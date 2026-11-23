@@ -104,8 +104,13 @@ func classifyFactMember(holderPkg *types2.Package, member string, codeQual func(
 	if !eligible || len(keys) == 0 {
 		// A methodless imported member has no decoder to call, but the
 		// union itself is well-formed: classify it as untriable so the
-		// trial is omitted instead of aborting the build.
-		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, decodable: hasJSON, foreign: foreign}, true
+		// trial is omitted instead of aborting the build. Go package
+		// archives carry no JSON records, so resolve a member the holder
+		// imports to its type and trial it when its UnmarshalJSON has the
+		// signature the generated code calls. A member the holder does not
+		// import stays untriable: its type is unresolvable here.
+		decodable := hasJSON || factMemberHasDecoder(pkg, typeName)
+		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON || decodable, decodable: decodable, foreign: foreign}, true
 	}
 	return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keys: keys, hasJSON: true, decodable: true, keyed: true, foreign: foreign}, true
 }
@@ -144,6 +149,33 @@ func foreignUnionKeysByPath(pkgPath, typ string) ([]string, bool, bool) {
 		return nil, false, hasJSON
 	}
 	return keys, true, true
+}
+
+// factMemberHasDecoder resolves an imported union member to the type the
+// holder's own imports provide and reports whether its UnmarshalJSON has the
+// signature the generated trial calls. Decoder facts in Go package archives
+// carry no JSON records, so without this lookup every Go decoder trials as
+// untriable. A member the holder does not import, an unexported name, or a
+// generic declaration stays untriable: the generated trial could not name
+// such a type, or could not spell its arguments.
+func factMemberHasDecoder(pkg *types2.Package, typeName string) bool {
+	if pkg == nil || pkg.Scope() == nil {
+		return false
+	}
+	obj := pkg.Scope().Lookup(typeName)
+	if obj == nil || !obj.Exported() {
+		return false
+	}
+	tname, ok := obj.(*types2.TypeName)
+	if !ok || tname.Type() == nil {
+		return false
+	}
+	if named, ok := tname.Type().(*types2.Named); ok {
+		if params := named.TypeParams(); params != nil && params.Len() > 0 {
+			return false
+		}
+	}
+	return hasUnmarshalJSON(tname.Type())
 }
 
 func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]bool, m types2.Type, qual func(*types2.Package) string) (unionMemberClass, bool) {
