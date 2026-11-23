@@ -224,8 +224,13 @@ type ctEjectPrinter struct {
 	names    map[string]string
 	imports  map[string]string
 	taken    map[string]bool
-	added    []string
+	locals   map[string]bool
+	added    []ctEjectImport
 	text     strings.Builder
+}
+
+type ctEjectImport struct {
+	name, path string
 }
 
 func newCtEjectPrinter(consumer *types2.Package, info *types2.Info, file *syntax.File, names map[string]string) *ctEjectPrinter {
@@ -258,16 +263,16 @@ func newCtEjectPrinter(consumer *types2.Package, info *types2.Info, file *syntax
 }
 
 func (p *ctEjectPrinter) alias(pkg *types2.Package) string {
-	if name, ok := p.imports[pkg.Path()]; ok {
+	if name, ok := p.imports[pkg.Path()]; ok && !p.locals[name] {
 		return name
 	}
 	name := pkg.Name()
-	for i := 2; p.taken[name] || p.consumer.Scope().Lookup(name) != nil; i++ {
+	for i := 2; p.taken[name] || p.locals[name] || p.consumer.Scope().Lookup(name) != nil; i++ {
 		name = pkg.Name() + strconv.Itoa(i)
 	}
 	p.taken[name] = true
 	p.imports[pkg.Path()] = name
-	p.added = append(p.added, pkg.Path())
+	p.added = append(p.added, ctEjectImport{name, pkg.Path()})
 	return name
 }
 
@@ -360,6 +365,8 @@ func (p *ctEjectPrinter) instance(rec *types2.LogosCtInst) (err error) {
 			return true
 		})
 	}
+	p.locals = ctEjectLocals(roots, facts)
+	defer func() { p.locals = nil }()
 	sels := make(map[*syntax.Name]bool)
 	for _, root := range roots {
 		syntax.Inspect(root, func(n syntax.Node) bool {
@@ -549,13 +556,28 @@ func ctEjectUngrouped(decl syntax.Node) syntax.Node {
 	return decl
 }
 
+func ctEjectLocals(roots []syntax.Node, facts *types2.Info) map[string]bool {
+	locals := make(map[string]bool)
+	for _, root := range roots {
+		syntax.Inspect(root, func(n syntax.Node) bool {
+			if name, ok := n.(*syntax.Name); ok {
+				if obj := facts.Defs[name]; obj != nil && obj.Pkg() != nil && obj.Parent() != obj.Pkg().Scope() {
+					locals[name.Value] = true
+				}
+			}
+			return true
+		})
+	}
+	return locals
+}
+
 func (p *ctEjectPrinter) edits(src []byte) []Edit {
 	base := p.file.Pos().FileBase()
 	var out []Edit
 	if len(p.added) != 0 {
 		var b strings.Builder
-		for _, path := range p.added {
-			fmt.Fprintf(&b, "\n\nimport %s %q", p.imports[path], path)
+		for _, imp := range p.added {
+			fmt.Fprintf(&b, "\n\nimport %s %q", imp.name, imp.path)
 		}
 		pos := p.file.PkgName.Pos()
 		at := syntax.MakePos(base, pos.Line(), pos.Col()+uint(len(p.file.PkgName.Value)))
