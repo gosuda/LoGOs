@@ -234,21 +234,19 @@ func cargoOutput(out chan cargo) chan cargo {
 	return out
 }
 
-func shadowedIfaceSend(ctx context.Context, counts chan int, out chan cargo) error {
+func shadowedIfaceSend(ctx context.Context, n int, out chan cargo) error {
 	type cargo = int8
 	go group (ctx) {
 		go {
-			cargoOutput(out) <- 1 << <-counts
+			cargoOutput(out) <- 1 << n
 		}
 	}
 	return nil
 }
 
 func shadowedIfaceValue() {
-	counts := make(chan int, 1)
-	counts <- 3
 	out := make(chan cargo, 1)
-	err := shadowedIfaceSend(precancelled(), counts, out)
+	err := shadowedIfaceSend(precancelled(), 3, out)
 	var got any
 	select {
 	case got = <-out:
