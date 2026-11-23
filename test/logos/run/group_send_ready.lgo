@@ -73,7 +73,13 @@ func interpSend(ctx context.Context, ch chan string, n int) error {
 	return nil
 }
 
+var stmtSawKey = make(chan string, 1)
+
 func recvChanLookup(key string) chan int {
+	select {
+	case stmtSawKey <- key:
+	default:
+	}
 	ch := make(chan int, 1)
 	ch <- len(key)
 	return ch
@@ -228,8 +234,19 @@ func recvStmtDrain(ctx context.Context, key string) error {
 func recvStmtReady() {
 	// A live context for the same reason as recvChanReady above:
 	// this case pins interpolation lowering, not cancel semantics.
+	// Drop the key recorded by the earlier channel test so the read
+	// below observes this drain's lookup.
+	select {
+	case <-stmtSawKey:
+	default:
+	}
 	err := recvStmtDrain(context.Background(), "abc")
-	check("recv-stmt-interp", err == nil, fmt.Sprint(err), "<nil>")
+	select {
+	case got := <-stmtSawKey:
+		check("recv-stmt-interp", err == nil && got == "k-abc", fmt.Sprint(err, got), "<nil> k-abc")
+	case <-time.After(5 * time.Second):
+		check("recv-stmt-interp", false, "lookup never ran", "<nil> k-abc")
+	}
 }
 
 func chanSnapshotBeforeValue() {
