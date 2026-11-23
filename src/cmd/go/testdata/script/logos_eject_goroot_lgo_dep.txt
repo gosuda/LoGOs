@@ -1,0 +1,165 @@
+[!symlink] skip 'fake GOROOT needs symlinks'
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+
+# A .lgo package shipped in the toolchain tree under src/logos/ (outside
+# the fixed rt/arena/sync set) must be materialized into the ejected
+# support module under rt/logos/, transitively, so the ejected tree
+# builds with plain Go. The test builds a private toolchain root inside
+# $WORK with one extra toolchain package and selects it with GOROOT.
+# Nothing is written into the real GOROOT.
+go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep/ejecttestdep.lgo logos/ejecttestdep/ejecttestdep.lgo
+env GOROOT=$WORK/fakegoroot
+
+cd m
+
+logos run .
+stdout '^ejecttestdep ok$'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+exists out/main.go
+exists out/_logos_deps/rt/go.mod
+exists out/_logos_deps/rt/logos/ejecttestdep/ejecttestdep.go
+! exists out/_logos_deps/rt/ejecttestdep
+! grep '^//go:build' out/_logos_deps/rt/logos/ejecttestdep/ejecttestdep.go
+
+env GOROOT=$TESTGO_GOROOT
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+
+# logos/json mirrors the path of the runtime package logos/rt/json. Its
+# lowered copy lands in its own directory, so it neither replaces nor
+# joins the runtime package.
+cd ../../j
+logos run .
+stdout '^2 7 9$'
+cp stdout $WORK/native-json.txt
+logos eject -o out
+exists out/_logos_deps/rt/logos/json/diagnostics.go
+exists out/_logos_deps/rt/logos/json/doc.go
+! exists out/_logos_deps/rt/json/diagnostics.go
+grep 'runtime support package' out/_logos_deps/rt/json/doc.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native-json.txt
+
+-- mkgoroot.go --
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func must(err error, what string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkgoroot: %s: %v\n", what, err)
+		os.Exit(1)
+	}
+}
+
+func link(oldname, newname string) {
+	must(os.MkdirAll(filepath.Dir(newname), 0777), "mkdir "+filepath.Dir(newname))
+	must(os.Symlink(oldname, newname), "symlink "+newname)
+}
+
+func main() {
+	if len(os.Args) != 5 {
+		fmt.Fprintf(os.Stderr, "usage: mkgoroot <realGOROOT> <fakeRoot> <extraSrc> <extraRel>\n")
+		os.Exit(2)
+	}
+	real, fake, extraSrc, extraRel := os.Args[1], os.Args[2], os.Args[3], os.Args[4]
+
+	must(os.MkdirAll(filepath.Join(fake, "src", "logos"), 0777), "mkdir fake src/logos")
+
+	ents, err := os.ReadDir(filepath.Join(real, "src"))
+	must(err, "read real src")
+	for _, e := range ents {
+		if e.Name() == "logos" {
+			continue
+		}
+		link(filepath.Join(real, "src", e.Name()), filepath.Join(fake, "src", e.Name()))
+	}
+
+	lents, err := os.ReadDir(filepath.Join(real, "src", "logos"))
+	must(err, "read real src/logos")
+	for _, e := range lents {
+		link(filepath.Join(real, "src", "logos", e.Name()), filepath.Join(fake, "src", "logos", e.Name()))
+	}
+
+	link(filepath.Join(real, "pkg"), filepath.Join(fake, "pkg"))
+	link(filepath.Join(real, "VERSION"), filepath.Join(fake, "VERSION"))
+	if _, err := os.Stat(filepath.Join(real, "go.env")); err == nil {
+		link(filepath.Join(real, "go.env"), filepath.Join(fake, "go.env"))
+	}
+	if _, err := os.Stat(filepath.Join(real, "lib")); err == nil {
+		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
+	}
+
+	dst := filepath.Join(fake, "src", filepath.FromSlash(extraRel))
+	must(os.MkdirAll(filepath.Dir(dst), 0777), "mkdir extra dir")
+	in, err := os.Open(extraSrc)
+	must(err, "open extra src")
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	must(err, "create extra dst")
+	_, err = io.Copy(out, in)
+	must(err, "copy extra")
+	must(out.Close(), "close extra dst")
+
+	old := time.Now().Add(-time.Hour)
+	must(os.Chtimes(dst, old, old), "chtimes extra dst")
+}
+
+-- dep/ejecttestdep.lgo --
+package ejecttestdep
+
+// Hello reports that the toolchain package lowered and ran.
+func Hello() string {
+	return "ejecttestdep ok"
+}
+
+-- m/go.mod --
+module example.com/gorootdep
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/ejecttestdep"
+)
+
+func main() {
+	fmt.Println(ejecttestdep.Hello())
+}
+
+-- j/go.mod --
+module example.com/gorootjson
+
+go 1.27
+
+-- j/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	ljson "logos/json"
+)
+
+func main() {
+	d := ljson.DiagnosticsFor([]byte("{\n  \"a\": x}"), 9)
+	fmt.Println(d.Line, d.Column, d.Offset)
+}
