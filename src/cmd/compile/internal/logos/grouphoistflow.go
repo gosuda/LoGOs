@@ -121,22 +121,31 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	// the two send arms share no expression nodes; the snapshots live in a
 	// block so no declaration lands in the enclosing scope where a forward
 	// goto might cross it, and `:=` avoids spelling a type that a local
-	// declaration could shadow.
-	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
+	// declaration could shadow. Snapshot defines copy through moved regions
+	// so later lowerings (interpolated strings) compose into the copies
+	// instead of being dropped as orphans inside the covering send splice.
+	// Leaf names and literals spell directly; pure values spell twice from
+	// source for element typing.
 	chTmp, valTmp := fc.groupTempName("c"), fc.groupTempName("v")
 	// A leaf value (a name, nil, or a literal) needs no snapshot: the
 	// send arms can spell it directly, which also keeps the channel's
 	// element typing for `ch <- nil` and `ch <- 1` that `v :=` loses.
 	// Any other expression is snapshotted once and the arms share the
 	// temporary.
+	var chText otext
+	var valText otext
 	var valArmA, valArmB syntax.Expr
 	var valTxtA, valTxtB otext
 	var valDef syntax.Stmt
 	switch v := syntax.Unparen(s.Value).(type) {
 	case *syntax.Name:
+		chText = fl.textOf(chSpan)
+		valText = fl.textOf(valSpan)
 		valArmA, valArmB = nameOf(pos, v.Value), nameOf(pos, v.Value)
 		valTxtA, valTxtB = valText, valText
 	case *syntax.BasicLit:
+		chText = fl.textOf(chSpan)
+		valText = fl.textOf(valSpan)
 		valArmA = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valTxtA, valTxtB = valText, valText
@@ -146,14 +155,19 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 		// contextual typing for untyped constants (-1, 1 << 3,
 		// math.Pi) that a `:=` snapshot would give the default type.
 		if pureSendValue(s.Value) {
-			if a, okA := parseExprAt(valText.s, pos); okA {
-				if b, okB := parseExprAt(valText.s, pos); okB {
+			srcText := fl.srcUser(valSpan.start, valSpan.end)
+			if a, okA := parseExprAt(srcText.s, pos); okA {
+				if b, okB := parseExprAt(srcText.s, pos); okB {
+					chText = fl.textOf(chSpan)
+					valText = fl.textOf(valSpan)
 					valArmA, valArmB = a, b
 					valTxtA, valTxtB = valText, valText
 					break
 				}
 			}
 		}
+		chText = fl.lazyText(chSpan)
+		valText = fl.lazyText(valSpan)
 		valArmA, valArmB = nameOf(pos, valTmp), nameOf(pos, valTmp)
 		valTxtA, valTxtB = gen(valTmp), gen(valTmp)
 		valDef = defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value})
