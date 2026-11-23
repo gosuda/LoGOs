@@ -135,9 +135,18 @@ func instrumentEqArray(call *ir.CallExpr, read, addr ir.Node, t *types.Type, off
 
 // instrumentEqLoopElem appends one unwalked read call per memory range the
 // generated equality compares in a value of type t at addrBase+idx+off, where
-// addrBase and idx are uintptr temporaries. Nested arrays unroll against the
-// dynamic base; only the outermost array needs the loop.
+// addrBase and idx are uintptr temporaries. Subtrees the equality never reads
+// emit nothing; a nested array the equality compares contiguously emits one
+// range read; only an array that skips bytes needs its own runtime loop.
+// Compiler work and generated code therefore never scale with an array's
+// length.
 func instrumentEqLoopElem(body *ir.Nodes, read, addrBase, idx ir.Node, t *types.Type, off int64) {
+	// The generated equality never reads this subtree: padding, blank
+	// fields, or a zero-sized value. Skipping here also keeps zero-sized
+	// elements from unrolling into trillions of empty visits.
+	if !eqEmitsCheck(t) {
+		return
+	}
 	if t.IsStruct() && !t.IsSIMD() {
 		for _, f := range t.Fields() {
 			if !f.Sym.IsBlank() {
@@ -147,18 +156,57 @@ func instrumentEqLoopElem(body *ir.Nodes, read, addrBase, idx ir.Node, t *types.
 		return
 	}
 	if t.IsArray() {
-		for i := int64(0); i < t.NumElem(); i++ {
-			instrumentEqLoopElem(body, read, addrBase, idx, t.Elem(), off+i*t.Elem().Size())
+		// The equality compares every byte of this array: one range
+		// read checks exactly the compared memory.
+		if !eqSkipsBytes(t) {
+			appendEqRangeRead(body, read, addrBase, idx, off, t.Size())
+			return
 		}
+		// The array skips bytes the equality never reads, so one range
+		// read would check memory the comparison ignores. Check each
+		// element in a nested runtime loop instead of unrolling the
+		// array at compile time.
+		instrumentEqNestedLoop(body, read, addrBase, idx, t, off)
 		return
 	}
-	if t.Size() == 0 {
+	appendEqRangeRead(body, read, addrBase, idx, off, t.Size())
+}
+
+// appendEqRangeRead appends one unwalked read call covering size bytes at
+// addrBase+idx+off.
+func appendEqRangeRead(body *ir.Nodes, read, addrBase, idx ir.Node, off, size int64) {
+	p := ir.NewBinaryExpr(base.Pos, ir.OADD, addrBase, idx)
+	if off != 0 {
+		p = ir.NewBinaryExpr(base.Pos, ir.OADD, p, ir.NewUintptr(base.Pos, off))
+	}
+	stmt := ir.NewCallExpr(base.Pos, ir.OCALL, read, []ir.Node{p, ir.NewUintptr(base.Pos, size)})
+	body.Append(orderStmtInPlace(typecheck.Stmt(stmt), map[string][]*ir.Name{}))
+}
+
+// instrumentEqNestedLoop appends a runtime loop over the elements of the
+// array type t at addrBase+idx+off, checking each element with the
+// field-wise check. The loop joins the nodes of body, whose outer loop
+// carries it unwalked like every other loop body here.
+func instrumentEqNestedLoop(body *ir.Nodes, read, addrBase, idx ir.Node, t *types.Type, off int64) {
+	esz := t.Elem().Size()
+	// Base address, evaluated once per outer element.
+	elemBase := typecheck.TempAt(base.Pos, ir.CurFunc, types.Types[types.TUINTPTR])
+	inner := typecheck.TempAt(base.Pos, ir.CurFunc, types.Types[types.TUINTPTR])
+	var innerBody ir.Nodes
+	instrumentEqLoopElem(&innerBody, read, elemBase, inner, t.Elem(), 0)
+	if len(innerBody) == 0 {
 		return
 	}
 	p := ir.NewBinaryExpr(base.Pos, ir.OADD, addrBase, idx)
 	if off != 0 {
 		p = ir.NewBinaryExpr(base.Pos, ir.OADD, p, ir.NewUintptr(base.Pos, off))
 	}
-	stmt := ir.NewCallExpr(base.Pos, ir.OCALL, read, []ir.Node{p, ir.NewUintptr(base.Pos, t.Size())})
-	body.Append(orderStmtInPlace(typecheck.Stmt(stmt), map[string][]*ir.Name{}))
+	body.Append(orderStmtInPlace(typecheck.Stmt(ir.NewAssignStmt(base.Pos, elemBase, p)), map[string][]*ir.Name{}))
+	loop := ir.NewForStmt(base.Pos, nil,
+		ir.NewBinaryExpr(base.Pos, ir.OLT, inner, ir.NewUintptr(base.Pos, t.NumElem()*esz)),
+		ir.NewAssignStmt(base.Pos, inner, ir.NewBinaryExpr(base.Pos, ir.OADD, inner, ir.NewUintptr(base.Pos, esz))),
+		nil, false)
+	loop.SetInit([]ir.Node{ir.NewAssignStmt(base.Pos, inner, ir.NewUintptr(base.Pos, 0))})
+	loop.Body = innerBody
+	body.Append(orderStmtInPlace(typecheck.Stmt(loop), map[string][]*ir.Name{}))
 }
