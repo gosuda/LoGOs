@@ -1218,6 +1218,8 @@ Instances MUST be memoized per type-argument list. [T-205]
 
 `logos eject` MUST print each other instance that a package needs as a non-generic function `<f>_logosct<N>` in that package. N counts the instances of one name that the package prints. `logos eject` MUST rename the call sites of all instances. An instance printed outside its defining package that names an unexported identifier, field, or method of another package MUST fail eject with `[comptime::unexported_in_exported]`. [T-205]
 
+An instance printed outside its defining package MUST spell each type declared in its body by its bare name. Such an instance that keeps a variable whose type names a type declared in its body, such as the tables of a const map over that type, MUST fail eject with `[comptime::copied_instance_state]`: the native build holds that variable once per instance, while each package that prints the instance would hold its own copy with its own body type. [T-205]
+
 A comptime generic MAY name the unexported package-level identifiers of its own package. Each instance MUST check them in the scope of the defining package. An unexported identifier of another package MUST stay refused. [T-205]
 
 An instantiation of such a generic in another package MUST build and run. The instance is compiled for the defining package, so it reaches those identifiers; the instantiating package never resolves them. [T-205]

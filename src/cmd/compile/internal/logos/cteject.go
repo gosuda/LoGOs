@@ -614,10 +614,16 @@ func (p *ctEjectPrinter) instance(rec *types2.LogosCtInst) (err error) {
 		return err
 	}
 	p.boxed = make(map[types2.Object]bool)
-	for i := range local.bound {
-		if d, ok := rec.Helpers[i].(*syntax.VarDecl); ok {
-			p.boxed[facts.Defs[d.NameList[0]]] = true
+	for i, helper := range rec.Helpers {
+		d, ok := helper.(*syntax.VarDecl)
+		body, bound := local.bound[i]
+		if !ok || !bound {
+			continue
 		}
+		if owner := rec.Origin.Pkg(); owner.Path() != p.consumer.Path() {
+			return &CtEjectRefusal{d.Pos(), fmt.Sprintf("[comptime::copied_instance_state] a comptime instance of %s ejected into package %s keeps a variable over %s, a type declared in its body; the native build holds it once per instance, but each package that prints the instance would hold its own", rec.Origin.FullName(), p.consumer.Path(), body.Name())}
+		}
+		p.boxed[facts.Defs[d.NameList[0]]] = true
 	}
 	sels := make(map[*syntax.Name]bool)
 	for _, root := range roots {
