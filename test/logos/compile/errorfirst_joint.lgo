@@ -1451,3 +1451,20 @@ func efDeferredResetThenRestored() {
 	h.stats, h.err = efFetchHeld()
 	_ = h.err
 }
+
+// A later iteration can overwrite the shared field after an earlier
+// iteration's defer registers, so the checked first call does not prove
+// the deferred read.
+func efLoopFieldErrDeferred() {
+	h := efHeld{}
+	for i := 0; i < 2; i++ {
+		h.stats, h.err = efFetchHeld()
+		if h.err != nil {
+			return
+		}
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+		_ = i
+	}
+}

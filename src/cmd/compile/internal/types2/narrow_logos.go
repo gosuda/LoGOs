@@ -1580,9 +1580,16 @@ func (p *logosEFPass) collectAssigns() {
 					note(l)
 				}
 				if (m.Op == 0 || m.Op == syntax.Def) && len(syntax.UnpackListExpr(m.Rhs)) == 1 {
-					if _, keys := p.tuple(lhs, syntax.UnpackListExpr(m.Rhs)[0]); keys != nil {
+					rhs := syntax.UnpackListExpr(m.Rhs)[0]
+					if _, keys := p.tuple(lhs, rhs); keys != nil {
 						for _, k := range keys {
 							tuple[k] = true
+						}
+					} else if p.errCallShape(lhs, rhs) {
+						for _, e := range lhs[:len(lhs)-1] {
+							if k, ok := p.destKey(e); ok {
+								tuple[k] = true
+							}
 						}
 					}
 				}
@@ -1595,6 +1602,12 @@ func (p *logosEFPass) collectAssigns() {
 					if _, keys := p.tuple(names, m.Values); keys != nil {
 						for _, k := range keys {
 							tuple[k] = true
+						}
+					} else if p.errCallShape(names, m.Values) {
+						for _, e := range names[:len(names)-1] {
+							if k, ok := p.destKey(e); ok {
+								tuple[k] = true
+							}
 						}
 					}
 				}
