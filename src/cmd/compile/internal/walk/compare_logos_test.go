@@ -5,6 +5,7 @@
 package walk
 
 import (
+	"go/constant"
 	"testing"
 
 	"cmd/compile/internal/ir"
@@ -98,6 +99,19 @@ func TestInstrumentEqNestedArrayBounded(t *testing.T) {
 	}
 }
 
+// eqLoopConst reads an integer loop bound, step, or reset, stripping any
+// conversion the typechecker wrapped around the literal.
+func eqLoopConst(t *testing.T, n ir.Node) (int64, bool) {
+	t.Helper()
+	for n.Op() == ir.OCONVNOP {
+		n = n.(*ir.ConvExpr).X
+	}
+	if !ir.IsConst(n, constant.Int) {
+		return 0, false
+	}
+	return ir.Int64Val(n), true
+}
+
 // A nested array that skips bytes needs its own runtime loop over the
 // elements, not a compile-time unroll of every entry.
 func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
@@ -127,9 +141,45 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 	if loop == nil {
 		t.Fatalf("third node holds no loop: %v", body[2])
 	}
-	innerReads, innerLoops := eqLoopReads(t, loop.Body)
-	if innerReads != 2 || innerLoops != 0 {
-		t.Fatalf("nested loop body holds %d reads and %d loops, want the 2 field reads", innerReads, innerLoops)
+	// The loop must stride by exactly one element from zero: a step of
+	// one would recheck bytes and a wrong bound would skip or overrun
+	// elements, and neither fault changes the read and loop counts above.
+	// Ordering lifts the index reset out of the loop node, so the reset
+	// is the zero assign ahead of the loop in the same block.
+	resets, loopAt := 0, -1
+	for i, n := range blk.List {
+		if as, ok := n.(*ir.AssignStmt); ok {
+			if v, ok := eqLoopConst(t, as.Y); ok && v == 0 {
+				resets++
+			}
+		}
+		if _, ok := n.(*ir.ForStmt); ok {
+			loopAt = i
+		}
+	}
+	if resets != 1 || loopAt < 1 {
+		t.Fatalf("nested loop block holds %d index resets before loop at %d, want one reset: %v", resets, loopAt, body[2])
+	}
+	cond, ok := loop.Cond.(*ir.BinaryExpr)
+	if bound, ok := eqLoopConst(t, cond.Y); !ok || cond.Op() != ir.OLT || bound != subs.Size() {
+		t.Fatalf("nested loop bound is not the whole array: %v", loop.Cond)
+	}
+	// Ordering wraps the post statement in a block, like every other
+	// loop body here.
+	postStmt := loop.Post
+	if blk, ok := postStmt.(*ir.BlockStmt); ok {
+		if len(blk.List) != 1 {
+			t.Fatalf("nested loop post block holds %d statements: %v", len(blk.List), loop.Post)
+		}
+		postStmt = blk.List[0]
+	}
+	post, ok := postStmt.(*ir.AssignStmt)
+	if !ok {
+		t.Fatalf("nested loop post is not an assign: %v", loop.Post)
+	}
+	step, ok := post.Y.(*ir.BinaryExpr)
+	if stride, ok := eqLoopConst(t, step.Y); !ok || step.Op() != ir.OADD || stride != sub.Size() {
+		t.Fatalf("nested loop does not stride by one element: %v", loop.Post)
 	}
 }
 
