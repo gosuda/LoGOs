@@ -200,11 +200,14 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 	if stride, ok := eqLoopConst(t, step.Y); !ok || step.Op() != ir.OADD || stride != sub.Size() {
 		t.Fatalf("nested loop does not stride by one element: %v", loop.Post)
 	}
-	bodyReads := 0
+	// Each read must cover a different field: counting the calls alone
+	// lets two reads of one field pass with another field unread, so
+	// require the address offsets and sizes to match the struct layout.
+	var ranges [][2]int64
 	oneBody := func(n ir.Node) {
 		switch n.Op() {
 		case ir.OCALL, ir.OCALLFUNC:
-			bodyReads++
+			ranges = append(ranges, eqLoopReadRange(t, n))
 		case ir.OAS:
 		default:
 			t.Fatalf("nested loop body holds %v, want a field read: %v", n.Op(), loop.Body)
@@ -219,9 +222,55 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 		}
 		oneBody(n)
 	}
-	if bodyReads != 2 {
-		t.Fatalf("nested loop body holds %d field reads, want one per struct field: %v", bodyReads, loop.Body)
+	if len(ranges) != 2 {
+		t.Fatalf("nested loop body holds %d field reads, want one per struct field: %v", len(ranges), loop.Body)
 	}
+	want := map[[2]int64]bool{}
+	for i := range sub.NumFields() {
+		f := sub.Field(i)
+		if f.Sym.IsBlank() {
+			continue
+		}
+		want[[2]int64{f.Offset, f.Type.Size()}] = true
+	}
+	for _, r := range ranges {
+		if !want[r] {
+			t.Fatalf("nested loop reads bytes %v, want the struct fields %v: %v", r, want, loop.Body)
+		}
+		delete(want, r)
+	}
+	if len(want) != 0 {
+		t.Fatalf("nested loop leaves struct bytes %v unread: %v", want, loop.Body)
+	}
+}
+
+// eqLoopReadRange reads the (offset, size) pair of one instrumented
+// read call: the address adds the field offset onto the element base
+// and the second argument is the compared byte count.
+func eqLoopReadRange(t *testing.T, n ir.Node) [2]int64 {
+	t.Helper()
+	call, ok := n.(*ir.CallExpr)
+	if !ok || len(call.Args) != 2 {
+		t.Fatalf("nested loop body holds %v, want a field read call: %v", n.Op(), n)
+	}
+	size, ok := eqLoopConst(t, call.Args[1])
+	if !ok {
+		t.Fatalf("nested loop read size is not constant: %v", call.Args[1])
+	}
+	var off int64
+	for addr := call.Args[0]; addr.Op() == ir.OADD; {
+		bin, ok := addr.(*ir.BinaryExpr)
+		if !ok {
+			t.Fatalf("nested loop read address is not an addition: %v", call.Args[0])
+		}
+		c, ok := eqLoopConst(t, bin.Y)
+		if !ok {
+			break
+		}
+		off += c
+		addr = bin.X
+	}
+	return [2]int64{off, size}
 }
 
 // A zero-sized subtree emits no check at all, however deep it nests: the
