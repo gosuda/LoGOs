@@ -98,6 +98,14 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 	}
 	if outermost {
 		check.logosEFBody = body
+		check.logosEFResults = check.logosEFResults[:0]
+		if sig := check.sig; sig != nil && sig.results != nil {
+			for i := range sig.results.Len() {
+				if v := sig.results.At(i); v != nil {
+					check.logosEFResults = append(check.logosEFResults, v)
+				}
+			}
+		}
 		tainted := make(map[string]bool)
 		for name := range dq.refInClos {
 			if dq.assignOut[name] {
@@ -1186,6 +1194,7 @@ type logosEFPass struct {
 	carve         map[syntax.Node]*logosEFState
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
 	trackedByRoot map[*Var][]logosEFKey
+	results       map[*Var]bool
 }
 
 func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
@@ -1193,6 +1202,12 @@ func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
 		return
 	}
 	p := &logosEFPass{check: check, body: body, seen: make(map[syntax.Pos]bool)}
+	if len(check.logosEFResults) > 0 {
+		p.results = make(map[*Var]bool, len(check.logosEFResults))
+		for _, v := range check.logosEFResults {
+			p.results[v] = true
+		}
+	}
 	if p.hasTuple() {
 		p.run(body, &logosEFState{})
 	}
@@ -2454,10 +2469,32 @@ func (p *logosEFPass) carveAfter(rest []syntax.Stmt, st *logosEFState) (*logosEF
 	if logosEFSame(ks, st) {
 		return nil, false
 	}
-	if p.remainderHazards(rest[i:]) {
+	if p.remainderHazards(rest[i:], p.carvedRoots(st, ks)) {
 		return nil, false
 	}
 	return ks, true
+}
+
+// carvedRoots lists the variables the carve dropped: an explicit return
+// that writes any of them through the named results cancels the carve.
+func (p *logosEFPass) carvedRoots(st, ks *logosEFState) map[*Var]bool {
+	out := make(map[*Var]bool)
+	for k := range st.m {
+		if _, ok := ks.m[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	for k := range st.may {
+		if _, ok := ks.may[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	for k := range st.mayErr {
+		if _, ok := ks.mayErr[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	return out
 }
 
 // carveStep folds one overwriting statement into the scratch state, or
@@ -2576,11 +2613,20 @@ func (p *logosEFPass) carveDrop(st *logosEFState, l syntax.Expr) *logosEFState {
 
 // remainderHazards reports whether rest can still rewrite a dropped value
 // or steer control off the straight line: any call, any assignment-like
-// statement, any branch, loop, label, or literal that may run later.
-func (p *logosEFPass) remainderHazards(rest []syntax.Stmt) bool {
+// statement, any branch, loop, label, or literal that may run later, and
+// any result-carrying return that writes a dropped named result.
+func (p *logosEFPass) remainderHazards(rest []syntax.Stmt, dropped map[*Var]bool) bool {
 	hazard := false
 	for _, s := range rest {
 		syntax.Inspect(s, func(n syntax.Node) bool {
+			if rs, ok := n.(*syntax.ReturnStmt); ok && len(syntax.UnpackListExpr(rs.Results)) > 0 {
+				for v := range dropped {
+					if p.results[v] {
+						hazard = true
+						return false
+					}
+				}
+			}
 			switch n.(type) {
 			case *syntax.CallExpr,
 				*syntax.AssignStmt,

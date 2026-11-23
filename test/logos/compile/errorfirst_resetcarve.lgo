@@ -54,19 +54,21 @@ func efrcResetBeforePlatformStore() {
 	_, _ = f, err
 }
 
-// Thread 11 probe: explicit return forwards into named results.
-func efrcProbeNamedReturn() (n int, err error) {
+// An explicit return writes the named results after the reset, so a
+// result-carrying return in the remainder cancels the carve.
+func efrcResetThenNamedForward() (n int, err error) {
 	n, err = efrcFetch()
 	m, otherErr := efrcFetch()
 	defer func() {
-		println(n)
+		println(n) // ERROR "result_before_error_check"
 	}()
 	n = 0
 	return m, otherErr
 }
 
-// Thread 11 control: unnamed results, return cannot overwrite.
-func efrcProbeUnnamedReturn() (int, error) {
+// Without named results a return cannot overwrite the reset value, so the
+// carve stands.
+func efrcResetThenUnnamedForward() (int, error) {
 	n, err := efrcFetch()
 	defer func() {
 		println(n)
@@ -75,28 +77,15 @@ func efrcProbeUnnamedReturn() (int, error) {
 	return n, err
 }
 
-// Thread 12 probe A: exact thread example, no outer store.
-func efrcProbeNestedA(c bool) error {
-	h := efrcHeld{}
-	g := func() { h.stats, h.err = efrcFetchHeld() }
-	if c {
-		defer func() {
-			println(h.stats)
-		}()
-		h.stats = 0
-	}
-	g()
-	return h.err
-}
-
-// Thread 12 probe B: outer store plus nested defer and reset.
-func efrcProbeNestedB(c bool) error {
+// A reset inside an if body does not protect against a store after the
+// enclosing block: the carve only applies at the function body's top level.
+func efrcResetNestedBlock(c bool) error {
 	h := efrcHeld{}
 	h.stats, h.err = efrcFetchHeld()
 	g := func() { h.stats, h.err = efrcFetchHeld() }
 	if c {
 		defer func() {
-			println(h.stats)
+			println(h.stats) // ERROR "result_before_error_check"
 		}()
 		h.stats = 0
 	}
@@ -104,11 +93,27 @@ func efrcProbeNestedB(c bool) error {
 	return h.err
 }
 
-// Thread 13 probe: partial reset, whole-value read.
-func efrcProbePartial() {
+// A store from an earlier-defined literal reaches the deferred read even
+// with no outer store: defining the literal records its stores.
+func efrcResetNestedLiteral(c bool) error {
+	h := efrcHeld{}
+	g := func() { h.stats, h.err = efrcFetchHeld() }
+	if c {
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+		h.stats = 0
+	}
+	g()
+	return h.err
+}
+
+// Resetting one field does not reset the whole value: the deferred read of
+// the whole struct still fails.
+func efrcResetPartialWhole() {
 	p, err := efrcFetchPair()
 	defer func() {
-		efrcUsePair(p)
+		efrcUsePair(p) // ERROR "result_before_error_check"
 	}()
 	p.X = 0
 	_ = err

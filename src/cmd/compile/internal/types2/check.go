@@ -161,6 +161,7 @@ type Checker struct {
 	logosNarrowStack    [][]*Var                      // logos M3-S4 hook: scoped narrowing push frames
 	logosInPlace        map[*syntax.LambdaExpr]bool
 	logosEFBody         *syntax.BlockStmt
+	logosEFResults      []*Var
 	logosDisqual        []map[string]bool               // logos M3-S4 hook: per-function disqualified names
 	logosLHS            []*Var                          // logos M3-S4 hook: assignment-target suppression stack
 	logosCurStmt        syntax.Stmt                     // logos M3-S4 hook: innermost enclosing statement for joint-use scan
