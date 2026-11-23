@@ -2160,6 +2160,7 @@ func (inst ctPreparedInstance) check(consumer *types2.Package, info *types2.Info
 	if err != nil {
 		return nil, nil, err
 	}
+	facts.LogosCtConstMapUses = ct.constMapUses
 	fn, err := types2.LogosCheckCtPrepared(&prepared, ct.owner, parent, inst.unit.decl, inst.unit.helpers, facts)
 	if err != nil {
 		return nil, nil, err

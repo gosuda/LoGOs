@@ -1217,7 +1217,7 @@ func (w ctWalker) ctConstMapExpr(e syntax.Expr) (syntax.Expr, []syntax.Stmt, boo
 		}
 		key, pre := w.optionOperand(n.Index, m.Key())
 		pos := n.Pos()
-		lookup := callOf(pos, w.ctMapHelper(pos, g, ctMapLookup), []syntax.Expr{key})
+		lookup := callOf(pos, w.ctMapHelper(pos, g, types2.LogosCtMapLookup), []syntax.Expr{key})
 		t := w.fl.optType(n)
 		if opt := w.fl.asOption(t); opt != nil && !types2.Identical(t, m.Elem()) {
 			wrap := "Opt"
@@ -1253,7 +1253,7 @@ func (w ctWalker) ctConstMapExpr(e syntax.Expr) (syntax.Expr, []syntax.Stmt, boo
 				return e, nil, true
 			}
 			pos := e.Pos()
-			var value syntax.Expr = callOf(pos, w.ctMapHelper(pos, g, ctMapMaterialize), nil)
+			var value syntax.Expr = callOf(pos, w.ctMapHelper(pos, g, types2.LogosCtMapMaterialize), nil)
 			t := constMapElem(w.fl.pkg.info.TypeOf(e))
 			if _, named := types2.Unalias(t).(*types2.Named); named {
 				value = callOf(pos, w.fl.ctTypeExpr(pos, t), []syntax.Expr{value})
@@ -1275,7 +1275,7 @@ func (w ctWalker) ctConstMapRange(s *syntax.ForStmt) ([]syntax.Stmt, bool) {
 		switch {
 		case !g.valid():
 		case g.owner != nil || g.local.bearing:
-			rc.X = w.ctMapHelper(pos, g, ctMapIterate)
+			rc.X = w.ctMapHelper(pos, g, types2.LogosCtMapIterate)
 		default:
 			rc.X = callOf(pos, b.rt("ConstAll"), []syntax.Expr{b.name(g.local.sortedName())})
 		}
@@ -1308,57 +1308,36 @@ type ctMapAccess struct {
 
 func (g ctMapAccess) valid() bool { return g.local != nil || g.owner != nil }
 
-type ctConstMapRole uint8
-
-const (
-	ctMapLookup ctConstMapRole = iota
-	ctMapMaterialize
-	ctMapIterate
-)
-
-type ctConstMapUse struct {
-	path    string
-	mapName string
-	role    ctConstMapRole
-}
-
-func (w ctWalker) ctMapHelper(pos syntax.Pos, g ctMapAccess, role ctConstMapRole) *syntax.Name {
+func (w ctWalker) ctMapHelper(pos syntax.Pos, g ctMapAccess, role types2.LogosCtConstMapRole) *syntax.Name {
 	if g.owner != nil {
 		id := nameOf(pos, "_logos_ct_map")
 		if w.fl.ct.constMapUses == nil {
-			w.fl.ct.constMapUses = make(map[*syntax.Name]ctConstMapUse)
+			w.fl.ct.constMapUses = make(map[*syntax.Name]types2.LogosCtConstMapRef)
 		}
-		w.fl.ct.constMapUses[id] = ctConstMapUse{path: g.owner.Pkg().Path(), mapName: g.owner.Name(), role: role}
+		w.fl.ct.constMapUses[id] = types2.LogosCtConstMapRef{Path: g.owner.Pkg().Path(), Name: g.owner.Name(), Role: role}
 		return id
 	}
 	switch role {
-	case ctMapLookup:
+	case types2.LogosCtMapLookup:
 		return nameOf(pos, g.local.lookupName())
-	case ctMapMaterialize:
+	case types2.LogosCtMapMaterialize:
 		return nameOf(pos, g.local.mapName())
-	case ctMapIterate:
+	case types2.LogosCtMapIterate:
 		return nameOf(pos, g.local.allName())
 	}
 	panic("invalid comptime const map helper role")
 }
 
 func (ct *ctLowerContext) bindConstMapUses(conf *types2.Config) error {
-	for id, use := range ct.constMapUses {
+	for id, ref := range ct.constMapUses {
 		var helper *types2.Func
 		if conf.LogosCtImportConstMap != nil {
-			if row, ok := conf.LogosCtImportConstMap(use.path, use.mapName); ok {
-				switch use.role {
-				case ctMapLookup:
-					helper = row.Lookup
-				case ctMapMaterialize:
-					helper = row.Materialize
-				case ctMapIterate:
-					helper = row.Iterate
-				}
+			if row, ok := conf.LogosCtImportConstMap(ref.Path, ref.Name); ok {
+				helper = row.Helper(ref.Role)
 			}
 		}
 		if helper == nil {
-			return fmt.Errorf("%s: missing owner const map helper for %s.%s", id.Pos(), use.path, use.mapName)
+			return fmt.Errorf("%s: missing owner const map helper for %s.%s", id.Pos(), ref.Path, ref.Name)
 		}
 		ct.bindUse(id, helper)
 	}

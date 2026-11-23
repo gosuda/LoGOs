@@ -34,7 +34,7 @@ type ctLowerContext struct {
 
 	instanceName    string
 	constMaps       map[types2.Object]*constMapGen
-	constMapUses    map[*syntax.Name]ctConstMapUse
+	constMapUses    map[*syntax.Name]types2.LogosCtConstMapRef
 	byteConversions map[*syntax.CallExpr]types2.BasicKind
 	makeLenProducts map[*syntax.Operation]bool
 }
@@ -71,7 +71,7 @@ func (ct *ctLowerContext) retain(root syntax.Node, helpers []syntax.Decl) {
 		return !ok || !live[id]
 	})
 	maps.DeleteFunc(ct.uses, func(n *syntax.Name, _ types2.Object) bool { return !live[n] })
-	maps.DeleteFunc(ct.constMapUses, func(n *syntax.Name, _ ctConstMapUse) bool { return !live[n] })
+	maps.DeleteFunc(ct.constMapUses, func(n *syntax.Name, _ types2.LogosCtConstMapRef) bool { return !live[n] })
 	maps.DeleteFunc(ct.owned, func(n syntax.Expr, _ types2.LogosOwnedType) bool { return !ownedLive[n] })
 	for path, ids := range ct.packageUses {
 		ids = slices.DeleteFunc(ids, func(n *syntax.Name) bool { return !live[n] })

@@ -421,12 +421,18 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 		}
 		return types2.TypeString(typ, p.qualify), nil
 	}
+	if ref, ok := facts.LogosCtConstMapUses[n]; ok {
+		return p.constMapText(n, ref, facts.Uses[n])
+	}
 	obj := facts.Uses[n]
 	if obj == nil {
 		obj = facts.Defs[n]
 	}
 	if obj == nil {
 		return n.Value, nil
+	}
+	if c, ok := obj.(*types2.Const); ok && c.Pkg() == nil && c.Parent() == nil {
+		return p.constText(c), nil
 	}
 	if name, ok := renames[obj]; ok {
 		return name, nil
@@ -444,7 +450,7 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 	}
 	foreign := pkg.Path() != p.consumer.Path()
 	if foreign && !obj.Exported() {
-		return "", &CtEjectRefusal{n.Pos(), fmt.Sprintf("[comptime::unexported_in_exported] a comptime instance ejected into package %s names unexported %s of package %s", p.consumer.Path(), obj.Name(), pkg.Path())}
+		return "", p.unexported(n.Pos(), obj.Name(), pkg.Path())
 	}
 	switch {
 	case member:
@@ -453,6 +459,42 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 		return p.alias(pkg) + "." + obj.Name(), nil
 	}
 	return obj.Name(), nil
+}
+
+func (p *ctEjectPrinter) unexported(pos syntax.Pos, name, path string) error {
+	return &CtEjectRefusal{pos, fmt.Sprintf("[comptime::unexported_in_exported] a comptime instance ejected into package %s names unexported %s of package %s", p.consumer.Path(), name, path)}
+}
+
+func (p *ctEjectPrinter) constText(c *types2.Const) string {
+	text := renderExpr(constExactExpr(c.Pos(), c.Val()))
+	if basic, ok := c.Type().(*types2.Basic); ok && basic.Info()&types2.IsUntyped != 0 {
+		return text
+	}
+	return types2.TypeString(c.Type(), p.qualify) + "(" + text + ")"
+}
+
+func (p *ctEjectPrinter) constMapText(n *syntax.Name, ref types2.LogosCtConstMapRef, obj types2.Object) (string, error) {
+	helper, ok := obj.(*types2.Func)
+	if !ok || helper.Pkg() == nil {
+		return "", fmt.Errorf("%s: comptime const map helper for %s.%s without a checked function", n.Pos(), ref.Path, ref.Name)
+	}
+	if ref.Path == p.consumer.Path() {
+		return helper.Name(), nil
+	}
+	if m := helper.Pkg().Scope().Lookup(ref.Name); m == nil || !m.Exported() {
+		return "", p.unexported(n.Pos(), ref.Name, ref.Path)
+	}
+	owner := p.alias(helper.Pkg()) + "." + ref.Name
+	sig := helper.Signature()
+	switch ref.Role {
+	case types2.LogosCtMapLookup:
+		key := types2.TypeString(sig.Params().At(0).Type(), p.qualify)
+		val := types2.TypeString(sig.Results().At(0).Type(), p.qualify)
+		return fmt.Sprintf("func(_logos_k %s) (%s, bool) { _logos_v, _logos_ok := %s[_logos_k]; return _logos_v, _logos_ok }", key, val, owner), nil
+	case types2.LogosCtMapMaterialize:
+		return fmt.Sprintf("func() %s { return %s }", types2.TypeString(sig.Results().At(0).Type(), p.qualify), owner), nil
+	}
+	return p.alias(types2.NewPackage(rtImportPath, "rt")) + ".SortedAllDynamic(" + owner + ")", nil
 }
 
 func ctEjectMember(obj types2.Object) bool {

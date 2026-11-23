@@ -3473,7 +3473,7 @@ func (w ctWalker) ctOptionCoalesce(e *syntax.CoalesceExpr) (syntax.Expr, []synta
 		if g, ok := w.ctMapUse(ix.X); ok && g.valid() {
 			var key syntax.Expr
 			key, pre = w.optionOperand(ix.Index, m.Key())
-			read = callOf(ix.Pos(), w.ctMapHelper(ix.Pos(), g, ctMapLookup), []syntax.Expr{key})
+			read = callOf(ix.Pos(), w.ctMapHelper(ix.Pos(), g, types2.LogosCtMapLookup), []syntax.Expr{key})
 		} else {
 			pre = w.ctOptionIndexArgs(ix, m)
 		}
