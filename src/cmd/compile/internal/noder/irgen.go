@@ -327,6 +327,7 @@ recheck:
 	if info.LogosCtFinish != nil {
 		info.LogosCtFinish(pkg, info, &conf)
 		base.ExitIfErrors()
+		logosCtInterfaceCycles(m, info)
 		if err := check.LogosCtInitOrder(); err != nil {
 			base.ExitIfErrors()
 			base.FatalfAt(src.NoXPos, "comptime package initialization: %v", err)
