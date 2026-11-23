@@ -11,7 +11,7 @@ stdout '^with ok 2026-01-01$'
 # Without that import the member stays untriable and valid input reports
 # zero matches.
 ! logos run ./without
-stderr '0 of 2 members matched'
+stdout '0 of 2 members matched'
 
 -- w/go.mod --
 module example.com/impdec
