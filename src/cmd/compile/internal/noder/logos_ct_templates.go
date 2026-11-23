@@ -16,9 +16,10 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-// Keep template export inactive until native lowering retains private owner
-// declarations and installs the prepared-instance finish pass.
-const logosCtNative = false
+// Native owner-package emission is active: prepared instances are checked
+// in the defining package and calls resolve to them. The text-copy path
+// is still present and gets deleted as the blockers land.
+const logosCtNative = true
 
 const logosCtTemplateVersion = 1
 

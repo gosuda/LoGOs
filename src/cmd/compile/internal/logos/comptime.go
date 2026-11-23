@@ -675,6 +675,22 @@ type cfSite struct {
 }
 
 func (fl *fileLower) expandComptime() {
+	// Native owner-package emission resolves call sites in the writer
+	// through LogosCtSiteKeys. No text copy is expanded and no call site
+	// is renamed. Comptime-generic definitions become unreachable stubs;
+	// their templates travel in the export and each instance is checked
+	// in the defining package. Forwarding definitions keep their bodies:
+	// the backend stencils them and resolves their nested calls through
+	// the instance dictionary.
+	if fl.pkg.info.LogosCtImport != nil {
+		for _, def := range fl.pkg.ctExp.defs {
+			if def.file != fl.file || def.forward {
+				continue
+			}
+			fl.cfStubDef(def)
+		}
+		return
+	}
 	parents := cfParents(fl.file)
 	for _, site := range fl.cfScanSites(parents) {
 		fl.expandSite(site)
