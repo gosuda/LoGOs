@@ -226,7 +226,10 @@ func TestChildArgumentsKeepsGOFLAGSTags(t *testing.T) {
 }
 
 func TestChildArgumentsReadsTestJSON(t *testing.T) {
-	neverTakesValue := func(name string) bool { return false }
+	// Mirrors the command's flag table: -run takes its value, so the
+	// scan must consume TestJobs instead of treating it as positional
+	// and stopping the package list there.
+	takesValue := func(name string) bool { return name == "run" }
 	tests := []struct {
 		verb    string
 		goflags string
@@ -244,13 +247,14 @@ func TestChildArgumentsReadsTestJSON(t *testing.T) {
 		{"test", "-json", "-json=false ./a", false},
 		{"test", "-json -json=false", "./a", false},
 		{"test", "", "-json . -run TestJobs sentinel -json=false", true},
+		{"test", "", "-json . -run -json=false sentinel", true},
 		{"test", "", "./a sentinel -json=false", false},
 		{"test", "", "-json ./a -tags=x sentinel -json=false", true},
 		{"run", "", "-json .", false},
 		{"run", "-json", ".", false},
 	}
 	for _, tt := range tests {
-		got := childArguments(tt.verb, strings.Fields(tt.args), neverTakesValue, tt.goflags)
+		got := childArguments(tt.verb, strings.Fields(tt.args), takesValue, tt.goflags)
 		if got.testJSON != tt.want {
 			t.Errorf("GOFLAGS=%q logos conc %s %s: testJSON = %v, want %v", tt.goflags, tt.verb, tt.args, got.testJSON, tt.want)
 		}
