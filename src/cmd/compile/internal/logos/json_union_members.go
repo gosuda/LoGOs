@@ -102,7 +102,10 @@ func classifyFactMember(holderPkg *types2.Package, member string, codeQual func(
 		keyFunc = "_logos_jsonkey_" + typeName
 	}
 	if !eligible || len(keys) == 0 {
-		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, decodable: hasJSON, foreign: foreign}, hasJSON
+		// A methodless imported member has no decoder to call, but the
+		// union itself is well-formed: classify it as untriable so the
+		// trial is omitted instead of aborting the build.
+		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, decodable: hasJSON, foreign: foreign}, true
 	}
 	return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keys: keys, hasJSON: true, decodable: true, keyed: true, foreign: foreign}, true
 }
@@ -151,8 +154,10 @@ func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]b
 	}
 	named, ok := unaliasConstView(elem).(*types2.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-		decodable := hasUnmarshalJSON(m)
-		return unionMemberClass{spell: spell, keyed: false, hasJSON: hasUnmarshalMethods(m), decodable: decodable, typ: m}, decodable
+		// A built-in or otherwise unnamed member has no decoder to call,
+		// but the union itself is well-formed: classify it as untriable
+		// so the trial is omitted instead of aborting the build.
+		return unionMemberClass{spell: spell, keyed: false, hasJSON: hasUnmarshalMethods(m), decodable: hasUnmarshalJSON(m), typ: m}, true
 	}
 	if args := named.TypeArgs(); args != nil && args.Len() > 0 {
 		for i := range args.Len() {
