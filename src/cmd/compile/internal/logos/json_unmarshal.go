@@ -446,7 +446,18 @@ func (uc jsonUnionClass) errorExpr(matched string) string {
 }
 
 func (uc jsonUnionClass) needsClaim() bool {
-	return len(uc.keyed) > 0 && len(uc.keyed) < len(uc.members)
+	// The claim flag is only read by keyless trials, so a union whose
+	// keyless members are all untriable needs no claim variable: emitting
+	// one would leave it assigned but never read.
+	if len(uc.keyed) == 0 || len(uc.keyed) == len(uc.members) {
+		return false
+	}
+	for _, m := range uc.members {
+		if m.decodable && !m.keyed {
+			return true
+		}
+	}
+	return false
 }
 
 func ownsKey(s trialMember) string {
