@@ -55,3 +55,22 @@ func efSwitchTagStaleRewrite() {
 		}()
 	}
 }
+
+func efSwitchFetchAt(i int) (int, error) {
+	return i, nil
+}
+
+// A tagged switch in a loop proves what the if form proves: the tag
+// still holds the error of the call that stored n on the previous
+// iteration, even though that store follows the switch in the source.
+func efSwitchTagLoopCarried() {
+	var n int
+	var err error
+	for i := 0; i < 3; i++ {
+		switch err {
+		case nil:
+			println(n)
+		}
+		n, err = efSwitchFetchAt(i)
+	}
+}

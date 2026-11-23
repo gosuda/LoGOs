@@ -3415,7 +3415,7 @@ func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, e syntax.Expr, miss
 		if disturbed {
 			return miss, miss
 		}
-		return miss.proveBefore(tagErr, tag.Pos()), miss
+		return miss.prove(tagErr), miss
 	case tagErr == nil && p.isNil(syntax.Unparen(e)):
 		if !disturbed {
 			if fk, ok := p.destKey(tag); ok {
@@ -3425,19 +3425,6 @@ func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, e syntax.Expr, miss
 	}
 	miss = p.expr(e, miss)
 	return miss, miss
-}
-
-// proveBefore proves only entries stored no later than pos: a case
-// expression runs after the tag was evaluated, so a store it makes can
-// replace the result the tag described, and the saved tag no longer
-// proves the replacement.
-func (s *logosEFState) proveBefore(errV *Var, pos syntax.Pos) *logosEFState {
-	return s.remap(func(e logosEFEntry) logosEFEntry {
-		if e.err == errV && e.pos.Cmp(pos) <= 0 {
-			e.proven = true
-		}
-		return e
-	})
 }
 
 // scratchDisturbed reports whether the analyzed case expressions wrote to
