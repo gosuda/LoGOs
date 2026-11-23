@@ -127,6 +127,10 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	chSpan, valSpan := h.span(s.Chan), h.span(s.Value)
 	mark := fc.hoistSubMark()
 	nMark, tMark := len(h.native), len(h.text)
+	// slotsThrough may replace the channel with a fresh snapshot name
+	// that carries no checked type, so read the channel type before it
+	// runs for the value temporary below.
+	chType := h.fc.fl.pkg.info.TypeOf(s.Chan)
 	h.slots([]*syntax.Expr{&s.Chan, &s.Value})
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
 	// Snapshot both operands in source order so each is evaluated once and
@@ -171,7 +175,7 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 		}
 		valArmA, valArmB = nameOf(pos, valTmp), nameOf(pos, valTmp)
 		valTxtA, valTxtB = gen(valTmp), gen(valTmp)
-		valDefs, valDefTexts = h.sendValueTemp(pos, s, valTmp, valText)
+		valDefs, valDefTexts = h.sendValueTemp(pos, s, valTmp, valText, chType)
 	}
 
 	armVal := func(valE syntax.Expr) *syntax.CommClause {
@@ -220,7 +224,7 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 // type). An assignment to the typed temporary applies exactly the
 // send's assignability rule. spellTypeBoth refuses names a local
 // declaration could shadow; then the snapshot falls back to `:=`.
-func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp string, valText otext) ([]syntax.Stmt, []otext) {
+func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp string, valText otext, chType types2.Type) ([]syntax.Stmt, []otext) {
 	fallback := func() ([]syntax.Stmt, []otext) {
 		return []syntax.Stmt{
 				defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
@@ -228,11 +232,12 @@ func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp st
 				cat(gen(valTmp+" := "), valText),
 			}
 	}
-	chT := h.fc.fl.pkg.info.TypeOf(s.Chan)
-	if chT == nil {
+	// The caller reads the channel type before slotsThrough runs: by now
+	// s.Chan may be a fresh snapshot name with no checked type.
+	if chType == nil {
 		return fallback()
 	}
-	ch, ok := chT.Underlying().(*types2.Chan)
+	ch, ok := chType.Underlying().(*types2.Chan)
 	if !ok {
 		return fallback()
 	}
