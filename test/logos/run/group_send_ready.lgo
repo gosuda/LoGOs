@@ -216,6 +216,22 @@ func recvChanReady() {
 	check("recv-chan-interp", err == nil && got == 5, fmt.Sprint(err, got), "<nil> 5")
 }
 
+func recvStmtDrain(ctx context.Context, key string) error {
+	go group (ctx) {
+		go {
+			<-recvChanLookup($"k-{key}")
+		}
+	}
+	return nil
+}
+
+func recvStmtReady() {
+	// A live context for the same reason as recvChanReady above:
+	// this case pins interpolation lowering, not cancel semantics.
+	err := recvStmtDrain(context.Background(), "abc")
+	check("recv-stmt-interp", err == nil, fmt.Sprint(err), "<nil>")
+}
+
 func chanSnapshotBeforeValue() {
 	first = make(chan int, 1)
 	second = make(chan int, 1)
@@ -332,6 +348,7 @@ func main() {
 	blockedCallOnce()
 	interpSendReady()
 	recvChanReady()
+	recvStmtReady()
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
 	gotoPastSend()
