@@ -86,14 +86,15 @@ func (h *ctfeHost) entityOf(obj Object, name string) (ctfe.Entity, bool) {
 		return ctfe.Entity{Kind: ctfe.EntNone, Name: obj.name}, true
 	case *Func:
 		if obj.pkg == check.pkg {
-			if body, ok := check.logosBodies[obj.name]; ok && body != nil {
+			key := logosConstFnKey(obj.pkg.path, obj.name)
+			if body, ok := check.logosBodies[key]; ok && body != nil {
 				fn := h.buildFunc(obj, body)
 				if fn == nil {
 					return ctfe.Entity{}, false
 				}
 				_, isConst := check.logosConstSyntax[body]
-				h.logosRecordConstFunc(obj.name, body, isConst)
-				if rec, ok := h.logosInfoConstFunc(obj.name); ok && rec.Const {
+				h.logosRecordConstFunc(key, body, isConst)
+				if rec, ok := h.logosInfoConstFunc(key); ok && rec.Const {
 					isConst = true
 				}
 				if isConst {
@@ -102,7 +103,7 @@ func (h *ctfeHost) entityOf(obj Object, name string) (ctfe.Entity, bool) {
 				}
 				return ctfe.Entity{Kind: ctfe.EntPlainFunc, Fn: fn}, true
 			}
-			if rec, ok := h.logosInfoConstFunc(obj.name); ok {
+			if rec, ok := h.logosInfoConstFunc(key); ok {
 				fn := h.buildFunc(obj, rec.Decl)
 				if fn == nil {
 					return ctfe.Entity{}, false
@@ -503,24 +504,24 @@ type LogosConstFunc struct {
 	Const bool
 }
 
-func (h *ctfeHost) logosRecordConstFunc(name string, body *syntax.FuncDecl, isConst bool) {
+func (h *ctfeHost) logosRecordConstFunc(key string, body *syntax.FuncDecl, isConst bool) {
 	if body == nil || h.check.Info == nil {
 		return
 	}
 	if h.check.Info.LogosConstFuncs == nil {
 		h.check.Info.LogosConstFuncs = map[string]LogosConstFunc{}
 	}
-	if _, ok := h.check.Info.LogosConstFuncs[name]; ok {
+	if _, ok := h.check.Info.LogosConstFuncs[key]; ok {
 		return
 	}
-	h.check.Info.LogosConstFuncs[name] = LogosConstFunc{Decl: body, Const: isConst}
+	h.check.Info.LogosConstFuncs[key] = LogosConstFunc{Decl: body, Const: isConst}
 }
 
-func (h *ctfeHost) logosInfoConstFunc(name string) (LogosConstFunc, bool) {
+func (h *ctfeHost) logosInfoConstFunc(key string) (LogosConstFunc, bool) {
 	if h.check.Info == nil {
 		return LogosConstFunc{}, false
 	}
-	rec, ok := h.check.Info.LogosConstFuncs[name]
+	rec, ok := h.check.Info.LogosConstFuncs[key]
 	if !ok || rec.Decl == nil {
 		return LogosConstFunc{}, false
 	}

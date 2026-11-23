@@ -87,12 +87,12 @@ func (check *Checker) logosSeedConstFuncs(info *Info) {
 		return
 	}
 	bodies, consts := check.logosConstFuncBodies()
-	for name, rec := range info.LogosConstFuncs {
+	for key, rec := range info.LogosConstFuncs {
 		if rec.Decl == nil {
 			continue
 		}
-		if _, dup := bodies[name]; !dup {
-			bodies[name] = rec.Decl
+		if _, dup := bodies[key]; !dup {
+			bodies[key] = rec.Decl
 		}
 		if rec.Const {
 			consts[rec.Decl] = true

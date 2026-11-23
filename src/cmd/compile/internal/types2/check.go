@@ -121,7 +121,7 @@ type Checker struct {
 	nextID            uint64                                // unique Id for type parameters (first valid Id is 1)
 	objMap            map[Object]*declInfo                  // maps package-level objects and (non-interface) methods to declaration info
 	objList           []Object                              // source-ordered keys of objMap
-	logosBodies       map[string]*syntax.FuncDecl           // logos M5-S2: plain function bodies by name for transitive const evaluation
+	logosBodies       map[string]*syntax.FuncDecl           // logos M5-S2: plain function bodies by path+"\x00"+object for transitive const evaluation
 	logosConstSyntax  map[*syntax.FuncDecl]bool             // logos M5-S2: inner FuncDecls declared through `const func`
 	logosMemoized     map[syntax.Expr]ctfeMemo              // logos M5-S2: one const evaluation per initializer
 	logosConstFnUnits map[string]*logosConstFnUnit          // logos constfn: parsed imported constfn records by path+"\x00"+object

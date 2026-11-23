@@ -414,14 +414,17 @@ type Info struct {
 	LogosZeroLit map[syntax.Expr]bool // logos hook: empty composite literals admitted as the zero value (T{}, int{}), for lowering to respell as *new(T)
 
 	// LogosConstFuncs carries the first check's CTFE proof for
-	// same-package functions, keyed by object name (SPEC Sec 2.1,
-	// T-201). Each entry records the checked body for transitive
-	// evaluation plus whether the first check saw it through a
-	// `const func` declaration. Copy checkers run on fresh checkers
-	// sharing this Info, so they read the proof from Info instead of
-	// a package-level global; the first check's static purity scan
-	// remains the impurity verdict. The first record wins, so a later
-	// observation through a plain declaration cannot downgrade it.
+	// same-package functions, keyed by package path and object name
+	// (path+"\x00"+object, SPEC Sec 2.1, T-201), so an instance checked
+	// for its defining package never reads a function of the
+	// instantiating package (SPEC Sec 2.5, T-205). Each entry records
+	// the checked body for transitive evaluation plus whether the first
+	// check saw it through a `const func` declaration. Copy checkers
+	// run on fresh checkers sharing this Info, so they read the proof
+	// from Info instead of a package-level global; the first check's
+	// static purity scan remains the impurity verdict. The first record
+	// wins, so a later observation through a plain declaration cannot
+	// downgrade it.
 	LogosConstFuncs map[string]LogosConstFunc
 }
 
