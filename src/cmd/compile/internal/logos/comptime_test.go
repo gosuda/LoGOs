@@ -73,6 +73,14 @@ func (fakeRuntimeImporter) Import(path string) (*types2.Package, error) {
 	name := types2.NewTypeName(syntax.Pos{}, pkg, "Site", nil)
 	types2.NewNamed(name, types2.NewStruct(nil, nil), nil)
 	pkg.Scope().Insert(name)
+	errTyp := types2.Universe.Lookup("error").Type()
+	joinParams := types2.NewTuple(
+		types2.NewParam(syntax.Pos{}, pkg, "a", errTyp),
+		types2.NewParam(syntax.Pos{}, pkg, "b", errTyp),
+	)
+	joinResults := types2.NewTuple(types2.NewParam(syntax.Pos{}, pkg, "", errTyp))
+	join := types2.NewFunc(syntax.Pos{}, pkg, "Join", types2.NewSignatureType(nil, nil, nil, joinParams, joinResults, false))
+	pkg.Scope().Insert(join)
 	pkg.MarkComplete()
 	return pkg, nil
 }
@@ -132,6 +140,37 @@ func TestCfEmitCopyResolvesRuntimeAlias(t *testing.T) {
 	fl.cfEmitCopy(needsRT, &cfSite{pos: syntax.Pos{}})
 	if got := countCopyDecls(fl, "NeedRT_logosct1"); got != 1 {
 		t.Fatalf("runtime-alias copy emitted %d times, want 1 (check must resolve %s)", got, rtAlias)
+	}
+}
+
+func TestCfEmitCopyKeepsExplicitRuntimeAlias(t *testing.T) {
+	fl := testCopyFileLower(t, "package p\n")
+	rtPkg, err := fl.cfLoadPackage(rtImportPath)
+	if err != nil || rtPkg == nil {
+		t.Fatalf("cfLoadPackage(%s) = %v, %v", rtImportPath, rtPkg, err)
+	}
+	reg := fl.getGenImports()
+	reg.pkgs[rtImportPath] = rtPkg
+	reg.qual[rtImportPath] = "_logos_t0"
+	reg.used["_logos_t0"] = true
+	mixed := gen("func Mixed_logosct2() error {\nvar _ _logos_rt.Site\nreturn _logos_t0.Join(nil, nil)\n}")
+	fl.cfEmitCopy(mixed, &cfSite{pos: syntax.Pos{}})
+	if got := countCopyDecls(fl, "Mixed_logosct2"); got != 1 {
+		t.Fatalf("mixed-alias copy emitted %d times, want 1 (check must bind both %s and _logos_t0)", got, rtAlias)
+	}
+}
+
+func TestCfCopyCheckAliasesIgnoresAliasTextInLiterals(t *testing.T) {
+	fl := testCopyFileLower(t, "package p\n")
+	lit := gen("func Lit_logosct3() string {\nreturn \"_logos_rt.\"\n}")
+	litFile, litErrs := cfParseSource("package cfcopy\n" + lit.s)
+	if len(litErrs) > 0 || cfFirstFunc(litFile) == nil {
+		t.Fatalf("parse literal copy: %v", litErrs)
+	}
+	for pkg := range fl.cfCopyCheckAliases(cfFirstFunc(litFile)) {
+		if pkg.Path() == rtImportPath {
+			t.Fatalf("string literal pulled %s into the copy check scope", rtImportPath)
+		}
 	}
 }
 

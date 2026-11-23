@@ -394,7 +394,7 @@ func (fl *fileLower) miniCheckCopies(blocks []*syntax.BlockStmt, cf *syntax.Cons
 		Sig:       fctx.sig,
 		Disqual:   fl.pkg.info.LogosDisqual[fctx.body],
 		Funcs:     fl.pkg.ctExp.copyFuncs,
-		Aliases:   fl.cfAliases(),
+		Aliases:   copyAliasList(fl.cfAliases()),
 		MaxSteps:  fl.pkg.info.LogosCTFEMaxSteps,
 		NodeLimit: base.LogosComptimeNodes,
 		Importer:  fl.pkg.info.LogosImporter,
@@ -429,6 +429,17 @@ func (fl *fileLower) cfAliases() map[*types2.Package]string {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// copyAliasList lifts one-alias-per-package file imports into the
+// multi-alias form the copy checker takes: an adopted copy can spell one
+// package under two qualifiers at once.
+func copyAliasList(m map[*types2.Package]string) map[*types2.Package][]string {
+	out := make(map[*types2.Package][]string, len(m))
+	for pkg, q := range m {
+		out[pkg] = []string{q}
 	}
 	return out
 }

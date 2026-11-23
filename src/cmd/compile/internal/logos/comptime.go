@@ -1267,7 +1267,7 @@ func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) bool {
 	if len(errs) > 0 || fn == nil {
 		base.Fatalf("logos: cannot parse comptime copy at %s: %v", site.pos.String(), errs)
 	}
-	if !fl.cfCheckCopyFunc(fn, site.pos, text) {
+	if !fl.cfCheckCopyFunc(fn, site.pos) {
 		return false
 	}
 	region := fl.adoptRegion(text, site.pos, fn.Pos().FileBase(), 2, []syntax.Node{fn})
@@ -1276,12 +1276,12 @@ func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) bool {
 	return true
 }
 
-func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos, text otext) bool {
+func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos) bool {
 	exp := fl.pkg.ctExp
 	ctx := types2.LogosCopyContext{
 		Scope:     fl.pkg.info.Scopes[fl.file],
 		Funcs:     exp.copyFuncs,
-		Aliases:   fl.cfCopyCheckAliases(text),
+		Aliases:   fl.cfCopyCheckAliases(fn),
 		MaxSteps:  fl.pkg.info.LogosCTFEMaxSteps,
 		NodeLimit: base.LogosComptimeNodes,
 		Importer:  fl.pkg.info.LogosImporter,
@@ -1297,25 +1297,56 @@ func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos, text o
 	return len(errs) == 0
 }
 
+// rtSelectorUsed reports whether fn spells the reserved runtime alias as
+// a package qualifier. A string literal that merely contains the alias
+// text is not a reference and must not pull the package into scope.
+func rtSelectorUsed(fn *syntax.FuncDecl) bool {
+	used := false
+	syntax.Inspect(fn, func(n syntax.Node) bool {
+		if s, ok := n.(*syntax.SelectorExpr); ok {
+			if id, ok := s.X.(*syntax.Name); ok && id.Value == rtAlias {
+				used = true
+				return false
+			}
+		}
+		return true
+	})
+	return used
+}
+
 // cfCopyCheckAliases returns the import aliases one copy check resolves:
-// the file's synthesized imports plus every runtime alias the copy text
-// names. Copy construction spells some types in lowered form
+// the file's synthesized imports plus every runtime alias the copy
+// spells. Copy construction spells some types in lowered form
 // (`_logos_rt.Option[T]` for an option), and the check must resolve
-// those names even though no user import declares them. The file import
-// gate emits the import once the copy is adopted.
-func (fl *fileLower) cfCopyCheckAliases(text otext) map[*types2.Package]string {
-	out := fl.cfAliases()
-	if !strings.Contains(text.s, rtAlias+".") {
+// those names even though no user import declares them. One package can
+// hold two qualifiers at once: an explicit reference the copy rewrote to
+// a fresh alias alongside a generated `_logos_rt` one. The file import
+// gate emits each import once the copy is adopted.
+func (fl *fileLower) cfCopyCheckAliases(fn *syntax.FuncDecl) map[*types2.Package][]string {
+	out := make(map[*types2.Package][]string)
+	for pkg, q := range fl.cfAliases() {
+		out[pkg] = []string{q}
+	}
+	if !rtSelectorUsed(fn) {
+		return out
+	}
+	for pkg, qs := range out {
+		if pkg.Path() != rtImportPath {
+			continue
+		}
+		for _, q := range qs {
+			if q == rtAlias {
+				return out
+			}
+		}
+		out[pkg] = append(out[pkg], rtAlias)
 		return out
 	}
 	pkg, err := fl.cfLoadPackage(rtImportPath)
 	if err != nil || pkg == nil {
 		return out
 	}
-	if out == nil {
-		out = make(map[*types2.Package]string)
-	}
-	out[pkg] = rtAlias
+	out[pkg] = []string{rtAlias}
 	return out
 }
 

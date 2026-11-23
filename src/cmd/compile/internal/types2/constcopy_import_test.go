@@ -119,7 +119,7 @@ func TestLogosCopyImportedStepLimit(t *testing.T) {
 	fn := logosCopyParseFunc(t, "package cfcopy\nfunc CopyOver() int {\nconst Limit = _logos_t0.Rec(1000)\nreturn Limit\n}\n")
 	ctx := LogosCopyContext{
 		Scope:    info.Scopes[file],
-		Aliases:  map[*Package]string{defPkg: "_logos_t0"},
+		Aliases:  map[*Package][]string{defPkg: {"_logos_t0"}},
 		MaxSteps: info.LogosCTFEMaxSteps,
 		Importer: info.LogosImporter,
 		Context:  info.LogosContext,
@@ -145,7 +145,7 @@ func TestLogosCopyImportedUnderLimit(t *testing.T) {
 	fn := logosCopyParseFunc(t, "package cfcopy\nfunc CopyUnder() int {\nconst Limit = _logos_t0.Rec(5)\nreturn Limit\n}\n")
 	ctx := LogosCopyContext{
 		Scope:    info.Scopes[file],
-		Aliases:  map[*Package]string{defPkg: "_logos_t0"},
+		Aliases:  map[*Package][]string{defPkg: {"_logos_t0"}},
 		MaxSteps: info.LogosCTFEMaxSteps,
 		Importer: info.LogosImporter,
 		Context:  info.LogosContext,
@@ -189,7 +189,7 @@ func TestLogosCopyWithoutImporterFailsClosed(t *testing.T) {
 	fn := logosCopyParseFunc(t, "package cfcopy\nfunc CopyOver() int {\nconst Limit = _logos_t0.Rec(1000)\nreturn Limit\n}\n")
 	ctx := LogosCopyContext{
 		Scope:    pkg.Scope(),
-		Aliases:  map[*Package]string{defPkg: "_logos_t0"},
+		Aliases:  map[*Package][]string{defPkg: {"_logos_t0"}},
 		MaxSteps: 100,
 	}
 	_, errs := LogosCheckCopyFunc(pkg, info, ctx, fn)
