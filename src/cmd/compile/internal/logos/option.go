@@ -3469,9 +3469,16 @@ func (w ctWalker) ctOptionCoalesce(e *syntax.CoalesceExpr) (syntax.Expr, []synta
 		m = w.ctOptionMap(ix.X)
 	}
 	if m != nil {
-		pre = w.ctOptionIndexArgs(ix, m)
+		var read syntax.Expr = ix
+		if g, ok := w.ctMapUse(ix.X); ok && g.valid() {
+			var key syntax.Expr
+			key, pre = w.optionOperand(ix.Index, m.Key())
+			read = callOf(ix.Pos(), w.ctMapHelper(ix.Pos(), g, ctMapLookup), []syntax.Expr{key})
+		} else {
+			pre = w.ctOptionIndexArgs(ix, m)
+		}
 		v, ok := w.nextArg(), w.nextArg()
-		pre = append(pre, defineOf(pos, []syntax.Expr{nameOf(pos, v), nameOf(pos, ok)}, []syntax.Expr{ix}))
+		pre = append(pre, defineOf(pos, []syntax.Expr{nameOf(pos, v), nameOf(pos, ok)}, []syntax.Expr{read}))
 		value, cond = nameOf(pos, v), nameOf(pos, ok)
 	} else {
 		x, head, t, opt := w.ctOptionReceiver(e.X)
