@@ -1,0 +1,38 @@
+// errorcheck
+
+package p
+
+type efSwitchHeld struct {
+	stats int
+	err   error
+}
+
+func efSwitchFetch() (int, error) {
+	return 1, nil
+}
+
+// A tagged switch on a field error proves the same path as the tagless
+// nil comparison: case nil discharges the stored value.
+func efSwitchTagNilProves() {
+	h := efSwitchHeld{}
+	h.stats, h.err = efSwitchFetch()
+	switch h.err {
+	case nil:
+		defer func() {
+			println(h.stats)
+		}()
+	}
+}
+
+// Without the nil case the deferred read still fails: the tagged switch
+// proves nothing on its other paths.
+func efSwitchTagNoNilFails() {
+	h := efSwitchHeld{}
+	h.stats, h.err = efSwitchFetch()
+	switch h.err {
+	default:
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+	}
+}

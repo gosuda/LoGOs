@@ -3034,6 +3034,10 @@ func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, e syntax.Expr, miss
 		return p.cond(e, miss)
 	case tagErr != nil && p.isNil(syntax.Unparen(e)):
 		return miss.prove(tagErr), miss
+	case tagErr == nil && p.isNil(syntax.Unparen(e)):
+		if fk, ok := p.destKey(tag); ok {
+			return miss.dropMayFor(fk), miss
+		}
 	}
 	miss = p.expr(e, miss)
 	return miss, miss
