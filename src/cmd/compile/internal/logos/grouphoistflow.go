@@ -136,23 +136,35 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	// Snapshot both operands in source order so each is evaluated once and
 	// the two send arms share no expression nodes; the snapshots live in a
 	// block so no declaration lands in the enclosing scope where a forward
-	// goto might cross it.
-	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
+	// goto might cross it. Snapshot defines copy through moved regions
+	// so later lowerings (interpolated strings) compose into the copies
+	// instead of being dropped as orphans inside the covering send splice.
+	// Leaf names and literals spell directly; constant values spell twice
+	// from source for element typing.
 	chTmp, valTmp := fc.groupTempName("c"), fc.groupTempName("v")
 	// A leaf value (a name, nil, or a literal) needs no snapshot: the
 	// send arms can spell it directly, which also keeps the channel's
 	// element typing for `ch <- nil` and `ch <- 1` that a temporary
 	// would give the default type. Any other expression is snapshotted
 	// once and the arms share the temporary.
+	var chText otext
+	var valText otext
 	var valArmA, valArmB syntax.Expr
 	var valTxtA, valTxtB otext
 	var valDefs []syntax.Stmt
 	var valDefTexts []otext
+	// The channel always snapshots through a moved region: unlike a leaf
+	// value, it can hold an interpolation that lowerInterp still rewrites,
+	// and an immediate textOf would orphan that later edit.
 	switch v := syntax.Unparen(s.Value).(type) {
 	case *syntax.Name:
+		chText = fl.lazyText(chSpan)
+		valText = fl.textOf(valSpan)
 		valArmA, valArmB = nameOf(pos, v.Value), nameOf(pos, v.Value)
 		valTxtA, valTxtB = valText, valText
 	case *syntax.BasicLit:
+		chText = fl.lazyText(chSpan)
+		valText = fl.textOf(valSpan)
 		valArmA = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valTxtA, valTxtB = valText, valText
@@ -165,14 +177,19 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 		// a reparsed clone would lose: fresh addresses, tuple fields, and
 		// property or SIMD facts.
 		if pureSendValue(s.Value) && fc.groupConstExpr(s.Value) {
-			if a, okA := parseExprAt(valText.s, pos); okA {
-				if b, okB := parseExprAt(valText.s, pos); okB {
+			srcText := fl.srcUser(valSpan.start, valSpan.end)
+			if a, okA := parseExprAt(srcText.s, pos); okA {
+				if b, okB := parseExprAt(srcText.s, pos); okB {
+					chText = fl.lazyText(chSpan)
+					valText = fl.textOf(valSpan)
 					valArmA, valArmB = a, b
 					valTxtA, valTxtB = valText, valText
 					break
 				}
 			}
 		}
+		chText = fl.lazyText(chSpan)
+		valText = fl.lazyText(valSpan)
 		valArmA, valArmB = nameOf(pos, valTmp), nameOf(pos, valTmp)
 		valTxtA, valTxtB = gen(valTmp), gen(valTmp)
 		valDefs, valDefTexts = h.sendValueTemp(pos, s, valTmp, valText, chType)

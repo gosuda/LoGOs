@@ -139,3 +139,27 @@ func TestUnionGenericInstantiationMemberDecodes(t *testing.T) {
 		t.Fatalf("expected WireBox.V = 42 decoded from wire key payload, got %v", wb.V)
 	}
 }
+
+type WirePtr = *WireBox[int]
+
+type WireAliasShape interface {
+	WirePtr | *RadSquare
+}
+
+type WireAliasHolder struct {
+	Item WireAliasShape `json:"item"`
+}
+
+func TestUnionAliasedGenericPointerMemberDecodes(t *testing.T) {
+	var h WireAliasHolder
+	if err := json.Unmarshal([]byte(`{"item":{"payload":42}}`), &h); err != nil {
+		t.Fatalf("aliased member must decode, got error: %v", err)
+	}
+	wb, ok := h.Item.(*WireBox[int])
+	if !ok {
+		t.Fatalf("expected *WireBox[int], got %T: %#v", h.Item, h.Item)
+	}
+	if wb.V != 42 {
+		t.Fatalf("expected WireBox.V = 42 decoded from wire key payload, got %v", wb.V)
+	}
+}

@@ -1,0 +1,14 @@
+// compile
+
+package p
+
+type Node interface { Leaf | Group }
+
+type Leaf struct{ S string }
+
+type Group struct{ Kids []Node }
+
+type Page struct {
+	Body   Node
+	Status int = 200
+}

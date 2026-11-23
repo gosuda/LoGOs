@@ -235,6 +235,15 @@ func logosStaticTrigger(info *Info, st *Struct) bool {
 	return false
 }
 
+func logosHolderSerializesToJSON(st *Struct) bool {
+	for i := range st.NumFields() {
+		if _, ok := logosTagLookup(st.Tag(i), "json"); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func logosFamilyNameClash(st *Struct, family string) bool {
 	keys := make(map[string]bool)
 	for i := range st.NumFields() {
@@ -465,6 +474,9 @@ func (check *Checker) logosCheckUnionJSONMembers() {
 		}
 		st, ok := named.Underlying().(*Struct)
 		if !ok {
+			continue
+		}
+		if !logosHolderSerializesToJSON(st) {
 			continue
 		}
 		for i, fld := range fields {

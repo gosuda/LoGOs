@@ -1,0 +1,119 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# Review output, the text findings and the --ai-patch brief, goes to
+# standard output. Diagnostic records of --json-diagnostics go to
+# standard error. The child stalls on a Done-channel receive, so each
+# run has one finding and one brief.
+cd streams
+
+# Plain: the test result, the text finding and the brief share standard
+# output, and standard error stays empty.
+! logos conc test -stall=200ms -count=1 --ai-patch ./stalled
+stdout '^ok '
+stdout '^.*stalled[/\\]main\.lgo:17: \[conc::group_child_stalled\] '
+stdout '^\t.*main\.lgo:24: the group started this child here$'
+stdout '^\tfix: '
+stdout '^\{"file":".*main\.lgo","line":17,"edit":'
+! stderr .
+
+# --json-diagnostics: the record goes to standard error, and the brief
+# stays a plain JSON object on standard output, which is no test2json
+# stream here.
+! logos conc test -stall=200ms -count=1 --ai-patch --json-diagnostics ./stalled
+stdout '^ok '
+stdout '^\{"file":".*main\.lgo","line":17,"edit":'
+! stdout '"Action"'
+! stdout 'conc::'
+stderr '^\{"schema_version":"1\.0","severity":"deny","rule_id":"conc::group_child_stalled","file":".*main\.lgo","span":\{"start_line":17,'
+stderr -count=1 '^\{"schema_version"'
+! stderr '^\t'
+! stderr '"edit"'
+
+# test -json: standard output is the test2json stream, so the text
+# finding and the brief each ride in output events, and every line of
+# standard output is a JSON object.
+! logos conc test -stall=200ms -count=1 --ai-patch -json ./stalled
+stdout '"Action":"pass","Package":"example\.com/concstreams/stalled","Elapsed"'
+stdout '^\{"Action":"output","Output":".*main\.lgo:17: \[conc::group_child_stalled\] '
+stdout '^\{"Action":"output","Output":"\\tfix: '
+stdout '^\{"Action":"output","Output":"\{\\"file\\":\\".*main\.lgo\\",\\"line\\":17,\\"edit\\":'
+! stdout '^\{"file"'
+! stdout '^[^{]'
+! stderr .
+
+# Both: the record goes to standard error, and the brief rides in an
+# output event of the test2json stream on standard output.
+! logos conc test -stall=200ms -count=1 --ai-patch -json --json-diagnostics ./stalled
+stdout '"Action":"pass","Package":"example\.com/concstreams/stalled","Elapsed"'
+stdout '^\{"Action":"output","Output":"\{\\"file\\":\\".*main\.lgo\\",\\"line\\":17,\\"edit\\":'
+! stdout 'conc::'
+! stdout '^\{"file"'
+! stdout '^[^{]'
+stderr '^\{"schema_version":"1\.0","severity":"deny","rule_id":"conc::group_child_stalled",'
+stderr -count=1 '^\{"schema_version"'
+! stderr '"edit"'
+
+# GOFLAGS=-json makes the same test2json stream.
+env GOFLAGS=-json
+! logos conc test -stall=200ms -count=1 ./stalled
+stdout '^\{"Action":"output","Output":".*main\.lgo:17: \[conc::group_child_stalled\] '
+! stdout '^[^{]'
+! stderr .
+env GOFLAGS=
+
+# run: the text finding shares standard output with the program.
+! logos conc run -stall=200ms ./stalled
+stdout '^jobs done: first job failed$'
+stdout '^.*stalled[/\\]main\.lgo:17: \[conc::group_child_stalled\] '
+! stderr .
+
+-- streams/go.mod --
+module example.com/concstreams
+
+go 1.27
+-- streams/stalled/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	inner, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+	<-inner.Done()
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- streams/stalled/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}

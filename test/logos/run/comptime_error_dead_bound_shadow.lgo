@@ -1,0 +1,32 @@
+// run
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+const N = 3
+
+func Reject[T any]() int {
+	comptime.Error("unsupported")
+	return 0
+}
+
+func Choose[T any]() string {
+	const N = 2
+	_ = comptime.SizeOf[int]()
+	const switch T {
+	case [N]int:
+		Reject[T]()
+		return "reject"
+	case int:
+		return "int"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(Choose[int]())
+	fmt.Println(Choose[[3]int]())
+}

@@ -99,6 +99,14 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 	}
 	if outermost {
 		check.logosEFBody = body
+		check.logosEFResults = check.logosEFResults[:0]
+		if sig := check.sig; sig != nil && sig.results != nil {
+			for i := range sig.results.Len() {
+				if v := sig.results.At(i); v != nil {
+					check.logosEFResults = append(check.logosEFResults, v)
+				}
+			}
+		}
 		tainted := make(map[string]bool)
 		for name := range dq.refInClos {
 			if dq.assignOut[name] {
@@ -772,6 +780,11 @@ type logosEFEntry struct {
 	err    *Var
 	name   string
 	proven bool
+	// errKey pairs a seeded entry with the error destination every live
+	// store of the result agrees on, so a nil check on that destination
+	// inside the literal can prove the read. The zero key pairs with
+	// nothing: blank-error and mixed stores never discharge a read.
+	errKey logosEFKey
 	// pos is the source position of the store that created the entry, so
 	// diagnostics that choose among entries stay deterministic.
 	pos syntax.Pos
@@ -795,6 +808,18 @@ func (k logosEFKey) displayName() string {
 
 type logosEFState struct {
 	m map[logosEFKey]logosEFEntry
+	// may marks results stored by a trailing-error call whose error has
+	// no tracked identity (field or discarded): the value can reach a
+	// later deferred read without a check. It is killed by any overwrite
+	// and merged by union across branches, and it is only consulted when
+	// seeding a deferred capture, so ordinary reads (including blank
+	// discards like v, _ := f(); return v) are unaffected.
+	may map[logosEFKey]bool
+	// mayErr pairs each may-marked result with the error destination its
+	// latest store used. Unlike the body-wide inventory it follows the
+	// flow: overwriting either side drops the pairing, so a later nil
+	// check cannot prove the original call.
+	mayErr map[logosEFKey]logosEFKey
 }
 
 func (s *logosEFState) set(k logosEFKey, e logosEFEntry) *logosEFState {
@@ -803,7 +828,52 @@ func (s *logosEFState) set(k logosEFKey, e logosEFEntry) *logosEFState {
 		m = make(map[logosEFKey]logosEFEntry, 1)
 	}
 	m[k] = e
-	return &logosEFState{m}
+	out := &logosEFState{m: m, may: s.may, mayErr: s.mayErr}
+	if s.may != nil && s.may[k] {
+		may := maps.Clone(s.may)
+		delete(may, k)
+		out.may = may
+	}
+	return out
+}
+
+func (s *logosEFState) setMay(k logosEFKey) *logosEFState {
+	if s.may != nil && s.may[k] {
+		return s
+	}
+	may := maps.Clone(s.may)
+	if may == nil {
+		may = make(map[logosEFKey]bool, 1)
+	}
+	may[k] = true
+	return &logosEFState{m: s.m, may: may, mayErr: s.mayErr}
+}
+
+// setMayErr records the error destination guarding may-marked k. The
+// pairing belongs to the latest store in flow order; overwriting either
+// side drops it through dropWriting.
+func (p *logosEFPass) setMayErr(st *logosEFState, k logosEFKey, errKey logosEFKey) *logosEFState {
+	if e, ok := st.mayErr[k]; ok && e == errKey {
+		return st
+	}
+	mayErr := maps.Clone(st.mayErr)
+	if mayErr == nil {
+		mayErr = make(map[logosEFKey]logosEFKey, 1)
+	}
+	mayErr[k] = errKey
+	return &logosEFState{m: st.m, may: st.may, mayErr: mayErr}
+}
+
+// setSeed adds a deferred-capture entry without killing may-reach: seeding
+// is analysis, not a store, so an untracked value that reaches the literal
+// stays marked for the unprove check that follows.
+func (s *logosEFState) setSeed(k logosEFKey, e logosEFEntry) *logosEFState {
+	m := maps.Clone(s.m)
+	if m == nil {
+		m = make(map[logosEFKey]logosEFEntry, 1)
+	}
+	m[k] = e
+	return &logosEFState{m: m, may: s.may, mayErr: s.mayErr}
 }
 
 // dropWriting stops tracking a destination that a write to k can change:
@@ -823,10 +893,113 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 			delete(out, v)
 		}
 	}
-	if out == nil {
+	var mayOut map[logosEFKey]bool
+	for v := range s.may {
+		if v.root != k.root {
+			continue
+		}
+		if logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path) {
+			if mayOut == nil {
+				mayOut = maps.Clone(s.may)
+			}
+			delete(mayOut, v)
+		}
+	}
+	// A write also drops pairings whose error destination it overlaps:
+	// the stored error no longer guards the paired result.
+	var errOut map[logosEFKey]logosEFKey
+	for v, ek := range s.mayErr {
+		if v.root != k.root && ek.root != k.root {
+			continue
+		}
+		overlapped := v.root == k.root && (logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path))
+		if !overlapped && ek.root == k.root {
+			overlapped = logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path)
+		}
+		if overlapped {
+			if errOut == nil {
+				errOut = maps.Clone(s.mayErr)
+			}
+			delete(errOut, v)
+		}
+	}
+	if out == nil && mayOut == nil && errOut == nil {
 		return s
 	}
-	return &logosEFState{out}
+	m := s.m
+	if out != nil {
+		m = out
+	}
+	may := s.may
+	if mayOut != nil {
+		may = mayOut
+	}
+	mayErr := s.mayErr
+	if errOut != nil {
+		mayErr = errOut
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErr}
+}
+
+// dropCovered forgets the entries a quiet field write fully overwrites:
+// the destination itself and anything nested inside it. It keeps strict
+// ancestors: resetting one field does not prove the whole value was
+// reset. Pairings whose error destination the write overlaps are still
+// dropped, mirroring the flow state.
+func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
+	var out map[logosEFKey]logosEFEntry
+	for v := range s.m {
+		if v.root != k.root {
+			continue
+		}
+		if logosEFPathUnder(v.path, k.path) {
+			if out == nil {
+				out = maps.Clone(s.m)
+			}
+			delete(out, v)
+		}
+	}
+	var mayOut map[logosEFKey]bool
+	for v := range s.may {
+		if v.root != k.root {
+			continue
+		}
+		if logosEFPathUnder(v.path, k.path) {
+			if mayOut == nil {
+				mayOut = maps.Clone(s.may)
+			}
+			delete(mayOut, v)
+		}
+	}
+	var errOut map[logosEFKey]logosEFKey
+	for v, ek := range s.mayErr {
+		overlapped := v.root == k.root && logosEFPathUnder(v.path, k.path)
+		if !overlapped && ek.root == k.root {
+			overlapped = logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path)
+		}
+		if overlapped {
+			if errOut == nil {
+				errOut = maps.Clone(s.mayErr)
+			}
+			delete(errOut, v)
+		}
+	}
+	if out == nil && mayOut == nil && errOut == nil {
+		return s
+	}
+	m := s.m
+	if out != nil {
+		m = out
+	}
+	may := s.may
+	if mayOut != nil {
+		may = mayOut
+	}
+	mayErr := s.mayErr
+	if errOut != nil {
+		mayErr = errOut
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErr}
 }
 
 // logosEFPathUnder reports whether path denotes prefix or a destination
@@ -884,7 +1057,7 @@ func (s *logosEFState) remap(f func(logosEFEntry) logosEFEntry) *logosEFState {
 	if out == nil {
 		return s
 	}
-	return &logosEFState{out}
+	return &logosEFState{m: out, may: s.may, mayErr: s.mayErr}
 }
 
 func (s *logosEFState) prove(errV *Var) *logosEFState {
@@ -892,6 +1065,52 @@ func (s *logosEFState) prove(errV *Var) *logosEFState {
 		e.proven = e.proven || e.err == errV
 		return e
 	})
+}
+
+// dropMayFor stops marking the results guarded by errKey as may-reach:
+// the nil test proved the guarding call succeeded on this path. It also
+// discharges seeded entries that every live store pairs with errKey, so a
+// nil check inside the deferred literal can prove its own read.
+func (s *logosEFState) dropMayFor(errKey logosEFKey) *logosEFState {
+	if (s.may == nil || len(s.mayErr) == 0) && len(s.m) == 0 {
+		return s
+	}
+	var out map[logosEFKey]bool
+	for v := range s.may {
+		if ek, ok := s.mayErr[v]; !ok || ek != errKey {
+			continue
+		}
+		if out == nil {
+			out = maps.Clone(s.may)
+		}
+		delete(out, v)
+	}
+	var mout map[logosEFKey]logosEFEntry
+	for k, e := range s.m {
+		if e.proven || e.err != nil || e.errKey != errKey || s.mayErr[k] != errKey {
+			continue
+		}
+		if mout == nil {
+			mout = maps.Clone(s.m)
+		}
+		e.proven = true
+		mout[k] = e
+	}
+	if out == nil && mout == nil {
+		return s
+	}
+	m := s.m
+	if mout != nil {
+		m = mout
+	}
+	may := s.may
+	if out != nil {
+		may = out
+		if len(may) == 0 {
+			may = nil
+		}
+	}
+	return &logosEFState{m: m, may: may, mayErr: s.mayErr}
 }
 
 func (s *logosEFState) detach(errV *Var) *logosEFState {
@@ -921,7 +1140,7 @@ func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 	if out == nil {
 		return st
 	}
-	return &logosEFState{out}
+	return &logosEFState{m: out, may: st.may, mayErr: st.mayErr}
 }
 
 // stable reports whether a destination's memory can no longer change
@@ -974,16 +1193,74 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 			ea.err = nil
 		}
 		ea.proven = ea.proven && eb.proven
+		if ea.errKey != eb.errKey {
+			ea.errKey = logosEFKey{}
+		}
 		m[v] = ea
 	}
-	return &logosEFState{m}
+	var may map[logosEFKey]bool
+	if a.may != nil || b.may != nil {
+		may = make(map[logosEFKey]bool)
+		for v := range a.may {
+			may[v] = true
+		}
+		for v := range b.may {
+			may[v] = true
+		}
+		if len(may) == 0 {
+			may = nil
+		}
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErrJoin(a, b)}
+}
+
+// mayErrJoin keeps a pairing when both branches agree on it, and keeps
+// one branch's pairing when the other branch holds nothing unchecked for
+// the result: a branch with no may mark and no pairing for the key
+// contributes only a safe value, so it cannot invalidate the pairing. A
+// branch with an unpaired or differently paired unchecked entry still
+// vetoes it, so a check on one branch never proves a value the other
+// branch paired elsewhere.
+func mayErrJoin(a, b *logosEFState) map[logosEFKey]logosEFKey {
+	if len(a.mayErr) == 0 && len(b.mayErr) == 0 {
+		return nil
+	}
+	var out map[logosEFKey]logosEFKey
+	keep := func(k logosEFKey, ek logosEFKey) {
+		if out == nil {
+			out = make(map[logosEFKey]logosEFKey)
+		}
+		out[k] = ek
+	}
+	for k, ea := range a.mayErr {
+		eb, ok := b.mayErr[k]
+		switch {
+		case ok && eb == ea:
+			keep(k, ea)
+		case ok:
+			// Disagreeing pairings veto each other.
+		default:
+			if _, has := b.may[k]; !has {
+				keep(k, ea)
+			}
+		}
+	}
+	for k, eb := range b.mayErr {
+		if _, ok := a.mayErr[k]; ok {
+			continue
+		}
+		if _, has := a.may[k]; !has {
+			keep(k, eb)
+		}
+	}
+	return out
 }
 
 func logosEFSame(a, b *logosEFState) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return maps.Equal(a.m, b.m)
+	return maps.Equal(a.m, b.m) && maps.Equal(a.may, b.may) && maps.Equal(a.mayErr, b.mayErr)
 }
 
 type logosEFFrame struct {
@@ -1004,6 +1281,7 @@ type logosEFEffects struct {
 	inside   map[*Var]bool
 	assigned map[logosEFKey]bool
 	created  map[logosEFKey]string
+	may      map[logosEFKey]logosEFKey
 }
 
 type logosEFPass struct {
@@ -1018,15 +1296,20 @@ type logosEFPass struct {
 	initialized   map[*Var]bool
 	tracked       map[logosEFKey]string
 	storeErr      map[logosEFKey][]*Var
+	storeErrKey   map[logosEFKey][]logosEFKey
 	sliced        map[logosEFKey]bool
 	storePos      map[logosEFKey][]syntax.Pos
 	inLoop        map[logosEFKey]bool
 	loopFresh     map[*syntax.ForStmt]map[*Var]bool
+	loopMaybe     map[*syntax.ForStmt]map[*Var]bool
 	loopTuple     map[*syntax.ForStmt]map[logosEFKey]bool
 	reenter       map[*syntax.ForStmt]bool
-	storeStmt     map[logosEFKey][]syntax.Node
+	runsOnce      map[*syntax.ForStmt]bool
+	loopDepth     int
+	carve         map[syntax.Node]*logosEFState
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
 	trackedByRoot map[*Var][]logosEFKey
+	results       map[*Var]bool
 }
 
 func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
@@ -1034,6 +1317,12 @@ func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
 		return
 	}
 	p := &logosEFPass{check: check, body: body, seen: make(map[syntax.Pos]bool)}
+	if len(check.logosEFResults) > 0 {
+		p.results = make(map[*Var]bool, len(check.logosEFResults))
+		for _, v := range check.logosEFResults {
+			p.results[v] = true
+		}
+	}
 	if p.hasTuple() {
 		p.run(body, &logosEFState{})
 	}
@@ -1045,13 +1334,25 @@ func (p *logosEFPass) hasTuple() bool {
 		switch n := n.(type) {
 		case *syntax.AssignStmt:
 			if n.Rhs != nil {
-				errV, _ := p.tuple(syntax.UnpackListExpr(n.Lhs), n.Rhs)
+				lhs := syntax.UnpackListExpr(n.Lhs)
+				errV, _ := p.tuple(lhs, n.Rhs)
 				found = found || errV != nil
+				if errV == nil {
+					if rhs := syntax.UnpackListExpr(n.Rhs); len(rhs) == 1 {
+						found = found || p.errCallShape(lhs, rhs[0])
+					}
+				}
 			}
 		case *syntax.VarDecl:
 			if n.Values != nil {
-				errV, _ := p.tuple(logosEFNames(n), n.Values)
+				lhs := logosEFNames(n)
+				errV, _ := p.tuple(lhs, n.Values)
 				found = found || errV != nil
+				if errV == nil {
+					if rhs := syntax.UnpackListExpr(n.Values); len(rhs) == 1 {
+						found = found || p.errCallShape(lhs, rhs[0])
+					}
+				}
 			}
 		}
 		return !found
@@ -1147,6 +1448,30 @@ func (p *logosEFPass) nilTest(op *syntax.Operation) (errV *Var, isNeq bool) {
 	return errV, op.Op == syntax.Neq
 }
 
+// nilTestFieldKey names the trackable destination a nil comparison tests
+// when the tested side is not a plain error variable: a field or element
+// path whose nil proof drops the may-reach marks of the results stored
+// under it.
+func (p *logosEFPass) nilTestFieldKey(op *syntax.Operation) (logosEFKey, bool) {
+	if op.Y == nil || (op.Op != syntax.Eql && op.Op != syntax.Neq) {
+		return logosEFKey{}, false
+	}
+	x, y := syntax.Unparen(op.X), syntax.Unparen(op.Y)
+	var tested syntax.Expr
+	switch {
+	case p.isNil(y):
+		tested = x
+	case p.isNil(x):
+		tested = y
+	default:
+		return logosEFKey{}, false
+	}
+	if p.varOf(tested) != nil {
+		return logosEFKey{}, false
+	}
+	return p.destKey(tested)
+}
+
 func (p *logosEFPass) tuple(lhs []syntax.Expr, rhs syntax.Expr) (errV *Var, keys []logosEFKey) {
 	call, ok := syntax.Unparen(rhs).(*syntax.CallExpr)
 	if !ok || len(lhs) < 2 {
@@ -1171,6 +1496,22 @@ func (p *logosEFPass) tuple(lhs []syntax.Expr, rhs syntax.Expr) (errV *Var, keys
 		}
 	}
 	return errV, keys
+}
+
+// errCallShape reports whether lhs, rhs is a multi-assignment from a call
+// whose result shape matches the LoGOs trailing-error convention: the
+// tuple has exactly len(lhs) elements, the last one is an error type, and
+// the callee is in LoGOs code. Go-contract calls and calls whose result
+// does not pair a trailing error keep no nil-error store, because their
+// last destination is not an error check.
+func (p *logosEFPass) errCallShape(lhs []syntax.Expr, rhs syntax.Expr) bool {
+	call, ok := syntax.Unparen(rhs).(*syntax.CallExpr)
+	if !ok || len(lhs) < 2 || !p.calleeInLgo(call.Fun) {
+		return false
+	}
+	typ, _, ok := p.check.logosChecked(call)
+	tup, isTuple := typ.(*Tuple)
+	return ok && isTuple && tup.Len() == len(lhs) && Identical(tup.At(tup.Len()-1).typ, universeError)
 }
 
 func (p *logosEFPass) staticFunc(e syntax.Expr) *Func {
@@ -1205,7 +1546,11 @@ func (p *logosEFPass) calleeInLgo(fun syntax.Expr) bool {
 			return p.check.logosFuncInLgo(fn)
 		}
 	}
-	return true
+	// A body-local variable rebound across several Go-only origins is
+	// still a Go call: every write is recorded and resolves to a Go
+	// declaration, so the call keeps the Go contract. Unknown, aliased,
+	// or mixed origins stay conservative.
+	return !p.allGoOrigins(v)
 }
 
 func (p *logosEFPass) sole(v *Var) syntax.Expr {
@@ -1215,10 +1560,53 @@ func (p *logosEFPass) sole(v *Var) syntax.Expr {
 	if p.assigns == nil {
 		p.collectAssigns()
 	}
+	// A parameter, package variable, or captured outer variable carries
+	// an incoming value the body inventory never sees, so its recorded
+	// assignments cannot name the call's origin. Only a variable the
+	// body declares starts from a recorded origin.
+	if !p.initialized[v] {
+		return nil
+	}
 	if exprs := p.assigns[logosEFKey{root: v}]; len(exprs) == 1 && !p.addr[v] {
 		return exprs[0]
 	}
 	return nil
+}
+
+// allGoOrigins reports whether v is declared in this body and every
+// recorded assignment of v statically resolves to a Go declaration, so
+// a call through a rebound variable keeps the Go contract. A variable
+// declared elsewhere carries an incoming value the inventory never
+// sees. A missing inventory, an address-taken variable, an unresolvable
+// or varying origin, and any LoGOs origin all answer false: a write
+// through the address never reaches the inventory.
+func (p *logosEFPass) allGoOrigins(v *Var) bool {
+	if v == nil {
+		return false
+	}
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	if !p.initialized[v] {
+		return false
+	}
+	if p.addr[v] {
+		return false
+	}
+	exprs, ok := p.assigns[logosEFKey{root: v}]
+	if !ok || len(exprs) == 0 {
+		return false
+	}
+	for _, r := range exprs {
+		if r == nil {
+			return false
+		}
+		fn := p.staticFunc(r)
+		if fn == nil || p.check.logosFuncInLgo(fn) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *logosEFPass) collectAssigns() {
@@ -1227,25 +1615,37 @@ func (p *logosEFPass) collectAssigns() {
 	p.initialized = make(map[*Var]bool)
 	p.tracked = make(map[logosEFKey]string)
 	p.storeErr = make(map[logosEFKey][]*Var)
+	p.storeErrKey = make(map[logosEFKey][]logosEFKey)
 	p.sliced = make(map[logosEFKey]bool)
 	p.storePos = make(map[logosEFKey][]syntax.Pos)
-	p.storeStmt = make(map[logosEFKey][]syntax.Node)
 	p.inLoop = make(map[logosEFKey]bool)
 	p.loopFresh = make(map[*syntax.ForStmt]map[*Var]bool)
+	p.loopMaybe = make(map[*syntax.ForStmt]map[*Var]bool)
 	p.loopTuple = make(map[*syntax.ForStmt]map[logosEFKey]bool)
 	p.reenter = make(map[*syntax.ForStmt]bool)
-	mark := func(stmt syntax.Node, lhs []syntax.Expr, rhs syntax.Expr) {
+	mark := func(lhs []syntax.Expr, rhs syntax.Expr) {
 		errV, keys := p.tuple(lhs, rhs)
 		if errV == nil {
-			// A result stored with its error discarded still writes the
-			// destination: record the store without an error identity so
-			// deferred captures know the value can be overwritten.
-			if _, isCall := syntax.Unparen(rhs).(*syntax.CallExpr); isCall && len(lhs) >= 2 {
+			// A LoGOs call whose trailing error is discarded still writes
+			// the destination: record the store without an error identity
+			// so deferred captures know the value can be overwritten.
+			// Calls that do not return a trailing error, and Go-contract
+			// calls, need no check and record nothing.
+			if p.errCallShape(lhs, rhs) {
+				errName := "its error"
+				var errKey logosEFKey
+				if k, ok := p.destKey(lhs[len(lhs)-1]); ok {
+					errName = k.displayName()
+					errKey = k
+				}
 				for _, e := range lhs[:len(lhs)-1] {
 					if k, ok := p.destKey(e); ok {
+						if _, ok := p.tracked[k]; !ok {
+							p.tracked[k] = errName
+						}
 						p.storePos[k] = append(p.storePos[k], e.Pos())
 						p.storeErr[k] = append(p.storeErr[k], nil)
-						p.storeStmt[k] = append(p.storeStmt[k], stmt)
+						p.storeErrKey[k] = append(p.storeErrKey[k], errKey)
 					}
 				}
 			}
@@ -1257,7 +1657,7 @@ func (p *logosEFPass) collectAssigns() {
 			}
 			p.storePos[k] = append(p.storePos[k], p.logosEFDestPos(lhs, k))
 			p.storeErr[k] = append(p.storeErr[k], errV)
-			p.storeStmt[k] = append(p.storeStmt[k], stmt)
+			p.storeErrKey[k] = append(p.storeErrKey[k], logosEFKey{})
 		}
 	}
 	note := func(lhs []syntax.Expr, rhs []syntax.Expr, plain bool) {
@@ -1282,14 +1682,20 @@ func (p *logosEFPass) collectAssigns() {
 			lhs := syntax.UnpackListExpr(n.Lhs)
 			rhs := syntax.UnpackListExpr(n.Rhs)
 			note(lhs, rhs, n.Op == 0 || n.Op == syntax.Def)
-			if (n.Op == 0 || n.Op == syntax.Def) && len(rhs) == 1 {
-				mark(n, lhs, rhs[0])
-			}
 		case *syntax.VarDecl:
 			if n.Values != nil {
 				names := logosEFNames(n)
 				note(names, syntax.UnpackListExpr(n.Values), true)
-				mark(n, names, n.Values)
+				break
+			}
+			// A declaration without values assigns nothing, but it still
+			// declares the names in this body: a later assignment is the
+			// only write the inventory can see, so the Go-origin proof
+			// keeps working for `var f T` followed by `f = g`.
+			for _, id := range n.NameList {
+				if v, _ := p.check.Defs[id].(*Var); v != nil {
+					p.initialized[v] = true
+				}
 			}
 		case *syntax.RangeClause:
 			note(syntax.UnpackListExpr(n.Lhs), nil, false)
@@ -1316,33 +1722,69 @@ func (p *logosEFPass) collectAssigns() {
 		}
 		return true
 	})
+	// Classify tuple stores only after the assignment inventory is
+	// complete: a call through a variable reassigned later in the body
+	// (for example parse := strconv.Atoi then parse = parseLogos) must
+	// see every assignment before its callee is resolved, or an in-loop
+	// LoGOs store is mistaken for a Go call and its error pairing lost.
+	syntax.Inspect(p.body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.AssignStmt:
+			if (n.Op == 0 || n.Op == syntax.Def) && len(syntax.UnpackListExpr(n.Rhs)) == 1 {
+				mark(syntax.UnpackListExpr(n.Lhs), syntax.UnpackListExpr(n.Rhs)[0])
+			}
+		case *syntax.VarDecl:
+			if n.Values != nil {
+				mark(logosEFNames(n), n.Values)
+			}
+		}
+		return true
+	})
 	syntax.Inspect(p.body, func(n syntax.Node) bool {
 		f, ok := n.(*syntax.ForStmt)
 		if !ok {
 			return true
 		}
 		fresh := p.defsIn(f.Body)
+		// maybe is the possibly-fresh set. Under GOCOMPILEDEBUG=loopvarhash a
+		// clause variable can stay shared even when loopDistinctVars holds,
+		// so the deferred-proof unpairing assumes freshness from
+		// loopDistinctVars alone while the carry checks below require the
+		// certain loopVarsFresh.
+		maybe := p.defsIn(f.Body)
 		// Under Go 1.22 loop-var semantics a variable a := range clause or
 		// a three-clause init declares gets a new instance each iteration;
 		// under earlier semantics it is one shared instance, so a deferred
 		// literal can observe a later iteration's store.
+		distinct := p.loopDistinctVars(f)
+		certain := p.loopVarsFresh(f)
 		if rc, ok := f.Init.(*syntax.RangeClause); ok {
-			if p.loopDistinctVars(f) {
-				for v := range p.defsIn(rc) {
+			for v := range p.defsIn(rc) {
+				if distinct {
+					maybe[v] = true
+				}
+				if certain {
 					fresh[v] = true
 				}
 			}
-		} else if f.Init != nil && p.loopDistinctVars(f) {
+		} else if f.Init != nil {
 			for v := range p.defsIn(f.Init) {
-				fresh[v] = true
+				if distinct {
+					maybe[v] = true
+				}
+				if certain {
+					fresh[v] = true
+				}
 			}
 		}
 		if f.Post != nil {
 			for v := range p.defsIn(f.Post) {
 				fresh[v] = true
+				maybe[v] = true
 			}
 		}
 		p.loopFresh[f] = fresh
+		p.loopMaybe[f] = maybe
 		tuple := p.loopTuple[f]
 		if tuple == nil {
 			tuple = make(map[logosEFKey]bool)
@@ -1363,9 +1805,16 @@ func (p *logosEFPass) collectAssigns() {
 					note(l)
 				}
 				if (m.Op == 0 || m.Op == syntax.Def) && len(syntax.UnpackListExpr(m.Rhs)) == 1 {
-					if _, keys := p.tuple(lhs, syntax.UnpackListExpr(m.Rhs)[0]); keys != nil {
+					rhs := syntax.UnpackListExpr(m.Rhs)[0]
+					if _, keys := p.tuple(lhs, rhs); keys != nil {
 						for _, k := range keys {
 							tuple[k] = true
+						}
+					} else if p.errCallShape(lhs, rhs) {
+						for _, e := range lhs[:len(lhs)-1] {
+							if k, ok := p.destKey(e); ok {
+								tuple[k] = true
+							}
 						}
 					}
 				}
@@ -1378,6 +1827,12 @@ func (p *logosEFPass) collectAssigns() {
 					if _, keys := p.tuple(names, m.Values); keys != nil {
 						for _, k := range keys {
 							tuple[k] = true
+						}
+					} else if p.errCallShape(names, m.Values) {
+						for _, e := range names[:len(names)-1] {
+							if k, ok := p.destKey(e); ok {
+								tuple[k] = true
+							}
 						}
 					}
 				}
@@ -1400,10 +1855,11 @@ func (p *logosEFPass) collectAssigns() {
 	for k := range p.tracked {
 		p.trackedByRoot[k.root] = append(p.trackedByRoot[k.root], k)
 	}
-	// A backward goto can run a loop again after its defers registered: a
-	// goto inside or after the labeled statement it targets jumps back,
-	// and a label placed at or before a loop reaches it on the way
-	// forward.
+	// A backward goto re-enters a loop when its target sits at or before
+	// the loop (the jump runs the whole loop again) or inside the loop
+	// body (the jump re-runs part of the body, recreating a loop-local
+	// error and rewriting a shared result). A label placed at or before a
+	// loop reaches it on the way forward.
 	labels := make(map[string]syntax.Stmt)
 	var gotos []*syntax.BranchStmt
 	syntax.Inspect(p.body, func(n syntax.Node) bool {
@@ -1427,7 +1883,7 @@ func (p *logosEFPass) collectAssigns() {
 				// A goto before the loop cannot run it again.
 				continue
 			}
-			if ls.Pos().Cmp(f.Pos()) <= 0 || inSubtree(ls, f) {
+			if ls.Pos().Cmp(f.Pos()) <= 0 || inSubtree(f, ls) {
 				p.reenter[f] = true
 			}
 		}
@@ -1943,6 +2399,15 @@ func (p *logosEFPass) noteCreated(k logosEFKey, errName string) {
 	}
 }
 
+func (p *logosEFPass) noteMay(k logosEFKey, errKey logosEFKey) {
+	if p.eff != nil && !p.eff.inside[k.root] {
+		if p.eff.may == nil {
+			p.eff.may = make(map[logosEFKey]logosEFKey)
+		}
+		p.eff.may[k] = errKey
+	}
+}
+
 func (p *logosEFPass) assigned(st *logosEFState, v *Var) *logosEFState {
 	k := logosEFKey{root: v}
 	p.noteAssigned(k)
@@ -1952,6 +2417,41 @@ func (p *logosEFPass) assigned(st *logosEFState, v *Var) *logosEFState {
 func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState) *logosEFState {
 	errV, keys := p.tuple(lhs, rhs)
 	if errV == nil {
+		// A trailing-error call whose error has no tracked identity
+		// (field or discarded) still leaves a value that can reach a
+		// deferred read: mark it may-reach. The marker is killed by any
+		// overwrite through dropDest, merged by union across branches,
+		// and consulted only when seeding a deferred capture, so
+		// ordinary reads (including v, _ := f(); return v) stay as
+		// before.
+		if !p.errCallShape(lhs, rhs) {
+			return st
+		}
+		for _, e := range lhs[:len(lhs)-1] {
+			k, ok := p.destKey(e)
+			if !ok {
+				continue
+			}
+			if k.path != "" && !p.trackable(k) {
+				continue
+			}
+			// A field-error store re-pairs the result: record the guard.
+			// Reset any entry a previous pairing left behind first, so
+			// a later check proves only the latest call. The reset runs
+			// before the marks because set drops may-reach on overwrite.
+			if _, ok := st.m[k]; ok {
+				e2 := st.m[k]
+				e2.err, e2.proven, e2.errKey = nil, false, logosEFKey{}
+				st = st.set(k, e2)
+			}
+			st = st.setMay(k)
+			var ek logosEFKey
+			if dk, ok := p.destKey(lhs[len(lhs)-1]); ok {
+				st = p.setMayErr(st, k, dk)
+				ek = dk
+			}
+			p.noteMay(k, ek)
+		}
 		return st
 	}
 	// Plain results track regardless of later address-taking or slicing: a
@@ -1963,6 +2463,13 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 			continue
 		}
 		st = st.set(k, logosEFEntry{err: errV, name: errV.name, pos: p.logosEFDestPos(lhs, k)})
+		// A plain-error store supersedes any field pairing for the same
+		// result: the variable proof owns the value from here on.
+		if _, ok := st.mayErr[k]; ok {
+			mayErr := maps.Clone(st.mayErr)
+			delete(mayErr, k)
+			st = &logosEFState{m: st.m, may: st.may, mayErr: mayErr}
+		}
 		p.noteCreated(k, errV.name)
 	}
 	return st
@@ -2029,6 +2536,15 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 	st = p.expr(op, st)
 	errV, isNeq := p.nilTest(op)
 	if errV == nil {
+		// A nil test on a field error proves the guarding call on the
+		// passing path just like a variable test does: it drops the
+		// may-reach mark, so a later deferred read stays accepted.
+		if fk, ok := p.nilTestFieldKey(op); ok {
+			if isNeq {
+				return st, st.dropMayFor(fk)
+			}
+			return st.dropMayFor(fk), st
+		}
 		return st, st
 	}
 	if isNeq {
@@ -2037,11 +2553,323 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 	return st.prove(errV), st
 }
 
-func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState) *logosEFState {
-	for _, s := range list {
+func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState, top bool) *logosEFState {
+	for i, s := range list {
+		if next, ok := p.deferStmt(s, list[i+1:], st, top); ok {
+			st = next
+			continue
+		}
 		st = p.stmt(s, st)
 	}
 	return st
+}
+
+// deferStmt analyzes a direct defer of a function literal, letting a later
+// unconditional plain overwrite in the same list satisfy the deferred read:
+// the literal observes the value at function exit, not at registration.
+// The carve applies only at the function body's top level, where the rest
+// of the list is everything that can still run: inside a nested block a
+// later store after the enclosing block is invisible to the remainder
+// check. The carve touches only the literal's capture input; the flow
+// state is untouched, so reads between the defer and the overwrite still
+// fail. Any other statement returns false for normal handling.
+func (p *logosEFPass) deferStmt(s syntax.Stmt, rest []syntax.Stmt, st *logosEFState, top bool) (*logosEFState, bool) {
+	cs, ok := s.(*syntax.CallStmt)
+	if !ok || cs.Tok != syntax.Defer || p.loopDepth > 0 || !top {
+		return nil, false
+	}
+	call, ok := syntax.Unparen(cs.Call).(*syntax.CallExpr)
+	if !ok {
+		return nil, false
+	}
+	lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit)
+	if !ok || lit.Body == nil {
+		return nil, false
+	}
+	carved, ok := p.carveAfter(rest, st)
+	if !ok {
+		return nil, false
+	}
+	if p.carve == nil {
+		p.carve = make(map[syntax.Node]*logosEFState)
+	}
+	p.carve[lit] = carved
+	st = p.stmt(s, st)
+	delete(p.carve, lit)
+	return st, true
+}
+
+// carveAfter folds the overwrites of straight-line panic-free statements
+// onto a scratch copy of st, so a deferred literal registered before an
+// unconditional reset observes the reset value. It stops at the first
+// statement that can do more than a quiet write; the caller then rejects
+// the carve if the remainder can still rewrite a dropped value.
+func (p *logosEFPass) carveAfter(rest []syntax.Stmt, st *logosEFState) (*logosEFState, bool) {
+	if st == nil || (len(st.m) == 0 && len(st.may) == 0) {
+		return nil, false
+	}
+	ks := &logosEFState{m: maps.Clone(st.m), may: maps.Clone(st.may), mayErr: maps.Clone(st.mayErr)}
+	i := 0
+	for i < len(rest) {
+		var cont bool
+		ks, cont = p.carveStep(ks, rest[i])
+		if !cont {
+			break
+		}
+		i++
+	}
+	if logosEFSame(ks, st) {
+		return nil, false
+	}
+	// A MustNonNil store can panic, but the resets folded before it
+	// already ran on every path, so keep them and fold only tails that
+	// change nothing after it. The checking store itself writes a
+	// platform pointer, never an unchecked result, and its panic
+	// preserves the prior resets.
+	if i < len(rest) && p.isCheckStore(rest[i]) {
+		for j := i + 1; j < len(rest); j++ {
+			trial, cont := p.carveStep(ks, rest[j])
+			if !cont {
+				if p.remainderHazards(rest[j:], p.carvedRoots(st, trial)) {
+					return nil, false
+				}
+				return ks, true
+			}
+			if !logosEFSame(trial, ks) {
+				return nil, false
+			}
+			ks = trial
+		}
+		return ks, true
+	}
+	if p.remainderHazards(rest[i:], p.carvedRoots(st, ks)) {
+		return nil, false
+	}
+	return ks, true
+}
+
+// carvedRoots lists the variables the carve dropped: an explicit return
+// that writes any of them through the named results cancels the carve.
+func (p *logosEFPass) carvedRoots(st, ks *logosEFState) map[*Var]bool {
+	out := make(map[*Var]bool)
+	for k := range st.m {
+		if _, ok := ks.m[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	for k := range st.may {
+		if _, ok := ks.may[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	for k := range st.mayErr {
+		if _, ok := ks.mayErr[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	return out
+}
+
+// carveStep folds one overwriting statement into the scratch state, or
+// reports false when the statement can do anything beyond a quiet write.
+func (p *logosEFPass) carveStep(ks *logosEFState, s syntax.Stmt) (*logosEFState, bool) {
+	switch s := s.(type) {
+	case *syntax.AssignStmt:
+		if s.Op != 0 && s.Op != syntax.Def {
+			return ks, false
+		}
+		lhs := syntax.UnpackListExpr(s.Lhs)
+		rhs := syntax.UnpackListExpr(s.Rhs)
+		for _, r := range rhs {
+			if !p.quietExpr(r) {
+				return ks, false
+			}
+			if p.platformChecked(r) {
+				return ks, false
+			}
+		}
+		for _, l := range lhs {
+			if !p.quietDest(l) {
+				return ks, false
+			}
+		}
+		for _, l := range lhs {
+			ks = p.carveDrop(ks, l)
+		}
+		return ks, true
+	case *syntax.DeclStmt:
+		for _, d := range s.DeclList {
+			vd, ok := d.(*syntax.VarDecl)
+			if !ok {
+				continue
+			}
+			if vd.Values != nil {
+				for _, r := range syntax.UnpackListExpr(vd.Values) {
+					if !p.quietExpr(r) {
+						return ks, false
+					}
+					if p.platformChecked(r) {
+						return ks, false
+					}
+				}
+				for _, name := range vd.NameList {
+					ks = p.carveDrop(ks, name)
+				}
+			}
+		}
+		return ks, true
+	}
+	return ks, false
+}
+
+// quietExpr reports whether e can neither panic nor exit: a literal, a
+// plain name, or a direct value-struct field path over quiet operands.
+// Anything else, including calls, indices, and operations, ends the scan.
+func (p *logosEFPass) quietExpr(e syntax.Expr) bool {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.BasicLit:
+		return true
+	case *syntax.Name:
+		return true
+	case *syntax.SelectorExpr:
+		sel := p.check.Selections[e]
+		if sel == nil || sel.Kind() != FieldVal || sel.Indirect() || len(sel.Index()) != 1 {
+			return false
+		}
+		return p.quietExpr(e.X)
+	}
+	return false
+}
+
+// quietDest reports whether l is a write that can neither panic nor exit:
+// a plain name, including the blank identifier, or a direct value-struct
+// field path over quiet destinations.
+func (p *logosEFPass) quietDest(l syntax.Expr) bool {
+	switch l := syntax.Unparen(l).(type) {
+	case *syntax.Name:
+		return true
+	case *syntax.SelectorExpr:
+		sel := p.check.Selections[l]
+		if sel == nil || sel.Kind() != FieldVal || sel.Indirect() || len(sel.Index()) != 1 {
+			return false
+		}
+		return p.quietDest(l.X)
+	}
+	return false
+}
+
+// platformChecked reports whether e is the recorded source of a MustNonNil
+// store: the lowering wraps it in a check that can panic, so the scan stops
+// before it instead of folding past it.
+func (p *logosEFPass) platformChecked(e syntax.Expr) bool {
+	info := p.check.Info
+	if info == nil || len(info.LogosChecks) == 0 {
+		return false
+	}
+	_, ok := info.LogosChecks[syntax.Unparen(e)]
+	return ok
+}
+
+// isCheckStore reports whether carveStep stops at s because of a recorded
+// MustNonNil source rather than a louder statement: a plain assignment or
+// declaration whose operands are all quiet with one of them checked. It
+// mirrors the scan order so the partial carve keeps only the resets that
+// already ran before the checking store.
+func (p *logosEFPass) isCheckStore(s syntax.Stmt) bool {
+	switch s := s.(type) {
+	case *syntax.AssignStmt:
+		if s.Op != 0 && s.Op != syntax.Def {
+			return false
+		}
+		rhs := syntax.UnpackListExpr(s.Rhs)
+		if len(rhs) == 0 {
+			return false
+		}
+		for _, r := range rhs {
+			if !p.quietExpr(r) {
+				return false
+			}
+			if p.platformChecked(r) {
+				return true
+			}
+		}
+		return false
+	case *syntax.DeclStmt:
+		for _, d := range s.DeclList {
+			vd, ok := d.(*syntax.VarDecl)
+			if !ok || vd.Values == nil {
+				continue
+			}
+			for _, r := range syntax.UnpackListExpr(vd.Values) {
+				if !p.quietExpr(r) {
+					return false
+				}
+				if p.platformChecked(r) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// carveDrop drops the entries a quiet write overwrites: whole-variable
+// writes mirror dropDest, while field writes drop only covered
+// destinations and keep strict ancestors. It touches only the scratch
+// state, never effects.
+func (p *logosEFPass) carveDrop(st *logosEFState, l syntax.Expr) *logosEFState {
+	l = syntax.Unparen(l)
+	if v := p.varOf(l); v != nil {
+		return st.dropWriting(logosEFKey{root: v}).detach(v)
+	}
+	if k, ok := p.rawKey(l); ok {
+		return st.dropCovered(k)
+	}
+	return st
+}
+
+// remainderHazards reports whether rest can still rewrite a dropped value
+// or steer control off the straight line: any call, any assignment-like
+// statement, any branch, loop, label, or literal that may run later, and
+// any result-carrying return that writes a dropped named result.
+func (p *logosEFPass) remainderHazards(rest []syntax.Stmt, dropped map[*Var]bool) bool {
+	hazard := false
+	for _, s := range rest {
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			if rs, ok := n.(*syntax.ReturnStmt); ok && len(syntax.UnpackListExpr(rs.Results)) > 0 {
+				for v := range dropped {
+					if p.results[v] {
+						hazard = true
+						return false
+					}
+				}
+			}
+			switch n.(type) {
+			case *syntax.CallExpr,
+				*syntax.AssignStmt,
+				*syntax.DeclStmt,
+				*syntax.RangeClause,
+				*syntax.BranchStmt,
+				*syntax.LabeledStmt,
+				*syntax.ForStmt,
+				*syntax.IfStmt,
+				*syntax.SwitchStmt,
+				*syntax.SelectStmt,
+				*syntax.GroupStmt,
+				*syntax.GroupChild,
+				*syntax.FuncLit,
+				*syntax.LambdaExpr:
+				hazard = true
+				return false
+			}
+			return !hazard
+		})
+		if hazard {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
@@ -2056,7 +2884,7 @@ func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	}
 	switch s := s.(type) {
 	case *syntax.BlockStmt:
-		return p.stmts(s.List, st)
+		return p.stmts(s.List, st, s == p.body)
 	case *syntax.ExprStmt:
 		return p.exprStmt(s, st)
 	case *syntax.SendStmt:
@@ -2093,7 +2921,7 @@ func (p *logosEFPass) logosStmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	case *syntax.ConstSwitchStmt:
 		out := st
 		for _, c := range s.Cases {
-			out = logosEFJoin(out, p.stmts(c.Body, st))
+			out = logosEFJoin(out, p.stmts(c.Body, st, false))
 		}
 		return out
 	case *syntax.ConstForStmt:
@@ -2212,6 +3040,32 @@ func (p *logosEFPass) decls(s *syntax.DeclStmt, st *logosEFState) *logosEFState 
 		}
 	}
 	return st
+}
+
+func (p *logosEFPass) loop(body *syntax.BlockStmt, cond syntax.Expr, post syntax.SimpleStmt, label string, st *logosEFState, rc *syntax.RangeClause) *logosEFState {
+	if st == nil {
+		return nil
+	}
+	p.loopDepth++
+	defer func() { p.loopDepth-- }()
+	head := st
+	for {
+		f := p.pushFrame(label, true)
+		in, out := head, (*logosEFState)(nil)
+		switch {
+		case rc != nil:
+			in, out = p.rangeAssign(rc, head), head
+		case cond != nil:
+			in, out = p.cond(cond, head)
+		}
+		end := p.stmt(post, logosEFJoin(p.stmt(body, in), f.cnt))
+		p.popFrame()
+		next := logosEFJoin(head, end)
+		if logosEFSame(next, head) {
+			return logosEFJoin(out, f.brk)
+		}
+		head = next
+	}
 }
 
 func (p *logosEFPass) assign(s *syntax.AssignStmt, st *logosEFState) *logosEFState {
@@ -2395,30 +3249,6 @@ func (p *logosEFPass) forStmt(s *syntax.ForStmt, label string, st *logosEFState)
 	return p.loop(s.Body, nil, nil, label, p.expr(rc.X, st), rc)
 }
 
-func (p *logosEFPass) loop(body *syntax.BlockStmt, cond syntax.Expr, post syntax.SimpleStmt, label string, st *logosEFState, rc *syntax.RangeClause) *logosEFState {
-	if st == nil {
-		return nil
-	}
-	head := st
-	for {
-		f := p.pushFrame(label, true)
-		in, out := head, (*logosEFState)(nil)
-		switch {
-		case rc != nil:
-			in, out = p.rangeAssign(rc, head), head
-		case cond != nil:
-			in, out = p.cond(cond, head)
-		}
-		end := p.stmt(post, logosEFJoin(p.stmt(body, in), f.cnt))
-		p.popFrame()
-		next := logosEFJoin(head, end)
-		if logosEFSame(next, head) {
-			return logosEFJoin(out, f.brk)
-		}
-		head = next
-	}
-}
-
 func (p *logosEFPass) rangeAssign(rc *syntax.RangeClause, st *logosEFState) *logosEFState {
 	if rc.Lhs == nil || rc.Def {
 		return st
@@ -2451,6 +3281,18 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 	f := p.pushFrame(label, false)
 	enter := make([]*logosEFState, len(s.Body))
 	miss := st
+	// Case expressions run after the tag was evaluated, so a store they
+	// make can replace the value the tag described. Collect their writes
+	// in a scratch summary, and once the tag destination or a result it
+	// guards was rewritten, a later nil match proves nothing.
+	var tagKey logosEFKey
+	if s.Tag != nil {
+		tagKey, _ = p.destKey(s.Tag)
+	}
+	savedEff := p.eff
+	scratch := &logosEFEffects{inside: make(map[*Var]bool), assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
+	p.eff = scratch
+	var disturbed bool
 	hasDefault := false
 	for i, c := range s.Body {
 		if c.Cases == nil {
@@ -2458,9 +3300,24 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 			continue
 		}
 		for _, e := range syntax.UnpackListExpr(c.Cases) {
+			if p.scratchDisturbed(scratch, tagKey, miss) {
+				disturbed = true
+			}
 			var hit *logosEFState
-			hit, miss = p.caseCond(s.Tag, tagErr, e, miss)
+			hit, miss = p.caseCond(s.Tag, tagErr, e, miss, disturbed)
 			enter[i] = logosEFJoin(enter[i], hit)
+		}
+	}
+	p.eff = savedEff
+	if savedEff != nil {
+		for k := range scratch.assigned {
+			p.noteAssigned(k)
+		}
+		for k, v := range scratch.created {
+			p.noteCreated(k, v)
+		}
+		for k, v := range scratch.may {
+			p.noteMay(k, v)
 		}
 	}
 	var out, fall *logosEFState
@@ -2469,7 +3326,7 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 			enter[i] = miss
 		}
 		p.ctx.fall = nil
-		out = logosEFJoin(out, p.stmts(c.Body, logosEFJoin(enter[i], fall)))
+		out = logosEFJoin(out, p.stmts(c.Body, logosEFJoin(enter[i], fall), false))
 		fall = p.ctx.fall
 	}
 	p.ctx.fall = nil
@@ -2480,22 +3337,82 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 	return logosEFJoin(out, f.brk)
 }
 
-func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, e syntax.Expr, miss *logosEFState) (hit, rest *logosEFState) {
+func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, e syntax.Expr, miss *logosEFState, disturbed bool) (hit, rest *logosEFState) {
 	switch {
 	case tag == nil:
 		return p.cond(e, miss)
 	case tagErr != nil && p.isNil(syntax.Unparen(e)):
-		return miss.prove(tagErr), miss
+		if disturbed {
+			return miss, miss
+		}
+		return miss.proveBefore(tagErr, tag.Pos()), miss
+	case tagErr == nil && p.isNil(syntax.Unparen(e)):
+		if !disturbed {
+			if fk, ok := p.destKey(tag); ok {
+				return miss.dropMayFor(fk), miss
+			}
+		}
 	}
 	miss = p.expr(e, miss)
 	return miss, miss
+}
+
+// proveBefore proves only entries stored no later than pos: a case
+// expression runs after the tag was evaluated, so a store it makes can
+// replace the result the tag described, and the saved tag no longer
+// proves the replacement.
+func (s *logosEFState) proveBefore(errV *Var, pos syntax.Pos) *logosEFState {
+	return s.remap(func(e logosEFEntry) logosEFEntry {
+		if e.err == errV && e.pos.Cmp(pos) <= 0 {
+			e.proven = true
+		}
+		return e
+	})
+}
+
+// scratchDisturbed reports whether the analyzed case expressions wrote to
+// the tag destination or to a result the tag currently guards: the tag
+// value predates those writes, so a later nil match proves nothing about
+// the replacement.
+func (p *logosEFPass) scratchDisturbed(scratch *logosEFEffects, tagKey logosEFKey, st *logosEFState) bool {
+	if tagKey == (logosEFKey{}) || st == nil {
+		return false
+	}
+	guarded := func(k logosEFKey) bool {
+		if k == tagKey {
+			return true
+		}
+		if ek, ok := st.mayErr[k]; ok && ek == tagKey {
+			return true
+		}
+		if e, ok := st.m[k]; ok && e.err == nil && e.errKey == tagKey {
+			return true
+		}
+		return false
+	}
+	for k := range scratch.assigned {
+		if guarded(k) {
+			return true
+		}
+	}
+	for k := range scratch.created {
+		if guarded(k) {
+			return true
+		}
+	}
+	for k := range scratch.may {
+		if guarded(k) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *logosEFPass) selectStmt(s *syntax.SelectStmt, label string, st *logosEFState) *logosEFState {
 	f := p.pushFrame(label, false)
 	var out *logosEFState
 	for _, c := range s.Body {
-		out = logosEFJoin(out, p.stmts(c.Body, p.stmt(c.Comm, st)))
+		out = logosEFJoin(out, p.stmts(c.Body, p.stmt(c.Comm, st), false))
 	}
 	p.popFrame()
 	return logosEFJoin(out, f.brk)
@@ -2603,33 +3520,14 @@ func (p *logosEFPass) loopDistinctVars(f *syntax.ForStmt) bool {
 	return (v == "" || version.Compare(v, "go1.22") >= 0) || lv > 0 && lv != 3
 }
 
-// loopExitsAfterStore reports whether stmt's store inside f's body is the
-// last write of its iteration: every later top-level statement exits the
-// loop through an unlabeled break or a return. It compares statement nodes
-// rather than positions because rewriting-generated nodes do not share the
-// position-table ordering of parse-origin nodes.
-func (p *logosEFPass) loopExitsAfterStore(stmt syntax.Node, f *syntax.ForStmt) bool {
-	if f.Body == nil {
-		return false
-	}
-	for i, s := range f.Body.List {
-		if s != stmt && !inSubtree(s, stmt) {
-			continue
-		}
-		for _, s := range f.Body.List[i+1:] {
-			switch s := s.(type) {
-			case *syntax.BranchStmt:
-				if s.Tok != syntax.Break || s.Label != nil {
-					return false
-				}
-			case *syntax.ReturnStmt:
-			default:
-				return false
-			}
-		}
-		return true
-	}
-	return false
+// loopVarsFresh reports whether f's iteration variables (range clause,
+// for-init, for-post) provably get a new instance each iteration.
+// loopDistinctVars mirrors noder's syntactic eligibility, but ForCapture
+// also hash-gates each variable under GOCOMPILEDEBUG=loopvarhash, so with
+// base.LoopVarHash set a clause variable can stay shared; freshness is
+// then not provable and the analysis must assume sharing.
+func (p *logosEFPass) loopVarsFresh(f *syntax.ForStmt) bool {
+	return base.LoopVarHash == nil && p.loopDistinctVars(f)
 }
 
 // loopsFor memoizes the loops whose bodies contain lit; lateCaptures asks
@@ -2673,14 +3571,9 @@ func (p *logosEFPass) seedEntry(k logosEFKey, lit syntax.Node) (logosEFEntry, bo
 	// cannot pass a value a different call may have failed on.
 	var errV *Var
 	seen := false
-	// The store feeding the captured value may precede the literal: it is
-	// the last store before lit unless a later one overwrites it.
-	latest := -1
-	for i, pos := range p.storePos[k] {
-		if pos.Cmp(lit.Pos()) < 0 {
-			latest = i
-		}
-	}
+	// Only stores that can reach the captured value at function exit
+	// contribute: flow analysis already keeps dead stores out, so a store
+	// absent from st.m at lit names a value overwritten before lit.
 	consider := func(ev *Var) {
 		if seen && errV != ev {
 			errV = nil
@@ -2690,13 +3583,22 @@ func (p *logosEFPass) seedEntry(k logosEFKey, lit syntax.Node) (logosEFEntry, bo
 		errV = ev
 		seen = true
 	}
-	if latest >= 0 {
-		consider(p.storeErr[k][latest])
-	}
+	first := true
 	for i, ev := range p.storeErr[k] {
 		if !p.storeLiveAfter(p.storePos[k][i], k, lit) {
 			continue
 		}
+		// Live stores agree on one field-error destination only when
+		// every one of them pairs with it. A plain-error store pairs
+		// with its variable instead, and a blank store pairs with
+		// nothing, so either breaks the agreement.
+		ek := p.storeErrKey[k][i]
+		if ek == (logosEFKey{}) || (!first && ek != e.errKey) {
+			e.errKey = logosEFKey{}
+		} else if first {
+			e.errKey = ek
+		}
+		first = false
 		consider(ev)
 		if errV == nil && !seen {
 			break
@@ -2723,21 +3625,109 @@ func (p *logosEFPass) loopLocalErrShared(errV *Var, k logosEFKey, lit syntax.Nod
 		if !p.storeLiveAfter(pos, k, lit) {
 			continue
 		}
-		for f, fresh := range p.loopFresh {
-			if !fresh[errV] {
+		for f, maybe := range p.loopMaybe {
+			if !maybe[errV] {
 				continue
 			}
 			if pos.Cmp(f.Pos()) < 0 || pos.Cmp(syntax.EndPos(f)) > 0 {
 				continue
 			}
-			if !p.reenter[f] && p.loopExitsAfterStore(p.storeStmt[k][i], f) {
-				// The store runs in lit's own iteration and the loop
-				// exits after it: the deferred literal reads exactly the
-				// value this error pairs with.
+			// A result root that is fresh in this loop names a new
+			// instance each iteration, so a store in one iteration
+			// cannot overwrite the value another iteration's defer
+			// captured: the pairing is same-iteration.
+			if p.loopFresh[f][k.root] && !p.reenter[f] {
 				continue
 			}
+			// A loop that cannot run twice has no earlier iteration
+			// whose defer could observe this store: the pairing is
+			// the single iteration's own.
+			if p.loopRunsOnce(f) {
+				continue
+			}
+			// A break or return after the store exits only the iteration
+			// that wrote the result: a defer registered by an earlier
+			// iteration still observes the field at function exit, so
+			// the pairing is cross-iteration and cannot be proven.
 			return true
 		}
+	}
+	return false
+}
+
+// loopRunsOnce reports whether f cannot register a defer in one iteration
+// and store the captured value in a later one: every path through the
+// body exits the loop (unlabeled break or return) without reaching the
+// back edge, no continue targets f, and no goto can re-enter it. A nil
+// body or an unknown branch target stays multi-iteration.
+func (p *logosEFPass) loopRunsOnce(f *syntax.ForStmt) bool {
+	if v, ok := p.runsOnce[f]; ok {
+		return v
+	}
+	// The re-entry inventory is fixed once collectAssigns runs, and the
+	// body never changes during the pass, so the answer is stable for
+	// the whole pass and can be memoized per loop.
+	v := p.loopRunsOnceScan(f)
+	if p.runsOnce == nil {
+		p.runsOnce = make(map[*syntax.ForStmt]bool)
+	}
+	p.runsOnce[f] = v
+	return v
+}
+
+func (p *logosEFPass) loopRunsOnceScan(f *syntax.ForStmt) bool {
+	if f.Body == nil || p.reenter[f] {
+		return false
+	}
+	hasContinue := false
+	syntax.Inspect(f.Body, func(n syntax.Node) bool {
+		br, ok := n.(*syntax.BranchStmt)
+		if !ok || br.Tok != syntax.Continue {
+			return true
+		}
+		if br.Target == nil || br.Target == f {
+			hasContinue = true
+			return false
+		}
+		return true
+	})
+	if hasContinue {
+		return false
+	}
+	return efBlockExitsLoop(f.Body.List, f)
+}
+
+// efBlockExitsLoop reports whether a statement list cannot fall through:
+// its last statement always exits the loop f.
+func efBlockExitsLoop(list []syntax.Stmt, f *syntax.ForStmt) bool {
+	if len(list) == 0 {
+		return false
+	}
+	return efStmtExitsLoop(list[len(list)-1], f)
+}
+
+// efStmtExitsLoop reports whether s always exits loop f through an
+// unlabeled break targeting f or a return. Switches, selects, and nested
+// loops capture unlabeled breaks, so they never count; labeled branches
+// and gotos stay multi-iteration.
+func efStmtExitsLoop(s syntax.Stmt, f *syntax.ForStmt) bool {
+	switch s := s.(type) {
+	case *syntax.BranchStmt:
+		if s.Tok != syntax.Break || s.Label != nil {
+			return false
+		}
+		return s.Target == nil || s.Target == f
+	case *syntax.ReturnStmt:
+		return true
+	case *syntax.BlockStmt:
+		return efBlockExitsLoop(s.List, f)
+	case *syntax.IfStmt:
+		if s.Else == nil {
+			return false
+		}
+		return efStmtExitsLoop(s.Then, f) && efStmtExitsLoop(s.Else, f)
+	case *syntax.LabeledStmt:
+		return efStmtExitsLoop(s.Stmt, f)
 	}
 	return false
 }
@@ -2745,6 +3735,29 @@ func (p *logosEFPass) loopLocalErrShared(errV *Var, k logosEFKey, lit syntax.Nod
 func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map[*Var]bool) *logosEFState {
 	if p.assigns == nil {
 		p.collectAssigns()
+	}
+	unprove := func(st *logosEFState, k logosEFKey) *logosEFState {
+		e, ok := st.m[k]
+		if !ok {
+			name := "its error"
+			if n, ok := p.tracked[k]; ok {
+				name = n
+			}
+			e = logosEFEntry{name: name, pos: lit.Pos()}
+			// A capture with no live stores sees only the flow state's
+			// pairing, which no later store can still rewrite past the
+			// literal. Record it so a nil check inside the literal can
+			// prove its own read.
+			e.errKey = st.mayErr[k]
+			return st.set(k, e)
+		}
+		if e.err == nil {
+			return st
+		}
+		e.err = nil
+		m := maps.Clone(st.m)
+		m[k] = e
+		return &logosEFState{m: m, may: st.may, mayErr: st.mayErr}
 	}
 	syntax.Inspect(lit, func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -2755,19 +3768,47 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 			}
 			k := logosEFKey{root: v}
 			if _, ok := st.m[k]; ok {
+				if st.may != nil && st.may[k] {
+					st = unprove(st, k)
+				}
 				return true
 			}
+			hadMay := st.may != nil && st.may[k]
 			if e, ok := p.seedEntry(k, lit); ok && p.seedAfter(k, lit) {
 				st = st.set(k, e)
+				if hadMay {
+					st = unprove(st, k)
+				}
+			} else if hadMay {
+				st = unprove(st, k)
 			}
 			for _, k2 := range p.trackedByRoot[v] {
 				if k2.path == "" || !p.trackable(k2) || !p.seedAfter(k2, lit) {
+					if k2.path == "" || !p.trackable(k2) {
+						continue
+					}
+					if st.may == nil || !st.may[k2] {
+						continue
+					}
+					if _, has := st.m[k2]; !has {
+						st = unprove(st, k2)
+					} else if st.may[k2] {
+						st = unprove(st, k2)
+					}
 					continue
 				}
 				if _, has := st.m[k2]; !has {
+					hadMay2 := st.may != nil && st.may[k2]
 					if e, ok := p.seedEntry(k2, lit); ok {
 						st = st.set(k2, e)
+						if hadMay2 {
+							st = unprove(st, k2)
+						}
+					} else if hadMay2 {
+						st = unprove(st, k2)
 					}
+				} else if st.may != nil && st.may[k2] {
+					st = unprove(st, k2)
 				}
 			}
 		case *syntax.SelectorExpr, *syntax.IndexExpr:
@@ -2776,22 +3817,46 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 				return true
 			}
 			if _, has := st.m[k]; has {
+				if st.may != nil && st.may[k] {
+					st = unprove(st, k)
+				}
 				return true
 			}
+			hadMaySel := st.may != nil && st.may[k]
 			if e, tracked := p.seedEntry(k, lit); tracked && p.trackable(k) && p.seedAfter(k, lit) {
 				st = st.set(k, e)
+				if hadMaySel {
+					st = unprove(st, k)
+				}
+			} else if hadMaySel && p.trackable(k) {
+				st = unprove(st, k)
 			}
 			for _, k2 := range p.trackedByRoot[k.root] {
 				if k2 == k || !logosEFPathUnder(k2.path, k.path) {
 					continue
 				}
 				if !p.trackable(k2) || !p.seedAfter(k2, lit) {
+					if p.trackable(k2) && st.may != nil && st.may[k2] {
+						if _, has := st.m[k2]; !has {
+							st = unprove(st, k2)
+						} else {
+							st = unprove(st, k2)
+						}
+					}
 					continue
 				}
 				if _, has := st.m[k2]; !has {
+					hadMay2 := st.may != nil && st.may[k2]
 					if e, ok := p.seedEntry(k2, lit); ok {
 						st = st.set(k2, e)
+						if hadMay2 {
+							st = unprove(st, k2)
+						}
+					} else if hadMay2 {
+						st = unprove(st, k2)
 					}
+				} else if st.may != nil && st.may[k2] {
+					st = unprove(st, k2)
 				}
 			}
 		}
@@ -2806,9 +3871,15 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	}
 	inside := p.defsIn(lit)
 	saved := p.eff
-	eff := &logosEFEffects{inside: inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string)}
+	eff := &logosEFEffects{inside: inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
 	p.eff = eff
-	p.run(body, p.lateCaptures(p.capture(st), lit, inside))
+	in := p.capture(st)
+	if p.carve != nil {
+		if cs, ok := p.carve[lit]; ok {
+			in = p.capture(cs)
+		}
+	}
+	end := p.run(body, p.lateCaptures(in, lit, inside))
 	p.eff = saved
 	for k := range eff.assigned {
 		if k.path == "" {
@@ -2819,6 +3890,45 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	for k, errName := range eff.created {
 		st = st.set(k, logosEFEntry{name: errName, pos: body.Pos()})
 		p.noteCreated(k, errName)
+	}
+	for k, errKey := range eff.may {
+		// The summary records every store, including ones the literal
+		// later overwrote: only the exit state's marks still describe
+		// values a later capture can observe. A result the literal
+		// reset exports no mark, and a result whose error it overwrote
+		// exports the mark without the dead guard, so a later check
+		// cannot prove it. The recorded guard still propagates outward
+		// for enclosing literals.
+		exitEk := errKey
+		if end != nil {
+			if !end.may[k] {
+				p.noteMay(k, logosEFKey{})
+				continue
+			}
+			exitEk = end.mayErr[k]
+		}
+		st = st.setMay(k)
+		if exitEk != (logosEFKey{}) {
+			st = p.setMayErr(st, k, exitEk)
+		}
+		p.noteMay(k, exitEk)
+	}
+	// A literal that stores a result may run after a later capture
+	// registers, so its may-reach marks join the outer flow with their
+	// pairings. Keys defined inside the literal stay local.
+	if end != nil {
+		for k := range end.may {
+			if inside[k.root] {
+				continue
+			}
+			st = st.setMay(k)
+		}
+		for k, ek := range end.mayErr {
+			if inside[k.root] || inside[ek.root] {
+				continue
+			}
+			st = p.setMayErr(st, k, ek)
+		}
 	}
 	return st
 }

@@ -18,41 +18,43 @@ logos lint ./...
 # statement that started it, and the finding makes the exit status 1.
 ! logos conc run -stall 200ms ./ignores
 stdout '^jobs done: first job failed$'
-stderr '^.*ignores[/\\]main\.lgo:15: \[conc::group_child_stalled\] a group child did not return within 200ms after its group was cancelled'
-stderr '^\t.*main\.lgo:15: the child is here now, in the state: sleep$'
-stderr '^\t.*main\.lgo:22: the group started this child here$'
-stderr '^\tfix: '
-stderr -count=1 'group_child_stalled'
+stdout '^.*ignores[/\\]main\.lgo:15: \[conc::group_child_stalled\] a group child did not return within 200ms after its group was cancelled'
+stdout '^\t.*main\.lgo:15: the child is here now, in the state: sleep$'
+stdout '^\t.*main\.lgo:22: the group started this child here$'
+stdout '^\tfix: '
+stdout -count=1 'group_child_stalled'
 
 ! logos conc test -stall=200ms -count=1 ./ignores
 stdout '^ok '
-stderr '\[conc::group_child_stalled\]'
+stdout '\[conc::group_child_stalled\]'
 
 # A child that another child started is watched in the same way.
 ! logos conc run -stall 200ms ./nested
 stdout '^jobs done: first job failed$'
-stderr '^.*nested[/\\]main\.lgo:15: \[conc::group_child_stalled\] '
-stderr '^\t.*main\.lgo:23: the group started this child here$'
-stderr -count=1 'group_child_stalled'
+stdout '^.*nested[/\\]main\.lgo:15: \[conc::group_child_stalled\] '
+stdout '^\t.*main\.lgo:23: the group started this child here$'
+stdout -count=1 'group_child_stalled'
 
 # A group whose parent context ends is watched in the same way.
 ! logos conc run -stall 200ms ./outer
 stdout '^jobs done: <nil>$'
-stderr '^.*outer[/\\]main\.lgo:10: \[conc::group_child_stalled\] '
-stderr '^\t.*main\.lgo:18: the group started this child here$'
-stderr -count=1 'group_child_stalled'
+stdout '^.*outer[/\\]main\.lgo:10: \[conc::group_child_stalled\] '
+stdout '^\t.*main\.lgo:18: the group started this child here$'
+stdout -count=1 'group_child_stalled'
 
 # The child returns before the default duration of 5s ends.
 logos conc run ./ignores
 stdout '^jobs done: first job failed$'
 ! stderr .
+! stdout 'conc::'
 
 # A child that returns at the cancellation gives no finding.
 logos conc run -stall 200ms ./returns
 stdout '^jobs done: first job failed$'
 ! stderr .
+! stdout 'conc::'
 logos conc test -stall 200ms -count=1 ./returns
-! stderr 'conc::'
+! stdout 'conc::'
 
 ! logos conc run -stall soon ./returns
 stderr '^logos conc run: -stall "soon" is not a positive duration$'
