@@ -384,8 +384,14 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 				}
 			}
 		case *types2.Interface:
-			for i := range t.NumMethods() {
-				m := t.Method(i)
+			// The printer writes only explicit methods and embedded
+			// type names, so only those spellings can be shadowed. An
+			// inherited method from an embedded interface is never
+			// spelled; rejecting the spelling for it drops a valid
+			// channel type, so walk the explicit methods and keep the
+			// separate walk over embedded types below.
+			for i := range t.NumExplicitMethods() {
+				m := t.ExplicitMethod(i)
 				if !m.Exported() && m.Pkg() != self {
 					shadowed = true
 					return
