@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"time"
 )
 
 var bad bool
@@ -113,8 +114,42 @@ func sendValues(ctx context.Context) error {
 	return nil
 }
 
+//logos:allow(correctness::unbounded_channel_op)
+func ident8fill(ch chan int8, dst chan int, v int) chan int8 {
+	dst <- v
+	return ch
+}
+
+// A group send evaluates the channel operand before the value operand:
+// the channel call fills oc, so the receive in the value can only proceed
+// after it. Evaluating the value first would block forever on the empty
+// channel, and evaluating the channel call twice would block the second
+// fill with no receiver left; either mistake surfaces here as a context
+// timeout instead of the shifted value.
+func orderedSendValues(ctx context.Context) error {
+	oc := make(chan int, 1)
+	ro := make(chan int8, 1)
+	go group (ctx) {
+		go {
+			ident8fill(ro, oc, 3) <- 1 << <-oc
+		}
+	}
+	select {
+	case v := <-ro:
+		check("ordered-channel-shift", v == 8, fmt.Sprint(v), "8")
+	case <-ctx.Done():
+		check("ordered-channel-shift", false, ctx.Err().Error(), "8")
+	}
+	return nil
+}
 func main() {
 	if err := sendValues(context.Background()); err != nil {
+		fmt.Println("FAIL group:", err)
+		os.Exit(1)
+	}
+	tctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := orderedSendValues(tctx); err != nil {
 		fmt.Println("FAIL group:", err)
 		os.Exit(1)
 	}

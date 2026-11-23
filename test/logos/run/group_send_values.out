@@ -6,3 +6,4 @@ ok call-channel-shift
 ok tuple-field-sum
 ok tuple-value
 ok ready-channel
+ok ordered-channel-shift
