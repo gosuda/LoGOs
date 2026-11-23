@@ -347,6 +347,7 @@ type fileLower struct {
 	groupClosures      *groupClosureRegistry
 	groupJoins         map[syntax.Stmt]bool
 	funcs              map[*syntax.BlockStmt]*funcLower
+	unwindFlags        map[*syntax.BlockStmt]string // armed deferred literal body -> return flag of its errdefer frame.
 	compositeDone      map[syntax.Expr]bool
 }
 
@@ -1220,6 +1221,7 @@ type funcLower struct {
 	hasErrdefer      bool
 	hasScopeDefer    bool
 	okName           string
+	unwindFlag       string // return flag of the errdefer frame that defers this literal; see armDeferredLiterals.
 	errSeq           int
 	funSeq           int
 	argSeq           int
@@ -1292,10 +1294,14 @@ func (fc *funcLower) lower() {
 	}
 	if fc.hasErrdefer {
 		fc.armOkFlag()
+		fc.armDeferredLiterals()
 	}
 	fc.lowerScopeDefers()
 	fc.lowerConstIf()
+	fc.unwindFlag = fc.fl.unwindFlags[fc.body]
+	exits := endsInReturn(fc.body.List)
 	fc.body.List = fc.lowerList(fc.body.List)
+	fc.armUnwindText(exits)
 }
 
 // detectCleanups records whether the body holds a defer? or an errdefer

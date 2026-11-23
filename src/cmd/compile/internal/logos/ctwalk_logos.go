@@ -32,7 +32,10 @@ func (fl *fileLower) ctFunction(ft *syntax.FuncType, sig *types2.Signature, body
 		return
 	}
 	w.prepareCleanupSyntax()
+	w.unwindFlag = fl.unwindFlags[body]
+	exits := endsInReturn(body.List)
 	body.List = w.scopeSyntaxList(body, body.List, w.stmts)
+	w.armUnwindSyntax(exits)
 	w.finishCleanupSyntax()
 }
 
@@ -156,6 +159,9 @@ func (w ctWalker) stmt(s syntax.Stmt) ([]syntax.Stmt, syntax.Stmt) {
 			return pre, next
 		}
 		pre := w.optionValues(s, &s.Results)
+		if w.unwindFlag != "" {
+			pre = append(pre, w.unwindRestore(s.Pos()))
+		}
 		cleanup, next := w.cleanupReturn(s)
 		return append(pre, cleanup...), next
 	case *syntax.CallStmt:

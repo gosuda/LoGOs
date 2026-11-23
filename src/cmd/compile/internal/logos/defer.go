@@ -685,6 +685,7 @@ func (fc *funcLower) prepareCleanupSyntax() {
 		pos := fc.body.Pos()
 		fc.okName = fc.fl.cswName("ctreturned")
 		fc.hoistTemp(fc.okName, fc.fl.ctBuiltin(pos, "bool"), "")
+		fc.armDeferredLiterals()
 	}
 }
 
@@ -705,6 +706,133 @@ func (fc *funcLower) cleanupReturned(pos syntax.Pos) []syntax.Stmt {
 		return nil
 	}
 	return []syntax.Stmt{assignOf(pos, []syntax.Expr{nameOf(pos, fc.okName)}, []syntax.Expr{fc.fl.ctBuiltin(pos, "true")})}
+}
+
+// unwindHeld names the copy of the frame's return flag that an armed
+// deferred literal keeps while it runs.
+const unwindHeld = "_logos_held"
+
+// armDeferredLiterals arms each deferred function literal of an errdefer
+// frame that has no results and defers no call of its own. An armed literal
+// clears the frame's return flag while it runs and puts it back at each
+// normal exit, so a panic or Goexit that starts in it after a successful
+// return still runs errdefer [T-104.2]. The literal stays the deferred
+// function, so recover() in it keeps its Go meaning. Without a deferred call
+// of its own, no recover can end its panic and let it return normally.
+func (fc *funcLower) armDeferredLiterals() {
+	syntax.Inspect(fc.body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return n.Body == fc.body
+		case *syntax.GroupChild:
+			return n.Body == fc.body
+		case *syntax.LambdaExpr:
+			return false
+		case *syntax.CallStmt:
+			if lit := armableLiteral(n); lit != nil {
+				if fc.fl.unwindFlags == nil {
+					fc.fl.unwindFlags = make(map[*syntax.BlockStmt]string)
+				}
+				fc.fl.unwindFlags[lit.Body] = fc.okName
+			}
+		}
+		return true
+	})
+}
+
+func armableLiteral(s *syntax.CallStmt) *syntax.FuncLit {
+	if s.Tok != syntax.Defer {
+		return nil
+	}
+	call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
+	if !ok {
+		return nil
+	}
+	lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit)
+	if !ok || len(lit.Type.ResultList) != 0 || defersIn(lit.Body) {
+		return nil
+	}
+	return lit
+}
+
+// defersIn reports whether body defers a call in its own frame.
+func defersIn(body *syntax.BlockStmt) bool {
+	found := false
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return n.Body == body
+		case *syntax.GroupChild:
+			return n.Body == body
+		case *syntax.LambdaExpr:
+			return false
+		case *syntax.CallStmt:
+			found = found || n.Tok == syntax.Defer
+		case *syntax.ErrdeferStmt, *syntax.ScopeDeferStmt:
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+func endsInReturn(list []syntax.Stmt) bool {
+	if len(list) == 0 {
+		return false
+	}
+	_, ok := list[len(list)-1].(*syntax.ReturnStmt)
+	return ok
+}
+
+// armUnwindTree wraps the lowered body of an armed literal: it keeps the
+// frame's return flag and clears it on entry, and puts it back at the end
+// unless the body already ends in a return.
+func (fc *funcLower) armUnwindTree(clear syntax.Expr, exits bool) {
+	pos := fc.body.Pos()
+	head := []syntax.Stmt{
+		defineOf(pos, []syntax.Expr{nameOf(pos, unwindHeld)}, []syntax.Expr{nameOf(pos, fc.unwindFlag)}),
+		assignOf(pos, []syntax.Expr{nameOf(pos, fc.unwindFlag)}, []syntax.Expr{clear}),
+	}
+	fc.body.List = append(head, fc.body.List...)
+	if !exits {
+		fc.body.List = append(fc.body.List, fc.unwindRestore(fc.body.Rbrace))
+	}
+}
+
+func (fc *funcLower) armUnwindText(exits bool) {
+	if fc.unwindFlag == "" {
+		return
+	}
+	fl := fc.fl
+	open := fl.off(fc.body.Pos()) + 1
+	fl.add(open, open, " "+unwindHeld+" := "+fc.unwindFlag+"; "+fc.unwindFlag+" = false;")
+	if !exits {
+		end := fl.off(fc.body.Rbrace)
+		fl.add(end, end, "; "+fc.unwindFlag+" = "+unwindHeld+"; ")
+	}
+	fc.armUnwindTree(nameOf(fc.body.Pos(), "false"), exits)
+}
+
+func (w ctWalker) armUnwindSyntax(exits bool) {
+	if w.unwindFlag == "" {
+		return
+	}
+	w.armUnwindTree(w.fl.ctBuiltin(w.body.Pos(), "false"), exits)
+}
+
+func (fc *funcLower) unwindRestore(pos syntax.Pos) syntax.Stmt {
+	return assignOf(pos, []syntax.Expr{nameOf(pos, fc.unwindFlag)}, []syntax.Expr{nameOf(pos, unwindHeld)})
+}
+
+// unwindReturn puts the frame's return flag back before a return of an armed
+// literal.
+func (fc *funcLower) unwindReturn(s *syntax.ReturnStmt) []syntax.Stmt {
+	if fc.unwindFlag == "" {
+		return []syntax.Stmt{s}
+	}
+	off := fc.fl.off(s.Pos())
+	fc.fl.add(off, off, fc.unwindFlag+" = "+unwindHeld+"; ")
+	return []syntax.Stmt{fc.unwindRestore(s.Pos()), s}
 }
 
 func (w ctWalker) lowerCleanupCallSyntax(stmt syntax.Stmt, lower func(syntax.Expr) (syntax.Expr, []syntax.Stmt)) []syntax.Stmt {

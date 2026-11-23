@@ -287,7 +287,9 @@ When the deferred call's result is nil, the join MUST keep the existing error; o
 A `recover()` call inside `f` of `defer f()?` MUST return nil and MUST NOT stop a panic of the enclosing function, as in the ejected form that calls `f` from a deferred function literal. [T-104.2][T-0.3]
 `errdefer` MUST be allowed only in functions whose last result is `error` [T-104.2].
 Other uses MUST fail with `correctness::errdefer_needs_error_result` [T-104.2].
-`errdefer` MUST run when the frame panics, exits through Goexit, or holds a non-nil error result at pop time [T-104.2].
+`errdefer` MUST run when the frame panics, exits through Goexit, or holds a non-nil error result at pop time, with the one limit that the next two rules give [T-104.2].
+After a successful return, `errdefer` MUST run when a later deferred function literal panics or calls `runtime.Goexit`, if that literal has no results and defers no call of its own. A `recover()` call in that literal MUST keep its Go meaning [T-104.2].
+After a successful return, a panic or Goexit that starts in any other later deferred call MUST leave `errdefer` skipped. This applies to a named function or method, and to a function literal with results or with a deferred call of its own. This is a known limit: a wrapper that sees this exit would make `recover()` in the callee return nil, as it does for `defer f()?` [T-104.2][T-0.3].
 A typed-nil error MUST count as non-nil for `errdefer` [T-104.2].
 The function, receiver, and arguments of a deferred call MUST be evaluated at the statement [T-104.2].
 An indexed function value MUST be captured at that statement, including when its callee expression is parenthesized. [T-104.2]

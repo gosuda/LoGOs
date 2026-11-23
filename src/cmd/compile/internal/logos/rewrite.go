@@ -211,7 +211,7 @@ func (fc *funcLower) lowerSimple(s syntax.Stmt) []syntax.Stmt {
 			return fc.lowerReturn(s)
 		}
 		scanForLiterals(fc.fl, s)
-		return []syntax.Stmt{s}
+		return fc.unwindReturn(s)
 	default:
 		return []syntax.Stmt{s}
 	}

@@ -1,5 +1,9 @@
-# errdefer runs when a later plain defer starts unwinding after a successful
-# return, by panic and by runtime.Goexit; it stays skipped on a plain success.
+# errdefer runs when a later deferred function literal starts unwinding after a
+# successful return, by panic and by runtime.Goexit; it stays skipped on a plain
+# success and when that literal returns normally, and recover() in the literal
+# keeps its Go meaning. A later named-callee defer that panics after a
+# successful return leaves errdefer skipped: the documented limit. The same
+# holds in a comptime generic instance, which lowers on its own path.
 # Native and ejected output must match. SPEC T-104.2.
 
 env GOPROXY=off
@@ -9,7 +13,7 @@ cd m
 
 logos run .
 # One anchored semantic check: all required events, in order.
-stdout '(?s)\Aplain ok: cleanup skipped\ndefer-second\ndefer-first\nstart-panic\nerrdefer-ran\nrecovered: late-boom\nerrdefer-ran-goexit\ndone\n\z'
+stdout '(?s)\Aplain ok: cleanup skipped\ndefer-second\ndefer-first\nstart-panic\nerrdefer-ran\nrecovered: late-boom\nstart-panic\nrecovered named: late-boom\nquiet-literal\nliteral-recovered: inner-boom\nerrdefer-ran-recovered\nliteral err: <nil>\nct-quiet\nct-quiet\nstart-panic\nct-errdefer-ran\nrecovered ct: late-boom\nerrdefer-ran-goexit\ndone\n\z'
 
 # The ejected run must print the same lines as this native run.
 cp stdout $WORK/native-stdout.txt
@@ -39,10 +43,17 @@ go 1.27
 package main
 
 import (
+	"comptime"
 	"context"
 	"fmt"
 	"runtime"
 )
+
+type Pair struct {
+	X int
+}
+
+var ready = true
 
 func note(s string) {
 	fmt.Println(s)
@@ -61,6 +72,12 @@ func lifoOrder() error {
 
 func laterPanic() (err error) {
 	errdefer note("errdefer-ran")
+	defer func() { startPanic() }()
+	return nil
+}
+
+func namedLaterPanic() (err error) {
+	errdefer note("named-errdefer-must-not-run")
 	defer startPanic()
 	return nil
 }
@@ -68,6 +85,39 @@ func laterPanic() (err error) {
 func startPanic() {
 	note("start-panic")
 	panic("late-boom")
+}
+
+func quietLiteral() (err error) {
+	errdefer note("quiet-errdefer-must-not-run")
+	defer func() {
+		note("quiet-literal")
+		if ready {
+			return
+		}
+		note("quiet-unreached")
+	}()
+	return nil
+}
+
+func literalRecovers() (err error) {
+	errdefer note("errdefer-ran-recovered")
+	defer func() {
+		if r := recover(); r != nil {
+			note(fmt.Sprint("literal-recovered: ", r))
+		}
+	}()
+	panic("inner-boom")
+}
+
+func ctLaterPanic[T any]() (err error) {
+	errdefer note("ct-errdefer-ran")
+	const if comptime.IsStruct[T]() {
+		defer func() { startPanic() }()
+	}
+	defer func() {
+		note("ct-quiet")
+	}()
+	return nil
 }
 
 func goexitCase() error {
@@ -80,7 +130,7 @@ func goexitCase() error {
 
 func exitWorker() (err error) {
 	errdefer note("errdefer-ran-goexit")
-	defer triggerGoexit()
+	defer func() { triggerGoexit() }()
 	return nil
 }
 
@@ -101,6 +151,19 @@ func main() {
 	func() {
 		defer func() { fmt.Println("recovered:", recover()) }()
 		_ = laterPanic()
+	}()
+	func() {
+		defer func() { fmt.Println("recovered named:", recover()) }()
+		_ = namedLaterPanic()
+	}()
+	if err := quietLiteral(); err != nil {
+		fmt.Println("quiet err:", err)
+	}
+	fmt.Println("literal err:", literalRecovers())
+	_ = ctLaterPanic[int]()
+	func() {
+		defer func() { fmt.Println("recovered ct:", recover()) }()
+		_ = ctLaterPanic[Pair]()
 	}()
 	if err := goexitCase(); err != nil {
 		fmt.Println("goexit err:", err)
