@@ -503,6 +503,12 @@ func (p *ctEjectPrinter) qualify(pkg *types2.Package) string {
 	return p.alias(pkg)
 }
 
+// typeText spells t in the printed text, where the types declared in the
+// instance body are declared by their bare names.
+func (p *ctEjectPrinter) typeText(t types2.Type) string {
+	return types2.LogosLocalTypeString(t, p.qualify)
+}
+
 // instName returns the ejected spelling of a call of instance id, or false
 // when the package does not name that instance.
 func (p *ctEjectPrinter) instName(id string) (string, bool) {
@@ -688,7 +694,7 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 		if typ == nil {
 			return "", fmt.Errorf("%s: comptime instance type without a checked type", n.Pos())
 		}
-		return types2.TypeString(typ, p.qualify), nil
+		return p.typeText(typ), nil
 	}
 	if ref, ok := facts.LogosCtConstMapUses[n]; ok {
 		return p.constMapText(n, ref, facts.Uses[n])
@@ -794,7 +800,7 @@ func (p *ctEjectPrinter) constText(c *types2.Const) string {
 	if basic, ok := c.Type().(*types2.Basic); ok && basic.Info()&types2.IsUntyped != 0 {
 		return text
 	}
-	return types2.TypeString(c.Type(), p.qualify) + "(" + text + ")"
+	return p.typeText(c.Type()) + "(" + text + ")"
 }
 
 func (p *ctEjectPrinter) constMapText(n *syntax.Name, ref types2.LogosCtConstMapRef, obj types2.Object) (string, error) {
@@ -812,11 +818,11 @@ func (p *ctEjectPrinter) constMapText(n *syntax.Name, ref types2.LogosCtConstMap
 	sig := helper.Signature()
 	switch ref.Role {
 	case types2.LogosCtMapLookup:
-		key := types2.TypeString(sig.Params().At(0).Type(), p.qualify)
-		val := types2.TypeString(sig.Results().At(0).Type(), p.qualify)
+		key := p.typeText(sig.Params().At(0).Type())
+		val := p.typeText(sig.Results().At(0).Type())
 		return fmt.Sprintf("func(_logos_k %s) (%s, bool) { _logos_v, _logos_ok := %s[_logos_k]; return _logos_v, _logos_ok }", key, val, owner), nil
 	case types2.LogosCtMapMaterialize:
-		return fmt.Sprintf("func() %s { return %s }", types2.TypeString(sig.Results().At(0).Type(), p.qualify), owner), nil
+		return fmt.Sprintf("func() %s { return %s }", p.typeText(sig.Results().At(0).Type()), owner), nil
 	}
 	return p.alias(types2.NewPackage(rtImportPath, "rt")) + ".SortedAllDynamic(" + owner + ")", nil
 }

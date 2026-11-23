@@ -834,7 +834,7 @@ var logosMethods = map[string]bool{
 	"LogosAssertEffects":        true,
 	"SetLogosAssertEffects":     true,
 	"SetLogosReadonly":          true,
-	"logosCgoTypeName":          true,
+	"logosTypeName":             true,
 	"logosStructTupleIdentical": true,
 	"ifaceWord":                 true,
 	"logosIfaceWord":            true,
@@ -1033,7 +1033,7 @@ var logosDecls = map[string]bool{
 }
 var logosFields = map[string]map[string]bool{
 	"Func":       {"logosReadonly": true, "logosAssert": true},
-	"typeWriter": {"logosCgoPkg": true},
+	"typeWriter": {"logosCgoPkg": true, "logosLocal": true},
 	"Named":      {"logosCtLocal": true},
 	"Package":    {"logosDerived": true, "logosCtLocals": true},
 	"Scope":      {"logosUsageDeferred": true},

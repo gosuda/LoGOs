@@ -303,7 +303,7 @@ func (p *ctEjectPrinter) localHelper(helper syntax.Decl, facts *types2.Info, ren
 	case *syntax.VarDecl:
 		obj := facts.Defs[d.NameList[0]]
 		name := renames[obj]
-		typ := types2.TypeString(obj.Type(), p.qualify)
+		typ := p.typeText(obj.Type())
 		box := name + "_box"
 		set := &syntax.VarDecl{NameList: []*syntax.Name{syntax.NewName(pos, name)}, Type: syntax.NewName(pos, typ), Values: d.Values}
 		fill := &syntax.FuncLit{Type: &syntax.FuncType{}, Body: &syntax.BlockStmt{List: []syntax.Stmt{
