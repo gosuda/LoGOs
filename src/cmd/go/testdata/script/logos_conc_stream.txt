@@ -51,6 +51,8 @@ stderr '^exit status 3$'
 ! logos conc run ./failing
 stderr 'operation failed:exit status 3$'
 ! stderr 'conc::'
+exec sh -c 'logos conc run ./failing; echo status=$?'
+stdout 'status=3$'
 
 # A helper that inherits stderr and reports its own status after the
 # program exits cannot replace the program's status.
@@ -58,6 +60,8 @@ stderr 'operation failed:exit status 3$'
 stderr -count=1 '^exit status 1$'
 stderr 'exit status 9'
 ! stderr 'conc::'
+exec sh -c 'logos conc run ./helper; echo status=$?'
+stdout 'status=1$'
 
 # A plain build does not carry the monitor.
 logos run ./opposite
