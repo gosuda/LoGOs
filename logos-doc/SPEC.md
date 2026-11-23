@@ -1286,7 +1286,7 @@ A method of a generic type that uses `const for` over a type parameter MUST fail
 
 An expansion above the selected `max_comptime_ast_nodes` limit with default 4,096 nodes MUST fail with `[comptime::node_limit]`. [T-205][T-102]
 
-A stack trace MUST print the base name without the `_logosct<N>` suffix. [T-205]
+A stack trace MUST print the base name without the instance suffix `.logosct.<id>`. [T-205]
 
 A shadowed `const switch` case MUST fail with `[comptime::unreachable_case]`. [T-205]
 

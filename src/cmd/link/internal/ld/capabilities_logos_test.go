@@ -134,11 +134,10 @@ func TestLogosCapSinkName(t *testing.T) {
 		{"runtime.cgocall.abi0", "runtime.cgocall"},
 		{"os.StartProcess", "os.StartProcess"},
 		{"example.com/dep.Init", "example.com/dep.Init"},
-		{"syscall.Connect·logosct12", "syscall.Connect"},
-		{"syscall.Connect·logosct1.abi0", "syscall.Connect"},
-		{"example.com/dep.Foo_logosct1", "example.com/dep.Foo"},
-		{"example.com/dep.Bar_logosct1.abi0", "example.com/dep.Bar"},
-		{"reflect.Value.Method·logosct1", "reflect.Value.Method"},
+		{"syscall.Connect.logosct." + testLogosCtID, "syscall.Connect"},
+		{"syscall.Connect.logosct." + testLogosCtID + ".abi0", "syscall.Connect"},
+		{"example.com/dep.Bar.logosct." + testLogosCtID + ".abiinternal", "example.com/dep.Bar"},
+		{"reflect.Value.Method.logosct." + testLogosCtID, "reflect.Value.Method"},
 	}
 	for _, tc := range tests {
 		if got := capSinkName(tc.sym); got != tc.want {
@@ -150,15 +149,15 @@ func TestLogosCapSinkName(t *testing.T) {
 func TestLogosCapReflectLookupClone(t *testing.T) {
 	for _, sym := range []string{
 		"reflect.Value.Method",
-		"reflect.Value.Method·logosct1",
-		"reflect.Value.MethodByName·logosct2",
+		"reflect.Value.Method.logosct." + testLogosCtID,
+		"reflect.Value.MethodByName.logosct." + testLogosCtID,
 		"reflect.Type.Method.abi0",
 	} {
 		if !capIsReflectLookupName(sym) {
 			t.Errorf("capIsReflectLookupName(%q) = false, want true", sym)
 		}
 	}
-	if capIsReflectLookupName("example.com/dep.Foo·logosct1") {
+	if capIsReflectLookupName("example.com/dep.Foo.logosct." + testLogosCtID) {
 		t.Error("capIsReflectLookupName(dep clone) = true, want false")
 	}
 }

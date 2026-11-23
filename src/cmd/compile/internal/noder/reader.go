@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"go/constant"
+	"internal/abi"
 	"internal/buildcfg"
 	"internal/pkgbits"
 	"path/filepath"
@@ -813,7 +814,7 @@ func (dict *readerDict) bindLogosCtVariant(variant logosCtVariant) {
 	if variant.p != nil {
 		assert(!dict.shaped)
 		base := dict.baseSym
-		dict.baseSym = base.Pkg.Lookup(base.Name + ".logosct." + variant.id)
+		dict.baseSym = base.Pkg.Lookup(base.Name + abi.LogosCtInstanceInfix + variant.id)
 		dict.logosCtVariant = variant
 	}
 }

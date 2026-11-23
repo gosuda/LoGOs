@@ -67,7 +67,6 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	shared.importedDone = map[string]bool{}
 	shared.composites, shared.compositeSeq = collectComposites(files, info)
 	shared.importedComposites = map[*types2.Var]*importedComposite{}
-	base.ClearLogosCtClones(pkg.Path())
 	newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
 	var prepared *ctPreparedPackage
 	if info.LogosCtImport != nil && len(info.LogosCtInst) != 0 {
@@ -143,9 +142,6 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	base.ExitIfErrors()
 	for _, file := range files {
 		rejectSurvivors(file)
-	}
-	for _, name := range shared.ctExp.memo {
-		base.RegisterLogosCtClone(pkg.Path(), name)
 	}
 	return changed, edits
 }
