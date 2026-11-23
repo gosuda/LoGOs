@@ -1416,10 +1416,10 @@ func (p *logosEFPass) calleeInLgo(fun syntax.Expr) bool {
 			return p.check.logosFuncInLgo(fn)
 		}
 	}
-	// A variable rebound across several Go-only origins is still a Go
-	// call: every recorded assignment resolves to a Go declaration, so
-	// the call keeps the Go contract. Unknown, aliased, or mixed origins
-	// stay conservative.
+	// A body-local variable rebound across several Go-only origins is
+	// still a Go call: every write is recorded and resolves to a Go
+	// declaration, so the call keeps the Go contract. Unknown, aliased,
+	// or mixed origins stay conservative.
 	return !p.allGoOrigins(v)
 }
 
@@ -1430,23 +1430,35 @@ func (p *logosEFPass) sole(v *Var) syntax.Expr {
 	if p.assigns == nil {
 		p.collectAssigns()
 	}
+	// A parameter, package variable, or captured outer variable carries
+	// an incoming value the body inventory never sees, so its recorded
+	// assignments cannot name the call's origin. Only a variable the
+	// body declares starts from a recorded origin.
+	if !p.initialized[v] {
+		return nil
+	}
 	if exprs := p.assigns[logosEFKey{root: v}]; len(exprs) == 1 && !p.addr[v] {
 		return exprs[0]
 	}
 	return nil
 }
 
-// allGoOrigins reports whether every recorded assignment of v statically
-// resolves to a Go declaration, so a call through a rebound variable keeps
-// the Go contract. A missing inventory, an address-taken variable, an
-// unresolvable or varying origin, and any LoGOs origin all answer false:
-// a write through the address never reaches the inventory.
+// allGoOrigins reports whether v is declared in this body and every
+// recorded assignment of v statically resolves to a Go declaration, so
+// a call through a rebound variable keeps the Go contract. A variable
+// declared elsewhere carries an incoming value the inventory never
+// sees. A missing inventory, an address-taken variable, an unresolvable
+// or varying origin, and any LoGOs origin all answer false: a write
+// through the address never reaches the inventory.
 func (p *logosEFPass) allGoOrigins(v *Var) bool {
 	if v == nil {
 		return false
 	}
 	if p.assigns == nil {
 		p.collectAssigns()
+	}
+	if !p.initialized[v] {
+		return false
 	}
 	if p.addr[v] {
 		return false

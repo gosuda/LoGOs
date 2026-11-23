@@ -1550,3 +1550,56 @@ func efFieldErrObsoletePairing() {
 	}()
 	_ = a
 }
+
+// A helper can rebind a package variable to a LoGOs function between
+// two Go assignments in this body. The inventory sees only Go origins,
+// but the call may use the LoGOs parser, so its result needs a check.
+var efParseGlobal = strconv.Atoi
+
+func efInstallLogosParser() {
+	efParseGlobal = efParseLogos
+}
+
+func efGlobalReboundParser(input string) {
+	efParseGlobal = strconv.Atoi
+	efInstallLogosParser()
+	n, err := efParseGlobal(input)
+	println(n) // ERROR "result_before_error_check"
+	_ = err
+	efParseGlobal = strconv.Atoi
+}
+
+// A parameter carries its caller's value past the body inventory. When
+// the branch is skipped the call uses the incoming function, which may
+// be a LoGOs function, so the single recorded Go assignment cannot
+// prove the Go contract.
+func efParamSoleParser(parse func(string) (int, error), cond bool, input string) {
+	if cond {
+		parse = strconv.Atoi
+	}
+	n, err := parse(input)
+	println(n) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// The same holds when several recorded assignments all name Go
+// functions: skipping every branch still calls the incoming value.
+func efParamMultiParser(parse func(string) (int, error), c1, c2 bool, input string) {
+	if c1 {
+		parse = strconv.Atoi
+	}
+	if c2 {
+		parse = strconv.Atoi
+	}
+	n, err := parse(input)
+	println(n) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A variable this body declares has every write in the inventory, so a
+// single Go origin still keeps the Go contract.
+func efLocalGoParser(input string) {
+	parse := strconv.Atoi
+	n, err := parse(input)
+	println(err, n)
+}
