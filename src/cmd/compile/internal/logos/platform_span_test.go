@@ -129,7 +129,8 @@ func f() {
 	v := new(int)
 	var ok bool
 	v, ok = p.m[0]
-	_, _ = v, ok
+	_ = v
+	_ = ok
 	w := new(int)
 	w = p.q
 	_ = w
@@ -202,9 +203,18 @@ func TestPlatformCommaOkKeepsTwoResults(t *testing.T) {
 			return true
 		}
 		if lhs, ok := as.Lhs.(*syntax.ListExpr); ok && len(lhs.ElemList) == 2 {
-			sawCommaOk = true
-			if isMustNonNil(as.Rhs) {
-				t.Errorf("native tree wraps the comma-ok lookup in MustNonNil")
+			// Only the exact lookup shape counts: generated code
+			// holds other two-destination assignments, and a later
+			// two-destination assignment over plain names must not
+			// satisfy this check if the lookup is dropped.
+			a, aok := lhs.ElemList[0].(*syntax.Name)
+			b, bok := lhs.ElemList[1].(*syntax.Name)
+			if aok && bok && a.Value == "v" && b.Value == "ok" {
+				if _, isIdx := syntax.Unparen(as.Rhs).(*syntax.IndexExpr); isIdx {
+					sawCommaOk = true
+				} else {
+					t.Errorf("native tree lost the v, ok = p.m[0] shape")
+				}
 			}
 			return true
 		}
