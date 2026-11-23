@@ -87,6 +87,15 @@ func lookupChan(key string) chan int {
 	return ch
 }
 
+func chanInterpSend(ctx context.Context, n int) error {
+	go group (ctx) {
+		go {
+			lookupChan($"key={n}") <- 1
+		}
+	}
+	return nil
+}
+
 var first, second chan int
 
 func redirect() int {
