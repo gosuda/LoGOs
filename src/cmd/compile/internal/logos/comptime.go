@@ -1476,10 +1476,10 @@ func (fl *fileLower) reduceComptimeInstance(rec *types2.LogosCtInst) (*syntax.Fu
 	name := nameOf(rec.Decl.Name.Pos(), rec.Sym)
 	fn := types2.NewFunc(name.Pos(), rec.Pkg, rec.Sym, rec.Sig)
 	info.Defs[name] = fn
-	r := ctReducer{fl: fl, owner: rec.Pkg, info: info, binders: make(map[types2.Object]bool, len(rec.Decl.TParamList))}
-	for _, param := range rec.Decl.TParamList {
-		if binder := fn.Scope().Lookup(param.Name.Value); binder != nil {
-			r.binders[binder] = true
+	r := ctReducer{fl: fl, owner: rec.Pkg, info: info, binders: make(map[types2.Object]types2.Type, len(rec.Decl.TParamList))}
+	for i, param := range rec.Decl.TParamList {
+		if binder := fn.Scope().Lookup(param.Name.Value); binder != nil && i < len(rec.Targs) {
+			r.binders[binder] = rec.Targs[i]
 		}
 	}
 	frame := newCtFrame(old, nil)
@@ -1503,7 +1503,7 @@ type ctReducer struct {
 	fl        *fileLower
 	owner     *types2.Package
 	info      *types2.Info
-	binders   map[types2.Object]bool
+	binders   map[types2.Object]types2.Type
 	nextLabel int
 	err       error
 }
@@ -1782,8 +1782,10 @@ func (r *ctReducer) copyFacts(old, new syntax.Node, f *ctFrame) {
 func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 	switch e := e.(type) {
 	case *syntax.Name:
-		if obj := f.info.Uses[e]; r.binders[obj] {
-			return r.fl.ctTypeExpr(e.Pos(), obj.Type())
+		if obj := f.info.Uses[e]; obj != nil {
+			if targ, ok := r.binders[obj]; ok {
+				return r.fl.ctTypeExpr(e.Pos(), targ)
+			}
 		}
 		if binding := f.binding(e); binding != nil && binding.index {
 			return litOf(e.Pos(), strconv.Itoa(binding.field.index), syntax.IntLit)
