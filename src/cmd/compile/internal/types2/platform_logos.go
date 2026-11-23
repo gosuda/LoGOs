@@ -836,7 +836,9 @@ func (check *Checker) logosIsPlatform(x *operand) bool {
 // logosExprIsPlatform reports whether e denotes a platform pointer
 // provenance value: a variable or tuple dummy that inherited a
 // type-parameter result of a generic call. Such values can be nil but
-// are not Go memory, unlike Go-derived values.
+// are not Go memory, unlike Go-derived values. Fields and elements of
+// a platform value stay platform: a nil stored through a generic call
+// reads back through the field.
 func (check *Checker) logosExprIsPlatform(e syntax.Expr) bool {
 	if e == nil || !check.isLogosFile(e) {
 		return false
@@ -855,6 +857,14 @@ func (check *Checker) logosExprIsPlatform(e syntax.Expr) bool {
 				return check.logosPlatformVar[v]
 			}
 		}
+	}
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.SelectorExpr:
+		return check.logosExprIsPlatform(e.X)
+	case *syntax.IndexExpr:
+		return check.logosExprIsPlatform(e.X)
+	case *syntax.SliceExpr:
+		return check.logosExprIsPlatform(e.X)
 	}
 	return false
 }
