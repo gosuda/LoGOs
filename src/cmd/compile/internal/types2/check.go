@@ -520,6 +520,8 @@ func (check *Checker) checkFiles(files []*syntax.File) {
 	print("== recordUntyped ==")
 	check.recordUntyped()
 
+	check.logosCtExportedForwarders() // logos T-205 hook: an exported forwarding function is a compile-time error.
+
 	if check.firstErr == nil {
 		check.monomorph()
 		check.logosCtDrain()

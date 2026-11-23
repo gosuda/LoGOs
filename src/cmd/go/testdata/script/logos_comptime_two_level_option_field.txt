@@ -1,11 +1,28 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
+# Render is exported and forwards its type parameter to the comptime
+# generic Show, so a caller in another package cannot instantiate it. The
+# defining package fails at compile time (SPEC 2.5, T-205), logos eject
+# refuses with the same text, and nothing reaches run time.
 cd w
-logos build ./...
-logos run ./main
+! logos build ./...
+stderr 'lib[/\\]lib.lgo:11:\d+: \[comptime::exported_forwarder\] exported function Render forwards type parameter T to comptime generic Show; a caller in another package cannot instantiate it'
+! stderr 'panic'
+! logos eject -o out
+stderr 'lib[/\\]lib.lgo:11:\d+: \[comptime::exported_forwarder\] exported function Render forwards type parameter T to comptime generic Show; a caller in another package cannot instantiate it'
+! exists out
+
+# The same rule holds when the comptime generic comes from another package.
+cd ../v
+! logos build ./fwd
+stderr 'fwd[/\\]fwd.lgo:6:\d+: \[comptime::exported_forwarder\] exported function Render forwards type parameter T to comptime generic Show'
+
+# An unexported forwarding function still reads the option fields through
+# both levels.
+cd ../u
+logos run .
 stdout '^ada unset$'
-cd ..
 
 -- w/go.mod --
 module example.com/twolevelopt
@@ -52,4 +69,72 @@ import (
 func main() {
 	p := lib.Profile{Nick: "ada"}
 	fmt.Println(lib.Render[lib.Profile](p))
+}
+
+-- v/go.mod --
+module example.com/twolevelfwd
+
+go 1.27
+
+-- v/lib/lib.lgo --
+package lib
+
+import "comptime"
+
+func Show[T any](v T) string {
+	s := ""
+	const for _, f := range comptime.Fields[T]() {
+		s = s + f.Name
+	}
+	return s
+}
+
+-- v/fwd/fwd.lgo --
+package fwd
+
+import "example.com/twolevelfwd/lib"
+
+func Render[T any](v T) string {
+	return lib.Show[T](v)
+}
+
+-- u/go.mod --
+module example.com/twolevelok
+
+go 1.27
+
+-- u/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Profile struct {
+	Nick string?
+	Tag  string?
+}
+
+func render[T any](v T) string {
+	return show[T](v)
+}
+
+func show[T any](v T) string {
+	s := ""
+	const for _, f := range comptime.Fields[T]() {
+		const if f.Index != 0 {
+			s = s + " "
+		}
+		s = s + cell(v.[f])
+	}
+	return s
+}
+
+func cell(v string?) string {
+	return v ?? "unset"
+}
+
+func main() {
+	fmt.Println(render[Profile](Profile{Nick: "ada"}))
 }

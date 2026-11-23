@@ -1,0 +1,171 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package types2
+
+import (
+	"slices"
+	"sync"
+
+	"cmd/compile/internal/syntax"
+
+	. "internal/types/errors"
+)
+
+var logosImportedComptimes = struct {
+	sync.RWMutex
+	m map[string]bool
+}{m: make(map[string]bool)}
+
+// LogosNoteImportedComptimes records the comptime generics that an imported
+// loGo/s package exports as __.LOGOS records.
+func LogosNoteImportedComptimes(pkgPath string, names []string) {
+	logosImportedComptimes.Lock()
+	defer logosImportedComptimes.Unlock()
+	for _, name := range names {
+		logosImportedComptimes.m[pkgPath+"."+name] = true
+	}
+}
+
+// logosCtForward is the first instantiation through which a forwarding
+// function passes one of its type parameters on.
+type logosCtForward struct {
+	site    *syntax.Name
+	param   *TypeParam
+	target  *Func
+	forward bool // target is a forwarding function of the package
+}
+
+// logosCtExportedForwarders reports each exported forwarding function of a
+// package that can be imported (SPEC 2.5, T-205). A forwarding function
+// expands only for the callers of its own package, so a caller in another
+// package cannot instantiate it. Package main cannot be imported. The
+// classification is the one the lowering expands: a package-level generic
+// function that is not a comptime generic forwards when it instantiates a
+// comptime generic, or a forwarding function of its package, with a type
+// argument that holds one of its type parameters.
+func (check *Checker) logosCtExportedForwarders() {
+	if !check.conf.Logos || check.pkg.name == "main" || check.Uses == nil || check.Instances == nil {
+		return
+	}
+	var fns []*Func
+	bodies := make(map[*Func]*syntax.BlockStmt)
+	for obj, di := range check.objMap {
+		fn, ok := obj.(*Func)
+		if !ok || di == nil || di.fdecl == nil || di.fdecl.Body == nil || di.fdecl.Recv != nil || len(di.fdecl.TParamList) == 0 || LogosUsesComptime(di.fdecl, di.file) {
+			continue
+		}
+		fns = append(fns, fn)
+		bodies[fn] = di.fdecl.Body
+	}
+	slices.SortFunc(fns, func(a, b *Func) int { return cmpPos(a.pos, b.pos) })
+	forwards := make(map[*Func]bool)
+	for found := true; found; {
+		found = false
+		for _, fn := range fns {
+			if forwards[fn] {
+				continue
+			}
+			if _, ok := check.logosCtFirstForward(bodies[fn], forwards); ok {
+				forwards[fn] = true
+				found = true
+			}
+		}
+	}
+	for _, fn := range fns {
+		if !forwards[fn] || !fn.Exported() {
+			continue
+		}
+		f, _ := check.logosCtFirstForward(bodies[fn], forwards)
+		kind := "comptime generic"
+		if f.forward {
+			kind = "forwarding function"
+		}
+		check.errorf(f.site, InvalidPkgUse, "[comptime::exported_forwarder] exported function %s forwards type parameter %s to %s %s; a caller in another package cannot instantiate it", fn.name, f.param.obj.name, kind, f.target.name)
+	}
+}
+
+// logosCtFirstForward finds the first instantiation in body, in source order,
+// whose type arguments hold a type parameter and whose callee is a comptime
+// generic or one of forwards.
+func (check *Checker) logosCtFirstForward(body *syntax.BlockStmt, forwards map[*Func]bool) (logosCtForward, bool) {
+	var out logosCtForward
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if out.site != nil {
+			return false
+		}
+		name, ok := n.(*syntax.Name)
+		if !ok {
+			return true
+		}
+		callee, _ := check.Uses[name].(*Func)
+		inst, found := check.Instances[name]
+		if callee == nil || !found || inst.TypeArgs == nil {
+			return true
+		}
+		origin := callee.Origin()
+		forward := forwards[origin]
+		if !forward && !check.logosCtComptimeTarget(origin) {
+			return true
+		}
+		for _, targ := range inst.TypeArgs.list() {
+			if param := logosCtForwardedParam(targ); param != nil {
+				out = logosCtForward{site: name, param: param, target: origin, forward: forward}
+				return false
+			}
+		}
+		return true
+	})
+	return out, out.site != nil
+}
+
+// logosCtComptimeTarget reports whether fn is a comptime generic of this
+// package or of an imported loGo/s package.
+func (check *Checker) logosCtComptimeTarget(fn *Func) bool {
+	if fn.Signature().Recv() != nil {
+		return false
+	}
+	if di := check.objMap[fn]; di != nil && di.fdecl != nil {
+		return di.fdecl.Body != nil && LogosUsesComptime(di.fdecl, di.file)
+	}
+	if fn.pkg == nil || fn.pkg == check.pkg {
+		return false
+	}
+	if check.logosIsComptimeGeneric(fn) {
+		return true
+	}
+	logosImportedComptimes.RLock()
+	defer logosImportedComptimes.RUnlock()
+	return logosImportedComptimes.m[fn.pkg.path+"."+fn.name]
+}
+
+// logosCtForwardedParam returns the first type parameter that t holds as
+// itself or through a pointer, slice, array, map, channel, or the type
+// arguments of a named type.
+func logosCtForwardedParam(t Type) *TypeParam {
+	switch t := t.(type) {
+	case *TypeParam:
+		return t
+	case *Pointer:
+		return logosCtForwardedParam(t.base)
+	case *Slice:
+		return logosCtForwardedParam(t.elem)
+	case *Array:
+		return logosCtForwardedParam(t.elem)
+	case *Map:
+		if param := logosCtForwardedParam(t.key); param != nil {
+			return param
+		}
+		return logosCtForwardedParam(t.elem)
+	case *Chan:
+		return logosCtForwardedParam(t.elem)
+	case *Named:
+		for _, targ := range t.TypeArgs().list() {
+			if param := logosCtForwardedParam(targ); param != nil {
+				return param
+			}
+		}
+	}
+	return nil
+}

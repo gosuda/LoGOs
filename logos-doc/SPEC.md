@@ -1278,7 +1278,7 @@ Any other instantiation of a comptime generic with a type parameter MUST fail wi
 
 A call of a comptime generic without explicit type arguments inside an expansion MUST fail with `[comptime::generic_targ]`. In the expansion of a forwarding function, the compiler MUST instead expand the call with its inferred type arguments. [T-205]
 
-An exported forwarding function MUST NOT travel as source text in `__.LOGOS`. Its body becomes a panic with the message `logos: comptime generic <name> runs only through loGo/s instantiation`, so a call from another package, in LoGOs or Go code, panics at run time. [T-205]
+An exported forwarding function MUST fail with `[comptime::exported_forwarder]` at its first instantiation that forwards a type parameter, because a caller in another package cannot instantiate it. The message MUST name the function and the type parameter. The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. `logos eject` MUST refuse such a package with the same diagnostic. [T-205]
 
 A method of a generic type MUST NOT be a comptime generic. [T-205]
 
