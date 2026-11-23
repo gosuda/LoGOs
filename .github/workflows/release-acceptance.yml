@@ -33,7 +33,7 @@ defaults:
 jobs:
   optimization:
     name: "std-cmd-${{ matrix.driver }}-O${{ matrix.level }}"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -60,7 +60,7 @@ jobs:
 
   parity:
     name: "complete-clean-tip-parity"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 300
     steps:
       - name: "Check out the exact clean candidate tip"
@@ -75,7 +75,7 @@ jobs:
 
   repro-a:
     name: "repro-host-ubuntu24"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 180
     outputs:
       result: "${{ steps.repro.outputs.result }}"
@@ -93,7 +93,7 @@ jobs:
 
   repro-b:
     name: "repro-host-ubuntu-current"
-    runs-on: "ubuntu-latest"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 180
     outputs:
       result: "${{ steps.repro.outputs.result }}"
@@ -130,7 +130,7 @@ jobs:
 
   runtimes:
     name: "real-gopls-qemu-wasm"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 240
     steps:
       - name: "Check out the exact clean candidate tip"
