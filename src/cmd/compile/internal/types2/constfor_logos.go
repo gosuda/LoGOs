@@ -63,7 +63,7 @@ type LogosCopyContext struct {
 	Version    string
 	Disqual    []map[string]bool
 	Funcs      []*Func
-	Aliases    map[*Package]string
+	Aliases    map[*Package][]string
 	MaxSteps   int
 	NodeLimit  int
 	Importer   Importer
@@ -108,8 +108,10 @@ func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]E
 	for _, f := range ctx.Funcs {
 		mc.scope.Insert(f)
 	}
-	for imported, alias := range ctx.Aliases {
-		mc.scope.Insert(NewPkgName(nopos, pkg, alias, imported))
+	for imported, aliases := range ctx.Aliases {
+		for _, alias := range aliases {
+			mc.scope.Insert(NewPkgName(nopos, pkg, alias, imported))
+		}
 	}
 	mc.sig = ctx.Sig
 	mc.logosDisqual = slices.Clone(ctx.Disqual)

@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"errors"
 	"internal/testenv"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -80,8 +81,9 @@ func main() {
 
 // TestLogosConcPrintsAFindingWhileTheProgramRuns holds the standard
 // input of the program open. The program blocks on it after the lock
-// order inversion, so a finding line that the test reads before it
-// closes that input came from a program that had not exited.
+// order inversion, so a finding line that the test reads on standard
+// output before it closes that input came from a program that had not
+// exited.
 func TestLogosConcPrintsAFindingWhileTheProgramRuns(t *testing.T) {
 	testenv.MustHaveGoBuild(t)
 	dir := logosJSONFixture(t, map[string]string{
@@ -95,12 +97,12 @@ func TestLogosConcPrintsAFindingWhileTheProgramRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	diagnostics, err := cmd.StderrPipe()
+	output, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var output bytes.Buffer
-	cmd.Stdout = &output
+	var diagnostics bytes.Buffer
+	cmd.Stderr = &diagnostics
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +113,7 @@ func TestLogosConcPrintsAFindingWhileTheProgramRuns(t *testing.T) {
 	})
 	defer watchdog.Stop()
 
-	lines := bufio.NewReader(diagnostics)
+	lines := bufio.NewReader(output)
 	var seen strings.Builder
 	found := false
 	for !found {
@@ -122,7 +124,7 @@ func TestLogosConcPrintsAFindingWhileTheProgramRuns(t *testing.T) {
 			break
 		}
 	}
-	if !found || gaveUp.Load() {
+	if !found || gaveUp.Load() || strings.Contains(seen.String(), "released") {
 		input.Close()
 		cmd.Wait()
 		t.Fatalf("no finding arrived while the program waited for its input (gave up: %v):\n%s", gaveUp.Load(), seen.String())
@@ -130,13 +132,16 @@ func TestLogosConcPrintsAFindingWhileTheProgramRuns(t *testing.T) {
 	if err := input.Close(); err != nil {
 		t.Fatal(err)
 	}
-	rest, _ := lines.ReadString(0)
+	rest, _ := io.ReadAll(lines)
 	err = cmd.Wait()
 	exit, isExit := errors.AsType[*exec.ExitError](err)
 	if !isExit || exit.ExitCode() != 1 {
-		t.Fatalf("logos conc run: %v, want exit status 1\nstderr after the finding:\n%s", err, rest)
+		t.Fatalf("logos conc run: %v, want exit status 1\nstandard output after the finding:\n%s", err, rest)
 	}
-	if got := output.String(); got != "released\n" {
-		t.Fatalf("standard output = %q, want the line the program prints after its input closed", got)
+	if !strings.HasSuffix(string(rest), "\nreleased\n") {
+		t.Fatalf("standard output after the finding = %q, want the rest of the finding, then the line the program prints after its input closed", rest)
+	}
+	if diagnostics.Len() != 0 {
+		t.Fatalf("standard error = %q, want nothing: a text finding goes to standard output", diagnostics.String())
 	}
 }

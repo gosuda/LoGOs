@@ -371,11 +371,13 @@ func (f *jsonField) fallbackQuotedValueLines(field string, kind scalarKind) []st
 }
 
 type trialMember struct {
-	keyed   bool
-	spell   string
-	sample  string
-	ptr     bool
-	keyFunc string
+	keyed     bool
+	spell     string
+	sample    string
+	ptr       bool
+	keyFunc   string
+	decodable bool
+	inits     []promotedDecoderInit
 }
 
 type jsonUnionClass struct {
@@ -404,12 +406,24 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 	uc.members = make([]trialMember, len(members))
 	for i, c := range members {
 		sample, isPtr := strings.CutPrefix(c.code, "*")
+		if !isPtr && c.typ != nil {
+			// An alias can hide a pointer spelling: derive pointer-ness
+			// from the unaliased type while keeping the accessible alias
+			// spelling, so the trial allocates instead of decoding
+			// into a nil value.
+			if p, ok := unaliasConstView(c.typ).(*types2.Pointer); ok {
+				isPtr = true
+				sample = sourceTypeString(unaliasConstView(p.Elem()), js.qualify, js.holderPkg, js.cgoSource)
+			}
+		}
 		uc.members[i] = trialMember{
-			keyed:   c.keyed,
-			spell:   c.code,
-			sample:  sample,
-			ptr:     isPtr,
-			keyFunc: c.keyFunc,
+			keyed:     c.keyed,
+			spell:     c.code,
+			sample:    sample,
+			decodable: c.decodable,
+			inits:     c.inits,
+			ptr:       isPtr,
+			keyFunc:   c.keyFunc,
 		}
 		if c.keyed {
 			uc.keyed = append(uc.keyed, i)
@@ -444,7 +458,18 @@ func (uc jsonUnionClass) errorExpr(matched string) string {
 }
 
 func (uc jsonUnionClass) needsClaim() bool {
-	return len(uc.keyed) > 0 && len(uc.keyed) < len(uc.members)
+	// The claim flag is only read by keyless trials, so a union whose
+	// keyless members are all untriable needs no claim variable: emitting
+	// one would leave it assigned but never read.
+	if len(uc.keyed) == 0 || len(uc.keyed) == len(uc.members) {
+		return false
+	}
+	for _, m := range uc.members {
+		if m.decodable && !m.keyed {
+			return true
+		}
+	}
+	return false
 }
 
 func ownsKey(s trialMember) string {
@@ -519,6 +544,9 @@ func unionKeyScanLines(uc jsonUnionClass) []string {
 
 func unionMemberTrialLines(uc jsonUnionClass, i int) []string {
 	s := uc.members[i]
+	if !s.decodable {
+		return nil
+	}
 	scratch := fmt.Sprintf("_logos_scratch%d", i)
 	decl := fmt.Sprintf("var %s %s", scratch, s.spell)
 	if s.ptr {
@@ -528,20 +556,30 @@ func unionMemberTrialLines(uc jsonUnionClass, i int) []string {
 	if s.keyed {
 		counter, dest = "_logos_match", "_logos_target"
 	}
-	attempt := ifLines(scratch+".UnmarshalJSON(_logos_raw) == nil", []string{
+	decode := ifLines(scratch+".UnmarshalJSON(_logos_raw) == nil", []string{
 		counter + "++",
 		dest + " = " + scratch,
 		fmt.Sprintf("_logos_winidx = %d", i),
 	})
+	// Embedded pointers initialize inside the gated attempt, so a trial
+	// skipped by key matching or the claim gate allocates nothing.
+	trial := decode
+	if len(s.inits) > 0 {
+		gated := make([]string, 0, len(s.inits)+1)
+		for _, in := range s.inits {
+			gated = append(gated, fmt.Sprintf("%s.%s = new(%s)", scratch, in.sel, in.elem))
+		}
+		trial = append(gated, decode...)
+	}
 	inner := []string{decl}
 	switch {
 	case s.keyed:
 		inner = append(inner, ifLines(fmt.Sprintf("_logos_keys_%d == 0", i), []string{fmt.Sprintf("_logos_matched_%d = false", i)})...)
-		inner = append(inner, ifLines(fmt.Sprintf("_logos_matched_%d", i), attempt)...)
+		inner = append(inner, ifLines(fmt.Sprintf("_logos_matched_%d", i), trial)...)
 	case uc.needsClaim():
-		inner = append(inner, ifLines("!_logos_claimed", attempt)...)
+		inner = append(inner, ifLines("!_logos_claimed", trial)...)
 	default:
-		inner = append(inner, attempt...)
+		inner = append(inner, trial...)
 	}
 	out := []string{"{"}
 	out = append(out, indentLines(ifLines(fmt.Sprintf("!_logos_hit || _logos_out.Winner == %d", i), inner))...)

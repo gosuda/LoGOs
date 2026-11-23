@@ -2,7 +2,10 @@
 
 package p
 
-import "strconv"
+import (
+	"bytes"
+	"strconv"
+)
 
 type efP struct {
 	X int
@@ -406,6 +409,7 @@ type efHeld struct {
 	inner  efInner
 	labels map[string]int
 	vals   []int
+	err    error
 }
 
 // SPEC 2.5/T-202 names the read of a result, not the form of the
@@ -1064,4 +1068,592 @@ func efLoopLocalErrSeedsUnproven() {
 		h.stats, err = efFetchHeld()
 	}
 	_ = first
+}
+
+// A defer registered in an earlier iteration checks that iteration's
+// error instance, which cannot prove a field a later iteration's store
+// wrote: the break after the store exits only the store's iteration.
+func efDeferredLoopLocalErrWrongIteration() {
+	h := efHeld{}
+	for i := 0; i < 2; i++ {
+		var err error
+		if i == 0 {
+			defer func() {
+				if err == nil {
+					println(h.stats) // ERROR "result_before_error_check"
+				}
+			}()
+			continue
+		}
+		h.stats, err = efFetchHeld()
+		break
+	}
+}
+
+// A plain write before the defer ends the earlier call's pairing, so the
+// deferred read observes only the later call's result under its own
+// error check and stays accepted.
+func efDeferredResetSeedsLaterError() {
+	h := efHeld{}
+	var first, second error
+	h.stats, first = efFetchHeld()
+	h.stats = 0
+	defer func() {
+		if second == nil {
+			println(h.stats)
+		}
+	}()
+	h.stats, second = efFetchHeld()
+	_ = first
+}
+
+func efPair() (int, bool) {
+	return 0, false
+}
+
+// A multi-value call whose last result is not an error needs no error
+// check, so storing it after the defer does not make the deferred read
+// unproven.
+func efDeferredInfallibleCall() {
+	h := efHeld{}
+	var err error
+	h.stats, err = efFetchHeld()
+	h.stats = 0
+	defer func() {
+		println(h.stats)
+	}()
+	h.stats, _ = efPair()
+	_ = err
+}
+
+func efParseLogos(s string) (int, error) {
+	return 1, nil
+}
+
+// A loop that cannot run twice has no earlier iteration whose defer could
+// observe a later store: the single iteration pairs its own error.
+func efSingleIterationBreak() {
+	h := efHeld{}
+	for {
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats)
+			}
+		}()
+		h.stats, err = efFetchHeld()
+		break
+	}
+}
+
+// Both the result root and the error are declared in the loop body, so
+// every iteration owns its own instances and the guarded read pairs the
+// iteration's own values.
+func efFreshRootAndErr() {
+	for i := 0; i < 2; i++ {
+		h := efHeld{}
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats)
+			}
+		}()
+		h.stats, err = efFetchHeld()
+		_ = i
+	}
+}
+
+// The first call stores its error in a field, so it carries no tracked
+// identity, but its failed value still reaches the deferred read when the
+// retry is skipped. The guarded read must fail.
+func efFieldErrThenConditionalRetry(retry bool) error {
+	type savedBox struct {
+		err error
+	}
+	h := efHeld{}
+	saved := savedBox{}
+	var retryErr error
+	h.stats, saved.err = efFetchHeld()
+	defer func() {
+		if retryErr == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	if retry {
+		h.stats, retryErr = efFetchHeld()
+	}
+	return saved.err
+}
+
+// Parse starts as strconv.Atoi but is reassigned to a LoGOs function in
+// the loop, so the in-loop stores may hold LoGOs results. The deferred
+// read under only the skipped retry's nil check must fail.
+func efReassignedCallee(input string, retry bool) {
+	h := efHeld{}
+	parse := strconv.Atoi
+	var parseErr, retryErr error
+	_ = parseErr
+	defer func() {
+		if retryErr == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	for i := 0; i < 2; i++ {
+		h.stats, parseErr = parse(input)
+		parse = efParseLogos
+		_ = i
+	}
+	if retry {
+		h.stats, retryErr = efParseLogos(input)
+	}
+}
+
+// One loop holding both a shared-root capture (rejected) and a fresh-root
+// capture (accepted) exercises both deferred-proof paths.
+func efMixedFreshShared() {
+	shared := efHeld{}
+	var sharedErr error
+	shared.stats, sharedErr = efFetchHeld()
+	_ = sharedErr
+	for i := 0; i < 2; i++ {
+		h := efHeld{}
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats)
+			}
+		}()
+		h.stats, err = efFetchHeld()
+		defer func() {
+			println(shared.stats) // ERROR "result_before_error_check"
+		}()
+		_ = i
+	}
+	_ = shared
+}
+
+// A backward goto to a label inside the loop body re-runs the reset and
+// recreates the loop-local error, so the single-iteration break exemption
+// cannot prove the deferred read even though the reset drops the entry the
+// goto's fixpoint join carries.
+func efGotoInnerLabelRetry(done bool) {
+	h := efHeld{}
+	for {
+	retry:
+		h.stats = 0
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats) // ERROR "result_before_error_check"
+			}
+		}()
+		h.stats, err = efFetchHeld()
+		if !done {
+			goto retry
+		}
+		break
+	}
+}
+
+// A nil check on a field error proves the guarding call on that path, so a
+// deferred read of the stored field stays accepted.
+func efFieldErrCheckedDeferred() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats)
+	}()
+}
+
+// The == nil form proves the same path inside the branch.
+func efFieldErrCheckedDeferredEqNil() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	if h.err == nil {
+		defer func() {
+			println(h.stats)
+		}()
+	}
+}
+
+// Without the check the deferred read still fails: the field error never
+// proves the stored value.
+func efFieldErrUncheckedDeferred() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	_ = h.err
+}
+
+// A function variable rebound from one Go reader to another keeps the Go
+// contract: the deferred read of its byte count needs no LoGOs proof.
+func efGoMultiOriginReaders() {
+	first := bytes.NewReader([]byte("repeat"))
+	second := bytes.NewReader([]byte("again"))
+	read := first.Read
+	var buf [8]byte
+	var n int
+	var err error
+	defer func() {
+		println(n)
+	}()
+	n, err = read(buf[:])
+	read = second.Read
+	n, err = read(buf[:])
+	_ = err
+}
+
+// An address-taken function variable can be rewritten through its pointer,
+// which the inventory never records, so even all-Go origins stay
+// conservative.
+func efGoOriginAddrTaken() {
+	first := bytes.NewReader([]byte("repeat"))
+	second := bytes.NewReader([]byte("again"))
+	read := first.Read
+	alias := &read
+	var buf [8]byte
+	var n int
+	var err error
+	defer func() {
+		println(n) // ERROR "result_before_error_check"
+	}()
+	n, err = read(buf[:])
+	read = second.Read
+	n, err = read(buf[:])
+	_ = alias
+	_ = err
+}
+
+// A var declaration with a discarded error activates the deferred check
+// just like the short declaration form.
+func efVarBlankDeferred() {
+	var v, _ = efFetchHeld()
+	defer func() {
+		println(v) // ERROR "result_before_error_check"
+	}()
+}
+
+func efShortBlankDeferred() {
+	v, _ := efFetchHeld()
+	defer func() {
+		println(v) // ERROR "result_before_error_check"
+	}()
+}
+
+// A later unconditional plain reset means the deferred literal only ever
+// observes the reset value, so the earlier unchecked store needs no proof.
+func efDeferredResetAfterDefer() error {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats)
+	}()
+	h.stats = 0
+	return h.err
+}
+
+// The same holds for a plain result: the reset drops the entry, and the
+// deferred body reads the replacement.
+func efDeferredPlainResetAfter() {
+	n, err := efFetchHeld()
+	defer func() {
+		println(n)
+	}()
+	n = 0
+	_ = err
+}
+
+// A return between the defer and the reset exits before the reset runs,
+// so the carve does not apply and the deferred read still fails.
+func efDeferredResetAfterReturn(cond bool) error {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	if cond {
+		return h.err
+	}
+	h.stats = 0
+	return h.err
+}
+
+// A call between the defer and the reset can panic and run the deferred
+// body early, so the carve does not apply either.
+func efDeferredResetAfterCall() error {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	efUse(0)
+	h.stats = 0
+	return h.err
+}
+
+// A conditional reset does not run on every path, so the deferred read
+// still fails.
+func efDeferredResetConditional(cond bool) error {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	if cond {
+		h.stats = 0
+	}
+	return h.err
+}
+
+// Inside a loop a later iteration can store again after the reset, so the
+// carve does not apply there either.
+func efDeferredResetInLoop() {
+	h := efHeld{}
+	for i := 0; i < 2; i++ {
+		var err error
+		h.stats, err = efFetchHeld()
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+		h.stats = 0
+		_ = err
+		_ = i
+	}
+}
+
+// A stored literal can run before the reset, so only direct defers get
+// the carve.
+func efStoredLiteralResetAfter() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	f := func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}
+	h.stats = 0
+	_ = h.err
+	f()
+}
+
+// A store after the reset dirties the value again, so the carve is
+// cancelled and the deferred read still fails.
+func efDeferredResetThenRestored() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	h.stats = 0
+	h.stats, h.err = efFetchHeld()
+	_ = h.err
+}
+
+// A later iteration can overwrite the shared field after an earlier
+// iteration's defer registers, so the checked first call does not prove
+// the deferred read.
+func efLoopFieldErrDeferred() {
+	h := efHeld{}
+	for i := 0; i < 2; i++ {
+		h.stats, h.err = efFetchHeld()
+		if h.err != nil {
+			return
+		}
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+		_ = i
+	}
+}
+
+// Overwriting the error destination after the store breaks the pairing:
+// a later nil check tests the replacement, not the failed call.
+func efFieldErrOverwritten() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	h.err = nil
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+}
+
+// The same holds when the check is inside a deferred literal that also
+// checks an unrelated error: the stale pairing cannot discharge the read
+// even if a later store pairs with the checked error.
+func efFieldErrOverwrittenInClosure(cond bool) {
+	h := efHeld{}
+	var retryErr error
+	h.stats, h.err = efFetchHeld()
+	h.err = nil
+	if h.err == nil {
+		defer func() {
+			if retryErr == nil {
+				println(h.stats) // ERROR "result_before_error_check"
+			}
+		}()
+		if cond {
+			h.stats, retryErr = efFetchHeld()
+		}
+	}
+	_ = retryErr
+}
+
+// A nil check inside the deferred literal discharges a read when every
+// live store pairs the result with that same error.
+func efFieldErrCheckedInClosure() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		if h.err == nil {
+			println(h.stats)
+		}
+	}()
+	_ = h.err
+}
+
+// A later conditional store with a different error breaks the agreement,
+// so the in-closure check cannot discharge the read.
+func efFieldErrInClosureMixed(cond bool) {
+	h := efHeld{}
+	var other error
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		if h.err == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	if cond {
+		h.stats, other = efFetchHeld()
+	}
+	_ = other
+}
+
+// Two unconditional stores agree on the latest pairing, and the nil check
+// proves it, so the deferred read stays accepted. A differently-paired
+// store in between would break the agreement instead.
+func efFieldErrObsoletePairing() {
+	h := efHeld{}
+	a := efHeld{}
+	h.stats, a.err = efFetchHeld()
+	h.stats, h.err = efFetchHeld()
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats)
+	}()
+	_ = a
+}
+
+// A helper can rebind a package variable to a LoGOs function between
+// two Go assignments in this body. The inventory sees only Go origins,
+// but the call may use the LoGOs parser, so its result needs a check.
+var efParseGlobal = strconv.Atoi
+
+func efInstallLogosParser() {
+	efParseGlobal = efParseLogos
+}
+
+func efGlobalReboundParser(input string) {
+	efParseGlobal = strconv.Atoi
+	efInstallLogosParser()
+	n, err := efParseGlobal(input)
+	println(n) // ERROR "result_before_error_check"
+	_ = err
+	efParseGlobal = strconv.Atoi
+}
+
+// A parameter carries its caller's value past the body inventory. When
+// the branch is skipped the call uses the incoming function, which may
+// be a LoGOs function, so the single recorded Go assignment cannot
+// prove the Go contract.
+func efParamSoleParser(parse func(string) (int, error), cond bool, input string) {
+	if cond {
+		parse = strconv.Atoi
+	}
+	n, err := parse(input)
+	println(n) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// The same holds when several recorded assignments all name Go
+// functions: skipping every branch still calls the incoming value.
+func efParamMultiParser(parse func(string) (int, error), c1, c2 bool, input string) {
+	if c1 {
+		parse = strconv.Atoi
+	}
+	if c2 {
+		parse = strconv.Atoi
+	}
+	n, err := parse(input)
+	println(n) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// A variable this body declares has every write in the inventory, so a
+// single Go origin still keeps the Go contract.
+func efLocalGoParser(input string) {
+	parse := strconv.Atoi
+	n, err := parse(input)
+	println(err, n)
+}
+
+// A variable declared without values still starts in this body, so a
+// single Go assignment keeps the Go contract.
+func efLocalNoInitParser(input string) {
+	var parse func(string) (int, error)
+	parse = strconv.Atoi
+	n, err := parse(input)
+	println(err, n)
+}
+
+// A LoGOs assignment to such a variable still needs the check: the
+// declaration form must not widen the contract.
+func efLocalNoInitLogosParser(input string) {
+	var parse func(string) (int, error)
+	parse = efParseLogos
+	n, err := parse(input)
+	println(n) // ERROR "result_before_error_check"
+	_ = err
+}
+
+// One branch stores a field-error result while the other keeps the zero
+// value: checking the sole call's error proves the deferred read, since
+// the silent branch contributes no unchecked value.
+func efBranchCleanDefault(cond bool) {
+	h := efHeld{}
+	if cond {
+		h.stats, h.err = efFetchHeld()
+	}
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats)
+	}()
+}
+
+// A branch that pairs the same result elsewhere still vetoes: the other
+// side must hold nothing unchecked, not merely a different check.
+func efBranchMixedPair(cond bool) {
+	h := efHeld{}
+	var err2 error
+	if cond {
+		h.stats, h.err = efFetchHeld()
+	} else {
+		h.stats, err2 = efFetchHeld()
+	}
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	_ = err2
 }

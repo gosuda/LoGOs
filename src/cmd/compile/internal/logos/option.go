@@ -1132,12 +1132,18 @@ func (fl *fileLower) wrapperTail(e syntax.Expr) otext {
 	if !ok {
 		return otext{}
 	}
+	// A parenthesized operand keeps the wrapper's closing splice
+	// inside its copied span; drain only a boundary insertion.
+	if vs.end != fl.exprSpan(e).end {
+		return otext{}
+	}
 	return drainOwnedAt(fl.ownerOfInsertion(vs.end), vs.end, id)
 }
 
 // wrapperHead drains the opening zero-width splice a wrapper (such as
 // the coalescing function) owned at the start of e's span, the mirror
-// of wrapperTail at the end.
+// of wrapperTail at the end. A parenthesized operand keeps the splice
+// inside its copied span, so only a boundary insertion is drained.
 func (fl *fileLower) wrapperHead(e syntax.Expr) otext {
 	top, ok := syntax.Unparen(e).(*syntax.CallExpr)
 	if !ok {
@@ -1149,6 +1155,9 @@ func (fl *fileLower) wrapperHead(e syntax.Expr) otext {
 	}
 	vs, ok := fl.wrapSpan[top]
 	if !ok {
+		return otext{}
+	}
+	if vs.start != fl.exprStart(e) {
 		return otext{}
 	}
 	return drainOwnedAt(fl.ownerOfInsertion(vs.start), vs.start, id)

@@ -19,7 +19,7 @@ LoGOs runs goroutines inside `go group` blocks. Shared state lives in `logos/syn
 3. Run `logos lint ./...` and `logos test -race ./...` first; with no package list both cover only the package in the current directory, not the module's subpackages. `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH.
 4. Run the program under the monitor only when it is lint-clean and race-clean.
 5. Use `logos conc run` for a program and `logos conc test` for tests.
-6. Read each finding on standard error while the child still runs.
+6. Read each finding on standard output while the child still runs. Under `--json-diagnostics`, read the records on standard error.
 7. Repair the named position, then rerun without `conc` to confirm the behavior.
 8. Retry a shake failure with the printed seed to shake the run again. The seed alone does not fix the yield counts: each hook mixes in the goroutine ID and hook count, so a rerun with the same seed is a retry, not an exact replay.
 
@@ -36,7 +36,7 @@ The group context cancels on the first child error or panic. The group joins eve
 
 ## Run and test forms
 
-`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins the build tags from `-tags` or from `GOFLAGS`. `logos conc test` adds `-count=1` unless a count is already set. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
+`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins the build tags from `-tags` or from `GOFLAGS`. `logos conc test` adds `-count=1` unless a count is already set on the command line or in `GOFLAGS`. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
 
 ```sh
 logos help conc
@@ -180,13 +180,19 @@ logos conc test -shake -count=1 ./ord
 
 Expect exit 1 for the test: the order flips and the test fails. Expect exit 1 for the run: the program prints the flipped order and `logos run` reports `exit status 2`. Expect exit 0 or 1 for the bare seed: the drawn order decides. Every one prints its `shake seed` line on standard error.
 
-Pass `--json-diagnostics` to print each finding as one JSON object per line in the `logos lint --json-diagnostics` schema. Expect the `note` field to hold the position lines and the fix line. Expect tab-separated text output otherwise. Apply every repair by hand. This revision offers no `--fix` flag.
+Pass `--json-diagnostics` to print each finding as one JSON object per line on standard error, in the `logos lint --json-diagnostics` schema. Expect the `note` field to hold the position lines and the fix line. Expect the tab-separated text form on standard output otherwise.
+
+Pass `--fix` to rewrite a stalled child that waits on a plain receive in a function that takes a context: the line becomes a select on the receive and the context. Pass `--ai-patch` instead to print that edit as one JSON object per line on standard output without changing files. Repair every other finding by hand.
+
+Expect review output on standard output: the text findings and the `--ai-patch` edits. Under `logos conc test -json`, standard output is the test2json stream, and each line of review output arrives as one event with `"Action":"output"`. The `logos conc: fixed` lines of `--fix` and the `shake seed` line stay on standard error.
 
 ```sh
 logos conc run --json-diagnostics ./opposite
+logos conc test -json --json-diagnostics ./opposite
+logos conc test -json ./opposite
 ```
 
-Expect exit 1 with one JSON object on standard error.
+Expect exit 1 for each. Expect one JSON object on standard error for the first two. Expect the test2json stream on standard output for the last two; in the last one, the lines of the text finding arrive as its `output` events, and standard error stays empty.
 
 ## Read exit codes
 
@@ -200,7 +206,7 @@ logos conc run -stall soon ./ignores
 logos conc test -shake=nope -count=1 ./ord
 ```
 
-Expect exit 1 for the first: `logos run` reports `exit status 3` and no finding prints. Expect exit 1 for the next two: each prints its finding. Expect exit 1 for both usage errors: each prints its message and runs no child. `logos conc test` without `-count` adds `-count=1` itself.
+Expect exit 1 for the first: `logos run` reports `exit status 3` and no finding prints. Expect exit 1 for the next two: each prints its finding. Expect exit 1 for both usage errors: each prints its message and runs no child. `logos conc test` without a `-count` on the command line or in `GOFLAGS` adds `-count=1` itself.
 
 ## Know what conc does not find
 
