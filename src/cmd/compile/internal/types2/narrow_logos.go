@@ -1294,6 +1294,31 @@ type logosEFEffects struct {
 	may      map[logosEFKey]logosEFKey
 }
 
+// writes reports whether the effects wrote a destination that overlaps k.
+func (e *logosEFEffects) writes(k logosEFKey) bool {
+	for w := range e.assigned {
+		if k.overlaps(w) {
+			return true
+		}
+	}
+	for w := range e.created {
+		if k.overlaps(w) {
+			return true
+		}
+	}
+	for w := range e.may {
+		if k.overlaps(w) {
+			return true
+		}
+	}
+	return false
+}
+
+// overlaps reports whether a write to w can change the value stored in k.
+func (k logosEFKey) overlaps(w logosEFKey) bool {
+	return k.root == w.root && (logosEFPathUnder(k.path, w.path) || logosEFPathUnder(w.path, k.path))
+}
+
 type logosEFPass struct {
 	check         *Checker
 	body          *syntax.BlockStmt
@@ -3892,6 +3917,7 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	}
 	end := p.run(body, p.lateCaptures(in, lit, inside))
 	p.eff = saved
+	before := st
 	for k := range eff.assigned {
 		if k.path == "" {
 			st = st.detach(k.root)
@@ -3906,10 +3932,8 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 		// The summary records every store, including ones the literal
 		// later overwrote: only the exit state's marks still describe
 		// values a later capture can observe. A result the literal
-		// reset exports no mark, and a result whose error it overwrote
-		// exports the mark without the dead guard, so a later check
-		// cannot prove it. The recorded guard still propagates outward
-		// for enclosing literals.
+		// reset exports no mark. The recorded guard still propagates
+		// outward for enclosing literals.
 		exitEk := errKey
 		if end != nil {
 			if !end.may[k] {
@@ -3919,14 +3943,11 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 			exitEk = end.mayErr[k]
 		}
 		st = st.setMay(k)
-		if exitEk != (logosEFKey{}) {
-			st = p.setMayErr(st, k, exitEk)
-		}
 		p.noteMay(k, exitEk)
 	}
 	// A literal that stores a result may run after a later capture
-	// registers, so its may-reach marks join the outer flow with their
-	// pairings. Keys defined inside the literal stay local.
+	// registers, so its may-reach marks join the outer flow. Keys
+	// defined inside the literal stay local.
 	if end != nil {
 		for k := range end.may {
 			if inside[k.root] {
@@ -3934,14 +3955,53 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 			}
 			st = st.setMay(k)
 		}
-		for k, ek := range end.mayErr {
-			if inside[k.root] || inside[ek.root] {
-				continue
-			}
-			st = p.setMayErr(st, k, ek)
+	}
+	return st.literalPairings(before, end, eff)
+}
+
+// literalPairings joins the caller's error pairings, held in before, with
+// the pairings a literal leaves at exit. The literal may run where it
+// stands, later, or never. A caller pairing survives when the exit keeps
+// it, or when the literal neither wrote its error nor stored the result.
+// An exit pairing survives only when the caller holds nothing unchecked
+// for the result, so a check on either error never proves a value the
+// other path stored.
+func (s *logosEFState) literalPairings(before, end *logosEFState, eff *logosEFEffects) *logosEFState {
+	exit := eff.may
+	if end != nil {
+		exit = end.mayErr
+	}
+	var out map[logosEFKey]logosEFKey
+	keep := func(k, ek logosEFKey) {
+		if out == nil {
+			out = make(map[logosEFKey]logosEFKey)
+		}
+		out[k] = ek
+	}
+	for k, ek := range before.mayErr {
+		if x, ok := exit[k]; ok && x == ek {
+			keep(k, ek)
+			continue
+		}
+		_, stored := eff.may[k]
+		_, created := eff.created[k]
+		if !stored && !created && !eff.writes(ek) && (end == nil || !end.may[k]) {
+			keep(k, ek)
 		}
 	}
-	return st
+	for k, ek := range exit {
+		if _, ok := before.mayErr[k]; ok {
+			continue
+		}
+		if ek == (logosEFKey{}) || eff.inside[k.root] || eff.inside[ek.root] || before.unchecked(k) {
+			continue
+		}
+		keep(k, ek)
+	}
+	if maps.Equal(out, s.mayErr) {
+		return s
+	}
+	return &logosEFState{m: s.m, may: s.may, mayErr: out}
 }
 
 func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFState {

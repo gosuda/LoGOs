@@ -67,3 +67,95 @@ func efClosureErrorOverwriteStale(cond bool) {
 	}
 	_ = retryErr
 }
+
+type efClosurePair struct {
+	stats  int
+	first  error
+	second error
+}
+
+// A literal that clears the error field of a pairing it received leaves
+// the stored result unchecked: the later nil check reads the cleared
+// field, not the call's error.
+func efClosureClearsIncomingError() {
+	h := efClosureHeld{}
+	h.stats, h.err = efClosureFetch()
+	func() {
+		h.err = nil
+	}()
+	if h.err == nil {
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+	}
+}
+
+// The same cleared pairing must not discharge the mark that a skipped
+// retry would otherwise keep.
+func efClosureClearsIncomingRetry(retry bool) {
+	h := efClosureHeld{}
+	h.stats, h.err = efClosureFetch()
+	func() {
+		h.err = nil
+	}()
+	if h.err != nil {
+		return
+	}
+	var retryErr error
+	defer func() {
+		if retryErr == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	if retry {
+		h.stats, retryErr = efClosureFetch()
+	}
+}
+
+// A literal that replaces the result and then clears the replacement's
+// error exports an unpaired value: the caller's pairing with the first
+// call's error no longer describes it.
+func efClosureReplacementKeepsOldGuard() {
+	h := efClosurePair{}
+	h.stats, h.first = efClosureFetch()
+	func() {
+		h.stats, h.second = efClosureFetch()
+		h.second = nil
+	}()
+	if h.first == nil {
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+	}
+}
+
+// A literal that only reads the result keeps the caller's pairing.
+func efClosureReadKeepsPairing() {
+	h := efClosureHeld{}
+	h.stats, h.err = efClosureFetch()
+	func() {
+		if h.err == nil {
+			println(h.stats)
+		}
+	}()
+	if h.err == nil {
+		defer func() {
+			println(h.stats)
+		}()
+	}
+}
+
+// A literal that stores the result again with the same error field
+// leaves one pairing on every path, so the check proves the read.
+func efClosureSamePairingAccepted() {
+	h := efClosureHeld{}
+	h.stats, h.err = efClosureFetch()
+	func() {
+		h.stats, h.err = efClosureFetch()
+	}()
+	if h.err == nil {
+		defer func() {
+			println(h.stats)
+		}()
+	}
+}
