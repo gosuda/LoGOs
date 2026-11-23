@@ -21,6 +21,9 @@ func check(tag string, cond bool, got, want string) {
 }
 
 type point (x int, y int)
+func ident8(ch chan int8) chan int8 {
+	return ch
+}
 
 // A send inside a group child spells pure values into both select arms;
 // operands that carry lowering annotations or checked types must keep
@@ -41,9 +44,12 @@ func sendValues(ctx context.Context) error {
 	ri := make(chan *int, 1)
 	ri8 := make(chan int8, 1)
 	ri8n := make(chan int8, 1)
+	ri8c := make(chan int8, 1)
 	rf := make(chan float32, 1)
 	rx := make(chan int, 1)
 	rp := make(chan point, 1)
+	counts := make(chan int, 1)
+	counts <- 3
 	go group (ctx) {
 		go {
 			pi <- &42
@@ -56,6 +62,9 @@ func sendValues(ctx context.Context) error {
 		}
 		go {
 			pf <- math.Pi
+		}
+		go {
+			ident8(ri8c) <- 1 << <-counts
 		}
 		go {
 			px <- p.x + p.y
@@ -88,14 +97,16 @@ func sendValues(ctx context.Context) error {
 	pv := <-ri
 	v8 := <-ri8
 	v8n := <-ri8n
-	vf := <-rf
+	v8c := <-ri8c
 	vx := <-rx
+	vf := <-rf
 	vp := <-rp
 	pbv := <-pb
 	check("fresh-address", pv != nil && *pv == 42, fmt.Sprint(pv), "42")
 	check("untyped-constant", v8 == 8, fmt.Sprint(v8), "8")
 	check("nonconstant-shift", v8n == 8, fmt.Sprint(v8n), "8")
 	check("untyped-float", vf > 3.14 && vf < 3.15, fmt.Sprint(vf), "3.14")
+	check("call-channel-shift", v8c == 8, fmt.Sprint(v8c), "8")
 	check("tuple-field-sum", vx == 9, fmt.Sprint(vx), "9")
 	check("tuple-value", vp.x == 4 && vp.y == 5, fmt.Sprint(vp.x, vp.y), "4 5")
 	check("ready-channel", pbv != nil && *pbv == 7, fmt.Sprint(pbv), "7")

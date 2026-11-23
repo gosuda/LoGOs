@@ -2,6 +2,7 @@ ok fresh-address
 ok untyped-constant
 ok nonconstant-shift
 ok untyped-float
+ok call-channel-shift
 ok tuple-field-sum
 ok tuple-value
 ok ready-channel
