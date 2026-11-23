@@ -911,6 +911,67 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 	return &logosEFState{m: m, may: may, mayErr: mayErr}
 }
 
+// dropCovered forgets the entries a quiet field write fully overwrites:
+// the destination itself and anything nested inside it. It keeps strict
+// ancestors: resetting one field does not prove the whole value was
+// reset. Pairings whose error destination the write overlaps are still
+// dropped, mirroring the flow state.
+func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
+	var out map[logosEFKey]logosEFEntry
+	for v := range s.m {
+		if v.root != k.root {
+			continue
+		}
+		if logosEFPathUnder(v.path, k.path) {
+			if out == nil {
+				out = maps.Clone(s.m)
+			}
+			delete(out, v)
+		}
+	}
+	var mayOut map[logosEFKey]bool
+	for v := range s.may {
+		if v.root != k.root {
+			continue
+		}
+		if logosEFPathUnder(v.path, k.path) {
+			if mayOut == nil {
+				mayOut = maps.Clone(s.may)
+			}
+			delete(mayOut, v)
+		}
+	}
+	var errOut map[logosEFKey]logosEFKey
+	for v, ek := range s.mayErr {
+		overlapped := v.root == k.root && logosEFPathUnder(v.path, k.path)
+		if !overlapped && ek.root == k.root {
+			overlapped = logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path)
+		}
+		if overlapped {
+			if errOut == nil {
+				errOut = maps.Clone(s.mayErr)
+			}
+			delete(errOut, v)
+		}
+	}
+	if out == nil && mayOut == nil && errOut == nil {
+		return s
+	}
+	m := s.m
+	if out != nil {
+		m = out
+	}
+	may := s.may
+	if mayOut != nil {
+		may = mayOut
+	}
+	mayErr := s.mayErr
+	if errOut != nil {
+		mayErr = errOut
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErr}
+}
+
 // logosEFPathUnder reports whether path denotes prefix or a destination
 // nested inside it; the empty prefix is the whole root.
 func logosEFPathUnder(path, prefix string) bool {
@@ -2597,8 +2658,9 @@ func (p *logosEFPass) platformChecked(e syntax.Expr) bool {
 	return ok
 }
 
-// carveDrop drops the entries a quiet write overwrites, mirroring dropDest
-// for the destination forms quietDest allows. It touches only the scratch
+// carveDrop drops the entries a quiet write overwrites: whole-variable
+// writes mirror dropDest, while field writes drop only covered
+// destinations and keep strict ancestors. It touches only the scratch
 // state, never effects.
 func (p *logosEFPass) carveDrop(st *logosEFState, l syntax.Expr) *logosEFState {
 	l = syntax.Unparen(l)
@@ -2606,7 +2668,7 @@ func (p *logosEFPass) carveDrop(st *logosEFState, l syntax.Expr) *logosEFState {
 		return st.dropWriting(logosEFKey{root: v}).detach(v)
 	}
 	if k, ok := p.rawKey(l); ok {
-		return st.dropWriting(k)
+		return st.dropCovered(k)
 	}
 	return st
 }
