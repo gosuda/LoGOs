@@ -546,23 +546,30 @@ func unionMemberTrialLines(uc jsonUnionClass, i int) []string {
 	if s.keyed {
 		counter, dest = "_logos_match", "_logos_target"
 	}
-	attempt := ifLines(scratch+".UnmarshalJSON(_logos_raw) == nil", []string{
+	decode := ifLines(scratch+".UnmarshalJSON(_logos_raw) == nil", []string{
 		counter + "++",
 		dest + " = " + scratch,
 		fmt.Sprintf("_logos_winidx = %d", i),
 	})
-	inner := []string{decl}
-	for _, in := range s.inits {
-		inner = append(inner, fmt.Sprintf("%s.%s = new(%s)", scratch, in.sel, in.elem))
+	// Embedded pointers initialize inside the gated attempt, so a trial
+	// skipped by key matching or the claim gate allocates nothing.
+	trial := decode
+	if len(s.inits) > 0 {
+		gated := make([]string, 0, len(s.inits)+1)
+		for _, in := range s.inits {
+			gated = append(gated, fmt.Sprintf("%s.%s = new(%s)", scratch, in.sel, in.elem))
+		}
+		trial = append(gated, decode...)
 	}
+	inner := []string{decl}
 	switch {
 	case s.keyed:
 		inner = append(inner, ifLines(fmt.Sprintf("_logos_keys_%d == 0", i), []string{fmt.Sprintf("_logos_matched_%d = false", i)})...)
-		inner = append(inner, ifLines(fmt.Sprintf("_logos_matched_%d", i), attempt)...)
+		inner = append(inner, ifLines(fmt.Sprintf("_logos_matched_%d", i), trial)...)
 	case uc.needsClaim():
-		inner = append(inner, ifLines("!_logos_claimed", attempt)...)
+		inner = append(inner, ifLines("!_logos_claimed", trial)...)
 	default:
-		inner = append(inner, attempt...)
+		inner = append(inner, trial...)
 	}
 	out := []string{"{"}
 	out = append(out, indentLines(ifLines(fmt.Sprintf("!_logos_hit || _logos_out.Winner == %d", i), inner))...)

@@ -588,6 +588,11 @@ func jsonTrialDecoder(t types2.Type, holderPkg *types2.Package, qual func(*types
 func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Package, qual func(*types2.Package) string) ([]promotedDecoderInit, bool) {
 	var out []promotedDecoderInit
 	var sel []string
+	// Only an emitted init names a field, so only an init selector must be
+	// assignable from the holder package. A value-only path names nothing;
+	// unexported value fields on it are fine. Track the selector prefix:
+	// once it leaves what the holder can assign, any deeper init fails.
+	assignable := true
 	// The last index entry names the method itself in its declaring type;
 	// only the earlier entries are embedded field steps to walk.
 	steps := index
@@ -601,7 +606,7 @@ func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Pack
 		}
 		f := st.Field(i)
 		if !f.Exported() && (holderPkg == nil || f.Pkg() != holderPkg) {
-			return nil, false
+			assignable = false
 		}
 		sel = append(sel, f.Name())
 		ft := unaliasConstView(f.Type())
@@ -625,6 +630,9 @@ func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Pack
 		switch c := ft.(type) {
 		case *types2.Struct:
 			if isPtr {
+				if !assignable {
+					return nil, false
+				}
 				out = append(out, promotedDecoderInit{sel: strings.Join(sel, "."), elem: types2.TypeString(elem, qual)})
 			}
 			st = c
@@ -632,6 +640,9 @@ func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Pack
 			return nil, false
 		default:
 			if isPtr {
+				if !assignable {
+					return nil, false
+				}
 				out = append(out, promotedDecoderInit{sel: strings.Join(sel, "."), elem: types2.TypeString(elem, qual)})
 			}
 			if !last {
@@ -644,7 +655,10 @@ func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Pack
 
 // unboundParams reports whether t's spelling can name an unbound type
 // parameter: a generic declaration, an instantiation over one, or the
-// parameter itself. Concrete instantiations spell fine with new(...).
+// parameter itself. A named generic instantiation retains its origin's
+// parameter list, so only a declaration without type arguments is rejected
+// for having parameters; an instantiation is judged by its arguments.
+// Concrete instantiations spell fine with new(...).
 func unboundParams(t types2.Type) bool {
 	u := types2.Unalias(t)
 	if p, ok := u.(*types2.Pointer); ok {
@@ -654,17 +668,15 @@ func unboundParams(t types2.Type) bool {
 		return true
 	}
 	if named, ok := u.(*types2.Named); ok {
-		if named.TypeParams() != nil && named.TypeParams().Len() > 0 {
-			return true
-		}
-		if args := named.TypeArgs(); args != nil {
+		if args := named.TypeArgs(); args != nil && args.Len() > 0 {
 			for i := range args.Len() {
 				if unboundParams(args.At(i)) {
 					return true
 				}
 			}
+			return false
 		}
-		return false
+		return named.TypeParams() != nil && named.TypeParams().Len() > 0
 	}
 	return false
 }

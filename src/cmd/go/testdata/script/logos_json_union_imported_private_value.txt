@@ -1,0 +1,88 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+
+# A public decoder promoted through a private embedded value in another
+# package decodes: the value-only path needs no field assignment, so the
+# holder trials the resolved decoder.
+logos run ./h
+stdout '^ok wrapper x=11$'
+
+-- w/go.mod --
+module example.com/imppriv
+
+go 1.27
+
+-- w/g/g.lgo --
+package g
+
+import (
+	"encoding/json"
+	"errors"
+)
+
+type decoder struct {
+	X int64 `json:"x"`
+}
+
+func (d *decoder) UnmarshalJSON(data []byte) error {
+	var v map[string]int64
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	x, ok := v["x"]
+	if !ok {
+		return errors.New("decoder requires x")
+	}
+	d.X = x
+	return nil
+}
+
+type Wrapper struct {
+	decoder
+}
+
+type Plain struct {
+	R float64
+}
+
+-- w/u/u.lgo --
+package u
+
+import "example.com/imppriv/g"
+
+type Node interface {
+	g.Wrapper | g.Plain
+}
+
+-- w/h/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"example.com/imppriv/g"
+	"example.com/imppriv/u"
+)
+
+type Holder struct {
+	Body   u.Node
+	Status int = 200
+}
+
+func main() {
+	var h Holder
+	if err := json.Unmarshal([]byte(`{"Body":{"x":11}}`), &h); err != nil {
+		fmt.Println("decode error:", err)
+		os.Exit(1)
+	}
+	w, ok := h.Body.(g.Wrapper)
+	if !ok {
+		fmt.Printf("wrong member %T %+v\n", h.Body, h.Body)
+		os.Exit(1)
+	}
+	fmt.Printf("ok wrapper x=%d\n", w.X)
+}

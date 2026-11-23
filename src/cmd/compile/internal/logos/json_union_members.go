@@ -165,9 +165,8 @@ func foreignUnionKeysByPath(pkgPath, typ string) ([]string, bool, bool) {
 // holder's own imports provide. Decoder facts in Go package archives carry
 // no JSON records; the resolved type lets the trial verify the decoder
 // against the real method set. A member the holder does not import, an
-// unexported name, or a generic declaration stays unresolvable: the
-// generated trial could not name such a type, or could not spell its
-// arguments.
+// unexported name, or an unspellable generic stays unresolvable: the
+// generated trial could not name such a type.
 func resolveFactMemberType(pkg *types2.Package, typeName string) (types2.Type, bool) {
 	if pkg == nil || pkg.Scope() == nil {
 		return nil, false
@@ -180,10 +179,8 @@ func resolveFactMemberType(pkg *types2.Package, typeName string) (types2.Type, b
 	if !ok || tname.Type() == nil {
 		return nil, false
 	}
-	if named, ok := tname.Type().(*types2.Named); ok {
-		if named.TypeParams().Len() != 0 || named.TypeArgs().Len() != 0 {
-			return nil, false
-		}
+	if unboundParams(tname.Type()) {
+		return nil, false
 	}
 	return tname.Type(), true
 }
