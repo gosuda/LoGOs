@@ -137,14 +137,17 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	var valArmA, valArmB syntax.Expr
 	var valTxtA, valTxtB otext
 	var valDef syntax.Stmt
+	// The channel always snapshots through a moved region: unlike a leaf
+	// value, it can hold an interpolation that lowerInterp still rewrites,
+	// and an immediate textOf would orphan that later edit.
 	switch v := syntax.Unparen(s.Value).(type) {
 	case *syntax.Name:
-		chText = fl.textOf(chSpan)
+		chText = fl.lazyText(chSpan)
 		valText = fl.textOf(valSpan)
 		valArmA, valArmB = nameOf(pos, v.Value), nameOf(pos, v.Value)
 		valTxtA, valTxtB = valText, valText
 	case *syntax.BasicLit:
-		chText = fl.textOf(chSpan)
+		chText = fl.lazyText(chSpan)
 		valText = fl.textOf(valSpan)
 		valArmA = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
@@ -158,7 +161,7 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 			srcText := fl.srcUser(valSpan.start, valSpan.end)
 			if a, okA := parseExprAt(srcText.s, pos); okA {
 				if b, okB := parseExprAt(srcText.s, pos); okB {
-					chText = fl.textOf(chSpan)
+					chText = fl.lazyText(chSpan)
 					valText = fl.textOf(valSpan)
 					valArmA, valArmB = a, b
 					valTxtA, valTxtB = valText, valText
