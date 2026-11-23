@@ -210,11 +210,12 @@ func interpSendReady() {
 func chanInterpReady() {
 	err := chanInterpSend(precancelled(), 4)
 	got := -1
+	ok := false
 	select {
-	case got = <-interpLookupChans["key=4"]:
+	case got, ok = <-interpLookupChans["key=4"]:
 	default:
 	}
-	check("send-chan-interp", err == nil && got == 1, fmt.Sprint(err, got), "<nil> 1")
+	check("send-chan-interp", err == nil && ok && got == 1, fmt.Sprint(err, ok, got), "<nil> true 1")
 }
 
 func chanSnapshotBeforeValue() {
