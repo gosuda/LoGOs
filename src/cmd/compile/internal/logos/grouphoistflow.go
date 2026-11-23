@@ -222,8 +222,10 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 // the default int instead of the element type, rejecting sends to
 // chan int8 (and untyped comparisons to a channel of a defined bool
 // type). An assignment to the typed temporary applies exactly the
-// send's assignability rule. spellTypeBoth refuses names a local
-// declaration could shadow; then the snapshot falls back to `:=`.
+// send's assignability rule. spellTypeBoth refuses names that fail
+// package visibility; a function-local type, const, or variable in
+// scope at pos can still shadow the spelled name, so a shadowed
+// spelling falls back to `:=`, which keeps the value's own type.
 func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp string, valText otext, chType types2.Type) ([]syntax.Stmt, []otext) {
 	fallback := func() ([]syntax.Stmt, []otext) {
 		return []syntax.Stmt{
@@ -242,7 +244,7 @@ func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp st
 		return fallback()
 	}
 	elemNative, elemSpelled, ok := h.fc.fl.spellTypeBoth(ch.Elem(), pos)
-	if !ok {
+	if !ok || h.fc.fl.spelledTypeShadowed(ch.Elem(), pos) {
 		return fallback()
 	}
 	return []syntax.Stmt{
@@ -252,6 +254,117 @@ func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp st
 			gen("var " + valTmp + " " + elemSpelled),
 			cat(gen(valTmp+" = "), valText),
 		}
+}
+
+// spelledTypeShadowed reports whether declaring a variable with the
+// spelling of typ at pos would resolve a bare type name to a different
+// declaration than the checked type names: a function-local type,
+// const, or variable in scope at pos shadows the package-level or
+// universe name the spelling uses. Qualified names keep an import
+// qualifier owned by generated import machinery, so only bare
+// spellings (the current package and the universe) are checked.
+// Anything the walk cannot prove unshadowed falls back to inference,
+// which keeps the value's own type.
+func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
+	scope := fl.sortedScopeAt(pos)
+	if scope == nil {
+		return true
+	}
+	self := fl.pkg.tpkg
+	shadowed := false
+	// bare reports whether spelling the bare name of obj at pos resolves
+	// to obj. LookupParent walks the enclosing scopes, so a
+	// function-local type, const, or variable reports its own object
+	// instead of the package-level or universe name the spelling uses.
+	// Qualified names keep an import qualifier owned by generated import
+	// machinery, so only bare spellings (the current package and the
+	// universe) are checked. Anything the walk cannot prove unshadowed,
+	// including a name that resolves nowhere, falls back to inference,
+	// which keeps the value's own type.
+	bare := func(name string, obj *types2.TypeName) {
+		if shadowed {
+			return
+		}
+		if obj == nil {
+			shadowed = true
+			return
+		}
+		if pkg := obj.Pkg(); pkg != self && pkg != nil {
+			return
+		}
+		if got := scope.LookupParent(name, pos); got != types2.Object(obj) {
+			shadowed = true
+		}
+	}
+	var walk func(t types2.Type)
+	walkTuple := func(t *types2.Tuple) {
+		if t == nil || shadowed {
+			return
+		}
+		for i := range t.Len() {
+			walk(t.At(i).Type())
+		}
+	}
+	walk = func(t types2.Type) {
+		if t == nil || shadowed {
+			return
+		}
+		switch t := t.(type) {
+		case *types2.Basic:
+			// unsafe.Pointer spells qualified; a bare local cannot
+			// shadow it the way bare universe names can.
+			if t.Kind() == types2.UnsafePointer {
+				break
+			}
+			obj, _ := types2.Universe.Lookup(t.Name()).(*types2.TypeName)
+			bare(t.Name(), obj)
+		case *types2.TypeParam:
+			bare(t.Obj().Name(), t.Obj())
+		case *types2.Alias:
+			bare(t.Obj().Name(), t.Obj())
+			if args := t.TypeArgs(); args != nil {
+				for i := range args.Len() {
+					walk(args.At(i))
+				}
+			}
+		case *types2.Pointer:
+			walk(t.Elem())
+		case *types2.Slice:
+			walk(t.Elem())
+		case *types2.Array:
+			walk(t.Elem())
+		case *types2.Map:
+			walk(t.Key())
+			walk(t.Elem())
+		case *types2.Chan:
+			walk(t.Elem())
+		case *types2.Signature:
+			walkTuple(t.Params())
+			walkTuple(t.Results())
+		case *types2.Tuple:
+			walkTuple(t)
+		case *types2.Named:
+			bare(t.Obj().Name(), t.Obj())
+			if args := t.TypeArgs(); args != nil {
+				for i := range args.Len() {
+					walk(args.At(i))
+				}
+			}
+		case *types2.Interface:
+			for i := range t.NumMethods() {
+				walk(t.Method(i).Type())
+			}
+			for i := range t.NumEmbeddeds() {
+				walk(t.EmbeddedType(i))
+			}
+		case *types2.Struct:
+			for i := range t.NumFields() {
+				walk(t.Field(i).Type())
+			}
+		}
+	}
+	walk(typ)
+	return shadowed
 }
 
 func (h *groupHoist) recvStmt(s *syntax.ExprStmt, op *syntax.Operation) (syntax.Stmt, otext, span) {

@@ -215,6 +215,35 @@ func shadowedTypeName() {
 	check("shadowed-type-send", err == nil && got.N == 9, fmt.Sprint(err, got), "<nil> {9}")
 }
 
+type cargo interface{}
+
+func cargoOutput(out chan cargo) chan cargo {
+	return out
+}
+
+func shadowedIfaceSend(ctx context.Context, counts chan int, out chan cargo) error {
+	type cargo = int8
+	go group (ctx) {
+		go {
+			cargoOutput(out) <- 1 << <-counts
+		}
+	}
+	return nil
+}
+
+func shadowedIfaceValue() {
+	counts := make(chan int, 1)
+	counts <- 3
+	out := make(chan cargo, 1)
+	err := shadowedIfaceSend(precancelled(), counts, out)
+	var got any
+	select {
+	case got = <-out:
+	default:
+	}
+	check("shadowed-iface-dynamic-type", err == nil && fmt.Sprintf("%T", got) == "int", fmt.Sprint(err, got), "<nil> 8")
+}
+
 func gotoPastSend() {
 	recordCalls.Store(0)
 	calls.Store(0)
@@ -304,6 +333,7 @@ func main() {
 	interpSendReady()
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
+	shadowedIfaceValue()
 	gotoPastSend()
 	nilSendReady()
 	namedElemReady()

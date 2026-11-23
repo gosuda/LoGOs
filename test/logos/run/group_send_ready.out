@@ -7,6 +7,7 @@ ok blocked-call-once
 ok interp-send
 ok send-original-chan
 ok shadowed-type-send
+ok shadowed-iface-dynamic-type
 ok goto-skips-send
 ok goto-send-not-evaluated
 ok goto-record-ran
