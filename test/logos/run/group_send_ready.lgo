@@ -73,6 +73,26 @@ func interpSend(ctx context.Context, ch chan string, n int) error {
 	return nil
 }
 
+var interpLookupChans = map[string]chan int{}
+
+func lookupChan(key string) chan int {
+	ch, ok := interpLookupChans[key]
+	if !ok {
+		ch = make(chan int, 1)
+		interpLookupChans[key] = ch
+	}
+	return ch
+}
+
+func chanInterpSend(ctx context.Context, n int) error {
+	go group (ctx) {
+		go {
+			lookupChan($"key={n}") <- 1
+		}
+	}
+	return nil
+}
+
 var first, second chan int
 
 func redirect() int {
@@ -185,6 +205,16 @@ func interpSendReady() {
 	default:
 	}
 	check("interp-send", err == nil && got == "count=4", fmt.Sprint(err, got), "<nil> count=4")
+}
+
+func chanInterpReady() {
+	err := chanInterpSend(precancelled(), 4)
+	got := -1
+	select {
+	case got = <-interpLookupChans["key=4"]:
+	default:
+	}
+	check("send-chan-interp", err == nil && got == 1, fmt.Sprint(err, got), "<nil> 1")
 }
 
 func chanSnapshotBeforeValue() {
@@ -302,6 +332,7 @@ func main() {
 	blockedStillCancels()
 	blockedCallOnce()
 	interpSendReady()
+	chanInterpReady()
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
 	gotoPastSend()
