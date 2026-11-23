@@ -36,7 +36,7 @@ The group context cancels on the first child error or panic. The group joins eve
 
 ## Run and test forms
 
-`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins the build tags from `-tags` or from `GOFLAGS`. `logos conc test` adds `-count=1` unless a count is already set. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
+`logos conc run` wraps `logos run`. `logos conc test` wraps `logos test`. Build and test flags pass through to the child. The monitor tag joins the build tags from `-tags` or from `GOFLAGS`. `logos conc test` adds `-count=1` unless a count is already set on the command line or in `GOFLAGS`. Place conc flags before the package for `run`. Place conc flags before `-args` or `--` for `test`. Text after that boundary belongs to the program.
 
 ```sh
 logos help conc
@@ -174,7 +174,7 @@ logos conc run -stall soon ./ignores
 logos conc test -shake=nope -count=1 ./ord
 ```
 
-Expect exit 1 for the first: `logos run` reports `exit status 3` and no finding prints. Expect exit 1 for the next two: each prints its finding. Expect exit 1 for both usage errors: each prints its message and runs no child. `logos conc test` without `-count` adds `-count=1` itself.
+Expect exit 1 for the first: `logos run` reports `exit status 3` and no finding prints. Expect exit 1 for the next two: each prints its finding. Expect exit 1 for both usage errors: each prints its message and runs no child. `logos conc test` without a `-count` on the command line or in `GOFLAGS` adds `-count=1` itself.
 
 ## Know what conc does not find
 
