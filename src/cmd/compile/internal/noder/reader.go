@@ -1898,7 +1898,7 @@ func (r *reader) openScope() {
 	r.Sync(pkgbits.SyncOpenScope)
 	pos := r.pos()
 
-	if base.Flag.Dwarf {
+	if base.Flag.Dwarf && (r.dict == nil || !r.dict.logosCtBody) {
 		r.scopeVars = append(r.scopeVars, len(r.curfn.Dcl))
 		r.marker.Push(pos)
 	}
@@ -1918,7 +1918,7 @@ func (r *reader) closeScope() {
 func (r *reader) closeAnotherScope() {
 	r.Sync(pkgbits.SyncCloseAnotherScope)
 
-	if base.Flag.Dwarf {
+	if base.Flag.Dwarf && (r.dict == nil || !r.dict.logosCtBody) {
 		scopeVars := r.scopeVars[len(r.scopeVars)-1]
 		r.scopeVars = r.scopeVars[:len(r.scopeVars)-1]
 
