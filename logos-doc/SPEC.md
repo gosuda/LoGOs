@@ -2228,7 +2228,7 @@ Eject MUST keep ordinary scalar source, so its output needs no SIMD package or e
 
 - `--json-diagnostics` on `logos lint`, on `logos build`, and on every other command that accepts it MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files, and for every finding of `logos conc`. [T-Sec14][T-102][T-106][R-U1]
 - Each line MUST be a complete object with schema version `1.0`. [T-Sec14]
-- `logos conc` MUST keep its review output, the text findings and the `--ai-patch` brief, on stdout, also under `--json-diagnostics`. [T-Sec14][T-106]
+- `logos conc` MUST keep its review output on stdout: without `--json-diagnostics` the text findings and the `--ai-patch` brief, and under `--json-diagnostics` the `--ai-patch` brief while each finding goes to stderr as a Section 14 record. [T-Sec14][T-106]
 
 ### 14.2 Top-level fields
 
