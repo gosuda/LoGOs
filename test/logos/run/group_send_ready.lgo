@@ -217,7 +217,8 @@ func chanInterpReady() {
 	case got = <-interpChan:
 	default:
 	}
-	check("send-chan-interp", err == nil && got == 1, fmt.Sprint(err, got), "<nil> 1")
+	_, keyOK := interpLookupChans["key=4"]
+	check("send-chan-interp", err == nil && got == 1 && keyOK && len(interpLookupChans) == 1, fmt.Sprint(err, got, keyOK, len(interpLookupChans)), "<nil> 1 true 1")
 }
 
 func chanSnapshotBeforeValue() {
