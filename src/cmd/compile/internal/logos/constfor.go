@@ -1890,6 +1890,18 @@ func (c *cfLeaf) cfMentionsLocalType(e syntax.Expr, ref syntax.Node) bool {
 // name win.
 func (c *cfLeaf) cfMentionsLocalDecl(e syntax.Expr, ref syntax.Node) bool {
 	found := false
+	// A selector member (the Sel of `X.Sel`) resolves in the
+	// qualifier's scope — a package member, field, or method — never
+	// as a lexical reference to a function-local declaration, so only
+	// qualifiers and bare names can mention one. The syntax walker
+	// visits Sel as a plain Name node, hence the pre-pass.
+	sels := map[*syntax.Name]bool{}
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if sel, ok := n.(*syntax.SelectorExpr); ok {
+			sels[sel.Sel] = true
+		}
+		return true
+	})
 	var visit func(n syntax.Node) bool
 	visit = func(n syntax.Node) bool {
 		if found {
@@ -1901,7 +1913,7 @@ func (c *cfLeaf) cfMentionsLocalDecl(e syntax.Expr, ref syntax.Node) bool {
 			}
 			return false
 		}
-		if name, ok := n.(*syntax.Name); ok &&
+		if name, ok := n.(*syntax.Name); ok && !sels[name] &&
 			(cfLocalTypeDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil ||
 				cfLocalConstDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil) {
 			found = true

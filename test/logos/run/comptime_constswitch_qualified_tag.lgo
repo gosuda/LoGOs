@@ -1,0 +1,46 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Widget struct {
+	N int
+	S string
+}
+
+func InnerRejects[T any]() string {
+	const switch T {
+	case int:
+		comptime.Error("InnerRejects rejects int")
+		return "bad"
+	case string:
+		return "ok"
+	}
+	return "other"
+}
+
+// A local `type Type = int` must not make the field tag `elf.Type`
+// look local: the selector member names a field, not a lexical
+// reference, so the dead `case string` arm for int fields is still
+// folded away and InnerRejects[int] is never specialized.
+func qualifiedFieldTag[T any]() string {
+	out := ""
+	const for _, elf := range comptime.Fields[T]() {
+		type Type = int
+		const switch elf.Type {
+		case string:
+			out += InnerRejects[elf.Type]()
+		case int:
+			out += "int"
+		}
+	}
+	return out
+}
+
+func main() {
+	fmt.Println(qualifiedFieldTag[Widget]())
+}
