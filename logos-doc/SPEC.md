@@ -80,7 +80,7 @@ Project tools SHOULD use `tool` directives in `go.mod`, never a Go file admitted
 ### 0.2 No new global keywords
 The language MUST add no new global keywords [T-0.2].
 See Sec 4.1 for contextual words and `const` positions.
-Identifiers that start with `_logos_` or `Logos_` MUST be rejected in `.lgo` [T-203.2].
+Identifiers that start with `_logos_` or `Logos_`, or that contain `_logosct`, MUST be rejected in `.lgo` [T-203.2].
 The compiler MUST report such identifiers with `correctness::reserved_identifier` [T-203.2].
 
 ### 0.3 Pure Go output through eject
@@ -1022,7 +1022,7 @@ A Go importer MUST see a property interface as the interface of its `Logos_GetF`
 
 A dynamic assertion such as `any(x).(I)` MUST work. [T-203.2]
 
-Identifiers starting with `Logos_` or `_logos_` MUST be reserved in `.lgo`. [T-203.2]
+Identifiers starting with `Logos_` or `_logos_`, and identifiers containing `_logosct`, the infix of ejected comptime instance names (Sec 18.2), MUST be reserved in `.lgo`. [T-203.2]
 
 A use of such an identifier MUST fail with `[correctness::reserved_identifier]`. [T-203.2]
 

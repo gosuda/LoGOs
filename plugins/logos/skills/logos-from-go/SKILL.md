@@ -72,7 +72,7 @@ These rules apply to both Go and `.lgo` lint targets, and diagnostics report ori
 | `correctness::mixed_package` | Finish the rename: no package holds both `.go` and `.lgo`. |
 | `correctness::misplaced_try` | Split the expression so `?` ends its own statement. |
 | `correctness::errdefer_needs_error_result` | Add a final `error` result, or use `defer`. |
-| `correctness::reserved_identifier` | Rename identifiers that start with `_logos_` or `Logos_`. |
+| `correctness::reserved_identifier` | Rename identifiers that start with `_logos_` or `Logos_` or contain `_logosct`. |
 | `correctness::duplicate_stem_filename` | Rename one of the two files that share a stem. |
 | `correctness::not_an_option` | Apply `?.` and `??` to option types only. |
 | `correctness::nil_deref_unproven` | Narrow with `!= nil`, select with `?.`, or unwrap with `??`. |

@@ -14,8 +14,11 @@ const logosMisplacedTry = "[correctness::misplaced_try] ? must end an assignment
 
 const logosErrdeferNeedsError = "[correctness::errdefer_needs_error_result] errdefer requires enclosing function to return error"
 
+// logosIsReserved reports whether name belongs to the compiler: the
+// _logos_ and Logos_ prefixes, and the _logosct infix of ejected comptime
+// instance names (<f>_logosct<N>, <f>_logosct_<h>).
 func logosIsReserved(name string) bool {
-	return strings.HasPrefix(name, "_logos_") || strings.HasPrefix(name, "Logos_")
+	return strings.HasPrefix(name, "_logos_") || strings.HasPrefix(name, "Logos_") || strings.Contains(name, "_logosct")
 }
 
 func (check *Checker) logosReservedIdent(id *syntax.Name) {
