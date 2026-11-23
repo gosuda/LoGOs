@@ -27,8 +27,8 @@ import (
 )
 
 // monitor runs `logos <verb>` with the monitor tag and relays the
-// findings of the program from a named pipe to standard error while the
-// program runs.
+// findings of the program from a named pipe while the program runs, to
+// the outputs that invocation.outputs names.
 func monitor(verb string, inv invocation) {
 	self, err := os.Executable()
 	if err != nil {
@@ -62,7 +62,8 @@ func monitor(verb string, inv invocation) {
 		stream = io.TeeReader(pipe, &raw)
 	}
 	findings := make(chan int, 1)
-	go func() { findings <- relay(stream, os.Stderr, inv.asJSON) }()
+	findingsOut, briefOut := inv.outputs(os.Stdout, os.Stderr)
+	go func() { findings <- relay(stream, findingsOut, inv.asJSON) }()
 
 	child := exec.Command(self, inv.arguments...)
 	child.Args[0] = os.Args[0]
@@ -143,7 +144,7 @@ func monitor(verb string, inv invocation) {
 			fixes = collectStalledFixes(raw.String(), overlay)
 		}
 		if inv.aiPatch {
-			printStalledBrief(fixes, inv.asJSON)
+			printStalledBrief(fixes, briefOut)
 		} else {
 			for _, done := range applyStalledFixes(fixes) {
 				fmt.Fprintf(os.Stderr, "logos conc: fixed %s\n", done)

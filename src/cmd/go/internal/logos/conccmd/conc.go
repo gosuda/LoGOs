@@ -105,15 +105,23 @@ ends. The monitor checks for it six times in the first 6.3 seconds of
 the program, and later after a collection of the program, one time per
 minute at most.
 
-A finding is printed on standard error as soon as the monitor sees it:
+A finding is printed on standard output as soon as the monitor sees it:
 
 	file:line: [rule] message
 		file:line: what this position is
 		fix: how to repair it
 
 The --json-diagnostics flag prints each finding as one JSON object per
-line instead, in the schema that 'logos lint --json-diagnostics' uses.
-The field 'note' holds the position lines and the fix line.
+line on standard error instead, in the schema that 'logos lint
+--json-diagnostics' uses. The field 'note' holds the position lines and
+the fix line. The --ai-patch brief is one JSON object per edit on
+standard output.
+
+When 'logos conc test' runs with -json, standard output carries the
+test2json stream of 'logos test -json'. Each line that the command
+prints there, a line of a text finding or of the brief, is then one
+test2json event with the action "output", so the stream keeps one
+schema.
 
 The exit status is the status of the program or of 'logos test' when
 that is not zero. Otherwise it is 1 when a finding was printed, and 0
@@ -174,6 +182,10 @@ func Register(root *base.Command) {
 type invocation struct {
 	arguments []string
 	asJSON    bool
+	// testJSON reports that the test child runs with -json, from the
+	// command line or from GOFLAGS: its standard output is a test2json
+	// stream.
+	testJSON bool
 	// goflags holds the effective GOFLAGS the child resolves, so flag
 	// lookups that live only there (like -overlay) are still visible.
 	goflags string
@@ -214,9 +226,14 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 // are decided from explicit values instead of the ambient process
 // configuration. An explicit -tags overrides GOFLAGS in the go command,
 // so the monitor joins the explicit set when one is present and the
-// GOFLAGS set otherwise.
+// GOFLAGS set otherwise. A -json of `test` stays in the arguments; it
+// also sets testJSON, as the go command reads it: from GOFLAGS, then
+// from the command line.
 func childArguments(verb string, args []string, takesValue func(string) bool, goflags string) invocation {
 	inv := invocation{arguments: []string{verb}, durations: map[string]string{}, goflags: goflags}
+	if verb == "test" {
+		inv.testJSON = goflagsTestJSON(goflags)
+	}
 	tagged := false
 	countSet := false
 	i := 0
@@ -251,6 +268,9 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
 		if name == "count" || name == "test.count" {
 			countSet = true
+		}
+		if verb == "test" && name == "json" {
+			inv.testJSON = boolFlagOn(hasValue, value)
 		}
 		switch {
 		case name == "json-diagnostics":
@@ -392,6 +412,29 @@ func goflagsTags(goflags string) (string, bool) {
 	return tags, ok
 }
 
+// goflagsTestJSON reports whether the effective GOFLAGS turns on the
+// -json flag of `logos test`. The last entry wins, as in the go command.
+func goflagsTestJSON(goflags string) bool {
+	flags, err := quoted.Split(goflags)
+	if err != nil {
+		return false
+	}
+	on := false
+	for _, flag := range flags {
+		if name, value, hasValue := strings.Cut(strings.TrimLeft(flag, "-"), "="); name == "json" {
+			on = boolFlagOn(hasValue, value)
+		}
+	}
+	return on
+}
+
+// boolFlagOn reads a boolean flag as the flag package does: a bare flag
+// is true, and a value is true when strconv.ParseBool reads it as true.
+func boolFlagOn(hasValue bool, value string) bool {
+	on, err := strconv.ParseBool(value)
+	return !hasValue || (err == nil && on)
+}
+
 func withMonitorTag(tags string) string {
 	if tags == "" {
 		return monitorTag
@@ -421,6 +464,45 @@ type findingLine struct {
 // endOfFindings ends the stream. The monitor never writes an empty
 // line, so the command writes one after the program has exited.
 const endOfFindings = "\n"
+
+// outputs returns where the command prints its findings and its
+// --ai-patch brief. Review output, the text findings and the brief,
+// goes to stdout; the findings under --json-diagnostics are diagnostic
+// records and go to stderr. When stdout carries the test2json stream of
+// `logos test -json`, each review line rides in a test2json output
+// event, so that stream keeps one schema.
+func (inv invocation) outputs(stdout, stderr io.Writer) (findings, brief io.Writer) {
+	review := stdout
+	if inv.testJSON {
+		review = testEvents{stdout}
+	}
+	if inv.asJSON {
+		return stderr, review
+	}
+	return review, review
+}
+
+// testEvents writes each line of a write as one test2json event with
+// the action "output", all in one write to w.
+type testEvents struct{ w io.Writer }
+
+func (e testEvents) Write(p []byte) (int, error) {
+	var events []byte
+	for line := range strings.Lines(string(p)) {
+		event, err := json.Marshal(struct {
+			Action string `json:"Action"`
+			Output string `json:"Output"`
+		}{Action: "output", Output: line})
+		if err != nil {
+			return 0, err
+		}
+		events = append(append(events, event...), '\n')
+	}
+	if _, err := e.w.Write(events); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
 
 // relay prints each finding line of r on w as soon as it arrives and
 // returns how many it printed. It stops at endOfFindings or at the end

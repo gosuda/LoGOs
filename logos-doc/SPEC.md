@@ -470,11 +470,13 @@ Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-10
 `logos conc` MUST build the program with the build tag `logosconc` in addition to the build tags that the user gives [T-106].
 A build without the build tag `logosconc` MUST NOT contain the monitor, and an ejected module MUST NOT contain the monitor [T-106].
 The build tag `logosconc` MUST NOT change the build of an ejected module [T-106].
-`logos conc` MUST print each finding on standard error while the program runs [T-106].
+`logos conc` MUST print each finding while the program runs: the text form on standard output, or with `--json-diagnostics` the object of Section 14 on standard error [T-106][T-Sec14].
 A finding MUST have a rule ID, a message, one or more source positions with the role of each position, and one fix hint [T-106].
 The text form of a finding MUST be the line `<file>:<line>: [<rule>] <message>`, then one line `<tab><file>:<line>: <role>` for each position, then the line `<tab>fix: <hint>` [T-106].
 With `--json-diagnostics`, `logos conc` MUST print each finding as one object of Section 14 with severity `deny` [T-106][T-Sec14].
 In that object, `file` and the two line fields of `span` MUST give the first position, the other fields of `span` MUST be 0, and the field `note` MUST hold the position lines and the fix line of the text form [T-106][T-Sec14].
+`logos conc` MUST print the `--ai-patch` brief on standard output, one JSON object per edit, also with `--json-diagnostics` [T-106].
+When `logos conc test` runs with `-json`, given on the command line or in `GOFLAGS`, `logos conc` MUST write each line that it prints on standard output as one test2json event with the action `output`, so that standard output stays one test2json stream [T-106].
 The exit status of `logos conc` MUST be the exit status of the program or of `logos test` when that status is not 0 [T-106].
 When that status is 0, the exit status MUST be 1 if `logos conc` printed a finding and 0 if it printed no finding [T-106].
 A finding line that `logos conc` cannot read MUST count as a finding [T-106].
@@ -2224,8 +2226,9 @@ Eject MUST keep ordinary scalar source, so its output needs no SIMD package or e
 
 ### 14.1 Emission
 
-- `--json-diagnostics` on `logos lint`, on `logos build`, and on every other command that accepts it MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files. [T-Sec14][T-102][R-U1]
+- `--json-diagnostics` on `logos lint`, on `logos build`, and on every other command that accepts it MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files, and for every finding of `logos conc`. [T-Sec14][T-102][T-106][R-U1]
 - Each line MUST be a complete object with schema version `1.0`. [T-Sec14]
+- `logos conc` MUST keep its review output, the text findings and the `--ai-patch` brief, on stdout, also under `--json-diagnostics`. [T-Sec14][T-106]
 
 ### 14.2 Top-level fields
 

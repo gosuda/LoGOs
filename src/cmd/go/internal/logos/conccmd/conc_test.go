@@ -225,6 +225,79 @@ func TestChildArgumentsKeepsGOFLAGSTags(t *testing.T) {
 	}
 }
 
+func TestChildArgumentsReadsTestJSON(t *testing.T) {
+	neverTakesValue := func(name string) bool { return false }
+	tests := []struct {
+		verb    string
+		goflags string
+		args    string
+		want    bool
+	}{
+		{"test", "", "-json ./a", true},
+		{"test", "", "./a -json", true},
+		{"test", "", "--json=true ./a", true},
+		{"test", "", "-json=false ./a", false},
+		{"test", "", "./a", false},
+		{"test", "", "./a -args -json", false},
+		{"test", "-json", "./a", true},
+		{"test", "-json=1", "./a", true},
+		{"test", "-json", "-json=false ./a", false},
+		{"test", "-json -json=false", "./a", false},
+		{"run", "", "-json .", false},
+		{"run", "-json", ".", false},
+	}
+	for _, tt := range tests {
+		got := childArguments(tt.verb, strings.Fields(tt.args), neverTakesValue, tt.goflags)
+		if got.testJSON != tt.want {
+			t.Errorf("GOFLAGS=%q logos conc %s %s: testJSON = %v, want %v", tt.goflags, tt.verb, tt.args, got.testJSON, tt.want)
+		}
+		if strings.Contains(tt.args, "json") && !slices.ContainsFunc(got.arguments, func(arg string) bool { return strings.Contains(arg, "json") }) {
+			t.Errorf("logos conc %s %s: child arguments %q lost the -json flag", tt.verb, tt.args, got.arguments)
+		}
+	}
+}
+
+// TestOutputsKeepReviewOnStdout runs one finding and one brief record
+// through the outputs of the four flag combinations: text findings and
+// the brief go to stdout, diagnostic records to stderr, and under
+// `test -json` every stdout line is a test2json output event.
+func TestOutputsKeepReviewOnStdout(t *testing.T) {
+	text, _ := relayAll(inversion, false)
+	record, _ := relayAll(inversion, true)
+	brief := `{"file":"main.lgo","line":12,"edit":"\tselect {"}` + "\n"
+	tests := []struct {
+		asJSON, testJSON bool
+		stdout, stderr   string
+	}{
+		{false, false, text + brief, ""},
+		{true, false, brief, record},
+		{false, true, text + brief, ""},
+		{true, true, brief, record},
+	}
+	for _, tt := range tests {
+		var stdout, stderr strings.Builder
+		inv := invocation{asJSON: tt.asJSON, testJSON: tt.testJSON}
+		findings, briefOut := inv.outputs(&stdout, &stderr)
+		relay(strings.NewReader(inversion), findings, inv.asJSON)
+		printStalledBrief([]stalledFix{{file: "main.lgo", line: 12, replacement: "\tselect {"}}, briefOut)
+		got := stdout.String()
+		if tt.testJSON {
+			var output strings.Builder
+			for line := range strings.Lines(got) {
+				var event struct{ Action, Output string }
+				if err := json.Unmarshal([]byte(line), &event); err != nil || event.Action != "output" {
+					t.Fatalf("--json-diagnostics=%v -json: stdout line %q is not a test2json output event", tt.asJSON, line)
+				}
+				output.WriteString(event.Output)
+			}
+			got = output.String()
+		}
+		if got != tt.stdout || stderr.String() != tt.stderr {
+			t.Errorf("--json-diagnostics=%v -json=%v:\nstdout %q\nwant   %q\nstderr %q\nwant   %q", tt.asJSON, tt.testJSON, got, tt.stdout, stderr.String(), tt.stderr)
+		}
+	}
+}
+
 func TestWithMonitorTagJoinsSpaceSeparatedTags(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"debug trace", "debug,trace,logosconc"},
