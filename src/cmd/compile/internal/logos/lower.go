@@ -278,6 +278,7 @@ type fileLower struct {
 	genImps                    *genImports
 	importsPendingGeneratedUse []*syntax.ImportDecl
 	ejectSites                 map[syntax.Node]bool
+	ctRuntimeUnsafe            bool // the ejected text imports unsafe for a comptime run-time body
 	// Option lowering state: optMemo pins one lowering per shared
 	// `T?` type node, narrowDone pins rewritten narrowed reads,
 	// wrapSpan remembers original spans of synthetic wrapper tops for

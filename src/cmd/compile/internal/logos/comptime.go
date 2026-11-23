@@ -364,23 +364,186 @@ func (fl *fileLower) cfKnownPackage(path string) *types2.Package {
 }
 
 // cfRetireDef keeps a comptime generic out of native code and out of
-// ejected text. Ejected text keeps an exported generic as a stub and drops
-// an unexported one; a forwarding function keeps its body natively.
+// ejected text. Ejected text keeps an exported generic as a stub, or with
+// its run-time body when cfRuntimeBody allows one, and drops an unexported
+// one; a forwarding function keeps its body natively.
 func (fl *fileLower) cfRetireDef(def *cfGenericDef) {
 	fn := def.decl
 	call := "panic(" + strconv.Quote("logos: comptime generic "+fn.Name.Value+" runs only through loGo/s instantiation") + ")"
+	runtime := base.LogosEject != "" && !def.forward && def.obj != nil && def.obj.Exported() && fl.cfRuntimeBody(fn)
 	if !def.forward {
 		fn.Body.List = fl.reparseStmts(call, fn.Pos())
 	}
 	switch {
 	case base.LogosEject != "" && (def.obj == nil || !def.obj.Exported()):
 		fl.add(fl.cfFuncStart(fl.off(syntax.StartPos(fn))), fl.off(syntax.EndPos(fn))+1, "")
+	case runtime:
 	case base.LogosEject != "" || !def.forward:
 		fl.add(fl.off(syntax.StartPos(fn.Body)), fl.off(syntax.EndPos(fn.Body))+1, "{\n\t"+call+"\n}")
 	default:
 		return
 	}
 	fl.changed = true
+}
+
+// cfLayout is one comptime.SizeOf or comptime.AlignOf call of a comptime
+// generic body, with the integer type its context gives it.
+type cfLayout struct {
+	call *syntax.CallExpr
+	targ syntax.Expr
+	op   string
+	typ  string
+}
+
+// cfRuntimeBody keeps, in the ejected text only, the body of an exported
+// comptime generic whose only compile-time forms are comptime.SizeOf and
+// comptime.AlignOf calls whose context fixes a predeclared integer type.
+// Each call becomes the unsafe operation on a zero value of its type
+// argument, converted to that type. Ordinary generic code that reaches
+// the generic with a type argument holding its own type parameter, such
+// as a local type that captures one, then runs in ejected code as it does
+// natively through an instance. The declaration check leaves the body to
+// each instance, so the test is syntactic and admits only plain Go with
+// no composite literal and no selector other than a package-qualified
+// name. Any other body keeps the panicking stub.
+func (fl *fileLower) cfRuntimeBody(fn *syntax.FuncDecl) bool {
+	imported := make(map[string]*types2.Package)
+	for _, decl := range fl.file.DeclList {
+		imp, ok := decl.(*syntax.ImportDecl)
+		if !ok {
+			continue
+		}
+		obj := fl.pkg.info.Implicits[imp]
+		if imp.LocalPkgName != nil {
+			obj = fl.pkg.info.Defs[imp.LocalPkgName]
+		}
+		if pn, ok := obj.(*types2.PkgName); ok && pn.Name() != "_" && pn.Name() != "." {
+			imported[pn.Name()] = pn.Imported()
+		}
+	}
+	parents := cfParents(fn)
+	var calls []cfLayout
+	var paths []string
+	ok := true
+	syntax.Inspect(fn.Body, func(n syntax.Node) bool {
+		if !ok {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.TryExpr, *syntax.ErrdeferStmt, *syntax.SwitchExpr, *syntax.ArmClause, *syntax.AssertedStruct,
+			*syntax.OptionType, *syntax.CoalesceExpr, *syntax.OptSelectExpr, *syntax.ConstType, *syntax.ConstFuncDecl,
+			*syntax.YieldStmt, *syntax.ScopeDeferStmt, *syntax.FieldDefault, *syntax.SpreadExpr, *syntax.InterpExpr,
+			*syntax.TupleType, *syntax.TupleLit, *syntax.LambdaExpr, *syntax.ConstIfStmt, *syntax.ConstSwitchStmt,
+			*syntax.ConstForStmt, *syntax.FieldProjExpr, *syntax.GroupStmt, *syntax.GroupChild, *syntax.CompositeLit:
+			ok = false
+		case *syntax.Name:
+			if obj, isFunc := fl.pkg.tpkg.Scope().Lookup(n.Value).(*types2.Func); isFunc && fl.pkg.ctExp.byObj[obj] != nil {
+				ok = false
+			}
+		case *syntax.SelectorExpr:
+			var pkg *types2.Package
+			if x, isName := n.X.(*syntax.Name); isName {
+				pkg = imported[x.Value]
+			}
+			switch {
+			case pkg == nil:
+				ok = false
+			case pkg != types2.LogosComptimePackage():
+				paths = append(paths, pkg.Path())
+			default:
+				layout, isLayout := fl.cfLayoutCall(n, fn, parents)
+				calls = append(calls, layout)
+				ok = isLayout
+			}
+			return false
+		}
+		return ok
+	})
+	if !ok || len(calls) == 0 {
+		return false
+	}
+	const unsafeName = "_logos_ctunsafe"
+	if !fl.ctRuntimeUnsafe {
+		fl.ctRuntimeUnsafe = true
+		end := fl.off(fl.file.PkgName.Pos()) + len(fl.file.PkgName.Value)
+		fl.add(end, end, "\n\nimport "+unsafeName+` "unsafe"`)
+	}
+	for _, path := range paths {
+		fl.ensureEjectImport(path, fn.Pos())
+	}
+	ctx := cfCtx{buf: fl.srcMap, starts: fl.start}
+	for _, l := range calls {
+		targ := string(fl.src[fl.off(syntax.StartPos(l.targ)):cfExactEnd(ctx, l.targ)])
+		text := fmt.Sprintf("%s(%s.%s(*new(%s)))", l.typ, unsafeName, l.op, targ)
+		end, want := cfExactEnd(ctx, l.call), token.LPAREN
+		scanSegment(fl.src, end, len(fl.src), func(t tok) bool {
+			switch {
+			case t.comment:
+				return true
+			case t.kind != want:
+				return false
+			case want == token.RPAREN:
+				end = t.end
+				return false
+			}
+			want = token.RPAREN
+			return true
+		})
+		fl.add(fl.off(syntax.StartPos(l.call)), end, text)
+	}
+	return true
+}
+
+// cfLayoutCall reports the layout call that sel selects from the comptime
+// package when its context fixes a predeclared integer type: a return value
+// of an integer result, a short variable declaration, or a variable
+// declaration of an integer type or of none.
+func (fl *fileLower) cfLayoutCall(sel *syntax.SelectorExpr, fn *syntax.FuncDecl, parents map[syntax.Node]syntax.Node) (cfLayout, bool) {
+	op := map[string]string{"SizeOf": "Sizeof", "AlignOf": "Alignof"}[sel.Sel.Value]
+	index, ok := parents[sel].(*syntax.IndexExpr)
+	if op == "" || !ok || index.X != sel {
+		return cfLayout{}, false
+	}
+	call, ok := parents[index].(*syntax.CallExpr)
+	targs := syntax.UnpackListExpr(index.Index)
+	if !ok || call.Fun != index || len(call.ArgList) != 0 || len(targs) != 1 {
+		return cfLayout{}, false
+	}
+	var typ syntax.Expr
+	switch p := parents[call].(type) {
+	case *syntax.ReturnStmt:
+		if len(fn.Type.ResultList) == 1 {
+			typ = fn.Type.ResultList[0].Type
+		}
+	case *syntax.ListExpr:
+		ret, isReturn := parents[p].(*syntax.ReturnStmt)
+		if i := slices.Index(p.ElemList, syntax.Expr(call)); isReturn && ret.Results == p && len(p.ElemList) == len(fn.Type.ResultList) {
+			typ = fn.Type.ResultList[i].Type
+		}
+	case *syntax.AssignStmt:
+		if _, isName := p.Lhs.(*syntax.Name); isName && p.Op == syntax.Def && p.Rhs == call {
+			typ = syntax.NewName(call.Pos(), "int")
+		}
+	case *syntax.VarDecl:
+		if len(p.NameList) == 1 && p.Values == call {
+			typ = p.Type
+			if typ == nil {
+				typ = syntax.NewName(call.Pos(), "int")
+			}
+		}
+	}
+	name, ok := typ.(*syntax.Name)
+	if !ok || fl.pkg.tpkg.Scope().Lookup(name.Value) != nil {
+		return cfLayout{}, false
+	}
+	obj, ok := types2.Universe.Lookup(name.Value).(*types2.TypeName)
+	if !ok {
+		return cfLayout{}, false
+	}
+	if basic, isBasic := obj.Type().(*types2.Basic); !isBasic || basic.Info()&types2.IsInteger == 0 {
+		return cfLayout{}, false
+	}
+	return cfLayout{call: call, targ: targs[0], op: op, typ: name.Value}, true
 }
 
 func cfHasTypeParam(t types2.Type) bool {
