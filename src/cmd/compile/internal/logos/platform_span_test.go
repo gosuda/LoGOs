@@ -182,6 +182,43 @@ func TestPlatformCommaOkKeepsTwoResults(t *testing.T) {
 		t.Fatalf("ApplyEdits: %v", err)
 	}
 	reparseLowered(t, "platform_commaok.lgo", out)
+	// A reparse alone cannot show the comma-ok assignment stayed
+	// two-valued, so inspect the native tree as well: a multi-destination
+	// assignment keeps its bare lookup, while the single-destination store
+	// of the other field is a MustNonNil call.
+	isMustNonNil := func(e syntax.Expr) bool {
+		call, ok := syntax.Unparen(e).(*syntax.CallExpr)
+		if !ok {
+			return false
+		}
+		sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+		return ok && sel.Sel.Value == "MustNonNil"
+	}
+	sawCommaOk := false
+	sawWrappedSingle := false
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		as, ok := n.(*syntax.AssignStmt)
+		if !ok {
+			return true
+		}
+		if lhs, ok := as.Lhs.(*syntax.ListExpr); ok && len(lhs.ElemList) == 2 {
+			sawCommaOk = true
+			if isMustNonNil(as.Rhs) {
+				t.Errorf("native tree wraps the comma-ok lookup in MustNonNil")
+			}
+			return true
+		}
+		if isMustNonNil(as.Rhs) {
+			sawWrappedSingle = true
+		}
+		return true
+	})
+	if !sawCommaOk {
+		t.Errorf("native tree lost the comma-ok assignment")
+	}
+	if !sawWrappedSingle {
+		t.Errorf("native tree misses the wrapped single-destination store")
+	}
 	text := string(out)
 	if strings.Contains(text, "ok = _logos_rt.MustNonNil") {
 		t.Errorf("lowered text wraps the comma-ok lookup:\n%s", text)
