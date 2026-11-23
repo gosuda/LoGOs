@@ -1121,3 +1121,109 @@ func efDeferredInfallibleCall() {
 	h.stats, _ = efPair()
 	_ = err
 }
+
+func efParseLogos(s string) (int, error) {
+	return 1, nil
+}
+
+// A loop that cannot run twice has no earlier iteration whose defer could
+// observe a later store: the single iteration pairs its own error.
+func efSingleIterationBreak() {
+	h := efHeld{}
+	for {
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats)
+			}
+		}()
+		h.stats, err = efFetchHeld()
+		break
+	}
+}
+
+// Both the result root and the error are declared in the loop body, so
+// every iteration owns its own instances and the guarded read pairs the
+// iteration's own values.
+func efFreshRootAndErr() {
+	for i := 0; i < 2; i++ {
+		h := efHeld{}
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats)
+			}
+		}()
+		h.stats, err = efFetchHeld()
+		_ = i
+	}
+}
+
+// The first call stores its error in a field, so it carries no tracked
+// identity, but its failed value still reaches the deferred read when the
+// retry is skipped. The guarded read must fail.
+func efFieldErrThenConditionalRetry(retry bool) error {
+	type savedBox struct {
+		err error
+	}
+	h := efHeld{}
+	saved := savedBox{}
+	var retryErr error
+	h.stats, saved.err = efFetchHeld()
+	defer func() {
+		if retryErr == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	if retry {
+		h.stats, retryErr = efFetchHeld()
+	}
+	return saved.err
+}
+
+// Parse starts as strconv.Atoi but is reassigned to a LoGOs function in
+// the loop, so the in-loop stores may hold LoGOs results. The deferred
+// read under only the skipped retry's nil check must fail.
+func efReassignedCallee(input string, retry bool) {
+	h := efHeld{}
+	parse := strconv.Atoi
+	var parseErr, retryErr error
+	_ = parseErr
+	defer func() {
+		if retryErr == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	for i := 0; i < 2; i++ {
+		h.stats, parseErr = parse(input)
+		parse = efParseLogos
+		_ = i
+	}
+	if retry {
+		h.stats, retryErr = efParseLogos(input)
+	}
+}
+
+// One loop holding both a shared-root capture (rejected) and a fresh-root
+// capture (accepted) exercises both deferred-proof paths.
+func efMixedFreshShared() {
+	shared := efHeld{}
+	var sharedErr error
+	shared.stats, sharedErr = efFetchHeld()
+	_ = sharedErr
+	for i := 0; i < 2; i++ {
+		h := efHeld{}
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats)
+			}
+		}()
+		h.stats, err = efFetchHeld()
+		defer func() {
+			println(shared.stats) // ERROR "result_before_error_check"
+		}()
+		_ = i
+	}
+	_ = shared
+}
