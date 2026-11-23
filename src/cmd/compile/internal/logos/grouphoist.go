@@ -183,7 +183,9 @@ func (h *groupHoist) channel(op *syntax.Operation) (syntax.Expr, otext, types2.T
 		nch = h.expr(ch)
 		fc.hoistSubEmit(fc.hoistSubTake(mark))
 	}
-	chText := fl.textOf(chSpan)
+	// A lazy copy: interpolation is lowered last, so an eager copy would
+	// keep the unlowered interpolation in the ejected channel text.
+	chText := fl.lazyText(chSpan)
 	return nch, chText, elemT
 }
 

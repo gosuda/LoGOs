@@ -96,6 +96,27 @@ func chanInterpSend(ctx context.Context, n int) error {
 	return nil
 }
 
+var stmtSawKey = make(chan string, 1)
+
+func recvChanLookup(key string) chan int {
+	select {
+	case stmtSawKey <- key:
+	default:
+	}
+	ch := make(chan int, 1)
+	ch <- len(key)
+	return ch
+}
+
+func recvChanSend(ctx context.Context, out chan int, key string) error {
+	go group (ctx) {
+		go {
+			out <- <-recvChanLookup($"k-{key}")
+		}
+	}
+	return nil
+}
+
 var first, second chan int
 
 func redirect() int {
@@ -221,6 +242,47 @@ func chanInterpReady() {
 	check("send-chan-interp", err == nil && got == 1 && keyOK && len(interpLookupChans) == 1, fmt.Sprint(err, got, keyOK, len(interpLookupChans)), "<nil> 1 true 1")
 }
 
+func recvChanReady() {
+	// A live context: under a cancelled group the hoisted inner
+	// receive races the done branch, which is unrelated to what
+	// this case pins (interpolation lowering in ejected text).
+	ch := make(chan int, 1)
+	err := recvChanSend(context.Background(), ch, "abc")
+	got := -1
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("recv-chan-interp", err == nil && got == 5, fmt.Sprint(err, got), "<nil> 5")
+}
+
+func recvStmtDrain(ctx context.Context, key string) error {
+	go group (ctx) {
+		go {
+			<-recvChanLookup($"k-{key}")
+		}
+	}
+	return nil
+}
+
+func recvStmtReady() {
+	// A live context for the same reason as recvChanReady above:
+	// this case pins interpolation lowering, not cancel semantics.
+	// Drop the key recorded by the earlier channel test so the read
+	// below observes this drain's lookup.
+	select {
+	case <-stmtSawKey:
+	default:
+	}
+	err := recvStmtDrain(context.Background(), "abc")
+	select {
+	case got := <-stmtSawKey:
+		check("recv-stmt-interp", err == nil && got == "k-abc", fmt.Sprint(err, got), "<nil> k-abc")
+	case <-time.After(5 * time.Second):
+		check("recv-stmt-interp", false, "lookup never ran", "<nil> k-abc")
+	}
+}
+
 func chanSnapshotBeforeValue() {
 	first = make(chan int, 1)
 	second = make(chan int, 1)
@@ -337,6 +399,8 @@ func main() {
 	blockedCallOnce()
 	interpSendReady()
 	chanInterpReady()
+	recvChanReady()
+	recvStmtReady()
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
 	gotoPastSend()
