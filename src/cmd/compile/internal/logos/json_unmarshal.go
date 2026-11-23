@@ -377,6 +377,7 @@ type trialMember struct {
 	ptr       bool
 	keyFunc   string
 	decodable bool
+	inits     []promotedDecoderInit
 }
 
 type jsonUnionClass struct {
@@ -410,6 +411,7 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 			spell:     c.code,
 			sample:    sample,
 			decodable: c.decodable,
+			inits:     c.inits,
 			ptr:       isPtr,
 			keyFunc:   c.keyFunc,
 		}
@@ -550,6 +552,9 @@ func unionMemberTrialLines(uc jsonUnionClass, i int) []string {
 		fmt.Sprintf("_logos_winidx = %d", i),
 	})
 	inner := []string{decl}
+	for _, in := range s.inits {
+		inner = append(inner, fmt.Sprintf("%s.%s = new(%s)", scratch, in.sel, in.elem))
+	}
 	switch {
 	case s.keyed:
 		inner = append(inner, ifLines(fmt.Sprintf("_logos_keys_%d == 0", i), []string{fmt.Sprintf("_logos_matched_%d = false", i)})...)
