@@ -852,10 +852,14 @@ func (check *Checker) logosExprIsPlatform(e syntax.Expr) bool {
 		return check.logosExprIsPlatform(call.ArgList[0])
 	}
 	if call, ok := syntax.Unparen(e).(*syntax.CallExpr); ok && check.logosCalleeWasGeneric(call) {
-		// A generic call with a pointer result is itself a platform
-		// source, so a field or element read straight off the call
-		// stays platform exactly as it does through a variable.
-		return true
+		// A generic call is itself a platform source only when its own
+		// result can be nil: a call returning a concrete value stays
+		// trusted, exactly as when the result first binds a variable.
+		if check.Info != nil {
+			if t := check.Info.TypeOf(e); t != nil && check.logosIsNonNilPointer(t) {
+				return true
+			}
+		}
 	}
 	if name, ok := syntax.Unparen(e).(*syntax.Name); ok {
 		if obj := check.lookup(name.Value); obj != nil {
