@@ -1262,7 +1262,7 @@ Termination-dead code is code that is not const-dead and that control flow canno
 
 The compiler MUST type-check termination-dead code as it type-checks live code, in a plain function and in an instance, and a `comptime.Error` in termination-dead code MUST fail compilation. Lowering MAY omit termination-dead code, as unrolling omits the iterations after the first terminating field, but the compiler MUST NOT omit the check of that code. [T-205]
 
-The declaration check of a comptime generic MUST leave the statements after a statement that holds a `const switch` to each instantiation, because the declaration cannot decide if that statement completes normally. [T-205]
+The declaration check of a comptime generic MUST leave the statements after a statement that holds a `const switch` to each instantiation, because the declaration cannot decide if that statement completes normally. When one of those statements is a labeled statement, the declaration check MUST check them itself, because a jump can reach them. A comptime generic with no instantiation therefore does not check the statements that it leaves; they are not termination-dead, because no check decides the termination of the `const switch`. [T-205]
 
 `comptime.Error(msg)` MUST take a constant string. [T-205]
 
