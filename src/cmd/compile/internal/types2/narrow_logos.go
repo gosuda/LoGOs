@@ -1128,6 +1128,11 @@ func (p *logosEFPass) hasTuple() bool {
 				lhs := logosEFNames(n)
 				errV, _ := p.tuple(lhs, n.Values)
 				found = found || errV != nil
+				if errV == nil {
+					if rhs := syntax.UnpackListExpr(n.Values); len(rhs) == 1 {
+						found = found || p.errCallShape(lhs, rhs[0])
+					}
+				}
 			}
 		}
 		return !found

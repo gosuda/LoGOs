@@ -1307,3 +1307,19 @@ func efGoMultiOriginReaders() {
 	n, err = read(buf[:])
 	_ = err
 }
+
+// A var declaration with a discarded error activates the deferred check
+// just like the short declaration form.
+func efVarBlankDeferred() {
+	var v, _ = efFetchHeld()
+	defer func() {
+		println(v) // ERROR "result_before_error_check"
+	}()
+}
+
+func efShortBlankDeferred() {
+	v, _ := efFetchHeld()
+	defer func() {
+		println(v) // ERROR "result_before_error_check"
+	}()
+}
