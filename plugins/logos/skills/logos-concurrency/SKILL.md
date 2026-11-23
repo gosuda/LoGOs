@@ -16,12 +16,12 @@ LoGOs runs goroutines inside `go group` blocks. Shared state lives in `logos/syn
 
 1. Write group code: start children inside `go group` blocks.
 2. Guard shared state with `logos/sync.Locked`.
-3. Run `logos lint` and `logos test -race` first. `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH.
+3. Run `logos lint ./...` and `logos test -race ./...` first; with no package list both cover only the package in the current directory, not the module's subpackages. `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH.
 4. Run the program under the monitor only when it is lint-clean and race-clean.
 5. Use `logos conc run` for a program and `logos conc test` for tests.
 6. Read each finding on standard output while the child still runs. Under `--json-diagnostics`, read the records on standard error.
 7. Repair the named position, then rerun without `conc` to confirm the behavior.
-8. Retry a shake failure with the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule, so treat a rerun as a retry, not an exact replay.
+8. Retry a shake failure with the printed seed to shake the run again. The seed alone does not fix the yield counts: each hook mixes in the goroutine ID and hook count, so a rerun with the same seed is a retry, not an exact replay.
 
 ## Group and lock forms
 
@@ -51,15 +51,40 @@ Set up the example packages before running the commands: create one module with 
 
 ## Read conc::lock_order_inversion
 
-Two goroutines took the same two `Locked` values in opposite orders. Treat it as a deadlock this run may have escaped by timing: the same run can still end with the runtime deadlock error after printing the finding, and the exit status is then the child's. One order everywhere gives no finding. Repair by taking the two values in one order everywhere, or by keeping both in one `Locked` value. Never edit a file under GOROOT to answer one.
+Two goroutines took the same two `Locked` values in opposite orders. The two orders must come from different goroutines; one goroutine that takes both orders is silent. Treat it as a deadlock this run may have escaped by timing: the same run can still end with the runtime deadlock error after printing the finding, and the exit status is then the child's. One order everywhere gives no finding. Repair by taking the two values in one order everywhere, or by keeping both in one `Locked` value. Never edit a file under GOROOT to answer one.
 
+Run the snippet from an error-returning function, as the `transfers` fixture in `logos_conc_stream.txt` does: `go group` needs the enclosing error result, so pasting bare groups into `main` does not compile. The lock callbacks take no error result, so keep `?` and fallible calls out of them; `main` calls the function and checks the error.
 ```lgo
-checking.WithLock(a => {
-  savings.WithLock(b => { move(a, b)? })
-})
-savings.WithLock(a => {
-  checking.WithLock(b => { move(a, b)? })
-})
+type account struct{ balance int }
+
+var (
+  checking sync.Locked[account]
+  savings  sync.Locked[account]
+)
+
+func opposite(ctx context.Context) error {
+  go group (ctx) {
+    go {
+      checking.WithLock(from => {
+        savings.WithLock(to => {
+          from.balance -= 10
+          to.balance += 10
+        })
+      })
+    }
+  }
+  go group (ctx) {
+    go {
+      savings.WithLock(from => {
+        checking.WithLock(to => {
+          from.balance -= 4
+          to.balance += 4
+        })
+      })
+    }
+  }
+  return nil
+}
 ```
 
 ## Read conc::group_child_stalled
@@ -114,13 +139,20 @@ goroutine ever waits on the lock, so no finding prints even at
 
 ## Read conc::group_unbounded
 
-A group without a limit runs 10000 children at one time. The count follows the work the program gives the group. A group with a limit never gets this finding. Repair by giving the group a limit.
+A group without a limit gets this finding when 10000 of its children run at one time. Gate the group on every child starting, as the `herd` fixture in `logos_conc_unbounded.txt` does: a child that returns early on a `work()?` failure, or one the scheduler has not started yet, can otherwise keep the running count below the threshold and the finding never prints. A group with a limit never gets this finding. Repair by giving the group a limit.
 
 ```lgo
+var started sync.WaitGroup
+
 go group (ctx) {
   for range 10000 {
-    go { work()? }
+    started.Add(1)
+    go {
+      started.Done()
+      time.Sleep(2 * time.Second)
+    }
   }
+  started.Wait()
 }
 ```
 
@@ -136,7 +168,7 @@ logos conc run -hold 2s ./slow
 
 Expect exit 1 for the first two: each prints its finding. Expect exit 0 for the third: the 400ms hold stays below the 2s limit.
 
-Pass `-shake` with a decimal seed to yield at group and lock hook points from that seed. Rerun the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule. Treat a rerun as a retry, not an exact replay. Pass bare `-shake` to take the seed from the clock; the command prints the seed it used. A bare `-shake` followed by a number takes that number as its seed. Omit `-shake` to turn shaking off. A seed of 0 is a usage error, because seed 0 turns shaking off. A non-numeric seed is a usage error.
+Pass `-shake` with a decimal seed to yield at group and lock hook points from that seed. Rerun the printed seed to shake the run again. The seed alone does not fix the yield counts: each hook mixes in the goroutine ID and hook count, so a rerun with the same seed can yield differently. Treat a rerun as a retry, not an exact replay. Pass bare `-shake` to take the seed from the clock; the command prints the seed it used. A bare `-shake` followed by a number takes that number as its seed. Omit `-shake` to turn shaking off. A seed of 0 is a usage error, because seed 0 turns shaking off. A non-numeric seed is a usage error.
 
 Pin GOMAXPROCS=1 for the seeded runs: one thread stops cross-processor stealing from hiding the order fault. It does not fix the schedule: the run queue still picks among the children that can run, and the seed mixes in goroutine IDs and hook counts.
 
