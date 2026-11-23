@@ -6,6 +6,7 @@ package noder
 
 import (
 	"bytes"
+	"errors"
 	"internal/logosfile"
 	"io"
 	"maps"
@@ -41,6 +42,10 @@ func logosEjectCtInstances(pkg *types2.Package, info *types2.Info, files []*synt
 		logosStore.edits = make(map[*syntax.File][]logos.Edit)
 	}
 	if err := logos.EjectCtInstances(pkg, info, files, logosStore.src, logosStore.edits); err != nil {
+		if refusal, ok := errors.AsType[*logos.CtEjectRefusal](err); ok {
+			base.Errorf("%v", refusal)
+			base.ExitIfErrors()
+		}
 		base.Fatalf("logos eject: %v", err)
 	}
 }

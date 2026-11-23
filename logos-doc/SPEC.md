@@ -1212,7 +1212,7 @@ A use of the switched type parameter inside a `const switch` case body MUST spel
 
 Instances MUST be memoized per type-argument list. [T-205]
 
-`logos eject` MUST print each instance that a package needs as a non-generic function `<f>_logosct<N>` in that package and MUST rename its call sites. An instance that names an unexported identifier of another package MUST fail eject with `[comptime::unexported_in_exported]`. [T-205]
+`logos eject` MUST print each instance that a package needs as a non-generic function `<f>_logosct<N>` in that package and MUST rename its call sites. An instance that names an unexported identifier, field, or method of another package MUST fail eject with `[comptime::unexported_in_exported]`. [T-205]
 
 An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
 
@@ -1226,9 +1226,9 @@ Any other range operand, and a non-struct `T`, MUST fail with `[comptime::const_
 
 Expansion MUST visit fields in declaration order. [T-205]
 
-It MUST include exported fields and unexported fields of a current-package `T`. [T-205]
+It MUST include exported fields and unexported fields of a `T` declared in the package that defines the generic, wherever the generic is instantiated. [T-205]
 
-It MUST exclude unexported fields of other packages. [T-205]
+It MUST exclude unexported fields of a `T` declared in any other package, the instantiating package included. [T-205]
 
 A `const for` MUST terminate when the body of some visible field terminates; a struct with no visible fields MUST NOT terminate. Over an unresolved generic type parameter it is terminating when its body is terminating with each instantiation rechecked after unrolling. [T-205]
 

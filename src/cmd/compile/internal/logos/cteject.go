@@ -435,17 +435,43 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 		return p.alias(pn.Imported()), nil
 	}
 	pkg := obj.Pkg()
-	if sels[n] || pkg == nil || obj.Parent() != pkg.Scope() {
+	if pkg == nil {
 		return n.Value, nil
 	}
-	if pkg.Path() == p.consumer.Path() {
-		return obj.Name(), nil
+	member := sels[n] || ctEjectMember(obj)
+	if !member && obj.Parent() != pkg.Scope() {
+		return n.Value, nil
 	}
-	if !obj.Exported() {
-		return "", fmt.Errorf("%s: [comptime::unexported_in_exported] a comptime instance ejected into package %s names unexported %s of package %s", n.Pos(), p.consumer.Path(), obj.Name(), pkg.Path())
+	foreign := pkg.Path() != p.consumer.Path()
+	if foreign && !obj.Exported() {
+		return "", &CtEjectRefusal{n.Pos(), fmt.Sprintf("[comptime::unexported_in_exported] a comptime instance ejected into package %s names unexported %s of package %s", p.consumer.Path(), obj.Name(), pkg.Path())}
 	}
-	return p.alias(pkg) + "." + obj.Name(), nil
+	switch {
+	case member:
+		return n.Value, nil
+	case foreign:
+		return p.alias(pkg) + "." + obj.Name(), nil
+	}
+	return obj.Name(), nil
 }
+
+func ctEjectMember(obj types2.Object) bool {
+	switch obj := obj.(type) {
+	case *types2.Var:
+		return obj.IsField()
+	case *types2.Func:
+		return obj.Signature().Recv() != nil
+	}
+	return false
+}
+
+// CtEjectRefusal is a comptime instance that logos eject cannot print.
+type CtEjectRefusal struct {
+	Pos syntax.Pos
+	Msg string
+}
+
+func (e *CtEjectRefusal) Error() string { return fmt.Sprintf("%s: %s", e.Pos, e.Msg) }
 
 func ctEjectDeclNames(decl syntax.Node) []*syntax.Name {
 	switch d := decl.(type) {

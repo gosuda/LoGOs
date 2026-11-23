@@ -5,33 +5,36 @@ cd w
 logos build ./...
 logos run ./main
 stdout '^wire-ok$'
-stdout '^names-cfg \[Port\]$'
-stdout '^names-svc \[Port Host hidden\]$'
+# SPEC 2.5: a const for includes the unexported fields of a T declared in
+# the package that defines the generic, here wire, and no others.
+stdout '^names-cfg \[Port secret\]$'
+stdout '^names-svc \[Port Host\]$'
 stdout '^cfg-port 9090$'
-stdout '^labels-cfg \[0=Port\]$'
-stdout '^labels-svc \[0=Port 1=Host 2=hidden\]$'
+stdout '^labels-cfg \[0=Port 1=secret\]$'
+stdout '^labels-svc \[0=Port 1=Host\]$'
 stdout '^describe-svc struct$'
 stdout '^describe-cfg struct$'
 stdout '^describe-int scalar$'
 stdout '^describe-off silent$'
 logos run ./names
-stdout '^\[Port\]$'
-cd ..
+stdout '^\[Port secret\]$'
 
-go list -export -deps -f '{{if .Export}}packagefile {{.ImportPath}}={{.Export}}{{end}}' fmt
-cp stdout $WORK/importcfg
-go tool compile -p example.com/wiretest/wire -importcfg $WORK/importcfg -o $WORK/wire.a w/wire/wire.lgo
-go tool pack p $WORK/wire.a __.LOGOS
-stdout 'comptime Autowire'
-stdout 'comptime Names'
-stdout 'comptime Describe'
-stdout 'const if true && '
-stdout 'func Autowire\[T any\]\(c \*Container\) \*T'
-stdout 'Resolve\[f\.Type\]\(c\)'
-stdout '//logosimp fmt fmt'
-stdout 'fmt\.Sprintf\("%d=%s", i, f\.Name\)'
-! stdout '_logos_ct'
-! stdout '_logos_tparam'
+# SPEC 2.5: each type-argument list compiles to one native instance in the
+# package that defines the generic; package main holds no copy.
+logos build -gcflags=all=-l -o $WORK/wire.exe ./main
+go tool nm $WORK/wire.exe
+stdout -count=2 ' T example\.com/wiretest/wire\.Autowire\.logosct\.[0-9a-f]{64}$'
+stdout -count=2 ' T example\.com/wiretest/wire\.Names\.logosct\.[0-9a-f]{64}$'
+stdout -count=2 ' T example\.com/wiretest/wire\.Labels\.logosct\.[0-9a-f]{64}$'
+stdout -count=3 ' T example\.com/wiretest/wire\.Describe\.logosct\.[0-9a-f]{64}$'
+! stdout ' T main\..*logosct'
+
+# SPEC 2.5: eject prints the instance Autowire[wire.Config] in package main,
+# where it cannot set the unexported field secret, so eject refuses it.
+! logos eject -o $WORK/out
+stderr '^(\./)?wire/wire\.lgo:33:6: \[comptime::unexported_in_exported\] a comptime instance ejected into package main names unexported secret of package example\.com/wiretest/wire$'
+! stderr 'internal compiler error'
+cd ..
 
 -- w/go.mod --
 module example.com/wiretest

@@ -3,8 +3,9 @@ env GOTOOLCHAIN=local
 
 cd m
 logos run .
-stdout '^names-main \[Port Host hidden\]$'
-stdout '^names-cfg \[Port\]$'
+# SPEC 2.5: unexported fields follow the package that defines the generic.
+stdout '^names-main \[Port Host\]$'
+stdout '^names-cfg \[Port secret\]$'
 cp stdout $WORK/native.txt
 
 logos eject -o out
