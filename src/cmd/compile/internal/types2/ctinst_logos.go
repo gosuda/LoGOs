@@ -789,17 +789,15 @@ func substTupleVars(check *Checker, t *Tuple, smap substMap) []*Var {
 	return out
 }
 
+// logosCtStopAfter ends the declaration check of a comptime generic after a
+// statement that holds a const switch: the declaration cannot decide
+// fallthrough from a deferred switch, so it leaves the continuation for the
+// concrete check without marking it dead. An instance checks the code after
+// a terminating statement like any other code: that code is
+// termination-dead, not const-dead, so it is type-checked and a
+// comptime.Error in it fails.
 func (check *Checker) logosCtStopAfter(s syntax.Stmt, tail []syntax.Stmt) bool {
-	if len(tail) == 0 {
-		return false
-	}
-	// The declaration cannot decide fallthrough from a deferred switch.
-	// Leave its continuation for the concrete check, without marking it dead.
-	if check.logosCtDeclCheck {
-		if !check.logosCtHasDeferredSwitch(s) {
-			return false
-		}
-	} else if !check.isTerminating(s, "") {
+	if len(tail) == 0 || !check.logosCtDeclCheck || !check.logosCtHasDeferredSwitch(s) {
 		return false
 	}
 	// A label in this list can be reached by a jump instead of falling
@@ -811,9 +809,6 @@ func (check *Checker) logosCtStopAfter(s syntax.Stmt, tail []syntax.Stmt) bool {
 	}
 	w := logosDeadUseWalk{check: check, checked: check.scope}
 	w.stmts(tail)
-	if !check.logosCtDeclCheck {
-		check.logosCtMarkDead(tail...)
-	}
 	return true
 }
 

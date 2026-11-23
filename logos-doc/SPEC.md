@@ -1246,6 +1246,10 @@ An assignment to it MUST fail with `[comptime::const_for_assign]`. [T-205]
 
 A live `comptime.Error(msg)` MUST fail compilation with `msg`. [T-205]
 
+A `const if` branch or a `const switch` case that an instantiation does not take is const-dead. The compiler MUST NOT type-check const-dead code or count it for termination or `break`, and a `comptime.Error` in const-dead code MUST NOT fail compilation. [T-205]
+
+Code that constant analysis reaches but control flow does not, for example a statement after a `return` or a `panic` in the taken case, is termination-dead. The compiler MUST type-check termination-dead code, and a `comptime.Error` in termination-dead code MUST fail compilation. [T-205]
+
 `comptime.Error(msg)` MUST take a constant string. [T-205]
 
 A non-constant `msg` MUST fail with `[comptime::error_not_constant]`. [T-205]

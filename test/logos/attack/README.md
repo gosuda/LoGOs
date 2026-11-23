@@ -2,7 +2,7 @@
 
 Each `.lgo` file is one behavior and a complete program. A `// run` file pairs with a `.out` file of the same stem. A `// errorcheck` file carries `// ERROR` comments. A `// compile` file must build with no diagnostic. Expected results follow plan invariants I1, I2, and I3. Where those invariants replace a SPEC 2.5 sentence, the fixture follows the plan. Other diagnostics follow SPEC 2.5, including the chain spelling in `test/logos/compile/comptime_cycle.lgo`.
 
-The plan replaces three SPEC 2.5 sentences. An untaken branch is not type-checked, is not counted for termination or break, and does not report `comptime.Error`. `f.Name`, `f.Index`, `f.Exported`, `f.Tag.Get` of a constant, and `comptime.TypeOf` identity are constants inside an instance. An exported comptime generic may name an unexported helper and an unexported type of its defining package, because the body is re-analyzed there. SPEC 2.5 still says both branches type-check, that a condition on `f.Name`, `f.Index`, or `f.Exported` fails `[comptime::not_constant]`, and that an unexported name fails `[comptime::unexported_in_exported]`.
+The plan replaces three SPEC 2.5 sentences. An untaken branch is const-dead: it is not type-checked, is not counted for termination or break, and does not report `comptime.Error`. Code after a `return` or `panic` in the taken branch is termination-dead, not untaken: it is type-checked and reports `comptime.Error` (owner decision of 2026-11-23, the #186 pin `test/logos/compile/comptime_error_unreached_case.lgo`). `f.Name`, `f.Index`, `f.Exported`, `f.Tag.Get` of a constant, and `comptime.TypeOf` identity are constants inside an instance. An exported comptime generic may name an unexported helper and an unexported type of its defining package, because the body is re-analyzed there. SPEC 2.5 still says that a condition on `f.Name`, `f.Index`, or `f.Exported` fails `[comptime::not_constant]`, and that an unexported name fails `[comptime::unexported_in_exported]`.
 
 Two packages are not a fixture. The logos testdir harness writes one source file into a throwaway module and builds that file. A second package has no import path. `identity_two_callsites.lgo` is the single-file form of I1 (one instance per type-argument list). An importing caller of an exported comptime generic is the same gap. `cross_unexported_helper.lgo` and `cross_unexported_type.lgo` attack the defining-package half of that rule.
 
@@ -21,10 +21,9 @@ Two packages are not a fixture. The logos testdir harness writes one source file
 | dead_error_silent.lgo | I3. `comptime.Error` in an untaken arm is silent. | basic.zig:353 |
 | dead_break_ignored.lgo | I3. `break` in an untaken arm does not affect the loop. | |
 | dead_false_error.lgo | I3. `comptime.Error` in a `const if false` arm is silent. | basic.zig:353 |
-| switch_return_hides_error.lgo | I3. A returning taken `const switch` case makes a later `comptime.Error` unreachable. | |
+| switch_tail_type_error.lgo | I3 and SPEC 2.5. Code after a returning taken case is termination-dead: its type error and its `comptime.Error` both report. | |
 | switch_dead_case_type_error.lgo | I3. A type error in an untaken `const switch` case is not checked. | |
 | switch_untaken_error_silent.lgo | I3. `comptime.Error` in an untaken case is silent. | |
-| switch_tail_type_error.lgo | I3. A type error after a returning taken case is not checked. | |
 | dead_error_taken.lgo | I3 and SPEC 2.5. A taken `comptime.Error` fails with its message. | |
 | switch_no_match_error.lgo | I3 and SPEC 2.5. No matching case leaves the later `comptime.Error` live. | |
 | taken_arm_type_error.lgo | I3. A type error in the taken `const if` arm still fails. | |

@@ -141,7 +141,6 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 	list = trimTrailingEmptyStmts(list)   // trailing empty statements are "invisible" to fallthrough analysis
 	narrowBase := check.logosNarrowBase() // logos M3-S4 hook: early-exit narrowing scope.
 	sharedSyntax := check.logosCtSubst != nil || check.logosFieldBind != nil
-	comptimeFlow := sharedSyntax || check.logosCtDeclCheck || check.logosRecordCopy
 	for i, s := range list {
 		if sharedSyntax {
 			s = check.logosYieldForm(s)
@@ -156,7 +155,7 @@ func (check *Checker) stmtList(ctxt stmtContext, list []syntax.Stmt) {
 		check.stmt(inner, s)
 		check.logosStmtExit(outerStmt) // logos M3-S4 hook.
 		check.logosAfterStmt(s)        // logos M3-S4 hook: early-exit narrowing for the rest of the list.
-		if comptimeFlow && check.logosCtStopAfter(s, list[i+1:]) {
+		if check.logosCtStopAfter(s, list[i+1:]) {
 			break
 		}
 	}

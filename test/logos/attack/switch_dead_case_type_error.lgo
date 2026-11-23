@@ -16,7 +16,9 @@ func Pick[T any](v T) string {
 	case int:
 		return "int"
 	}
-	comptime.Error("unsupported")
+	const if comptime.IsStruct[T]() {
+		comptime.Error("unsupported")
+	}
 	return ""
 }
 

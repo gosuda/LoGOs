@@ -1,11 +1,8 @@
-// run
+// errorcheck
 
-package main
+package p
 
-import (
-	"comptime"
-	"fmt"
-)
+import "comptime"
 
 func Pick[T any]() string {
 	const switch T {
@@ -13,11 +10,9 @@ func Pick[T any]() string {
 		return "int"
 	}
 	var s struct{ X int }
-	_ = s.NoSuch
+	_ = s.NoSuch // ERROR "NoSuch"
 	comptime.Error("unsupported")
 	return ""
 }
 
-func main() {
-	fmt.Println(Pick[int]())
-}
+var _ = Pick[int]() // ERROR "\[comptime::error\] unsupported"
