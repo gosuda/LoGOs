@@ -516,6 +516,178 @@ func jsonUnmarshalMethod(t types2.Type, name string) *types2.Func {
 	return fn
 }
 
+// promotedDecoderInit initializes one embedded pointer field on the promotion
+// path of a union member: sel is the dotted field selector from the scratch
+// value and elem is the element type spelling for new(...).
+type promotedDecoderInit struct {
+	sel  string
+	elem string
+}
+
+// jsonTrialDecoder reports whether the generated union trial can call
+// UnmarshalJSON on a zero value of t, and if so the embedded pointer fields
+// the trial must initialize. The method may be declared directly or promoted
+// through embedded fields. The trial declares a zero scratch value, so a
+// method reached through an embedded pointer would write through nil: the
+// returned inits allocate each such field before dispatch, in path order. A
+// path through an embedded interface, a generic instantiation, or a field the
+// holder package cannot assign stays unsupported, and every other form stays
+// untriable.
+func jsonTrialDecoder(t types2.Type, holderPkg *types2.Package, qual func(*types2.Package) string) ([]promotedDecoderInit, bool) {
+	u := unaliasConstView(t)
+	if p, ok := u.(*types2.Pointer); ok {
+		u = unaliasConstView(p.Elem())
+	}
+	var (
+		st    *types2.Struct
+		named *types2.Named
+		pkg   *types2.Package
+	)
+	if n, ok := u.(*types2.Named); ok {
+		if n.Obj() == nil {
+			return nil, false
+		}
+		if unboundParams(n) {
+			return nil, false
+		}
+		named = n
+		pkg = n.Obj().Pkg()
+		under := unaliasConstView(n.Underlying())
+		if _, ok := under.(*types2.Interface); ok {
+			return nil, false
+		}
+		s, ok := under.(*types2.Struct)
+		if !ok {
+			if !hasUnmarshalJSON(named) {
+				return nil, false
+			}
+			return nil, true
+		}
+		st = s
+	} else if s, ok := u.(*types2.Struct); ok {
+		st = s
+	} else {
+		return nil, false
+	}
+	lookup := types2.Type(st)
+	if named != nil {
+		lookup = named
+	}
+	m, index, _ := types2.LookupFieldOrMethod(types2.NewPointer(lookup), false, pkg, "UnmarshalJSON")
+	fn, ok := m.(*types2.Func)
+	if !ok || !jsonUnmarshalSignature("UnmarshalJSON", fn) {
+		return nil, false
+	}
+	inits, ok := promotedDecoderInits(st, index, holderPkg, qual)
+	if !ok {
+		return nil, false
+	}
+	return inits, true
+}
+
+func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Package, qual func(*types2.Package) string) ([]promotedDecoderInit, bool) {
+	var out []promotedDecoderInit
+	var sel []string
+	// Only an emitted init names a field, so only an init selector must be
+	// assignable from the holder package. A value-only path names nothing;
+	// unexported value fields on it are fine. Track the selector prefix:
+	// once it leaves what the holder can assign, any deeper init fails.
+	assignable := true
+	// The last index entry names the method itself in its declaring type;
+	// only the earlier entries are embedded field steps to walk.
+	steps := index
+	if len(steps) > 0 {
+		steps = steps[:len(steps)-1]
+	}
+	for pos, i := range steps {
+		last := pos == len(steps)-1
+		if i < 0 || i >= st.NumFields() {
+			return nil, false
+		}
+		f := st.Field(i)
+		if !f.Exported() && (holderPkg == nil || f.Pkg() != holderPkg) {
+			assignable = false
+		}
+		sel = append(sel, f.Name())
+		ft := unaliasConstView(f.Type())
+		var elem types2.Type
+		elemSpell := ""
+		isPtr := false
+		if p, ok := types2.Unalias(ft).(*types2.Pointer); ok {
+			isPtr = true
+			elem = unaliasConstView(p.Elem())
+			// Spell the allocation through the field's own pointer
+			// element, which keeps an accessible alias: for an
+			// embedded *Exported where Exported is an alias for an
+			// unexported type, the holder writes new(g.Exported),
+			// not new(g.hidden), which names an unreachable type.
+			elemSpell = types2.TypeString(p.Elem(), qual)
+			ft = elem
+		}
+		if unboundParams(ft) {
+			return nil, false
+		}
+		for {
+			named, ok := ft.(*types2.Named)
+			if !ok {
+				break
+			}
+			ft = unaliasConstView(named.Underlying())
+		}
+		switch c := ft.(type) {
+		case *types2.Struct:
+			if isPtr {
+				if !assignable {
+					return nil, false
+				}
+				out = append(out, promotedDecoderInit{sel: strings.Join(sel, "."), elem: elemSpell})
+			}
+			st = c
+		case *types2.Pointer, *types2.Interface:
+			return nil, false
+		default:
+			if isPtr {
+				if !assignable {
+					return nil, false
+				}
+				out = append(out, promotedDecoderInit{sel: strings.Join(sel, "."), elem: elemSpell})
+			}
+			if !last {
+				return nil, false
+			}
+		}
+	}
+	return out, true
+}
+
+// unboundParams reports whether t's spelling can name an unbound type
+// parameter: a generic declaration, an instantiation over one, or the
+// parameter itself. A named generic instantiation retains its origin's
+// parameter list, so only a declaration without type arguments is rejected
+// for having parameters; an instantiation is judged by its arguments.
+// Concrete instantiations spell fine with new(...).
+func unboundParams(t types2.Type) bool {
+	u := types2.Unalias(t)
+	if p, ok := u.(*types2.Pointer); ok {
+		return unboundParams(p.Elem())
+	}
+	if _, ok := u.(*types2.TypeParam); ok {
+		return true
+	}
+	if named, ok := u.(*types2.Named); ok {
+		if args := named.TypeArgs(); args != nil && args.Len() > 0 {
+			for i := range args.Len() {
+				if unboundParams(args.At(i)) {
+					return true
+				}
+			}
+			return false
+		}
+		return named.TypeParams() != nil && named.TypeParams().Len() > 0
+	}
+	return false
+}
+
 func jsonIsDecoderPointer(t types2.Type) bool {
 	p, ok := types2.Unalias(t).(*types2.Pointer)
 	if !ok {

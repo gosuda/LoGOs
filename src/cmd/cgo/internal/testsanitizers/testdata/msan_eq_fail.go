@@ -8,40 +8,57 @@ package main
 #include <stdint.h>
 #include <stdlib.h>
 
-struct rec { int8_t a; int64_t b; int8_t c; int64_t d; int8_t e; int64_t f; };
+typedef struct {
+	uint8_t tag;
+	uint64_t id;
+} msan_eq_fail_rec;
 
-// The field f stays uninitialized.
-struct rec *newRec(void) {
-	struct rec *r = malloc(sizeof *r);
-	r->a = 1;
-	r->b = 2;
-	r->c = 3;
-	r->d = 4;
-	r->e = 5;
-	return r;
+typedef struct {
+	msan_eq_fail_rec r[2];
+} msan_eq_fail_pair;
+
+msan_eq_fail_pair *msanEqFailAlloc(void) {
+	return (msan_eq_fail_pair *)malloc(sizeof(msan_eq_fail_pair));
+}
+
+// Writes only the tags, leaving both ids uninitialized. Comparing two
+// pairs initialized this way must report an uninitialized read exactly
+// because the equality instrumentation checks the compared fields: with
+// no checks emitted the comparison would silently report equal.
+void msanEqFailInitTags(msan_eq_fail_pair *p, uint8_t t0, uint8_t t1) {
+	p->r[0].tag = t0;
+	p->r[1].tag = t1;
+}
+
+void msanEqFailFree(msan_eq_fail_pair *p) {
+	free(p);
 }
 */
 import "C"
+
 import (
 	"fmt"
 	"unsafe"
 )
 
-type rec struct {
-	a int8
-	b int64
-	c int8
-	d int64
-	e int8
-	f int64
+// msanEqFailRecord matches msan_eq_fail_rec above: one tag byte, seven
+// padding bytes, then the id.
+type msanEqFailRecord struct {
+	Tag uint8
+	ID  uint64
 }
 
 func main() {
-	got := (*rec)(unsafe.Pointer(C.newRec()))
-	fmt.Println(equal(got, &rec{1, 2, 3, 4, 5, 6}))
-}
-
-//go:noinline
-func equal(a, b *rec) bool {
-	return *a == *b
+	pa := C.msanEqFailAlloc()
+	pb := C.msanEqFailAlloc()
+	C.msanEqFailInitTags(pa, 1, 2)
+	C.msanEqFailInitTags(pb, 1, 2)
+	a := (*[2]msanEqFailRecord)(unsafe.Pointer(pa))
+	b := (*[2]msanEqFailRecord)(unsafe.Pointer(pb))
+	if *a != *b {
+		panic("pairs differ")
+	}
+	fmt.Println("equal")
+	C.msanEqFailFree(pa)
+	C.msanEqFailFree(pb)
 }

@@ -1,0 +1,411 @@
+name: CI
+
+# Native GitHub Actions CI (see .github/scripts/*.sh). One run per commit:
+# route picks suites from the changed paths, build compiles the toolchain once, the suites reuse it.
+on:
+  push:
+    branches: [release-branch.go1.27]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "core ssa gc gates compiler cgo dogfood, or all"
+        default: all
+
+jobs:
+  route:
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      core: ${{ steps.route.outputs.core }}
+      ssa: ${{ steps.route.outputs.ssa }}
+      gc: ${{ steps.route.outputs.gc }}
+      gates: ${{ steps.route.outputs.gates }}
+      gate_any: ${{ steps.route.outputs.gate_any }}
+      regression: ${{ steps.route.outputs.regression }}
+      compiler: ${{ steps.route.outputs.compiler }}
+      cgo: ${{ steps.route.outputs.cgo }}
+      dogfood: ${{ steps.route.outputs.dogfood }}
+      bench: ${{ steps.route.outputs.bench }}
+      build: ${{ steps.route.outputs.build }}
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          fetch-depth: 2
+          persist-credentials: false
+      - run: for f in .github/scripts/*.sh; do bash -n "$f"; done
+      - id: route
+        run: GITHUB_SHA="${{ github.event.pull_request.head.sha || github.sha }}" bash .github/scripts/route.sh
+        env:
+          INPUT_SUITES: ${{ inputs.suites || 'all' }}
+
+  build:
+    needs: route
+    if: needs.route.outputs.build == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 30
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - run: bash .github/scripts/setup.sh build
+      - uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: toolchain
+          path: "~/tc"
+
+  # logos.yml suites unit / scripts / upstream / autovec (and tagged-facts, which unit already runs)
+  unit:
+    needs: [route, build]
+    if: needs.route.outputs.core == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 150
+    env:
+      LOGOS_PACKAGES: >-
+        logos/... cmd/go/internal/logos/... cmd/compile/internal/logos/... cmd/internal/logos/...
+        cmd/internal/logosowned internal/logosfile cmd/cgo/internal/testlogos
+      GOLANGCI_LINT_VERSION: "2.15.0"
+      GOLANGCI_LINT_SHA256: "9b7fe6a6bf6334b98decf8d86b11415ea7889afdabdd1959fdce23af2a9ebcea"
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore py
+      - name: Unit tests
+        run: bash .github/scripts/unit-tests.sh
+      - name: Compiler fixtures
+        if: always()
+        run: bash .github/scripts/unit-fixtures.sh
+      - name: Lint (gofmt, vet, golangci-lint)
+        if: always()
+        run: bash .github/scripts/unit-lint.sh
+      - name: Evidence checkers and controls (wasm, tagged facts/methods, field offsets, simd imports, zero arrays)
+        if: always()
+        run: bash .github/scripts/unit-evidence.sh
+  scripts:
+    needs: [route, build]
+    if: needs.route.outputs.regression == 'true'
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 180
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles c23
+      - name: Full upstream and LoGOs regression (run.bash; includes every cmd/go script test)
+        run: bash .github/scripts/scripts-regression.sh
+      - name: Installed test subprocess behavior and inline capability ownership
+        if: always()
+        run: bash .github/scripts/scripts-subprocess.sh
+  upstream:
+    needs: [route, build]
+    if: needs.route.outputs.core == 'true'
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 150
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles py c23
+      - name: Complete upstream complement under the compact test environment
+        run: bash .github/scripts/upstream-complement.sh
+  autovec:
+    needs: [route, build]
+    if: needs.route.outputs.core == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 60
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles c23
+      - name: Automatic vectorization tests
+        run: bash .github/scripts/autovec-tests.sh
+  compiler:
+    needs: [route, build]
+    if: needs.route.outputs.compiler == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 120
+    env:
+      GOMAXPROCS: "4"
+      GOFLAGS: "-p=2"
+      GOMEMLIMIT: 2GiB
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles c23
+      - name: Focused compiler and command checks
+        run: bash .github/scripts/compiler-checks.sh
+  gates:
+    needs: [route, build]
+    if: needs.route.outputs.gate_any == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 150
+    env:
+      GOMAXPROCS: "4"
+      GOFLAGS: "-p=2"
+      GOMEMLIMIT: 2GiB
+      GATES: ${{ needs.route.outputs.gates }}
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles
+      - name: Routed feature gates (feature-gate.sh, minus its own toolchain build)
+        run: bash .github/scripts/gates-routed.sh
+  gc:
+    needs: [route, build]
+    if: needs.route.outputs.gc == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 120
+    env:
+      GOMAXPROCS: "4"
+      GOFLAGS: "-p=2"
+      GOMEMLIMIT: 2GiB
+    strategy:
+      fail-fast: false
+      matrix:
+        experiment: [logosarena, "logosarena,nogreenteagc"]
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore
+      - name: Runtime GC stability under each experiment
+        env:
+          EXP: ${{ matrix.experiment }}
+        run: bash .github/scripts/gc-experiments.sh
+      - name: Original close-ownership failure probe
+        if: matrix.experiment == 'logosarena'
+        env:
+          EXP: ${{ matrix.experiment }}
+        run: bash .github/scripts/gc-probe.sh
+  ssa:
+    needs: [route, build]
+    if: needs.route.outputs.ssa == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 150
+    env:
+      GOMAXPROCS: "4"
+      GOFLAGS: "-p=2"
+      GOMEMLIMIT: 2GiB
+      GOAMD64: v1
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles
+      - name: "SIMD zero guards: frozen attacks, vet, mutation proof"
+        run: bash .github/scripts/ssa-zero1.sh
+      - name: "SIMD zero guards: native and emulated (qemu) CPUs"
+        if: always()
+        run: bash .github/scripts/ssa-zero2.sh
+      - name: "SIMD gate and dominance scripts (plain and race), wasm runner isolation"
+        if: always()
+        run: bash .github/scripts/ssa-zero3.sh
+      - name: "Autovec native: preflight, faults, memory, GC"
+        if: always()
+        run: bash .github/scripts/ssa-av1.sh
+      - name: "Autovec native: mutation proofs and ejection"
+        if: always()
+        run: bash .github/scripts/ssa-av2.sh
+      - name: "Autovec native: formatting and generated builtins enforced"
+        if: always()
+        run: bash .github/scripts/ssa-av3.sh
+
+  # The runner kills a silent job; the heartbeat keeps the log alive (cause not found), so manual runs only.
+  simdstd:
+    needs: [route, build]
+    if: github.event_name == 'workflow_dispatch' && needs.route.outputs.ssa == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 150
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles
+      - name: SIMD standard library at the baseline (v1) and v3 targets
+        run: bash .github/scripts/simdstd-library.sh
+  cgo:
+    needs: [route, build]
+    if: needs.route.outputs.cgo == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 120
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles
+      - name: C compilers (gccgo)
+        run: bash .github/scripts/cgo-compilers.sh
+      - name: "cgo focused: lint, compat, probes, families, sanitizers, stock oracle"
+        if: always()
+        run: bash .github/scripts/cgo-focused.sh
+  cgofull:
+    needs: [route, build, cgo]
+    if: github.event_name == 'push' && needs.route.outputs.cgo == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        experiment: ["nologoscgoopt,nologosfastcgo", "logoscgoopt,nologosfastcgo"]
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles c23
+      - name: C compilers (gccgo)
+        run: bash .github/scripts/cgo-compilers.sh
+      - name: cgo full default-short dist under each cgo experiment
+        env:
+          CGO_EXPERIMENT: ${{ matrix.experiment }}
+        run: bash .github/scripts/cgofull-dist.sh
+  cgobench:
+    needs: [route, build, cgo]
+    if: github.event_name == 'push' && needs.route.outputs.cgo == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 120
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore oracles
+      - name: C compilers (gccgo)
+        run: bash .github/scripts/cgo-compilers.sh
+      - name: "cgo benchmark: one frozen sequential campaign per declared row"
+        run: bash .github/scripts/cgobench-benchmark.sh
+  dogfood:
+    needs: [route, build]
+    if: needs.route.outputs.dogfood == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 120
+    env:
+      GOMAXPROCS: "2"
+      GOMEMLIMIT: 2GiB
+      GOGC: "50"
+      GOTOOLCHAIN: local
+      GOWORK: "off"
+      GOENV: "off"
+      GOTELEMETRY: "off"
+      CC: gcc
+      CXX: g++
+      GGLINT_REVISION: 4456e61c4dbdf636fca2b5bd77787873e2d1c1e8
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore nopath
+      - name: "Corpus: contracts, exact sources"
+        run: bash .github/scripts/dogfood-contracts.sh
+      - name: "Corpus: build reviewed gglint"
+        if: always()
+        run: bash .github/scripts/dogfood-gglint.sh
+      - name: "Corpus: tools diagnostics"
+        if: always()
+        run: bash .github/scripts/dogfood-tools.sh
+      - name: "Retain early tools diagnostics"
+        if: always()
+        run: bash .github/scripts/dogfood-retainearly.sh
+      - name: "Corpus: replay and assess all 196 cells"
+        if: always()
+        run: bash .github/scripts/dogfood-replay.sh
+      - name: "Corpus: fixtures, backends, FFI, language, lint"
+        if: always()
+        run: bash .github/scripts/dogfood-corpus.sh
+      - name: "Retain source receipts, reports, and raw evidence"
+        if: always()
+        run: bash .github/scripts/dogfood-retainevidence.sh
+      - uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        if: always()
+        with:
+          name: dogfood-evidence
+          path: dogfood-evidence
+
+  bench:
+    needs: [route, build]
+    if: github.event_name == 'pull_request' && needs.route.outputs.bench == 'true'
+    runs-on: depot-ubuntu-24.04-4
+    timeout-minutes: 90
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha || github.sha }}"
+          persist-credentials: false
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - run: bash .github/scripts/setup.sh restore
+      - name: "Autovec benchmarks: base vs candidate, measured sequentially"
+        run: bash .github/scripts/bench-autovec.sh
+        env:
+          AUTOVEC_CAND_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

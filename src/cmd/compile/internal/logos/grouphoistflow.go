@@ -109,6 +109,17 @@ func pureSendValue(e syntax.Expr) bool {
 	return pure
 }
 
+// groupConstExpr reports whether e is a constant expression: only
+// those are spelled in each send arm, since a `:=` snapshot gives an
+// untyped constant its default type instead of the channel element's
+// contextual type, while a typed constant snapshots equivalently.
+// Every other value keeps its original checked node so later passes
+// keep the annotations a reparsed clone would lose.
+func (fc *funcLower) groupConstExpr(e syntax.Expr) bool {
+	_, ok := typeConst(fc.fl.pkg.info, e)
+	return ok
+}
+
 func (h *groupHoist) send(s *syntax.SendStmt) span {
 	fc := h.fc
 	fl := fc.fl
@@ -116,49 +127,74 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	chSpan, valSpan := h.span(s.Chan), h.span(s.Value)
 	mark := fc.hoistSubMark()
 	nMark, tMark := len(h.native), len(h.text)
+	// slotsThrough may replace the channel with a fresh snapshot name
+	// that carries no checked type, so read the channel type before it
+	// runs for the value temporary below.
+	chType := h.fc.fl.pkg.info.TypeOf(s.Chan)
 	h.slots([]*syntax.Expr{&s.Chan, &s.Value})
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
 	// Snapshot both operands in source order so each is evaluated once and
 	// the two send arms share no expression nodes; the snapshots live in a
 	// block so no declaration lands in the enclosing scope where a forward
-	// goto might cross it, and `:=` avoids spelling a type that a local
-	// declaration could shadow.
-	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
+	// goto might cross it. Snapshot defines copy through moved regions
+	// so later lowerings (interpolated strings) compose into the copies
+	// instead of being dropped as orphans inside the covering send splice.
+	// Leaf names and literals spell directly; constant values spell twice
+	// from source for element typing.
 	chTmp, valTmp := fc.groupTempName("c"), fc.groupTempName("v")
 	// A leaf value (a name, nil, or a literal) needs no snapshot: the
 	// send arms can spell it directly, which also keeps the channel's
-	// element typing for `ch <- nil` and `ch <- 1` that `v :=` loses.
-	// Any other expression is snapshotted once and the arms share the
-	// temporary.
+	// element typing for `ch <- nil` and `ch <- 1` that a temporary
+	// would give the default type. Any other expression is snapshotted
+	// once and the arms share the temporary.
+	var chText otext
+	var valText otext
 	var valArmA, valArmB syntax.Expr
 	var valTxtA, valTxtB otext
-	var valDef syntax.Stmt
+	var valDefs []syntax.Stmt
+	var valDefTexts []otext
+	// The channel always snapshots through a moved region: unlike a leaf
+	// value, it can hold an interpolation that lowerInterp still rewrites,
+	// and an immediate textOf would orphan that later edit.
 	switch v := syntax.Unparen(s.Value).(type) {
 	case *syntax.Name:
+		chText = fl.lazyText(chSpan)
+		valText = fl.textOf(valSpan)
 		valArmA, valArmB = nameOf(pos, v.Value), nameOf(pos, v.Value)
 		valTxtA, valTxtB = valText, valText
 	case *syntax.BasicLit:
+		chText = fl.lazyText(chSpan)
+		valText = fl.textOf(valSpan)
 		valArmA = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valArmB = at(&syntax.BasicLit{Value: v.Value, Kind: v.Kind}, pos)
 		valTxtA, valTxtB = valText, valText
 	default:
-		// A pure value is spelled in each send arm: only one arm
-		// evaluates it, and spelling it keeps the channel element's
-		// contextual typing for untyped constants (-1, 1 << 3,
-		// math.Pi) that a `:=` snapshot would give the default type.
-		if pureSendValue(s.Value) {
-			if a, okA := parseExprAt(valText.s, pos); okA {
-				if b, okB := parseExprAt(valText.s, pos); okB {
+		// Only an untyped constant is spelled in each send arm: only one
+		// arm evaluates it, and spelling it keeps the channel element's
+		// contextual typing (-1, 1 << 3, math.Pi) that a temporary
+		// would give the default type. Every other value snapshots through
+		// its original checked node, so later passes keep the annotations
+		// a reparsed clone would lose: fresh addresses, tuple fields, and
+		// property or SIMD facts.
+		if pureSendValue(s.Value) && fc.groupConstExpr(s.Value) {
+			srcText := fl.srcUser(valSpan.start, valSpan.end)
+			if a, okA := parseExprAt(srcText.s, pos); okA {
+				if b, okB := parseExprAt(srcText.s, pos); okB {
+					chText = fl.lazyText(chSpan)
+					valText = fl.textOf(valSpan)
 					valArmA, valArmB = a, b
 					valTxtA, valTxtB = valText, valText
 					break
 				}
 			}
 		}
+		chText = fl.lazyText(chSpan)
+		valText = fl.lazyText(valSpan)
 		valArmA, valArmB = nameOf(pos, valTmp), nameOf(pos, valTmp)
 		valTxtA, valTxtB = gen(valTmp), gen(valTmp)
-		valDef = defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value})
+		valDefs, valDefTexts = h.sendValueTemp(pos, s, valTmp, valText, chType)
 	}
+
 	armVal := func(valE syntax.Expr) *syntax.CommClause {
 		return at(&syntax.CommClause{Comm: at(&syntax.SendStmt{
 			Chan:  nameOf(pos, chTmp),
@@ -180,9 +216,7 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	blockList := []syntax.Stmt{
 		defineOf(pos, []syntax.Expr{nameOf(pos, chTmp)}, []syntax.Expr{s.Chan}),
 	}
-	if valDef != nil {
-		blockList = append(blockList, valDef)
-	}
+	blockList = append(blockList, valDefs...)
 	blockList = append(blockList, ready)
 	block := blockOf(pos, blockList)
 	preNative, preText := h.native[nMark:], h.text[tMark:]
@@ -193,12 +227,224 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	block.List = append(slices.Clone(preNative), block.List...)
 	selText := cat(gen("select { case "+chTmp+" <- "), valTxtA, gen(": default:\nselect { case "+chTmp+" <- "), valTxtB, gen(": "+fc.groupDoneText(h.top)+" }\n}"))
 	texts := append(preText, cat(gen(chTmp+" := "), chText))
-	if valDef != nil {
-		texts = append(texts, cat(gen(valTmp+" := "), valText))
-	}
+	texts = append(texts, valDefTexts...)
 	texts = append(texts, selText)
 	h.add([]syntax.Stmt{block}, cat(gen("{\n"), joinO(texts, "\n"), gen("\n}")))
 	return span{start: chSpan.start, end: valSpan.end}
+}
+
+// sendValueTemp snapshots a send value into valTmp. The temporary is
+// declared with the channel element type when it can be spelled, so the
+// value keeps the send's contextual typing: `v := 1 << n` would give v
+// the default int instead of the element type, rejecting sends to
+// chan int8 (and untyped comparisons to a channel of a defined bool
+// type). An assignment to the typed temporary applies exactly the
+// send's assignability rule. spellTypeBoth refuses names that fail
+// package visibility; a function-local type, const, or variable in
+// scope at pos can still shadow the spelled name, so a shadowed
+// spelling falls back to `:=`, which keeps the value's own type.
+func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp string, valText otext, chType types2.Type) ([]syntax.Stmt, []otext) {
+	fallback := func() ([]syntax.Stmt, []otext) {
+		return []syntax.Stmt{
+			defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
+		}, []otext{
+			cat(gen(valTmp+" := "), valText),
+		}
+	}
+	// The caller reads the channel type before slotsThrough runs: by now
+	// s.Chan may be a fresh snapshot name with no checked type. A type
+	// parameter's Underlying is its constraint interface rather than a
+	// channel, so resolve the core type before extracting the element:
+	// without it a valid generic send falls back to inference and the
+	// default int rejects the value.
+	if chType == nil {
+		return fallback()
+	}
+	ch, ok := chType.Underlying().(*types2.Chan)
+	if !ok {
+		core := types2.CoreType(chType)
+		if core == nil {
+			return fallback()
+		}
+		ch, ok = core.Underlying().(*types2.Chan)
+		if !ok {
+			return fallback()
+		}
+	}
+	elemNative, elemSpelled, ok := h.fc.fl.spellTypeBoth(ch.Elem(), pos)
+	if !ok || h.fc.fl.spelledTypeShadowed(ch.Elem(), pos) {
+		return fallback()
+	}
+	return []syntax.Stmt{
+		typedVarDecl(pos, nameOf(pos, valTmp), elemNative),
+		assignOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
+	}, []otext{
+		gen("var " + valTmp + " " + elemSpelled),
+		cat(gen(valTmp+" = "), valText),
+	}
+}
+
+// spelledTypeShadowed reports whether declaring a variable with the
+// spelling of typ at pos would resolve a name to a different
+// declaration than the checked type names: a function-local type,
+// const, or variable in scope at pos shadows the package-level or
+// universe name the spelling uses, or a local shadows the import
+// qualifier the spelling reuses. Anything the walk cannot prove
+// unshadowed falls back to inference, which keeps the value's own
+// type.
+func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
+	scope := fl.sortedScopeAt(pos)
+	if scope == nil {
+		return true
+	}
+	self := fl.pkg.tpkg
+	shadowed := false
+	// bare reports whether spelling the bare name of obj at pos resolves
+	// to obj. LookupParent walks the enclosing scopes, so a
+	// function-local type, const, or variable reports its own object
+	// instead of the package-level or universe name the spelling uses.
+	// Anything the walk cannot prove unshadowed, including a name that
+	// resolves nowhere, falls back to inference, which keeps the
+	// value's own type.
+	// qualified reports whether spelling the qualifier spellTypeBoth
+	// recorded for path at pos resolves to that import. synthQualifier
+	// reuses an existing import alias, so a function parameter or local
+	// with the same name shadows the qualifier and the spelling names
+	// the wrong declaration.
+	bare := func(name string, obj *types2.TypeName) {
+		if shadowed {
+			return
+		}
+		if obj == nil {
+			shadowed = true
+			return
+		}
+		if pkg := obj.Pkg(); pkg != self && pkg != nil {
+			return
+		}
+		if got := scope.LookupParent(name, pos); got != types2.Object(obj) {
+			shadowed = true
+		}
+	}
+	qualified := func(path string) {
+		if shadowed {
+			return
+		}
+		var q string
+		if fl.genImps != nil {
+			q = fl.genImps.qual[path]
+		}
+		if q == "" {
+			q = ownedEjectImports[fl.file][path]
+		}
+		if q == "" {
+			shadowed = true
+			return
+		}
+		got := scope.LookupParent(q, pos)
+		if got == nil {
+			return
+		}
+		pn, ok := got.(*types2.PkgName)
+		if !ok || pn.Imported() == nil || pn.Imported().Path() != path {
+			shadowed = true
+		}
+	}
+	var walk func(t types2.Type)
+	walkTuple := func(t *types2.Tuple) {
+		if t == nil || shadowed {
+			return
+		}
+		for i := range t.Len() {
+			walk(t.At(i).Type())
+		}
+	}
+	walk = func(t types2.Type) {
+		if t == nil || shadowed {
+			return
+		}
+		switch t := t.(type) {
+		case *types2.Basic:
+			if t.Kind() == types2.UnsafePointer {
+				qualified(types2.Unsafe.Path())
+				break
+			}
+			obj, _ := types2.Universe.Lookup(t.Name()).(*types2.TypeName)
+			bare(t.Name(), obj)
+		case *types2.TypeParam:
+			bare(t.Obj().Name(), t.Obj())
+		case *types2.Alias:
+			if pkg := t.Obj().Pkg(); pkg != nil && pkg != self {
+				qualified(pkg.Path())
+			} else {
+				bare(t.Obj().Name(), t.Obj())
+			}
+			if args := t.TypeArgs(); args != nil {
+				for i := range args.Len() {
+					walk(args.At(i))
+				}
+			}
+		case *types2.Pointer:
+			walk(t.Elem())
+		case *types2.Slice:
+			walk(t.Elem())
+		case *types2.Array:
+			walk(t.Elem())
+		case *types2.Map:
+			walk(t.Key())
+			walk(t.Elem())
+		case *types2.Chan:
+			walk(t.Elem())
+		case *types2.Signature:
+			walkTuple(t.Params())
+			walkTuple(t.Results())
+		case *types2.Tuple:
+			walkTuple(t)
+		case *types2.Named:
+			if pkg := t.Obj().Pkg(); pkg != nil && pkg != self {
+				qualified(pkg.Path())
+			} else {
+				bare(t.Obj().Name(), t.Obj())
+			}
+			if args := t.TypeArgs(); args != nil {
+				for i := range args.Len() {
+					walk(args.At(i))
+				}
+			}
+		case *types2.Interface:
+			// The printer writes only explicit methods and embedded
+			// type names, so only those spellings can be shadowed. An
+			// inherited method from an embedded interface is never
+			// spelled; rejecting the spelling for it drops a valid
+			// channel type, so walk the explicit methods and keep the
+			// separate walk over embedded types below.
+			for i := range t.NumExplicitMethods() {
+				m := t.ExplicitMethod(i)
+				if !m.Exported() && m.Pkg() != self {
+					shadowed = true
+					return
+				}
+				walk(m.Type())
+			}
+			for i := range t.NumEmbeddeds() {
+				walk(t.EmbeddedType(i))
+			}
+		case *types2.Struct:
+			// A struct spelling lists its fields structurally, so an
+			// unexported field from another package cannot be spelled:
+			// the field's identity includes its declaring package.
+			for i := range t.NumFields() {
+				f := t.Field(i)
+				if !f.Exported() && f.Pkg() != self {
+					shadowed = true
+					return
+				}
+				walk(f.Type())
+			}
+		}
+	}
+	walk(typ)
+	return shadowed
 }
 
 func (h *groupHoist) recvStmt(s *syntax.ExprStmt, op *syntax.Operation) (syntax.Stmt, otext, span) {

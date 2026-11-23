@@ -111,7 +111,7 @@ jobs:
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
           GOEXPERIMENT=simd,preemptibleloops GOAMD64=v3 go build -gcflags=-d=ssa/autovec/debug=1 -o "$RUNNER_TEMP/vector-gc" ../test/logos/run/autovec_gc.go 2>&1 | tee "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
-          grep -E 'autovec_gc.go:48:.*autovectorized 64-bit integer loop' "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
+          grep -E 'autovec_gc.go:58:.*autovectorized 64-bit integer loop' "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
           GODEBUG=asyncpreemptoff=1 timeout 90s "$RUNNER_TEMP/vector-gc"
       - name: "Build the mutation overlay helper"
         if: "!cancelled() && steps.build.outcome == 'success'"
@@ -269,6 +269,17 @@ jobs:
           1.27.2 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 UPROOT1272
           1.27.3 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 UPROOT1273
           PINS
+      - name: "Select and verify the C23 consumer compiler"
+        run: |
+          compiler="$(command -v gcc-14)"
+          compiler_bin="$RUNNER_TEMP/autovec-c23-bin"
+          mkdir "$compiler_bin"
+          ln -s "$compiler" "$compiler_bin/cc"
+          "$compiler_bin/cc" --version
+          printf 'int main(void) { return 0; }\n' |
+            "$compiler_bin/cc" -std=c23 -x c - -o "$RUNNER_TEMP/autovec-c23-check"
+          "$RUNNER_TEMP/autovec-c23-check"
+          printf '%s\n' "$compiler_bin" >> "$GITHUB_PATH"
       - name: "Build the toolchain"
         id: "build"
         run: |

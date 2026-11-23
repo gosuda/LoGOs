@@ -1,0 +1,10 @@
+// compile
+
+package p
+
+type PrimNode interface{ int | string }
+
+type PrimHolder struct {
+	Body   PrimNode
+	Status int = 200
+}

@@ -57,9 +57,25 @@ func (fl *fileLower) lowerPlatform() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.AssignStmt:
+			// A single value feeding several destinations is the
+			// comma-ok shape: wrapping it in the single-result
+			// MustNonNil call would not compile, so the lookup
+			// stays as is. Positions nested inside still lower.
+			if l, ok := n.Lhs.(*syntax.ListExpr); ok && len(l.ElemList) > 1 {
+				if _, ok := n.Rhs.(*syntax.ListExpr); !ok {
+					break
+				}
+			}
 			collectSingle(n.Rhs, func(e syntax.Expr) { n.Rhs = e })
 		case *syntax.VarDecl:
 			if n.Values != nil {
+				// Same comma-ok shape as above: `var v, ok = m[k]`
+				// keeps the two-result lookup.
+				if len(n.NameList) > 1 {
+					if _, ok := n.Values.(*syntax.ListExpr); !ok {
+						break
+					}
+				}
 				collectSingle(n.Values, func(e syntax.Expr) { n.Values = e })
 			}
 		case *syntax.CallExpr:

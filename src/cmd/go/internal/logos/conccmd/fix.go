@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/scanner"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -198,15 +199,17 @@ func headerEncloses(lines []string, idx, line int) bool {
 					inRaw = false
 				}
 			case inStr:
-				if c == '\\' {
+				switch c {
+				case '\\':
 					j++
-				} else if c == '"' {
+				case '"':
 					inStr = false
 				}
 			case inRune:
-				if c == '\\' {
+				switch c {
+				case '\\':
 					j++
-				} else if c == '\'' {
+				case '\'':
 					inRune = false
 				}
 			case c == '/' && j+1 < len(s) && s[j+1] == '/':
@@ -268,7 +271,7 @@ func childContext(header string) (ctx, exit string, ok bool) {
 	depth := 0
 	openAt := -1 // index of the "(" whose depth-1 contents hold pos
 	depthOneOpen := -1
-	for i := 0; i < len(header); i++ {
+	for i := range len(header) {
 		switch header[i] {
 		case '(':
 			depth++
@@ -298,7 +301,7 @@ func childContext(header string) (ctx, exit string, ok bool) {
 	if name == "" || name == "_" {
 		return "", "", false
 	}
-	for i := 0; i < len(name); i++ {
+	for i := range len(name) {
 		c := name[i]
 		if c != '_' && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') {
 			return "", "", false
@@ -332,10 +335,10 @@ func childContext(header string) (ctx, exit string, ok bool) {
 		result = strings.TrimSpace(result[:i])
 	}
 	result = strings.TrimSpace(strings.TrimSuffix(result, "{"))
-	switch {
-	case result == "":
+	switch result {
+	case "":
 		return name, "return", true
-	case result == "error":
+	case "error":
 		return name, "return " + name + ".Err()", true
 	}
 	// A named error result like "(err error)" or "err error" also exits.
@@ -520,10 +523,9 @@ func assigned(toks []lineToken, i int) bool {
 	return false
 }
 
-// printStalledBrief prints one JSON object per fix to standard output
-// without changing files. Under -json-diagnostics it writes each brief
-// inside a test2json output record so the stream keeps one schema.
-func printStalledBrief(fixes []stalledFix, asJSON bool) {
+// printStalledBrief prints one JSON object per fix to w without
+// changing files. The caller picks w with invocation.outputs.
+func printStalledBrief(fixes []stalledFix, w io.Writer) {
 	for _, f := range fixes {
 		rec, err := json.Marshal(struct {
 			File string `json:"file"`
@@ -533,17 +535,6 @@ func printStalledBrief(fixes []stalledFix, asJSON bool) {
 		if err != nil {
 			continue
 		}
-		if asJSON {
-			event, err := json.Marshal(struct {
-				Action string `json:"Action"`
-				Output string `json:"Output"`
-			}{Action: "output", Output: string(rec) + "\n"})
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(os.Stdout, "%s\n", event)
-			continue
-		}
-		fmt.Fprintf(os.Stdout, "%s\n", rec)
+		_, _ = w.Write(append(rec, '\n'))
 	}
 }

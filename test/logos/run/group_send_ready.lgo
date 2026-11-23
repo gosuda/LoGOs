@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 var failed bool
@@ -73,6 +74,52 @@ func interpSend(ctx context.Context, ch chan string, n int) error {
 	return nil
 }
 
+var interpLookupChans = map[string]chan int{}
+
+var interpChan chan int
+
+func lookupChan(key string) chan int {
+	ch, ok := interpLookupChans[key]
+	if !ok {
+		ch = make(chan int, 1)
+		interpLookupChans[key] = ch
+	}
+	interpChan = ch
+	return ch
+}
+
+func chanInterpSend(ctx context.Context, n int) error {
+	go group (ctx) {
+		go {
+			lookupChan($"key={n}") <- 1
+		}
+	}
+	return nil
+}
+
+var stmtSawKey = make(chan string, 1)
+
+// recvChanLookup answers with the key it was called with, so a test
+// that receives from its channel checks the looked-up key by value.
+func recvChanLookup(key string) chan string {
+	select {
+	case stmtSawKey <- key:
+	default:
+	}
+	ch := make(chan string, 1)
+	ch <- key
+	return ch
+}
+
+func recvChanSend(ctx context.Context, out chan string, key string) error {
+	go group (ctx) {
+		go {
+			out <- <-recvChanLookup($"k-{key}")
+		}
+	}
+	return nil
+}
+
 var first, second chan int
 
 func redirect() int {
@@ -131,6 +178,18 @@ func precancelled() context.Context {
 	return ctx
 }
 
+func tickShadowed() time.Duration { return time.Second }
+
+func shadowedImportSend(ctx context.Context, ch chan time.Duration, time int) error {
+	_ = time
+	go group (ctx) {
+		go {
+			ch <- tickShadowed()
+		}
+	}
+	return nil
+}
+
 func bothArmsReady() {
 	bad := 0
 	for i := 0; i < 100; i++ {
@@ -187,6 +246,58 @@ func interpSendReady() {
 	check("interp-send", err == nil && got == "count=4", fmt.Sprint(err, got), "<nil> count=4")
 }
 
+func chanInterpReady() {
+	err := chanInterpSend(precancelled(), 4)
+	got := -1
+	select {
+	case got = <-interpChan:
+	default:
+	}
+	_, keyOK := interpLookupChans["key=4"]
+	check("send-chan-interp", err == nil && got == 1 && keyOK && len(interpLookupChans) == 1, fmt.Sprint(err, got, keyOK, len(interpLookupChans)), "<nil> 1 true 1")
+}
+
+func recvChanReady() {
+	// A live context: under a cancelled group the hoisted inner
+	// receive races the done branch, which is unrelated to what
+	// this case pins (interpolation lowering in ejected text).
+	ch := make(chan string, 1)
+	err := recvChanSend(context.Background(), ch, "abc")
+	got := ""
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("recv-chan-interp", err == nil && got == "k-abc", fmt.Sprint(err, " ", got), "<nil> k-abc")
+}
+
+func recvStmtDrain(ctx context.Context, key string) error {
+	go group (ctx) {
+		go {
+			<-recvChanLookup($"k-{key}")
+		}
+	}
+	return nil
+}
+
+func recvStmtReady() {
+	// A live context for the same reason as recvChanReady above:
+	// this case pins interpolation lowering, not cancel semantics.
+	// Drop the key recorded by the earlier channel test so the read
+	// below observes this drain's lookup.
+	select {
+	case <-stmtSawKey:
+	default:
+	}
+	err := recvStmtDrain(context.Background(), "xyz")
+	select {
+	case got := <-stmtSawKey:
+		check("recv-stmt-interp", err == nil && got == "k-xyz", fmt.Sprint(err, " ", got), "<nil> k-xyz")
+	case <-time.After(5 * time.Second):
+		check("recv-stmt-interp", false, "lookup never ran", "<nil> k-xyz")
+	}
+}
+
 func chanSnapshotBeforeValue() {
 	first = make(chan int, 1)
 	second = make(chan int, 1)
@@ -213,6 +324,93 @@ func shadowedTypeName() {
 	default:
 	}
 	check("shadowed-type-send", err == nil && got.N == 9, fmt.Sprint(err, got), "<nil> {9}")
+}
+
+type cargo interface{}
+
+func cargoOutput(out chan cargo) chan cargo {
+	return out
+}
+
+func shadowedIfaceSend(ctx context.Context, n int, out chan cargo) error {
+	type cargo = int8
+	go group (ctx) {
+		go {
+			cargoOutput(out) <- 1 << n
+		}
+	}
+	return nil
+}
+
+func shadowedIfaceValue() {
+	out := make(chan cargo, 1)
+	err := shadowedIfaceSend(precancelled(), 3, out)
+	var got any
+	select {
+	case got = <-out:
+	default:
+	}
+	check("shadowed-iface-dynamic-type", err == nil && fmt.Sprintf("%T", got) == "int", fmt.Sprint(err, got), "<nil> 8")
+}
+
+func shadowedIfaceRecv(ctx context.Context, in <-chan int, n int, out chan cargo) error {
+	type cargo = int8
+	go group (ctx) {
+		go {
+			cargoOutput(out) <- (1 << n) + <-in
+		}
+	}
+	return nil
+}
+
+func shadowedIfaceRecvValue() {
+	in := make(chan int, 1)
+	in <- 2
+	out := make(chan cargo, 1)
+	err := shadowedIfaceRecv(context.Background(), in, 3, out)
+	var got any
+	select {
+	case got = <-out:
+	default:
+	}
+	check("shadowed-iface-recv-hoist", err == nil && fmt.Sprintf("%T", got) == "int" && fmt.Sprint(got) == "10", fmt.Sprint(err, got), "<nil> 10")
+}
+
+func shadowedImportValue() {
+	ch := make(chan time.Duration, 1)
+	err := shadowedImportSend(precancelled(), ch, 0)
+	got := time.Duration(0)
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("shadowed-import-qualifier-send", err == nil && got == time.Second, fmt.Sprint(err, got), "<nil> 1s")
+}
+
+func nextPointer() unsafe.Pointer {
+	v := 7
+	return unsafe.Pointer(&v)
+}
+
+func shadowedUnsafeSend(ctx context.Context, ch chan unsafe.Pointer, unsafe int) error {
+	_ = unsafe
+	go group (ctx) {
+		go {
+			ch <- nextPointer()
+		}
+	}
+	return nil
+}
+
+func shadowedUnsafeValue() {
+	ch := make(chan unsafe.Pointer, 1)
+	err := shadowedUnsafeSend(precancelled(), ch, 0)
+	got := unsafe.Pointer(nil)
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("shadowed-unsafe-qualifier-send", err == nil && got != nil, fmt.Sprint(err, got), "<nil> non-nil")
 }
 
 func gotoPastSend() {
@@ -302,8 +500,15 @@ func main() {
 	blockedStillCancels()
 	blockedCallOnce()
 	interpSendReady()
+	chanInterpReady()
+	recvChanReady()
+	recvStmtReady()
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
+	shadowedIfaceValue()
+	shadowedIfaceRecvValue()
+	shadowedImportValue()
+	shadowedUnsafeValue()
 	gotoPastSend()
 	nilSendReady()
 	namedElemReady()

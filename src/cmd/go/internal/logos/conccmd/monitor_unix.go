@@ -8,6 +8,7 @@ package conccmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -29,9 +30,9 @@ import (
 )
 
 // monitor runs `logos <verb>` with the monitor tag and relays the
-// findings of the program from a named pipe to standard error while the
-// program runs.
-func monitor(verb string, inv invocation) {
+// findings of the program from a named pipe while the program runs, to
+// the outputs that invocation.outputs names.
+func monitor(ctx context.Context, verb string, inv invocation) {
 	self, err := os.Executable()
 	if err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
@@ -43,7 +44,7 @@ func monitor(verb string, inv invocation) {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	base.AtExit(func() { os.RemoveAll(dir) })
+	base.AtExit(func() { _ = os.RemoveAll(dir) })
 
 	// The command holds the pipe open for reading and writing. A program
 	// can then open it for writing at any time without blocking, and the
@@ -56,7 +57,7 @@ func monitor(verb string, inv invocation) {
 	if err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
 	}
-	defer pipe.Close()
+	defer func() { _ = pipe.Close() }()
 
 	stream := io.Reader(pipe)
 	var raw strings.Builder
@@ -64,9 +65,10 @@ func monitor(verb string, inv invocation) {
 		stream = io.TeeReader(pipe, &raw)
 	}
 	findings := make(chan int, 1)
-	go func() { findings <- relay(stream, os.Stderr, inv.asJSON) }()
+	findingsOut, briefOut := inv.outputs(os.Stdout, os.Stderr)
+	go func() { findings <- relay(stream, findingsOut, inv.asJSON) }()
 
-	child := exec.Command(self, inv.arguments...)
+	child := exec.CommandContext(ctx, self, inv.arguments...)
 	child.Args[0] = os.Args[0]
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
@@ -85,10 +87,10 @@ func monitor(verb string, inv invocation) {
 		if err != nil {
 			base.Fatalf("logos conc %s: %v", verb, err)
 		}
-		defer stderrR.Close()
+		defer func() { _ = stderrR.Close() }()
 		child.Stderr = stderrW
 		go func() {
-			io.Copy(scanner, stderrR)
+			_, _ = io.Copy(scanner, stderrR)
 			close(copyDone)
 		}()
 	} else {
@@ -110,7 +112,6 @@ func monitor(verb string, inv invocation) {
 	// Always set the shake seed, even when empty: the child inherits
 	// OrigEnv, and an inherited nonzero value would shake the run without
 	// printing a seed. An empty value turns shaking off, matching the
-	// omitted -shake default. Later entries win over inherited ones.
 	child.Env = append(child.Env, shakeEnv+"="+inv.shake)
 	base.StartSigHandlers()
 	started := time.Now()
@@ -119,16 +120,21 @@ func monitor(verb string, inv invocation) {
 		// The run is over and the exit-status line is already in the
 		// pipe, but inherited writers keep it open — drain only what
 		// is buffered, never wait for an EOF that may never come.
-		stderrW.Close()
+		_ = stderrW.Close()
 		// An expired deadline wakes the background copy but also
 		// prevents it from reading the buffered tail, so retire it
 		// first, then drain under a short grace deadline: buffered
 		// bytes return at once and the wait stays bounded.
-		stderrR.SetReadDeadline(time.Now())
+		if err := stderrR.SetReadDeadline(time.Now()); err != nil {
+			base.Fatalf("logos conc %s: %v", verb, err)
+		}
 		<-copyDone
-		stderrR.SetReadDeadline(time.Now().Add(3 * time.Second))
-		io.Copy(scanner, stderrR)
+		if err := stderrR.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			base.Fatalf("logos conc %s: %v", verb, err)
+		}
+		_, _ = io.Copy(scanner, stderrR)
 	}
+	scanner.finish()
 
 	if _, err := pipe.WriteString(endOfFindings); err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
@@ -149,7 +155,7 @@ func monitor(verb string, inv invocation) {
 			fixes = collectStalledFixes(raw.String(), overlay)
 		}
 		if inv.aiPatch {
-			printStalledBrief(fixes, inv.asJSON)
+			printStalledBrief(fixes, briefOut)
 		} else {
 			for _, done := range applyStalledFixes(fixes, started) {
 				fmt.Fprintf(os.Stderr, "logos conc: fixed %s\n", done)
@@ -185,8 +191,9 @@ var exitLine = regexp.MustCompile(`exit status ([0-9]+)$`)
 
 // exitScanWriter passes the child's standard error through to standard
 // error while it watches for the "exit status N" line `logos run`
-// prints. The wrapper's own status is 1, so the last such line is the
-// only way to recover the program's status.
+// prints. The wrapper's own status is 1, so the first such line is the
+// only way to recover the program's status; a helper that inherited
+// standard error can print a later one that must not replace it.
 type exitScanWriter struct {
 	mu   sync.Mutex
 	tail []byte
@@ -205,18 +212,44 @@ func (s *exitScanWriter) Write(p []byte) (int, error) {
 		}
 		line := s.tail[:i]
 		s.tail = s.tail[i+1:]
-		if m := exitLine.FindSubmatchIndex(line); m != nil &&
-			(m[0] == 0 || line[m[0]-1] != ':') {
-			// A build diagnostic such as "error obtaining VCS status:
-			// exit status 128" ends with the same phrase; the colon
-			// keeps it from passing for the wrapper's own report.
-			s.code, _ = strconv.Atoi(string(line[m[2]:m[3]]))
-		}
+		s.scan(line)
 	}
 	if len(s.tail) > 4096 {
 		s.tail = s.tail[len(s.tail)-4096:]
 	}
 	return n, err
+}
+
+// finish scans the unterminated tail once the child's standard error
+// is drained: whatever the program or a helper left without a newline
+// still gets one last look for the wrapper's report.
+func (s *exitScanWriter) finish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.tail) == 0 {
+		return
+	}
+	s.scan(s.tail)
+	s.tail = s.tail[:0]
+}
+
+// scan records the exit status of an "exit status N" line. The first
+// match wins: a helper that inherited standard error can still print a
+// late "exit status N" after the program exited, and it must not
+// replace the program's status. A diagnostic such as "error obtaining
+// VCS status: exit status 128" carries a colon and whitespace before
+// the phrase, which the glued report never has.
+func (s *exitScanWriter) scan(line []byte) {
+	m := exitLine.FindSubmatchIndex(line)
+	if m == nil || s.code != 0 {
+		return
+	}
+	prefix := line[:m[0]]
+	trimmed := bytes.TrimRight(prefix, " \t")
+	if len(trimmed) < len(prefix) && bytes.HasSuffix(trimmed, []byte(":")) {
+		return
+	}
+	s.code, _ = strconv.Atoi(string(line[m[2]:m[3]]))
 }
 
 func (s *exitScanWriter) status() int {

@@ -65,6 +65,19 @@ func logosMarkWarn() {
 	errorMsgs[len(errorMsgs)-1].logos.warn = true
 }
 
+// ResetErrors clears the queued error messages and the error counters.
+// It is for tests that exercise error paths without exiting the process.
+func ResetErrors() {
+	errorMsgs = errorMsgs[:0]
+	numErrors = 0
+	numSyntaxErrors = 0
+	lasterror = struct {
+		syntax src.XPos
+		other  src.XPos
+		msg    string
+	}{}
+}
+
 func logosText(m errorMsg) string {
 	if !LogosJSON {
 		return m.msg

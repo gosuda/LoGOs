@@ -8,41 +8,58 @@ package main
 #include <stdint.h>
 #include <stdlib.h>
 
-struct rec { int8_t a; int64_t b; int8_t c; int64_t d; int8_t e; int64_t f; };
+typedef struct {
+	uint8_t tag;
+	uint64_t id;
+} msan_eq_rec;
 
-// The padding after a, c and e stays uninitialized.
-struct rec *newRec(void) {
-	struct rec *r = malloc(sizeof *r);
-	r->a = 1;
-	r->b = 2;
-	r->c = 3;
-	r->d = 4;
-	r->e = 5;
-	r->f = 6;
-	return r;
+typedef struct {
+	msan_eq_rec r[2];
+} msan_eq_pair;
+
+msan_eq_pair *msanEqAlloc(void) {
+	return (msan_eq_pair *)malloc(sizeof(msan_eq_pair));
+}
+
+// Writes only the fields, leaving the seven padding bytes between
+// tag and id uninitialized, the way a C caller that never touches
+// padding does.
+void msanEqInit(msan_eq_pair *p, uint8_t t0, uint64_t i0, uint8_t t1, uint64_t i1) {
+	p->r[0].tag = t0;
+	p->r[0].id = i0;
+	p->r[1].tag = t1;
+	p->r[1].id = i1;
+}
+
+void msanEqFree(msan_eq_pair *p) {
+	free(p);
 }
 */
 import "C"
+
 import (
 	"fmt"
 	"unsafe"
 )
 
-type rec struct {
-	a int8
-	b int64
-	c int8
-	d int64
-	e int8
-	f int64
+// msanEqRecord matches msan_eq_rec above: one tag byte, seven padding
+// bytes, then the id.
+type msanEqRecord struct {
+	Tag uint8
+	ID  uint64
 }
 
 func main() {
-	got := (*rec)(unsafe.Pointer(C.newRec()))
-	fmt.Println(equal(got, &rec{1, 2, 3, 4, 5, 6}))
-}
-
-//go:noinline
-func equal(a, b *rec) bool {
-	return *a == *b
+	pa := C.msanEqAlloc()
+	pb := C.msanEqAlloc()
+	C.msanEqInit(pa, 1, 100, 2, 200)
+	C.msanEqInit(pb, 1, 100, 2, 200)
+	a := (*[2]msanEqRecord)(unsafe.Pointer(pa))
+	b := (*[2]msanEqRecord)(unsafe.Pointer(pb))
+	if *a != *b {
+		panic("pairs differ")
+	}
+	fmt.Println("equal")
+	C.msanEqFree(pa)
+	C.msanEqFree(pb)
 }

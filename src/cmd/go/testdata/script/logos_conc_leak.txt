@@ -19,20 +19,21 @@ logos lint ./...
 # function that the goroutine runs, while the program still runs.
 ! logos conc run ./leaks
 stdout '^served$'
-stderr '^.*legacy[/\\]feed\.go:6: \[conc::goroutine_leak\] a goroutine waits, and no goroutine that can run reaches what it waits for; it never ends$'
-stderr '^\t.*feed\.go:6: the goroutine waits here, in runtime\.chanrecv1$'
-stderr '^\t.*feed\.go:5: the goroutine runs the function that starts here$'
-stderr '^\tfix: '
-stderr -count=1 'goroutine_leak'
+stdout '^.*legacy[/\\]feed\.go:6: \[conc::goroutine_leak\] a goroutine waits, and no goroutine that can run reaches what it waits for; it never ends$'
+stdout '^\t.*feed\.go:6: the goroutine waits here, in runtime\.chanrecv1$'
+stdout '^\t.*feed\.go:5: the goroutine runs the function that starts here$'
+stdout '^\tfix: '
+stdout -count=1 'goroutine_leak'
 
 ! logos conc test -count=1 ./leaks
 stdout '^ok '
-stderr '\[conc::goroutine_leak\]'
+stdout '\[conc::goroutine_leak\]'
 
 # A goroutine that the program can still wake is not a leak.
 logos conc run ./stops
 stdout '^served$'
 ! stderr .
+! stdout 'conc::'
 
 # The monitor does not keep a deadlocked program alive: the runtime ends
 # it with its own error, as in a plain build.
@@ -45,7 +46,7 @@ stderr 'all goroutines are asleep - deadlock!'
 cd ../feeds
 ! logos conc test -count=1 ./legacy
 stdout '^ok '
-stderr '^.*legacy[/\\]feed\.go:6: \[conc::goroutine_leak\] '
+stdout '^.*legacy[/\\]feed\.go:6: \[conc::goroutine_leak\] '
 
 -- app/go.mod --
 module example.com/app

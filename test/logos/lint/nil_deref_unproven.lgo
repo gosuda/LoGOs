@@ -228,6 +228,18 @@ func compareToNil(u *User?) bool {
 	return u == nil
 }
 
+func shadowInitWritesOuter(p *User?) string {
+	clear := func() {
+		if p := (switch p = nil; { default => 1 }); p == 1 {
+		}
+	}
+	_ = clear
+	if p != nil {
+		return p.Name // ERROR "\[correctness::nil_deref_unproven\]"
+	}
+	return ""
+}
+
 //logos:allow(correctness::nil_deref_unproven)
 func allowIgnored(u *User?) string {
 	return u.Name // ERROR "\[correctness::nil_deref_unproven\]"

@@ -9,7 +9,7 @@ stdout '^const WidePure P64$'
 
 logos build -o $WORK/ok.a ./okcall
 ! logos build -o $WORK/bad.a ./badcall
-stderr 'const_view_mutation.*cannot pass const view'
+stderr 'const_view_mutation.*cannot pass argument through const view'
 
 # Go-mode mutation masks keep positions 64 and 65: a const view passed at a
 # mutated position past 63 is rejected, and one at an unmutated position is not.

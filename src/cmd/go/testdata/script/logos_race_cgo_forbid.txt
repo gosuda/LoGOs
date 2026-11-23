@@ -23,8 +23,10 @@ logos test -race -tags=netcgo -count=1 ./clean
 stdout '^ok  '
 logos test -race -tags=netcgo -v -count=1 ./clean
 stdout 'TestNetcgoTagPreserved'
+! stdout 'TestOSUserGoInjected'
 logos test -race -v -count=1 ./clean
 ! stdout 'TestNetcgoTagPreserved'
+! stdout 'TestOSUserGoInjected'
 logos list -race -tags=netcgo -test -deps -f '{{if eq .ImportPath "net"}}cgo={{.CgoFiles}}{{end}}' ./clean
 stdout '^cgo=\[\]$'
 
@@ -86,6 +88,15 @@ cd ../resrace
 [cgo] logos build -o ok.bin ./ok
 [cgo] ! logos build -o bad.bin ./bad
 [cgo] stderr 'not in cgo_allowlist'
+cd ../nokey
+
+# The "all" pattern sees the same pure-Go os/user files the package
+# loader selects: bufio and bytes are imported only by that variant,
+# and this module has no test that would pull them in itself.
+cd ../forbidall
+[!GOOS:windows] logos list -race -f '{{.ImportPath}}' all
+[!GOOS:windows] stdout '^bufio$'
+[!GOOS:windows] stdout '^bytes$'
 cd ../nokey
 
 # With no C compiler and no zig the message names the need and the policy.
@@ -192,6 +203,16 @@ import "testing"
 func TestNetcgoTagPreserved(t *testing.T) {
 }
 
+-- forbid/clean/osusergo_tag_test.lgo --
+//go:build osusergo
+
+package clean
+
+import "testing"
+
+func TestOSUserGoInjected(t *testing.T) {
+}
+
 -- forbid/usesc/usesc.lgo --
 package usesc
 
@@ -225,6 +246,25 @@ func main() {
 	if int(C.answer()) != 42 {
 		panic("wrong answer")
 	}
+}
+
+-- forbidall/go.mod --
+module example.com/forbidall
+
+go 1.27
+
+-- forbidall/logos.toml --
+[build]
+cgo = "forbid"
+
+-- forbidall/lib/lib.lgo --
+package lib
+
+import "os/user"
+
+func Current() error {
+	_, err := user.Current()
+	return err
 }
 
 -- nokey/go.mod --
