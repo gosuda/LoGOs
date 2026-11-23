@@ -202,7 +202,7 @@ var filemap = map[string]action{
 			"syntax.StringLit->token.STRING") // must happen before renaming identifiers
 		renameIdents(f, "syntax->ast")
 	},
-	"package.go":    nil,
+	"package.go":    stripLogosHooks,
 	"pointer.go":    nil,
 	"predicates.go": stripLogosHooks,
 	"range.go": func(f *ast.File) {
@@ -895,6 +895,7 @@ var logosDecls = map[string]bool{
 }
 var logosFields = map[string]map[string]bool{
 	"Func":       {"logosReadonly": true, "logosAssert": true},
+	"Package":    {"logosDerived": true},
 	"typeWriter": {"logosCgoPkg": true},
 }
 
@@ -966,11 +967,17 @@ func stripLogosFields(f *ast.File, drop func(from, to token.Pos)) {
 				if len(fd.Names) != 1 {
 					panic("shared logos field decl")
 				}
+				from := fd.Pos()
 				if fd.Doc != nil {
-					drop(fd.Doc.Pos(), fd.End())
-				} else {
-					drop(fd.Pos(), fd.End())
+					from = fd.Doc.Pos()
 				}
+				// A stripped last field takes the blank lines above it, so
+				// none is left before the closing brace.
+				if idx > 0 && idx == len(fl.List)-1 {
+					tf := fset.File(f.Pos())
+					from = tf.LineStart(tf.Line(fl.List[idx-1].End()) + 1)
+				}
+				drop(from, fd.End())
 				del = append(del, idx)
 				continue
 			}
