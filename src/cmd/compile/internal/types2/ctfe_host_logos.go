@@ -113,6 +113,12 @@ func (h *ctfeHost) entityOf(obj Object, name string) (ctfe.Entity, bool) {
 				}
 				return ctfe.Entity{Kind: ctfe.EntPlainFunc, Fn: fn}, true
 			}
+			if u, fn, body, err := check.logosResolveImportedConstFunc(obj.pkg.path, obj.name); err == nil && u != nil {
+				if callee := h.buildFunc(fn, body); callee != nil {
+					callee.Const = true
+					return ctfe.Entity{Kind: ctfe.EntConstFunc, Fn: callee}, true
+				}
+			}
 			return ctfe.Entity{}, false
 		}
 		path := ""
