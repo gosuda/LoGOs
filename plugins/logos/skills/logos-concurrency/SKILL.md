@@ -137,6 +137,8 @@ The example needs the second goroutine: with only the slow callback no
 goroutine ever waits on the lock, so no finding prints even at
 `-hold 50ms`.
 
+## Read conc::group_unbounded
+
 A group without a limit gets this finding when 10000 of its children run at one time. Gate the group on every child starting, as the `herd` fixture in `logos_conc_unbounded.txt` does: a child that returns early on a `work()?` failure, or one the scheduler has not started yet, can otherwise keep the running count below the threshold and the finding never prints. A group with a limit never gets this finding. Repair by giving the group a limit.
 
 ```lgo
