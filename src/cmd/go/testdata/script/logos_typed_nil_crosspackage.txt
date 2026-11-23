@@ -32,6 +32,7 @@ cd derived
 ! logos build ./...
 stderr 'platform pointer beta\.Missing \(\*bytes\.Buffer\)'
 stderr 'platform pointer b\.E \(\*example\.com/derived/beta\.MyError\)'
+stderr 'platform pointer beta\.Gen\[\*beta\.MyError\]\{\}\.Zero\(\) \(\*example\.com/derived/beta\.MyError\)'
 stderr 'platform pointer pexp \(\*example\.com/derived/beta\.MyError\) returned as error result'
 stderr 'platform pointer pinf \(\*example\.com/derived/beta\.MyError\) returned as error result'
 cd ..
