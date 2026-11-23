@@ -1622,3 +1622,38 @@ func efLocalNoInitLogosParser(input string) {
 	println(n) // ERROR "result_before_error_check"
 	_ = err
 }
+
+// One branch stores a field-error result while the other keeps the zero
+// value: checking the sole call's error proves the deferred read, since
+// the silent branch contributes no unchecked value.
+func efBranchCleanDefault(cond bool) {
+	h := efHeld{}
+	if cond {
+		h.stats, h.err = efFetchHeld()
+	}
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats)
+	}()
+}
+
+// A branch that pairs the same result elsewhere still vetoes: the other
+// side must hold nothing unchecked, not merely a different check.
+func efBranchMixedPair(cond bool) {
+	h := efHeld{}
+	var err2 error
+	if cond {
+		h.stats, h.err = efFetchHeld()
+	} else {
+		h.stats, err2 = efFetchHeld()
+	}
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	_ = err2
+}

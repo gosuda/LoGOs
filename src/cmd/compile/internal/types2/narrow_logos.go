@@ -1181,24 +1181,47 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 			may = nil
 		}
 	}
-	return &logosEFState{m: m, may: may, mayErr: mayErrJoin(a.mayErr, b.mayErr)}
+	return &logosEFState{m: m, may: may, mayErr: mayErrJoin(a, b)}
 }
 
-// mayErrJoin keeps a pairing only when both branches agree on it: a check
-// on one branch must not prove a value the other branch paired elsewhere.
-func mayErrJoin(a, b map[logosEFKey]logosEFKey) map[logosEFKey]logosEFKey {
-	if len(a) == 0 || len(b) == 0 {
+// mayErrJoin keeps a pairing when both branches agree on it, and keeps
+// one branch's pairing when the other branch holds nothing unchecked for
+// the result: a branch with no may mark and no pairing for the key
+// contributes only a safe value, so it cannot invalidate the pairing. A
+// branch with an unpaired or differently paired unchecked entry still
+// vetoes it, so a check on one branch never proves a value the other
+// branch paired elsewhere.
+func mayErrJoin(a, b *logosEFState) map[logosEFKey]logosEFKey {
+	if len(a.mayErr) == 0 && len(b.mayErr) == 0 {
 		return nil
 	}
 	var out map[logosEFKey]logosEFKey
-	for k, ea := range a {
-		if eb, ok := b[k]; !ok || eb != ea {
+	keep := func(k logosEFKey, ek logosEFKey) {
+		if out == nil {
+			out = make(map[logosEFKey]logosEFKey)
+		}
+		out[k] = ek
+	}
+	for k, ea := range a.mayErr {
+		eb, ok := b.mayErr[k]
+		switch {
+		case ok && eb == ea:
+			keep(k, ea)
+		case ok:
+			// Disagreeing pairings veto each other.
+		default:
+			if _, has := b.may[k]; !has {
+				keep(k, ea)
+			}
+		}
+	}
+	for k, eb := range b.mayErr {
+		if _, ok := a.mayErr[k]; ok {
 			continue
 		}
-		if out == nil {
-			out = make(map[logosEFKey]logosEFKey, len(a))
+		if _, has := a.may[k]; !has {
+			keep(k, eb)
 		}
-		out[k] = ea
 	}
 	return out
 }
