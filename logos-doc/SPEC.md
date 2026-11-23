@@ -2459,7 +2459,7 @@ The toolchain is one complete toolchain for Go and LoGOs: Go packages and LoGOs 
 
 ### 18.2 Compiler-made names
 
-Compiler-made names use the `_logos_` prefix; ejected comptime instances use the `_logosct` suffix. The only exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, and the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, which Go importers can call.
+Compiler-made names use the `_logos_` prefix; an ejected comptime instance name puts `_logosct` after the generic's name (`<f>_logosct<N>` or `<f>_logosct_<h>`, Sec 2.5). The only exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, and the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, which Go importers can call.
 Tuple temporary names MUST be distinct across all files and expansion sites of a package, including sites with identical source coordinates. Repeated compilation of the same ordered inputs MUST produce the same names. Source diagnostics MUST retain the original positions. [T-204.1]
 Separately lowered inactive files MUST retain distinct tuple temporary names when combined in an ejected package. [T-204.1]
 For example, the lowering of `v := parse(s)?` reads as follows (temporary names and site indices vary by position).
