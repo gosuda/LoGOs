@@ -58,37 +58,39 @@ func (p *packageLower) ctEjectNames() map[string]string {
 // comptime instance in the file to the instance's ejected name. The
 // syntax tree keeps the site, so the native build is unchanged.
 func (fl *fileLower) ejectCtSites() {
-	keys := fl.pkg.info.LogosCtSiteKeys
-	if len(keys) == 0 {
+	if len(fl.pkg.info.LogosCtSiteKeys) == 0 {
 		return
 	}
-	names := fl.pkg.ctEjectNames()
 	parents := cfParents(fl.file)
-	ctx := cfCtx{buf: fl.srcMap, starts: fl.start}
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		name, ok := n.(*syntax.Name)
-		if !ok {
-			return true
+		if name, ok := n.(*syntax.Name); ok {
+			fl.ejectCtSite(name, parents)
 		}
-		eject, ok := names[keys[name]]
-		if !ok {
-			return true
-		}
-		var site syntax.Expr = name
-		if sel, ok := parents[site].(*syntax.SelectorExpr); ok && sel.Sel == name {
-			site = sel
-		}
-		if index, ok := parents[site].(*syntax.IndexExpr); ok && index.X == site {
-			site = index
-		}
-		fl.add(offAt(fl.start, syntax.StartPos(site)), cfExactEnd(ctx, site), eject)
-		if fl.ejectSites == nil {
-			fl.ejectSites = make(map[syntax.Node]bool)
-		}
-		fl.ejectSites[site] = true
-		fl.changed = true
 		return true
 	})
+}
+
+// ejectCtSite renames one keyed site, with its qualifier and type
+// arguments, to the ejected name of its instance in the ejected text.
+func (fl *fileLower) ejectCtSite(name *syntax.Name, parents map[syntax.Node]syntax.Node) {
+	eject, ok := fl.pkg.ctEjectNames()[fl.pkg.info.LogosCtSiteKeys[name]]
+	if !ok {
+		return
+	}
+	var site syntax.Expr = name
+	if sel, ok := parents[site].(*syntax.SelectorExpr); ok && sel.Sel == name {
+		site = sel
+	}
+	if index, ok := parents[site].(*syntax.IndexExpr); ok && index.X == site {
+		site = index
+	}
+	ctx := cfCtx{buf: fl.srcMap, starts: fl.start}
+	fl.add(offAt(fl.start, syntax.StartPos(site)), cfExactEnd(ctx, site), eject)
+	if fl.ejectSites == nil {
+		fl.ejectSites = make(map[syntax.Node]bool)
+	}
+	fl.ejectSites[site] = true
+	fl.changed = true
 }
 
 // ejectBlankImport blanks, in the ejected text only, an import that only

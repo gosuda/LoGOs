@@ -121,7 +121,7 @@ func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
 	return true
 }
 func (check *Checker) logosTypeOfCall(x *operand, call *syntax.CallExpr) bool {
-	if !check.logosComptimeInGeneric() && check.logosCtSubst == nil && !check.logosRecordCopy {
+	if !check.logosComptimeInGeneric() && check.logosCtSubst == nil {
 		return false
 	}
 	idx, ok := call.Fun.(*syntax.IndexExpr)
@@ -151,7 +151,7 @@ func (check *Checker) logosTypeOfCall(x *operand, call *syntax.CallExpr) bool {
 		}
 		check.logosTypeOfDeferred[call.Fun] = true
 	}
-	if (check.logosCtSubst != nil || check.logosRecordCopy) && !isTypeParam(targ) {
+	if check.logosCtSubst != nil && !isTypeParam(targ) {
 		if check.logosTypeOfFact == nil {
 			check.logosTypeOfFact = make(map[syntax.Expr]Type)
 		}

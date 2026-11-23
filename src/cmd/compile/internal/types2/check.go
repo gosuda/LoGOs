@@ -191,7 +191,6 @@ type Checker struct {
 	logosComptimeCallee map[*syntax.SelectorExpr]bool
 	logosPred           logosPredState // logos M7-S3 hook: `const if` condition context for comptime predicates.
 	logosDeclInfo       *Info
-	logosRecordCopy     bool
 	logosCtDeclCheck    bool                 // logos comptime instantiation: true while a comptime generic declaration itself is being checked.
 	logosCtTParamDecl   bool                 // logos comptime instantiation: true while any generic declaration is being checked.
 	logosTypeOfDeferred map[syntax.Expr]bool // logos comptime instantiation: TypeOf calls whose argument is still a type parameter.

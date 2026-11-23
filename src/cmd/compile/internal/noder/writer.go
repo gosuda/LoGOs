@@ -582,21 +582,18 @@ func (pw *pkgWriter) typIdx(typ types2.Type, dict *writerDict) typeInfo {
 		}
 
 	case *types2.Named:
-		if logosCtNative {
-			origin, captures, explicit := types2.LogosCtLocalNamed(typ)
-			if origin != nil && (len(captures) != 0 || len(explicit) != 0 || types2.LogosCtLocalABIName(origin) != "") {
-				obj := origin.Obj()
-				if local := pw.logosCtLocalDecl(obj); local != nil {
-					obj = local
-				}
-				w.Code(pkgbits.TypeNamedCaptured)
-				w.obj(obj, explicit)
-				w.Len(len(captures))
-				for _, capture := range captures {
-					w.typ(capture)
-				}
-				break
+		if origin, captures, explicit := types2.LogosCtLocalNamed(typ); origin != nil && (len(captures) != 0 || len(explicit) != 0 || types2.LogosCtLocalABIName(origin) != "") {
+			obj := origin.Obj()
+			if local := pw.logosCtLocalDecl(obj); local != nil {
+				obj = local
 			}
+			w.Code(pkgbits.TypeNamedCaptured)
+			w.obj(obj, explicit)
+			w.Len(len(captures))
+			for _, capture := range captures {
+				w.typ(capture)
+			}
+			break
 		}
 		w.Code(pkgbits.TypeNamed)
 		w.namedType(splitNamed(typ))
@@ -3149,7 +3146,7 @@ func (pw *pkgWriter) collectDecls(noders []*noder) {
 			}
 		}
 	}
-	if !logosCtNative || pw.info.LogosCtPrepared == nil && pw.info.LogosCtGenerics == nil && pw.info.LogosCtImport == nil {
+	if pw.info.LogosCtPrepared == nil && pw.info.LogosCtGenerics == nil && pw.info.LogosCtImport == nil {
 		return
 	}
 	pw.logosCtInfo = pw.info

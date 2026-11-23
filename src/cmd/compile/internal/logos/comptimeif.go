@@ -31,7 +31,7 @@ func cfLiveBranch(s *syntax.ConstIfStmt, info *types2.Info) (live *syntax.BlockS
 func (fl *fileLower) cfPruneConstIf(s *syntax.ConstIfStmt, run *cfRun, add func(int, int, string)) *syntax.BlockStmt {
 	live, ok := cfLiveBranch(s, run.info)
 	if !ok {
-		fl.cfError(run.sites.at(s.Cond.Pos()), "[comptime::not_constant] const if condition cannot be evaluated for this instantiation")
+		fl.cfError(s.Cond.Pos(), "[comptime::not_constant] const if condition cannot be evaluated for this instantiation")
 	}
 	starts := run.ctx.starts
 	start := offAt(starts, s.Pos())

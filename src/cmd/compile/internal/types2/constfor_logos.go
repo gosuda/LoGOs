@@ -31,23 +31,19 @@ type LogosConstFor struct {
 }
 
 type LogosCopyContext struct {
-	Scope      *Scope
-	Sig        *Signature
-	Version    string
-	Disqual    []map[string]bool
-	Funcs      []*Func
-	Aliases    map[*Package]string
-	MaxSteps   int
-	NodeLimit  int
-	Importer   Importer
-	Context    *Context
-	ConstFuncs map[string]LogosConstFunc
-	Bind       LogosTypeBindings
-	Record     bool
-	Sizes      Sizes
+	Scope     *Scope
+	Sig       *Signature
+	Version   string
+	Disqual   []map[string]bool
+	Aliases   map[*Package]string
+	MaxSteps  int
+	NodeLimit int
+	Importer  Importer
+	Context   *Context
+	Bind      LogosTypeBindings
 }
 
-func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]Error) *Checker {
+func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info) *Checker {
 	imp := ctx.Importer
 	if imp == nil && info != nil {
 		imp = info.LogosImporter
@@ -63,15 +59,10 @@ func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]E
 		Logos:              true,
 		GoVersion:          ctx.Version,
 		Context:            ctxt,
-		Sizes:              ctx.Sizes,
 		Importer:           imp,
 		IgnoreBranchErrors: true,
 		LogosCTFEMaxSteps:  ctx.MaxSteps,
-		Error: func(err error) {
-			if e, ok := err.(Error); ok && !e.Soft && errs != nil {
-				*errs = append(*errs, e)
-			}
-		},
+		Error:              func(error) {},
 	}
 	conf.LogosComptimeNodeLimit = ctx.NodeLimit
 	if conf.LogosCTFEMaxSteps == 0 && info != nil {
@@ -80,47 +71,29 @@ func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]E
 	mc := NewChecker(conf, pkg, info)
 	mc.version = asGoVersion(ctx.Version)
 	mc.logosCopy = true
-	mc.logosRecordCopy = ctx.Record
 	mc.scope = &Scope{parent: ctx.Scope, comment: "logos copies"}
-	for _, f := range ctx.Funcs {
-		mc.scope.Insert(f)
-	}
 	for imported, alias := range ctx.Aliases {
 		mc.scope.Insert(NewPkgName(nopos, pkg, alias, imported))
 	}
 	mc.logosBindCopyTypes(ctx.Bind)
 	mc.sig = ctx.Sig
 	mc.logosDisqual = slices.Clone(ctx.Disqual)
-	mc.logosSeedConstFuncs(info, ctx.ConstFuncs)
+	mc.logosSeedConstFuncs(info)
 	return mc
 }
 
-func (check *Checker) logosSeedConstFuncs(info *Info, explicit map[string]LogosConstFunc) {
-	if len(explicit) == 0 && (info == nil || len(info.LogosConstFuncs) == 0) {
+func (check *Checker) logosSeedConstFuncs(info *Info) {
+	if info == nil || len(info.LogosConstFuncs) == 0 {
 		return
 	}
 	bodies, consts := check.logosConstFuncBodies()
-	seed := func(name string, rec LogosConstFunc) {
+	for name, rec := range info.LogosConstFuncs {
 		if rec.Decl == nil {
-			return
+			continue
 		}
 		if _, dup := bodies[name]; !dup {
 			bodies[name] = rec.Decl
 		}
-		if rec.Const {
-			consts[rec.Decl] = true
-		}
-	}
-	if info != nil {
-		for name, rec := range info.LogosConstFuncs {
-			seed(name, rec)
-		}
-	}
-	for name, rec := range explicit {
-		if rec.Decl == nil {
-			continue
-		}
-		bodies[name] = rec.Decl
 		if rec.Const {
 			consts[rec.Decl] = true
 		}
@@ -137,51 +110,19 @@ func LogosCheckCopy(pkg *Package, info *Info, ctx LogosCopyContext, blocks []*sy
 	if ctx.Scope == nil || ctx.Sig == nil {
 		return
 	}
-	mc := ctx.logosCopyChecker(pkg, info, nil)
+	mc := ctx.logosCopyChecker(pkg, info)
 	for _, b := range blocks {
 		mc.stmt(0, b)
 	}
 	mc.logosCopyFinish()
 }
 
-func LogosCheckCopyFunc(pkg *Package, info *Info, ctx LogosCopyContext, fn *syntax.FuncDecl) (*Func, []Error) {
-	if ctx.Scope == nil || fn.Body == nil {
-		return nil, nil
-	}
-	var errs []Error
-	mc := ctx.logosCopyChecker(pkg, info, &errs)
-	sig := new(Signature)
-	mc.funcType(sig, nil, nil, fn.Type)
-	obj := NewFunc(fn.Name.Pos(), pkg, fn.Name.Value, sig)
-	mc.recordDef(fn.Name, obj)
-	mc.scope.Insert(obj)
-	mc.funcBody(nil, fn.Name.Value, sig, fn.Body, nil)
-	mc.logosCopyFinish()
-	return obj, errs
-}
-
 type LogosTypeBindings struct {
-	Types map[string]Type
-	Pkgs  map[string]*Package
+	Pkgs map[string]*Package
 }
 
 func (check *Checker) logosBindCopyTypes(bind LogosTypeBindings) {
-	for name, t := range bind.Types {
-		check.scope.Insert(NewTypeName(nopos, check.pkg, name, t))
-	}
 	for name, p := range bind.Pkgs {
-		if p == nil {
-			p = logosComptimePackage()
-		}
-		if name == "." {
-			for _, name := range p.Scope().Names() {
-				obj := p.Scope().Lookup(name)
-				if obj.Exported() {
-					check.scope.Insert(obj)
-				}
-			}
-			continue
-		}
 		check.scope.Insert(NewPkgName(nopos, check.pkg, name, p))
 	}
 }
@@ -633,7 +574,7 @@ func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
 		check.errorf(e.Pos(), MissingFieldOrMethod, "[comptime::const_for_projection] cannot project a field of %s", xop.typ())
 		return
 	}
-	if info.Struct != nil && !Identical(xt, info.Target) && (check.logosCtSubst != nil || check.logosRecordCopy) {
+	if info.Struct != nil && !Identical(xt, info.Target) && check.logosCtSubst != nil {
 		if b := check.logosFieldBindingOf(v); b != nil {
 			check.logosFieldProjByName(x, &xop, mode, b.field)
 			return

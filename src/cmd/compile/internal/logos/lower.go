@@ -927,7 +927,7 @@ func (fl *fileLower) newSite(pos syntax.Pos, line uint) string {
 // lowerFile lowers every function body of one file.
 func (fl *fileLower) lowerFile() {
 	fl.collectInterpKinds() // interpolation operand kinds before any rewrite.
-	fl.lowerComptime()      // comptime generic copies, then const for unrolling, before any rewrite.
+	fl.lowerComptime()      // comptime generic retirement, then const for unrolling, before any rewrite.
 	fl.lowerStructDefaults()
 	fl.scanRodataMarkers() // hand-written //logos:rodata lines.
 	fl.lowerArenaEject()

@@ -227,7 +227,7 @@ func readImportFileImpl(m *gcimports, path string) (pkg1 *types.Pkg, pkg2 *types
 	checkLogosUnion := !m.logos.isLogos && logosFacts != nil && logosExportHasLogosFile(&pr)
 
 	var ct *logosCtImportState
-	if m.logos.isLogos && logosCtNative {
+	if m.logos.isLogos {
 		ct = &m.logos.ct
 	}
 	readPackage(newPkgReader(pr), pkg1, false, ct)

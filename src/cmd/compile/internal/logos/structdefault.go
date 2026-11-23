@@ -45,7 +45,7 @@ func (fl *fileLower) lowerStructDefaults() {
 
 // lowerTypeParamLits respells an empty composite literal the checker admitted
 // as a zero value — T{} for a type parameter, int{}, or an elided {} element —
-// as *new(T): a concrete substitution in a comptime copy carries the real
+// as *new(T): a concrete substitution in a comptime instance carries the real
 // literal, while a plain generic emits the equivalent allocation.
 func (fl *fileLower) lowerTypeParamLits() {
 	// Field defaults never emit their source: stripFieldDefaults erases

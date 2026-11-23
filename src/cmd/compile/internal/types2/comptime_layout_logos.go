@@ -64,7 +64,7 @@ func (check *Checker) logosLayoutCall(x *operand, call *syntax.CallExpr, fname s
 }
 
 func (check *Checker) logosComptimePosition() bool {
-	if check.logosPred.depth > 0 || check.logosFieldBind != nil || check.logosCtSubst != nil || check.logosRecordCopy {
+	if check.logosPred.depth > 0 || check.logosFieldBind != nil || check.logosCtSubst != nil {
 		return true
 	}
 	return check.logosComptimeInGeneric()

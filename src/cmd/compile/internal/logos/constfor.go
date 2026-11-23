@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/constant"
 	"go/token"
+	"maps"
 	"reflect"
 	"slices"
 	"strconv"
@@ -23,8 +24,7 @@ import (
 // declaration order. Lowering is text-primary: the expansion text is
 // built from source slices with leaf substitutions, the native tree is
 // re-parsed from that text, and every new node takes the const for
-// position so traces name the .lgo line. S3 (comptime.go) reuses the
-// core for per-instantiation copies.
+// position so traces name the .lgo line.
 
 // cfField is one unrolled struct field.
 type cfField struct {
@@ -270,106 +270,93 @@ func (fl *fileLower) unrollConstFor(cf *syntax.ConstForStmt, info *types2.LogosC
 	return out, host
 }
 
-// nestedSitePair links one freshly unrolled comptime call to the staged
-// instance the drain recorded for the corresponding original call.
+// nestedSitePair links one freshly unrolled comptime site to the staged
+// instance the drain recorded for the corresponding original site.
 type nestedSitePair struct {
 	orig, fresh *syntax.Name
 	id          string
 }
 
-// pairNestedSiteKeys records writer site keys for comptime calls in a
-// freshly unrolled const-for copy. The drain staged instances for the
-// original call sites per iteration and recorded keys against the
-// original nodes; the copies are fresh nodes, so pair them with the
-// originals in order and copy the staged ids. Only calls whose type
-// arguments mention function-local types are paired: other nested
-// calls still lower as text copies. Skips silently on any shape
-// mismatch, leaving writer fallback behavior unchanged.
+// pairNestedSiteKeys records writer site keys for the comptime sites in
+// a freshly unrolled const-for copy. The drain staged an instance for
+// each original site per iteration and recorded its key against the
+// original node; the copies are fresh nodes, so pair them with the
+// originals in unrolled order and copy the staged ids. In eject mode each
+// paired site is renamed to its printed instance in the ejected text.
 func (fl *fileLower) pairNestedSiteKeys(cf *syntax.ConstForStmt, info *types2.LogosConstFor, index int, stmts []syntax.Stmt) []nestedSitePair {
-	if fl.pkg.info.LogosCtImport == nil {
+	if fl.pkg.info.LogosCtImport == nil || index < 0 || index >= len(info.Iterations) || info.Iterations[index] == nil {
 		return nil
 	}
-	if index < 0 || index >= len(info.Iterations) {
-		return nil
-	}
-	iter := info.Iterations[index]
-	if iter == nil || len(iter.LogosCtSiteKeys) == 0 {
-		return nil
-	}
-	orig := cfNestedComptimeCalls(cf.Body, func(name *syntax.Name) bool {
-		if _, ok := iter.LogosCtSiteKeys[name]; !ok {
-			return false
-		}
-		inst, ok := iter.Instances[name]
-		return ok && cfTargsMentionLocal(typeArgsOf(inst.TypeArgs))
-	})
+	pairs := cfStagedSites(cf.Body, info.Iterations[index])
 	var fresh []*syntax.Name
 	for _, s := range stmts {
-		fresh = append(fresh, cfNestedComptimeCalls(s, func(name *syntax.Name) bool {
-			inst, ok := fl.pkg.info.Instances[name]
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			name, ok := n.(*syntax.Name)
 			if !ok {
-				return false
+				return true
 			}
+			_, inst := fl.pkg.info.Instances[name]
 			obj, _ := fl.pkg.info.Uses[name].(*types2.Func)
-			return obj != nil && fl.cfIsGeneric(obj) && cfTargsMentionLocal(typeArgsOf(inst.TypeArgs))
-		})...)
+			if inst && obj != nil && fl.cfIsGeneric(obj) {
+				fresh = append(fresh, name)
+			}
+			return true
+		})
 	}
-	if len(orig) == 0 || len(orig) != len(fresh) {
+	if len(pairs) != len(fresh) {
+		if base.Errors() == 0 {
+			base.Fatalf("logos: const for at %s unrolls %d comptime sites for %d staged instances", cf.Pos().String(), len(fresh), len(pairs))
+		}
+		return nil
+	}
+	if len(pairs) == 0 {
 		return nil
 	}
 	if fl.pkg.info.LogosCtSiteKeys == nil {
 		fl.pkg.info.LogosCtSiteKeys = make(map[*syntax.Name]string)
 	}
-	var pairs []nestedSitePair
-	for i, name := range orig {
-		id := iter.LogosCtSiteKeys[name]
-		if id == "" {
-			return nil
+	for i := range pairs {
+		pairs[i].fresh = fresh[i]
+		fl.pkg.info.LogosCtSiteKeys[fresh[i]] = pairs[i].id
+	}
+	if base.LogosEject != "" {
+		parents := make(map[syntax.Node]syntax.Node)
+		for _, s := range stmts {
+			maps.Copy(parents, cfParents(s))
 		}
-		pairs = append(pairs, nestedSitePair{orig: name, fresh: fresh[i], id: id})
-	}
-	if fl.pkg.info.LogosCtSiteKeys == nil {
-		fl.pkg.info.LogosCtSiteKeys = make(map[*syntax.Name]string)
-	}
-	for _, p := range pairs {
-		fl.pkg.info.LogosCtSiteKeys[p.fresh] = p.id
+		for _, p := range pairs {
+			fl.ejectCtSite(p.fresh, parents)
+		}
 	}
 	return pairs
 }
 
-// cfNestedComptimeCalls collects the callee names of calls in order,
-// descending everywhere except nested const-for bodies (whose calls
-// belong to their own iterations). keep decides membership.
-func cfNestedComptimeCalls(root syntax.Node, keep func(*syntax.Name) bool) []*syntax.Name {
-	var out []*syntax.Name
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		if _, ok := n.(*syntax.ConstForStmt); ok {
+// cfStagedSites lists in unrolled order the comptime sites that one
+// iteration of body expands to, each with the instance the drain staged
+// for it: the live sites of body under info, and each nested const for
+// once per visible field under that field's iteration.
+func cfStagedSites(body syntax.Node, info *types2.Info) []nestedSitePair {
+	var out []nestedSitePair
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if st, ok := n.(syntax.Stmt); ok && info.LogosConstIfDead[st] {
 			return false
 		}
-		if call, ok := n.(*syntax.CallExpr); ok {
-			if name := cfNestedCalleeName(call.Fun); name != nil && keep(name) {
-				out = append(out, name)
+		switch n := n.(type) {
+		case *syntax.ConstForStmt:
+			if loop := info.LogosConstFor[n]; loop != nil && loop.Struct != nil {
+				for _, fd := range cfFieldsOf(loop) {
+					out = append(out, cfStagedSites(n.Body, loop.Iterations[fd.index])...)
+				}
+			}
+			return false
+		case *syntax.Name:
+			if id := info.LogosCtSiteKeys[n]; id != "" {
+				out = append(out, nestedSitePair{orig: n, id: id})
 			}
 		}
 		return true
 	})
 	return out
-}
-
-// cfNestedCalleeName mirrors the writer's callee resolution: through
-// index expressions to the function name or selector.
-func cfNestedCalleeName(e syntax.Expr) *syntax.Name {
-	e = syntax.Unparen(e)
-	if idx, ok := e.(*syntax.IndexExpr); ok {
-		return cfNestedCalleeName(idx.X)
-	}
-	if sel, ok := e.(*syntax.SelectorExpr); ok {
-		return sel.Sel
-	}
-	if name, ok := e.(*syntax.Name); ok {
-		return name
-	}
-	return nil
 }
 
 // cfDirectLocalType reports the declared name when t is directly a
@@ -663,7 +650,6 @@ func (fl *fileLower) miniCheckCopies(blocks []*syntax.BlockStmt, cf *syntax.Cons
 	ctx := types2.LogosCopyContext{
 		Sig:       fctx.sig,
 		Disqual:   fl.pkg.info.LogosDisqual[fctx.body],
-		Funcs:     fl.pkg.ctExp.copyFuncs,
 		Aliases:   fl.cfAliases(),
 		MaxSteps:  fl.pkg.info.LogosCTFEMaxSteps,
 		NodeLimit: base.LogosComptimeNodes,
@@ -682,7 +668,7 @@ func (fl *fileLower) miniCheckCopies(blocks []*syntax.BlockStmt, cf *syntax.Cons
 
 // cfAliases returns the synthesized package aliases of the file so far,
 // each keyed by the package object it names. A copy keeps the comptime
-// selections its record spells, such as comptime.ViewAs, so comptime
+// selections its source spells, such as comptime.ViewAs, so comptime
 // binds as well when the file does not bind that name itself.
 func (fl *fileLower) cfAliases() map[*types2.Package]string {
 	out := make(map[*types2.Package]string)
@@ -870,7 +856,6 @@ type cfRun struct {
 	ctx     cfCtx
 	info    *types2.Info
 	parents map[syntax.Node]syntax.Node
-	sites   *cfSites
 	budget  int
 	labels  map[string]bool
 	labelID int
@@ -883,33 +868,6 @@ func (fl *fileLower) cfRunFor(cf *syntax.ConstForStmt) *cfRun {
 		info:    fl.pkg.info,
 		parents: cfParents(cf),
 	}
-}
-
-// unrollConstForFields expands cf over fields. src/starts locate the cf
-// positions; stamp is the position every new node takes so traces name
-// the .lgo const for line. chain carries outer bindings for nesting.
-func (fl *fileLower) unrollConstForFields(cf *syntax.ConstForStmt, run *cfRun) ([]syntax.Stmt, otext) {
-	info := run.info.LogosConstFor[cf]
-	if info == nil || info.Struct == nil {
-		base.Fatalf("logos: missing const for facts at %s", run.sites.at(cf.Pos()).String())
-	}
-	bodyOff := offAt(run.ctx.starts, syntax.StartPos(cf.Body))
-	bodyEnd := offAt(run.ctx.starts, syntax.EndPos(cf.Body)) + 1
-	bodySrc := run.ctx.buf.sliceO(bodyOff, bodyEnd)
-	var out []syntax.Stmt
-	var parts []otext
-	outerNodes := cfBodyNodes(cf.Body)
-	for _, fd := range cfFieldsOf(info) {
-		if !fl.cfCharge(run, outerNodes) {
-			break
-		}
-		active := cfPushField(nil, info, fd)
-		m := &cfMapper{start: bodyOff}
-		text := fl.expandLevel(cf.Body, active, bodySrc, 0, m, run, info.Iterations[fd.index])
-		out = append(out, fl.reparseStmts(text.s, run.ctx.stamp)...)
-		parts = append(parts, text, gen("\n"))
-	}
-	return out, cat(parts...)
 }
 
 // offAt converts a valid file position to a byte offset.
@@ -1092,7 +1050,7 @@ func (fl *fileLower) expandLevel(body *syntax.BlockStmt, active cfChain, text ot
 		}
 		loop := info.LogosConstFor[inner]
 		if loop == nil || loop.Struct == nil {
-			base.Fatalf("logos: missing nested const for facts at %s", run.sites.at(inner.Pos()).String())
+			base.Fatalf("logos: missing nested const for facts at %s", inner.Pos().String())
 		}
 		s, e := m.mapSpan(istart, iend)
 		bstart := offAt(ctx.starts, syntax.StartPos(inner.Body))
@@ -1269,23 +1227,6 @@ func cfAddressTaken(p syntax.Node, parents map[syntax.Node]syntax.Node) bool {
 			return false
 		}
 	}
-}
-
-// cfSites holds the bindings for the fresh source of a generic copy.
-type cfSites struct {
-	bindings map[types2.Object]func() (string, bool)
-	tparams  []types2.Object
-	shadowed []span
-	errPos   syntax.Pos
-}
-
-// at returns the position a diagnostic about pos reports: the
-// instantiation site for copies, pos itself otherwise.
-func (s *cfSites) at(pos syntax.Pos) syntax.Pos {
-	if s != nil && s.errPos.IsKnown() {
-		return s.errPos
-	}
-	return pos
 }
 
 // cfError reports one user-facing comptime diagnostic at pos. The run
@@ -1584,17 +1525,7 @@ func (c *cfLeaf) subCall(n *syntax.CallExpr) bool {
 			return false
 		}
 	}
-	if c.subComptimeError(n) {
-		return false
-	}
-	s, e := cfCallSpan(ctx, n)
-	if insideAny(span{start: s, end: e}, c.covered) {
-		return true
-	}
-	if s, e, text, ok := c.fl.cfNestedSite(n, c.run); ok {
-		c.add(s, e, text)
-	}
-	return true
+	return !c.subComptimeError(n)
 }
 
 // subComptimeError answers a live comptime.Error call of an expansion:
@@ -1611,9 +1542,9 @@ func (c *cfLeaf) subComptimeError(n *syntax.CallExpr) bool {
 	}
 	msg, ok := cfComptimeErrorMsg(c.run.info, n.ArgList[0])
 	if !ok {
-		c.fl.cfError(c.run.sites.at(n.ArgList[0].Pos()), "[comptime::error_not_constant] comptime.Error needs a constant message")
+		c.fl.cfError(n.ArgList[0].Pos(), "[comptime::error_not_constant] comptime.Error needs a constant message")
 	} else {
-		c.fl.cfError(c.run.sites.at(n.ArgList[0].Pos()), "[comptime::error] %s", msg)
+		c.fl.cfError(n.ArgList[0].Pos(), "[comptime::error] %s", msg)
 	}
 	c.add(s, e, "")
 	return true
@@ -1621,7 +1552,7 @@ func (c *cfLeaf) subComptimeError(n *syntax.CallExpr) bool {
 
 // cfComptimeErrorMsg evaluates the comptime.Error message argument: a
 // recorded constant string, or a string literal when the check left no
-// record (copies re-check without one).
+// record.
 func cfComptimeErrorMsg(info *types2.Info, e syntax.Expr) (string, bool) {
 	if tv, ok := typeConst(info, e); ok && tv.Kind() == constant.String {
 		return constant.StringVal(tv), true
@@ -1639,9 +1570,6 @@ func (c *cfLeaf) subName(n *syntax.Name) {
 	if insideAny(span{start: s, end: e}, c.covered) {
 		return
 	}
-	if c.subMarker(n) {
-		return
-	}
 	a := c.binding(n)
 	if a == nil || !a.index {
 		return
@@ -1651,52 +1579,13 @@ func (c *cfLeaf) subName(n *syntax.Name) {
 		return
 	}
 	if cfAddressTaken(p, c.parents) {
-		c.fl.cfError(c.run.sites.at(n.Pos()), "[comptime::const_for_assign] cannot take the address of const for variable %s", n.Value)
+		c.fl.cfError(n.Pos(), "[comptime::const_for_assign] cannot take the address of const for variable %s", n.Value)
 		return
 	}
 	if c.fl.cfBareSkip(n, p) {
 		return
 	}
 	c.add(s, e, strconv.Itoa(a.field.index))
-}
-
-func (c *cfLeaf) subMarker(n *syntax.Name) bool {
-	sites := c.run.sites
-	if sites == nil {
-		return false
-	}
-	obj := c.run.info.Uses[n]
-	if obj == nil {
-		return false
-	}
-	if p := c.parents[n]; p != nil && c.fl.cfBareSkip(n, p) {
-		return false
-	}
-	start := offAt(c.run.ctx.starts, n.Pos())
-	resolve := sites.bindings[obj]
-	var spelling string
-	var ok bool
-	switch i := slices.Index(sites.tparams, obj); {
-	case i >= 0 && insideAny(span{start: start, end: start}, sites.shadowed):
-		spelling, ok = cfBind(i), true
-	case resolve != nil:
-		spelling, ok = resolve()
-	case obj.Pkg() != nil && obj.Pkg() != c.fl.pkg.tpkg && obj.Parent() == obj.Pkg().Scope():
-		if !obj.Exported() {
-			c.fl.cfOwnerOnly(sites.at(n.Pos()), cfObjKind(obj), obj.Name(), obj.Pkg().Path())
-			return true
-		}
-		var qualifier string
-		qualifier, ok = c.fl.cfCopyQualifier(obj.Pkg().Path(), sites.at(n.Pos()))
-		spelling = qualifier + "." + obj.Name()
-	default:
-		return false
-	}
-	if ok {
-		s, e := c.at(n)
-		c.add(s, e, spelling)
-	}
-	return true
 }
 
 func (c *cfLeaf) binding(n *syntax.Name) *cfActive {
@@ -1754,7 +1643,7 @@ func (c *cfLeaf) subTagGet(call *syntax.CallExpr) (matched, descend bool) {
 	if !c.fl.needReflect {
 		pkg, err := c.fl.cfLoadPackage("reflect")
 		if err != nil {
-			c.fl.cfError(c.run.sites.at(call.Pos()), "[comptime::generic_import] cannot load reflect for a dynamic struct tag lookup: %v", err)
+			c.fl.cfError(call.Pos(), "[comptime::generic_import] cannot load reflect for a dynamic struct tag lookup: %v", err)
 			return true, false
 		}
 		c.fl.pkg.ctExp.pkgs["reflect"] = pkg

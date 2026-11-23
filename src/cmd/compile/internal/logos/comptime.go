@@ -19,23 +19,7 @@ import (
 	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
-	"internal/buildcfg"
 )
-
-const (
-	cfBindMarker = "_logos_bind"
-	cfCopyInfix  = "_logosct"
-)
-
-// cfBind names the alias a copy declares at the top of its body for
-// parameter n when a const switch over a type parameter exists: `type
-// _logos_bind0 = <argument>`. References spelled with it always resolve
-// to the parameter's argument, while the argument's own spelling
-// materializes only in the bind's right-hand side: at body scope, where
-// no case body declaration can capture it.
-func cfBind(n int) string {
-	return cfBindMarker + strconv.Itoa(n)
-}
 
 type cfImport struct {
 	name string
@@ -55,7 +39,6 @@ type cfRecord struct {
 	imports []cfImport
 	owner   []cfOwnerName
 	source  string
-	sourceO otext
 }
 
 func (r *cfRecord) text() string {
@@ -69,34 +52,6 @@ func (r *cfRecord) text() string {
 	}
 	b.WriteString(r.source)
 	return b.String()
-}
-
-func cfParseRecord(name, text string) (*cfRecord, error) {
-	rec := &cfRecord{name: name}
-	for strings.HasPrefix(text, "//logos") {
-		line, rest, _ := strings.Cut(text, "\n")
-		text = rest
-		fields := strings.Fields(line)
-		switch {
-		case fields[0] == "//logosct":
-		case fields[0] == "//logosimp" && len(fields) == 3:
-			rec.imports = append(rec.imports, cfImport{name: fields[1], path: fields[2]})
-		case fields[0] == "//logosowner" && len(fields) >= 3:
-			rec.owner = append(rec.owner, cfOwnerName{name: fields[1], kind: strings.Join(fields[2:], " ")})
-		default:
-			return nil, fmt.Errorf("unknown record header %q", line)
-		}
-	}
-	rec.source = text
-	return rec, nil
-}
-
-func cfParseSource(text string) (*syntax.File, []error) {
-	var errs []error
-	file, _ := syntax.Parse(syntax.NewFileBase("cfrecord.lgo"), strings.NewReader(text), func(err error) {
-		errs = append(errs, err)
-	}, nil, syntax.CheckBranches|syntax.LogosMode)
-	return file, errs
 }
 
 func cfFirstFunc(file *syntax.File) *syntax.FuncDecl {
@@ -119,33 +74,19 @@ type cfGenericDef struct {
 	forward bool
 }
 
-type cfFrame struct {
-	key     string
-	label   string
-	forward bool
-}
-
 type cfExpander struct {
-	defs      []*cfGenericDef
-	byObj     map[*types2.Func]*cfGenericDef
-	byDecl    map[*syntax.FuncDecl]*cfGenericDef
-	foreign   map[string]*cfRecord
-	memo      map[string]string
-	stack     []cfFrame
-	pkgs      map[string]*types2.Package
-	roots     []*types2.Package
-	seq       int
-	copyFuncs []*types2.Func
-	switches  map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase
+	defs     []*cfGenericDef
+	byObj    map[*types2.Func]*cfGenericDef
+	byDecl   map[*syntax.FuncDecl]*cfGenericDef
+	pkgs     map[string]*types2.Package
+	switches map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase
 }
 
 func newCfExpander(shared *packageLower, files []*syntax.File, src map[*syntax.File][]byte) {
 	exp := &cfExpander{
-		byObj:   make(map[*types2.Func]*cfGenericDef),
-		byDecl:  make(map[*syntax.FuncDecl]*cfGenericDef),
-		foreign: make(map[string]*cfRecord),
-		memo:    make(map[string]string),
-		pkgs:    make(map[string]*types2.Package),
+		byObj:  make(map[*types2.Func]*cfGenericDef),
+		byDecl: make(map[*syntax.FuncDecl]*cfGenericDef),
+		pkgs:   make(map[string]*types2.Package),
 	}
 	shared.ctExp = exp
 	f := facts.Current()
@@ -172,30 +113,6 @@ func newCfExpander(shared *packageLower, files []*syntax.File, src map[*syntax.F
 	if f != nil {
 		facts.SetCurrent(f)
 	}
-}
-
-func (e *cfExpander) frameIndex(key string) int {
-	return slices.IndexFunc(e.stack, func(f cfFrame) bool { return f.key == key })
-}
-
-func cfExpKey(name, pkgPath string, targs []types2.Type) string {
-	var b strings.Builder
-	b.WriteString(pkgPath)
-	b.WriteByte(0)
-	b.WriteString(name)
-	for _, t := range targs {
-		b.WriteByte(0)
-		b.WriteString(types2.TypeString(t, func(p *types2.Package) string { return p.Path() }))
-	}
-	return b.String()
-}
-
-func cfShortKeys(targs []types2.Type) string {
-	parts := make([]string, len(targs))
-	for i, t := range targs {
-		parts[i] = types2.TypeString(t, func(*types2.Package) string { return "" })
-	}
-	return strings.Join(parts, ", ")
 }
 
 func cfFactObject(obj *types2.Func) string {
@@ -325,7 +242,6 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, imports []cfImport) *cfReco
 		imports: imports,
 		owner:   owner,
 		source:  out.s,
-		sourceO: out,
 	}
 }
 
@@ -362,13 +278,6 @@ func (b *cfRecordBuilder) ownerNames() []cfOwnerName {
 	}
 	syntax.Inspect(b.decl, visit)
 	return out
-}
-
-// cfOwnerOnly reports an unexported identifier of another package that a
-// comptime copy needs: only the defining package can instantiate the
-// generic.
-func (fl *fileLower) cfOwnerOnly(pos syntax.Pos, kind, name, pkgPath string) {
-	fl.cfError(pos, "[comptime::unexported_in_exported] comptime source names unexported %s %s of package %s; only that package can instantiate it", kind, name, pkgPath)
 }
 
 func (b *cfRecordBuilder) recordObject(n *syntax.Name) types2.Object {
@@ -667,39 +576,18 @@ func shiftSplices(subs []splice, off int) []splice {
 	return out
 }
 
-type cfSite struct {
-	fun   syntax.Expr
-	targs []types2.Type
-	obj   *types2.Func
-	pos   syntax.Pos
-}
-
+// expandComptime retires the comptime generics of the file. Each instance
+// compiles natively in the defining package; eject renames each call site
+// to its printed instance in the ejected text only.
 func (fl *fileLower) expandComptime() {
-	// Native owner-package emission resolves call sites in the writer
-	// through LogosCtSiteKeys. No text copy is expanded. Comptime-generic
-	// definitions become unreachable stubs; their templates travel in the
-	// export and each instance is checked in the defining package.
-	// Forwarding definitions keep their bodies: the backend stencils them
-	// and resolves their nested calls through the instance dictionary.
-	// Eject renames each call site in its text only; EjectCtInstances
-	// prints the named instances after they are checked.
-	if fl.pkg.info.LogosCtImport != nil {
-		for _, def := range fl.pkg.ctExp.defs {
-			if def.file == fl.file {
-				fl.cfRetireDef(def)
-			}
+	for _, def := range fl.pkg.ctExp.defs {
+		if def.file == fl.file {
+			fl.cfRetireDef(def)
 		}
-		if base.LogosEject != "" {
-			fl.ejectCtSites()
-		}
-		return
 	}
-	parents := cfParents(fl.file)
-	for _, site := range fl.cfScanSites(parents) {
-		fl.expandSite(site)
+	if base.LogosEject != "" {
+		fl.ejectCtSites()
 	}
-	fl.flushOuterFirst()
-	fl.cfRetireDefs()
 }
 
 func (fl *fileLower) lowerComptime() {
@@ -829,79 +717,6 @@ func (fl *fileLower) cfBlankImportText(imp *syntax.ImportDecl) {
 	}
 }
 
-func (fl *fileLower) cfScanSites(parents map[syntax.Node]syntax.Node) []*cfSite {
-	var out []*cfSite
-	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		var fun syntax.Expr
-		var pos syntax.Pos
-		switch n := n.(type) {
-		case *syntax.CallExpr:
-			fun, pos = syntax.Unparen(n.Fun), n.Pos()
-			if _, indexed := fun.(*syntax.IndexExpr); indexed {
-				return true
-			}
-		case *syntax.IndexExpr:
-			fun, pos = n, n.Pos()
-			if call, ok := parents[n].(*syntax.CallExpr); ok && call.Fun == n {
-				pos = call.Pos()
-			}
-		default:
-			return true
-		}
-		if site := fl.cfSiteOf(fun, pos, parents); site != nil {
-			out = append(out, site)
-			_, indexed := n.(*syntax.IndexExpr)
-			return !indexed
-		}
-		return true
-	})
-	return out
-}
-
-func (fl *fileLower) cfSiteOf(fun syntax.Expr, pos syntax.Pos, parents map[syntax.Node]syntax.Node) *cfSite {
-	name := cfCalleeName(fun)
-	if name == nil {
-		return nil
-	}
-	inst, ok := fl.pkg.info.Instances[name]
-	obj, isFunc := fl.pkg.info.Uses[name].(*types2.Func)
-	if !ok || !isFunc || !fl.cfIsGeneric(obj) || fl.cfHandledElsewhere(fun, parents) {
-		return nil
-	}
-	targs := typeArgsOf(inst.TypeArgs)
-	if slices.ContainsFunc(targs, cfHasTypeParam) {
-		fl.cfError(pos, "[comptime::generic_targ] cannot instantiate %s with a type parameter", name.Value)
-		return nil
-	}
-	return &cfSite{fun: fun, targs: targs, obj: obj, pos: pos}
-}
-
-func (fl *fileLower) cfHandledElsewhere(n syntax.Node, parents map[syntax.Node]syntax.Node) bool {
-	for p := parents[n]; p != nil; p = parents[p] {
-		switch p := p.(type) {
-		case *syntax.ConstForStmt:
-			return true
-		case *syntax.FuncDecl:
-			_, isDef := fl.pkg.ctExp.byDecl[p]
-			return isDef
-		}
-	}
-	return false
-}
-
-func cfCalleeName(fun syntax.Expr) *syntax.Name {
-	if idx, ok := fun.(*syntax.IndexExpr); ok {
-		fun = idx.X
-	}
-	switch x := fun.(type) {
-	case *syntax.Name:
-		return x
-	case *syntax.SelectorExpr:
-		return x.Sel
-	}
-	return nil
-}
-
 func typeArgsOf(l *types2.TypeList) []types2.Type {
 	out := make([]types2.Type, l.Len())
 	for i := range l.Len() {
@@ -924,380 +739,11 @@ func (fl *fileLower) cfIsGeneric(obj *types2.Func) bool {
 	return slices.ContainsFunc(f.Comptimes, func(c facts.ComptimeFact) bool { return c.Object == cfFactObject(obj) })
 }
 
-func (fl *fileLower) cfRecordFor(obj *types2.Func) (*cfRecord, bool) {
-	exp := fl.pkg.ctExp
-	if def, ok := exp.byObj[obj]; ok {
-		return def.record, true
-	}
-	key := obj.Pkg().Path() + "\x00" + cfFactObject(obj)
-	if rec, ok := exp.foreign[key]; ok {
-		return rec, true
-	}
-	f, ok := facts.Lookup(obj.Pkg().Path())
-	if !ok {
-		return nil, false
-	}
-	for _, c := range f.Comptimes {
-		if c.Object != cfFactObject(obj) {
-			continue
-		}
-		rec, err := cfParseRecord(obj.Name(), string(c.Source))
-		if err != nil {
-			base.Fatalf("logos: bad comptime record for %s: %v", obj.Name(), err)
-		}
-		exp.foreign[key] = rec
-		return rec, true
-	}
-	return nil, false
-}
-
-func (fl *fileLower) expandSite(site *cfSite) {
-	name := fl.cfCopyFor(site)
-	ctx := cfCtx{buf: fl.srcMap, starts: fl.start}
-	fl.add(offAt(fl.start, syntax.StartPos(site.fun)), cfExactEnd(ctx, site.fun), name)
-	replacement := nameOf(syntax.StartPos(site.fun), name)
-	replacement.SetTypeInfo(site.fun.GetTypeInfo())
-	fl.stageReplacement(site.fun, replacement)
-	fl.changed = true
-}
-
-func cfCopyName(obj *types2.Func, seq int) string {
-	return obj.Name() + cfCopyInfix + strconv.Itoa(seq)
-}
-
-func (fl *fileLower) cfCopyFor(site *cfSite) string {
-	exp := fl.pkg.ctExp
-	key := cfExpKey(cfFactObject(site.obj), site.obj.Pkg().Path(), site.targs)
-	if name, ok := exp.memo[key]; ok {
-		return name
-	}
-	label := cfShortKeys(site.targs)
-	if i := exp.frameIndex(key); i >= 0 {
-		fl.cfError(site.pos, "[comptime::circular_instantiation] %s", cfChainText(exp.stack[i:], label))
-		return cfCopyName(site.obj, exp.seq)
-	}
-	rec, ok := fl.cfRecordFor(site.obj)
-	if !ok {
-		fl.cfError(site.pos, "[comptime::generic_targ] no comptime source for %s", site.obj.Name())
-		return cfCopyName(site.obj, exp.seq)
-	}
-	if pkg := site.obj.Pkg(); pkg != fl.pkg.tpkg && len(rec.owner) != 0 {
-		for _, n := range rec.owner {
-			fl.cfOwnerOnly(site.pos, n.kind, n.name, pkg.Path())
-		}
-		return cfCopyName(site.obj, exp.seq)
-	}
-	name := cfCopyName(site.obj, exp.seq)
-	exp.seq++
-	def := exp.byObj[site.obj]
-	exp.stack = append(exp.stack, cfFrame{key: key, label: label, forward: def != nil && def.forward})
-	reported := base.Errors()
-	text, ok := fl.cfBuildCopy(site, rec, name)
-	exp.stack = exp.stack[:len(exp.stack)-1]
-	exp.memo[key] = name
-	if ok && base.Errors() == reported {
-		fl.cfEmitCopy(text, site)
-	}
-	return name
-}
-
-func cfChainText(frames []cfFrame, label string) string {
-	parts := make([]string, 0, len(frames)+1)
-	for _, f := range frames {
-		parts = append(parts, f.label)
-	}
-	return strings.Join(append(parts, label), " -> ")
-}
-
-func cfTParamSpan(src string) (span, bool) {
-	want := []token.Token{token.FUNC, token.IDENT, token.LBRACK}
-	var open, depth, end int
-	b := []byte(src)
-	scanSegment(b, 0, len(b), func(t tok) bool {
-		switch {
-		case t.comment:
-		case len(want) > 0:
-			if t.kind != want[0] {
-				return false
-			}
-			if want[0] == token.LBRACK {
-				open, depth = t.start, 1
-			}
-			want = want[1:]
-		case t.kind == token.LBRACK:
-			depth++
-		case t.kind == token.RBRACK:
-			depth--
-			if depth == 0 {
-				end = t.end
-				return false
-			}
-		}
-		return true
-	})
-	return span{open, end}, end != 0
-}
-
-func (fl *fileLower) cfBuildCopy(site *cfSite, rec *cfRecord, copyName string) (otext, bool) {
-	srcO := rec.sourceO
-	if srcO.s == "" {
-		srcO = gen(rec.source)
-	}
-	params, ok := cfTParamSpan(srcO.s)
-	if !ok {
-		fl.cfError(site.pos, "[comptime::generic_targ] malformed comptime source of %s", rec.name)
-		return otext{}, false
-	}
-	const prefix = "package cfcopy\n"
-	buf := cat(gen(prefix), srcO)
-	src := []byte(buf.s)
-	file, errs := cfParseSource(buf.s)
-	fn := cfFirstFunc(file)
-	if len(errs) > 0 || fn == nil {
-		base.Fatalf("logos: cannot parse comptime source of %s: %v", rec.name, errs)
-	}
-	sites, info, ok := fl.cfCheckRecord(fn, copyName, site, rec)
-	if !ok {
-		return otext{}, false
-	}
-	run := &cfRun{
-		ctx:     cfCtx{buf: srcBuf{b: src, chunks: buf.chunks}, starts: lineStarts(src), stamp: site.pos},
-		info:    info,
-		parents: cfParents(fn),
-		sites:   sites,
-	}
-	params.start += len(prefix)
-	params.end += len(prefix)
-	subs := cfCaseShadowDecls(fn, run)
-	subs = append(subs, fl.cfCopySplices(fn, copyName, run)...)
-	subs = append(subs, splice{start: params.start, end: params.end})
-	out, err := applyChunks(buf, subs)
-	if err != nil {
-		base.Fatalf("logos: overlapping comptime copy %s: %v", copyName, err)
-	}
-	return out.slice(len(prefix), len(out.s)), true
-}
-
-func (fl *fileLower) cfCopySplices(fn *syntax.FuncDecl, copyName string, run *cfRun) []splice {
-	ctx := run.ctx
-	nameStart := offAt(ctx.starts, fn.Name.Pos())
-	subs := []splice{{start: nameStart, end: nameStart + len(fn.Name.Value), text: copyName}}
-	var covered []span
-	for _, cf := range cfInnerConstFors(fn.Body, run.info) {
-		s := offAt(ctx.starts, syntax.StartPos(cf))
-		e := offAt(ctx.starts, syntax.EndPos(cf)) + 1
-		stmts, text := fl.unrollConstForFields(cf, run)
-		fl.cfCountNodes(stmts, run.sites.at(cf.Pos()))
-		subs = append(subs, splice{start: s, end: e, text: text.s, chunks: text.chunks})
-		covered = append(covered, span{s, e})
-	}
-	for _, sub := range fl.cfLeafSubs(fn, nil, covered, run) {
-		subs = append(subs, splice{start: sub.start, end: sub.end, text: sub.text})
-	}
-	return subs
-}
-
-// cfCaseShadowDecls marks each case of a const switch over a type
-// parameter of the copy and declares the parameters' binds at the top of
-// its body. Inside a marked case every parameter reference spells its
-// bind (cfBind), so a case body type decl cannot capture the argument's
-// spelling, an unnamed argument such as `*int` stays a conversion
-// target, and an argument spelled like a parameter keeps the caller's
-// meaning.
-func cfCaseShadowDecls(fn *syntax.FuncDecl, run *cfRun) []splice {
-	sites := run.sites
-	sites.shadowed = cfShadowedCases(fn.Body, run.info, run)
-	if len(sites.shadowed) == 0 {
-		return nil
-	}
-	var text strings.Builder
-	for i, obj := range sites.tparams {
-		spelled, ok := sites.bindings[obj]()
-		if !ok {
-			sites.shadowed = nil
-			return nil
-		}
-		fmt.Fprintf(&text, " type %s = %s;", cfBind(i), spelled)
-	}
-	p := offAt(run.ctx.starts, syntax.StartPos(fn.Body)) + 1
-	return []splice{{start: p, end: p, text: text.String()}}
-}
-
-// cfShadowedCases returns the spans of the cases of every const switch
-// over a type parameter under root. A const for body is read through the
-// info of its first checked iteration: the copy check records the body
-// only per iteration.
-func cfShadowedCases(root syntax.Node, info *types2.Info, run *cfRun) []span {
-	var out []span
-	starts := run.ctx.starts
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		switch s := n.(type) {
-		case *syntax.ConstForStmt:
-			loop := info.LogosConstFor[s]
-			if loop == nil || loop.Struct == nil {
-				return true
-			}
-			if i := slices.IndexFunc(loop.Iterations, func(it *types2.Info) bool { return it != nil }); i >= 0 {
-				out = append(out, cfShadowedCases(s.Body, loop.Iterations[i], run)...)
-			}
-			return false
-		case *syntax.ConstSwitchStmt:
-			tag, ok := syntax.Unparen(s.Targ).(*syntax.Name)
-			if obj := info.Uses[tag]; !ok || obj == nil || !slices.Contains(run.sites.tparams, obj) {
-				return true
-			}
-			for i, cs := range s.Cases {
-				end := offAt(starts, s.Rbrace)
-				if i+1 < len(s.Cases) {
-					end = offAt(starts, s.Cases[i+1].Case)
-				}
-				out = append(out, span{start: offAt(starts, cs.Case), end: end})
-			}
-		}
-		return true
-	})
-	return out
-}
-
-// Check the original source with concrete bindings before any splice can
-// discard a branch or reuse one syntax node for multiple emitted copies.
-func (fl *fileLower) cfCheckRecord(fn *syntax.FuncDecl, copyName string, site *cfSite, rec *cfRecord) (*cfSites, *types2.Info, bool) {
-	params := fn.TParamList
-	if len(site.targs) != len(params) {
-		fl.cfError(site.pos, "[comptime::generic_targ] %s needs %d type arguments, have %d", rec.name, len(params), len(site.targs))
-		return nil, nil, false
-	}
-	origin := site.obj.Pkg()
-	fl.pkg.ctExp.roots = append(fl.pkg.ctExp.roots, origin)
-	ctx := types2.LogosCopyContext{
-		Scope:     origin.Scope(),
-		Version:   fl.pkg.info.FileVersions[fl.file.Pos().FileBase()],
-		NodeLimit: base.LogosComptimeNodes,
-		Sizes:     types2.SizesFor("gc", buildcfg.GOARCH),
-		Record:    true,
-		Bind: types2.LogosTypeBindings{
-			Types: make(map[string]types2.Type, len(params)),
-			Pkgs:  make(map[string]*types2.Package, len(rec.imports)),
-		},
-	}
-	for i, p := range params {
-		ctx.Bind.Types[p.Name.Value] = site.targs[i]
-	}
-	for _, imp := range rec.imports {
-		if imp.path == "comptime" {
-			ctx.Bind.Pkgs[imp.name] = nil
-			continue
-		}
-		pkg, err := fl.cfLoadPackage(imp.path)
-		if err != nil {
-			fl.cfError(site.pos, "[comptime::generic_import] cannot import %s for the copy: %v", imp.path, err)
-			return nil, nil, false
-		}
-		ctx.Bind.Pkgs[imp.name] = pkg
-	}
-	info := &types2.Info{
-		Types:             make(map[syntax.Expr]types2.TypeAndValue),
-		Uses:              make(map[*syntax.Name]types2.Object),
-		Scopes:            make(map[syntax.Node]*types2.Scope),
-		Instances:         make(map[*syntax.Name]types2.Instance),
-		LogosImporter:     fl.pkg.info.LogosImporter,
-		LogosContext:      fl.pkg.info.LogosContext,
-		LogosCTFEMaxSteps: fl.pkg.info.LogosCTFEMaxSteps,
-		LogosCTFE:         maps.Clone(fl.pkg.info.LogosCTFE),
-		LogosConstFuncs:   maps.Clone(fl.pkg.info.LogosConstFuncs),
-	}
-	originalName := fn.Name.Value
-	fn.Name.Value, fn.TParamList = copyName, nil
-	_, errs := types2.LogosCheckCopyFunc(fl.pkg.tpkg, info, ctx, fn)
-	fn.Name.Value = originalName
-	for _, err := range errs {
-		fl.cfError(site.pos, "%s", err.Msg)
-	}
-	if len(errs) != 0 {
-		return nil, nil, false
-	}
-	sites := &cfSites{
-		bindings: make(map[types2.Object]func() (string, bool), len(params)+len(rec.imports)),
-		tparams:  make([]types2.Object, len(params)),
-		errPos:   site.pos,
-	}
-	bound := info.Scopes[fn.Type].Parent()
-	for i, p := range params {
-		t := site.targs[i]
-		obj := bound.Lookup(p.Name.Value)
-		sites.tparams[i] = obj
-		sites.bindings[obj] = fl.cfLazySpelling(func() (string, bool) { return fl.spellTypeAs(t, copyTypeSpelling) }, func() {
-			fl.cfError(site.pos, "[comptime::generic_targ] cannot spell type argument %s of %s", t, rec.name)
-		})
-	}
-	for _, imp := range rec.imports {
-		if pn, ok := bound.Lookup(imp.name).(*types2.PkgName); ok && imp.path != "comptime" {
-			sites.bindings[pn] = fl.cfLazySpelling(func() (string, bool) { return fl.cfCopyQualifier(imp.path, site.pos) }, nil)
-		}
-	}
-	return sites, info, true
-}
-
-// cfCopyQualifier spells path for one copied body. A name in a copied
-// body resolves to the same object as in the defining package.
-func (fl *fileLower) cfCopyQualifier(path string, pos syntax.Pos) (string, bool) {
-	q, ok := fl.cfImportQualifier(path, pos)
-	if !ok {
-		return "", false
-	}
-	if strings.HasPrefix(q, "_logos_") {
-		return q, true
-	}
-	return fl.cfFreshCopyAlias(path, pos)
-}
-
-// cfFreshCopyAlias mints the reserved import alias the copy carries
-// for path.
-func (fl *fileLower) cfFreshCopyAlias(path string, pos syntax.Pos) (string, bool) {
-	reg := fl.getGenImports()
-	pkg := reg.pkgs[path]
-	if pkg == nil {
-		var err error
-		if pkg, err = fl.cfLoadPackage(path); err != nil || pkg == nil {
-			fl.cfError(pos, "[comptime::generic_import] cannot import %s for the copy: %v", path, err)
-			return "", false
-		}
-		reg.pkgs[path] = pkg
-	}
-	var q string
-	for i := 0; ; i++ {
-		q = fmt.Sprintf("_logos_t%d", i)
-		if !reg.used[q] {
-			break
-		}
-	}
-	reg.used[q] = true
-	reg.qual[path] = q
-	if !slices.Contains(reg.order, path) {
-		reg.order = append(reg.order, path)
-	}
-	return q, true
-}
-
 func (fl *fileLower) cfRuntimeBindings() types2.LogosTypeBindings {
 	if !fl.needReflect {
 		return types2.LogosTypeBindings{}
 	}
 	return types2.LogosTypeBindings{Pkgs: map[string]*types2.Package{reflectAlias: fl.pkg.ctExp.pkgs["reflect"]}}
-}
-
-func (fl *fileLower) cfLazySpelling(compute func() (string, bool), fail func()) func() (string, bool) {
-	var text string
-	var ok, done bool
-	return func() (string, bool) {
-		if !done {
-			done = true
-			if text, ok = compute(); !ok && fail != nil {
-				fail()
-			}
-		}
-		return text, ok
-	}
 }
 
 func (fl *fileLower) cfImportQualifier(path string, pos syntax.Pos) (string, bool) {
@@ -1341,102 +787,16 @@ func (fl *fileLower) cfLoadPackage(path string) (*types2.Package, error) {
 }
 
 func (fl *fileLower) cfKnownPackage(path string) *types2.Package {
-	roots := append([]*types2.Package{fl.pkg.tpkg}, fl.pkg.ctExp.roots...)
-	for _, root := range roots {
-		if root.Path() == path {
-			return root
-		}
-		for _, imp := range root.Imports() {
-			if imp.Path() == path {
-				return imp
-			}
+	root := fl.pkg.tpkg
+	if root.Path() == path {
+		return root
+	}
+	for _, imp := range root.Imports() {
+		if imp.Path() == path {
+			return imp
 		}
 	}
 	return nil
-}
-
-func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, run *cfRun) (int, int, string, bool) {
-	fun, indexed := call.Fun.(*syntax.IndexExpr)
-	callee := call.Fun
-	if indexed {
-		callee = fun.X
-	}
-	calleeName := cfCalleeName(callee)
-	obj, _ := run.info.Uses[calleeName].(*types2.Func)
-	if obj == nil || !fl.cfIsGeneric(obj) {
-		return 0, 0, "", false
-	}
-	pos := run.sites.at(call.Pos())
-	stack := fl.pkg.ctExp.stack
-	inForwarder := len(stack) != 0 && stack[len(stack)-1].forward
-	if !indexed && !inForwarder {
-		fl.cfError(pos, "[comptime::generic_targ] comptime generic %s needs explicit type arguments here", obj.Name())
-		return 0, 0, "", false
-	}
-	instance := run.info.Instances[calleeName]
-	targs := typeArgsOf(instance.TypeArgs)
-	if indexed && len(targs) != len(syntax.UnpackListExpr(fun.Index)) {
-		fl.cfError(pos, "[comptime::generic_targ] cannot resolve the type arguments of %s", obj.Name())
-		return 0, 0, "", false
-	}
-	if fl.pkg.info.LogosCtImport != nil && cfTargsMentionLocal(targs) {
-		// Native owner-package emission resolves nested call sites in
-		// the writer through LogosCtSiteKeys paired during unrolling.
-		// A text copy is checked where a function-local type argument
-		// is not in scope, so leave the call spelled and emit no copy.
-		return 0, 0, "", false
-	}
-	name := fl.cfCopyFor(&cfSite{fun: call.Fun, targs: targs, obj: obj, pos: pos})
-	return offAt(run.ctx.starts, syntax.StartPos(call.Fun)), cfExactEnd(run.ctx, call.Fun), name, true
-}
-
-func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) {
-	file, errs := cfParseSource("package cfcopy\n" + text.s)
-	fn := cfFirstFunc(file)
-	if len(errs) > 0 || fn == nil {
-		base.Fatalf("logos: cannot parse comptime copy at %s: %v", site.pos.String(), errs)
-	}
-	if !fl.cfCheckCopyFunc(fn, site.pos) {
-		return
-	}
-	region := fl.adoptRegion(text, site.pos, fn.Pos().FileBase(), 2, []syntax.Node{fn})
-	fl.file.DeclList = append(fl.file.DeclList, fn)
-	fl.addHost(fl.orig, fl.orig, &cfHost{regions: []*cfRegion{region}, head: "\n\n", tail: "\n"})
-}
-
-func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos) bool {
-	exp := fl.pkg.ctExp
-	ctx := types2.LogosCopyContext{
-		Scope:     fl.pkg.info.Scopes[fl.file],
-		Funcs:     exp.copyFuncs,
-		Aliases:   fl.cfAliases(),
-		MaxSteps:  fl.pkg.info.LogosCTFEMaxSteps,
-		NodeLimit: base.LogosComptimeNodes,
-		Importer:  fl.pkg.info.LogosImporter,
-		Context:   fl.pkg.info.LogosContext,
-		Bind:      fl.cfRuntimeBindings(),
-	}
-	obj, errs := types2.LogosCheckCopyFunc(fl.pkg.tpkg, fl.pkg.info, ctx, fn)
-	if obj != nil {
-		exp.copyFuncs = append(exp.copyFuncs, obj)
-	}
-	for _, err := range errs {
-		fl.cfError(pos, "%s", err.Msg)
-	}
-	return len(errs) == 0
-}
-
-func (fl *fileLower) cfRetireDefs() {
-	for _, def := range fl.pkg.ctExp.defs {
-		if def.file != fl.file {
-			continue
-		}
-		if def.obj != nil && def.obj.Exported() {
-			fl.cfStubDef(def)
-		} else {
-			fl.cfDeleteDef(def.decl)
-		}
-	}
 }
 
 // cfRetireDef keeps a comptime generic out of native code and out of
@@ -1459,20 +819,6 @@ func (fl *fileLower) cfRetireDef(def *cfGenericDef) {
 	fl.changed = true
 }
 
-func (fl *fileLower) cfStubDef(def *cfGenericDef) {
-	fn := def.decl
-	call := "panic(" + strconv.Quote("logos: comptime generic "+fn.Name.Value+" runs only through loGo/s instantiation") + ")"
-	fn.Body.List = fl.reparseStmts(call, fn.Pos())
-	fl.add(fl.off(syntax.StartPos(fn.Body)), fl.off(syntax.EndPos(fn.Body))+1, "{\n\t"+call+"\n}")
-	fl.changed = true
-}
-
-func (fl *fileLower) cfDeleteDef(decl *syntax.FuncDecl) {
-	fl.file.DeclList = slices.DeleteFunc(fl.file.DeclList, func(d syntax.Decl) bool { return d == syntax.Decl(decl) })
-	fl.add(fl.cfFuncStart(fl.off(syntax.StartPos(decl))), fl.off(syntax.EndPos(decl))+1, "")
-	fl.changed = true
-}
-
 func cfHasTypeParam(t types2.Type) bool {
 	switch t := t.(type) {
 	case *types2.TypeParam:
@@ -1489,64 +835,6 @@ func cfHasTypeParam(t types2.Type) bool {
 		return cfHasTypeParam(t.Elem())
 	case *types2.Named:
 		return slices.ContainsFunc(typeArgsOf(t.TypeArgs()), cfHasTypeParam)
-	}
-	return false
-}
-
-// cfTargsMentionLocal reports whether any type argument names a type
-// declared below package scope (for example a function-local type). A
-// text copy is checked at package scope and can never spell such an
-// argument; those call sites lower natively instead.
-func cfTargsMentionLocal(targs []types2.Type) bool {
-	for _, t := range targs {
-		if cfTypeMentionsLocal(t) {
-			return true
-		}
-	}
-	return false
-}
-
-func cfTypeMentionsLocal(t types2.Type) bool {
-	switch t := t.(type) {
-	case *types2.Named:
-		if old := t.Obj(); old != nil && old.Pkg() != nil && old.Parent() != nil && old.Parent() != old.Pkg().Scope() {
-			return true
-		}
-		return slices.ContainsFunc(typeArgsOf(t.TypeArgs()), cfTypeMentionsLocal)
-	case *types2.Alias:
-		if old := t.Obj(); old != nil && old.Pkg() != nil && old.Parent() != nil && old.Parent() != old.Pkg().Scope() {
-			return true
-		}
-		return cfTypeMentionsLocal(t.Rhs())
-	case *types2.Pointer:
-		return cfTypeMentionsLocal(t.Elem())
-	case *types2.Slice:
-		return cfTypeMentionsLocal(t.Elem())
-	case *types2.Array:
-		return cfTypeMentionsLocal(t.Elem())
-	case *types2.Map:
-		return cfTypeMentionsLocal(t.Key()) || cfTypeMentionsLocal(t.Elem())
-	case *types2.Chan:
-		return cfTypeMentionsLocal(t.Elem())
-	case *types2.Option:
-		return cfTypeMentionsLocal(t.Elem)
-	case *types2.ConstView:
-		return cfTypeMentionsLocal(t.Elem)
-	case *types2.Signature:
-		if t.Params() != nil {
-			for i := range t.Params().Len() {
-				if cfTypeMentionsLocal(t.Params().At(i).Type()) {
-					return true
-				}
-			}
-		}
-		if t.Results() != nil {
-			for i := range t.Results().Len() {
-				if cfTypeMentionsLocal(t.Results().At(i).Type()) {
-					return true
-				}
-			}
-		}
 	}
 	return false
 }

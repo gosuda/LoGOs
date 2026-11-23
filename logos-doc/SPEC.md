@@ -1348,8 +1348,8 @@ Expansion MUST include unexported fields only for the current package. [T-205]
 Exact cases MUST match only the named type. [T-205]
 Tilde cases MUST match underlying types. [T-205]
 Native and ejected output MUST agree. [T-205]
-Comptime generics MUST expand into non-generic copies in the instantiating package. [T-205]
-`Resolve[f.Type](c)` MUST resolve per field in the copy. [T-205]
+Comptime generics MUST compile to non-generic instances in the defining package. [T-205]
+`Resolve[f.Type](c)` MUST resolve per field in the instance. [T-205]
 The check MUST track the active instantiation stack. [T-205]
 Field copies MUST compare compile-time types through `f.Type`. [T-205]
 A copy whose field types differ MUST fail compilation as an ordinary type mismatch. [T-205]
@@ -2457,7 +2457,7 @@ The toolchain is one complete toolchain for Go and LoGOs: Go packages and LoGOs 
 
 ### 18.2 Compiler-made names
 
-Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` suffix. The only exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, and the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, which Go importers can call.
+Compiler-made names use the `_logos_` prefix; ejected comptime instances use the `_logosct` suffix. The only exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, and the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, which Go importers can call.
 Tuple temporary names MUST be distinct across all files and expansion sites of a package, including sites with identical source coordinates. Repeated compilation of the same ordered inputs MUST produce the same names. Source diagnostics MUST retain the original positions. [T-204.1]
 Separately lowered inactive files MUST retain distinct tuple temporary names when combined in an ejected package. [T-204.1]
 For example, the lowering of `v := parse(s)?` reads as follows (temporary names and site indices vary by position).

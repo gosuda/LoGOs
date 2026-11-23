@@ -96,11 +96,9 @@ func (DupCarrier) Dup[T any](v T) int {
 	fl := &fileLower{pkg: shared, file: file, src: data, orig: len(data), start: lineStarts(data)}
 	fl.srcMap = origBuf(data)
 	exp := &cfExpander{
-		byObj:   make(map[*types2.Func]*cfGenericDef),
-		byDecl:  make(map[*syntax.FuncDecl]*cfGenericDef),
-		foreign: make(map[string]*cfRecord),
-		memo:    make(map[string]string),
-		pkgs:    make(map[string]*types2.Package),
+		byObj:  make(map[*types2.Func]*cfGenericDef),
+		byDecl: make(map[*syntax.FuncDecl]*cfGenericDef),
+		pkgs:   make(map[string]*types2.Package),
 	}
 	got := fl.registerComptime(exp, &facts.Facts{})
 	counts := make(map[string]int)

@@ -102,7 +102,7 @@ recheck:
 		LogosUnionTypes:            logosCtCarry.LogosUnionTypes,
 		// expand as needed
 	}
-	if base.Logos && logosCtNative {
+	if base.Logos {
 		previous := logosCtCarry.LogosCtImport
 		info.LogosCtImport = func(fn *types2.Func) (types2.LogosCtGeneric, bool) {
 			generic, ok := logosImportCtGeneric(&importer, fn)
@@ -276,8 +276,6 @@ recheck:
 		logosDerivedCarry = types2.LogosDerivedVarNames(pkg)
 		if conf.Logos {
 			info.LogosUnionTypes = logosCaptureUnionTypes(info, files)
-		}
-		if conf.Logos && logosCtNative {
 			logosCtFreezeTemplates(info)
 			info.LogosCtExportNamedDefaults = logosCtCaptureNamedTypeProvenance(pkg, info)
 		}
