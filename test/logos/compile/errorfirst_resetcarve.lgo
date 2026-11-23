@@ -41,13 +41,14 @@ func efrcResetAfterPlatformStore() {
 	_, _ = f, err
 }
 
-// A reset before the platform-checked store does not save the carve either:
-// the remainder still holds the checking store.
+// A reset before the platform-checked store still protects the deferred
+// read: the check can only panic after the reset already ran, so the
+// partial carve stands.
 func efrcResetBeforePlatformStore() {
 	missing := flag.Lookup("no-such-flag-efrc")
 	n, err := efrcFetch()
 	defer func() {
-		println(n) // ERROR "result_before_error_check"
+		println(n)
 	}()
 	n = 0
 	var f *flag.Flag = missing

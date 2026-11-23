@@ -2533,6 +2533,27 @@ func (p *logosEFPass) carveAfter(rest []syntax.Stmt, st *logosEFState) (*logosEF
 	if logosEFSame(ks, st) {
 		return nil, false
 	}
+	// A MustNonNil store can panic, but the resets folded before it
+	// already ran on every path, so keep them and fold only tails that
+	// change nothing after it. The checking store itself writes a
+	// platform pointer, never an unchecked result, and its panic
+	// preserves the prior resets.
+	if i < len(rest) && p.isCheckStore(rest[i]) {
+		for j := i + 1; j < len(rest); j++ {
+			trial, cont := p.carveStep(ks, rest[j])
+			if !cont {
+				if p.remainderHazards(rest[j:], p.carvedRoots(st, trial)) {
+					return nil, false
+				}
+				return ks, true
+			}
+			if !logosEFSame(trial, ks) {
+				return nil, false
+			}
+			ks = trial
+		}
+		return ks, true
+	}
 	if p.remainderHazards(rest[i:], p.carvedRoots(st, ks)) {
 		return nil, false
 	}
@@ -2659,6 +2680,50 @@ func (p *logosEFPass) platformChecked(e syntax.Expr) bool {
 	}
 	_, ok := info.LogosChecks[syntax.Unparen(e)]
 	return ok
+}
+
+// isCheckStore reports whether carveStep stops at s because of a recorded
+// MustNonNil source rather than a louder statement: a plain assignment or
+// declaration whose operands are all quiet with one of them checked. It
+// mirrors the scan order so the partial carve keeps only the resets that
+// already ran before the checking store.
+func (p *logosEFPass) isCheckStore(s syntax.Stmt) bool {
+	switch s := s.(type) {
+	case *syntax.AssignStmt:
+		if s.Op != 0 && s.Op != syntax.Def {
+			return false
+		}
+		rhs := syntax.UnpackListExpr(s.Rhs)
+		if len(rhs) == 0 {
+			return false
+		}
+		for _, r := range rhs {
+			if !p.quietExpr(r) {
+				return false
+			}
+			if p.platformChecked(r) {
+				return true
+			}
+		}
+		return false
+	case *syntax.DeclStmt:
+		for _, d := range s.DeclList {
+			vd, ok := d.(*syntax.VarDecl)
+			if !ok || vd.Values == nil {
+				continue
+			}
+			for _, r := range syntax.UnpackListExpr(vd.Values) {
+				if !p.quietExpr(r) {
+					return false
+				}
+				if p.platformChecked(r) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
 }
 
 // carveDrop drops the entries a quiet write overwrites: whole-variable
