@@ -116,7 +116,7 @@ jobs:
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
           GOEXPERIMENT=simd,preemptibleloops GOAMD64=v3 go build -gcflags=-d=ssa/autovec/debug=1 -o "$RUNNER_TEMP/vector-gc" ../test/logos/run/autovec_gc.go 2>&1 | tee "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
-          grep -E 'autovec_gc.go:48:.*autovectorized 64-bit integer loop' "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
+          grep -E 'autovec_gc.go:58:.*autovectorized 64-bit integer loop' "$RUNNER_TEMP/autovec-evidence/gc-vectorization.txt"
           GODEBUG=asyncpreemptoff=1 timeout 90s "$RUNNER_TEMP/vector-gc"
       - name: "Build the mutation overlay helper"
         if: "!cancelled() && steps.build.outcome == 'success'"
