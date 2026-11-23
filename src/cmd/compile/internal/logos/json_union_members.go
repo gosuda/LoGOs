@@ -14,15 +14,17 @@ import (
 )
 
 type unionMemberClass struct {
-	spell   string
-	code    string
-	bare    string
-	keyFunc string
-	keys    []string
-	hasJSON bool
-	keyed   bool
-	foreign bool
-	typ     types2.Type
+	spell     string
+	code      string
+	bare      string
+	keyFunc   string
+	keys      []string
+	hasJSON   bool
+	decodable bool
+	inits     []promotedDecoderInit
+	keyed     bool
+	foreign   bool
+	typ       types2.Type
 }
 
 type unionNames struct {
@@ -46,7 +48,7 @@ func classifyUnionMembers(holderPkg *types2.Package, staticJSON map[*types2.Name
 		var c unionMemberClass
 		var classified bool
 		if m.Type != nil {
-			c, classified = classifyOneMember(holderPkg, staticJSON, m.Type, qual)
+			c, classified = classifyOneMember(holderPkg, staticJSON, m.Type, qual, codeQual)
 			c.code = sourceTypeString(m.Type, codeQual, holderPkg, cgoSource)
 		} else {
 			c, classified = classifyFactMember(holderPkg, m.Text(), codeQual)
@@ -101,9 +103,25 @@ func classifyFactMember(holderPkg *types2.Package, member string, codeQual func(
 		keyFunc = "_logos_jsonkey_" + typeName
 	}
 	if !eligible || len(keys) == 0 {
-		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, foreign: foreign}, hasJSON
+		// A methodless imported member has no decoder to call, but the
+		// union itself is well-formed: classify it as untriable so the
+		// trial is omitted instead of aborting the build. Go package
+		// archives carry no JSON records, so resolve a member the holder
+		// imports to its type and verify the trial against it: the emitted
+		// trial initializes embedded pointer fields on the decoder's
+		// promotion path, and a path that cannot run on a zero value stays
+		// untriable. A member the holder does not import keeps the fact
+		// verdict: its type is unresolvable here.
+		decodable := hasJSON
+		var inits []promotedDecoderInit
+		if typ, ok := resolveFactMemberType(pkg, typeName); ok {
+			var tok bool
+			inits, tok = jsonTrialDecoder(typ, holderPkg, codeQual)
+			decodable = tok
+		}
+		return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON || decodable, decodable: decodable, inits: inits, foreign: foreign}, true
 	}
-	return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keys: keys, hasJSON: true, keyed: true, foreign: foreign}, true
+	return unionMemberClass{spell: spell, code: code, bare: typeName, keyFunc: keyFunc, keys: keys, hasJSON: true, decodable: true, keyed: true, foreign: foreign}, true
 }
 
 func memberPackageFor(holderPkg *types2.Package, path string) *types2.Package {
@@ -135,6 +153,7 @@ func foreignUnionKeysByPath(pkgPath, typ string) ([]string, bool, bool) {
 		hasJSON = meta.HasDecoder
 		eligible = meta.Eligible
 	}
+
 	keys := jsonKeysFor(rec, typ)
 	if !eligible || len(keys) == 0 {
 		return nil, false, hasJSON
@@ -142,7 +161,31 @@ func foreignUnionKeysByPath(pkgPath, typ string) ([]string, bool, bool) {
 	return keys, true, true
 }
 
-func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]bool, m types2.Type, qual func(*types2.Package) string) (unionMemberClass, bool) {
+// resolveFactMemberType resolves an imported union member to the type the
+// holder's own imports provide. Decoder facts in Go package archives carry
+// no JSON records; the resolved type lets the trial verify the decoder
+// against the real method set. A member the holder does not import, an
+// unexported name, or an unspellable generic stays unresolvable: the
+// generated trial could not name such a type.
+func resolveFactMemberType(pkg *types2.Package, typeName string) (types2.Type, bool) {
+	if pkg == nil || pkg.Scope() == nil {
+		return nil, false
+	}
+	obj := pkg.Scope().Lookup(typeName)
+	if obj == nil || !obj.Exported() {
+		return nil, false
+	}
+	tname, ok := obj.(*types2.TypeName)
+	if !ok || tname.Type() == nil {
+		return nil, false
+	}
+	if unboundParams(tname.Type()) {
+		return nil, false
+	}
+	return tname.Type(), true
+}
+
+func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]bool, m types2.Type, qual func(*types2.Package) string, codeQual func(*types2.Package) string) (unionMemberClass, bool) {
 	spell := types2.TypeString(m, qual)
 	elem := m
 	if ptr, ok := types2.Unalias(elem).(*types2.Pointer); ok {
@@ -150,7 +193,16 @@ func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]b
 	}
 	named, ok := unaliasConstView(elem).(*types2.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-		return unionMemberClass{spell: spell, keyed: false, hasJSON: hasUnmarshalMethods(m), typ: m}, hasUnmarshalMethods(m)
+		// A built-in or otherwise unnamed member has no decoder of its own,
+		// but an anonymous struct may promote the UnmarshalJSON of its
+		// embedded fields. The trial declares a zero scratch value, so a
+		// method reached through an embedded pointer would write through
+		// nil: trial only what can run, and initialize the embedded
+		// pointer fields on the decoder's path first. Everything else
+		// stays untriable so the trial is omitted instead of aborting the
+		// build.
+		inits, ok := jsonTrialDecoder(m, holderPkg, codeQual)
+		return unionMemberClass{spell: spell, keyed: false, hasJSON: ok, decodable: ok, inits: inits, typ: m}, true
 	}
 	if args := named.TypeArgs(); args != nil && args.Len() > 0 {
 		for i := range args.Len() {
@@ -164,19 +216,29 @@ func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]b
 	samePkg := holderPkg != nil && memberPkg != nil && holderPkg.Path() == memberPkg.Path()
 	concreteArgs := named.TypeArgs() != nil && named.TypeArgs().Len() > 0
 	hasJSON := hasUnmarshalMethods(m)
+	decodable := hasUnmarshalJSON(m)
 	var keys []string
 	var eligible bool
 	if samePkg || concreteArgs {
 		keys, eligible = localUnionKeys(staticJSON, named)
 	} else {
-		keys, eligible, hasJSON = foreignUnionKeys(memberPkg, bare, hasJSON)
+		var factDecoder bool
+		keys, eligible, factDecoder = foreignUnionKeys(memberPkg, bare, hasUnmarshalJSON(m))
+		hasJSON = factDecoder || hasJSON
+		decodable = factDecoder || decodable
 	}
 	keyFunc := keyFuncFor(bare, memberPkg, holderPkg)
 	foreign := !samePkg
-	if !eligible || len(keys) == 0 {
-		return unionMemberClass{spell: spell, bare: bare, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, foreign: foreign, typ: m}, true
+	var inits []promotedDecoderInit
+	if decodable {
+		var ok bool
+		inits, ok = jsonTrialDecoder(m, holderPkg, codeQual)
+		decodable = ok
 	}
-	return unionMemberClass{spell: spell, bare: bare, keyFunc: keyFunc, keys: keys, hasJSON: true, keyed: true, foreign: foreign, typ: m}, true
+	if !eligible || len(keys) == 0 {
+		return unionMemberClass{spell: spell, bare: bare, keyFunc: keyFunc, keyed: false, hasJSON: hasJSON, decodable: decodable, inits: inits, foreign: foreign, typ: m}, true
+	}
+	return unionMemberClass{spell: spell, bare: bare, keyFunc: keyFunc, keys: keys, hasJSON: true, decodable: decodable, inits: inits, keyed: true, foreign: foreign, typ: m}, true
 }
 
 func localUnionKeys(staticJSON map[*types2.Named]bool, named *types2.Named) ([]string, bool) {
