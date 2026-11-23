@@ -26,14 +26,14 @@ func TestCompileConstSwitchDeadTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run := func() ([]byte, error) {
-		cmd := testenv.Command(t, logosTool, "run", "-p=1", "-buildvcs=false", ".")
+	run := func(args ...string) ([]byte, error) {
+		cmd := testenv.Command(t, logosTool, args...)
 		cmd.Dir = dir
 		cmd.Env = append(archDiffEnv(cmd, runtime.GOOS, runtime.GOARCH), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
 		return cmd.CombinedOutput()
 	}
 
-	output, err := run()
+	output, err := run("run", "-p=1", "-buildvcs=false", ".")
 	if err != nil {
 		t.Fatalf("logos run with dead declarations: %v\n%s", err, output)
 	}
@@ -44,9 +44,14 @@ func TestCompileConstSwitchDeadTypes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "live_cycle.lgo"), []byte("package main\n\nvar _ = pick[string]()\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	output, err = run()
-	want := "invalid recursive type: anonymous interface refers to itself"
-	if err == nil || !strings.Contains(string(output), want) || strings.Contains(string(output), "internal compiler error") {
-		t.Fatalf("logos run with live cycle = %v, want diagnostic %q without an ICE:\n%s", err, want, output)
+	const want = "invalid recursive type: anonymous interface refers to itself"
+	for _, args := range [][]string{
+		{"run", "-p=1", "-buildvcs=false", "."},
+		{"eject", "-o", filepath.Join(t.TempDir(), "ejected")},
+	} {
+		output, err := run(args...)
+		if err == nil || !strings.Contains(string(output), want) || strings.Contains(string(output), "internal compiler error") {
+			t.Fatalf("logos %s with live cycle = %v, want diagnostic %q without an ICE:\n%s", args[0], err, want, output)
+		}
 	}
 }
