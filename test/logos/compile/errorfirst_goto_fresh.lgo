@@ -1,0 +1,34 @@
+// errorcheck
+
+package p
+
+type efGotoHeld struct {
+	stats int
+	err   error
+}
+
+func efGotoFetch() (int, error) {
+	return 1, nil
+}
+
+// The root is fresh each iteration, but the backward goto re-runs the
+// store within one iteration, so an earlier defer can read a later
+// retry's unchecked value. The read must fail.
+func efGotoInnerLabelRetryFreshRoot(done bool) {
+	for {
+		h := efGotoHeld{}
+	retry:
+		h.stats = 0
+		var err error
+		defer func() {
+			if err == nil {
+				println(h.stats) // ERROR "result_before_error_check"
+			}
+		}()
+		h.stats, err = efGotoFetch()
+		if !done {
+			goto retry
+		}
+		break
+	}
+}

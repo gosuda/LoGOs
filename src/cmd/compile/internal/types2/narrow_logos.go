@@ -1159,6 +1159,7 @@ type logosEFEffects struct {
 	inside   map[*Var]bool
 	assigned map[logosEFKey]bool
 	created  map[logosEFKey]string
+	may      map[logosEFKey]logosEFKey
 }
 
 type logosEFPass struct {
@@ -2259,6 +2260,15 @@ func (p *logosEFPass) noteCreated(k logosEFKey, errName string) {
 	}
 }
 
+func (p *logosEFPass) noteMay(k logosEFKey, errKey logosEFKey) {
+	if p.eff != nil && !p.eff.inside[k.root] {
+		if p.eff.may == nil {
+			p.eff.may = make(map[logosEFKey]logosEFKey)
+		}
+		p.eff.may[k] = errKey
+	}
+}
+
 func (p *logosEFPass) assigned(st *logosEFState, v *Var) *logosEFState {
 	k := logosEFKey{root: v}
 	p.noteAssigned(k)
@@ -2296,9 +2306,12 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 				st = st.set(k, e2)
 			}
 			st = st.setMay(k)
-			if ek, ok := p.destKey(lhs[len(lhs)-1]); ok {
-				st = p.setMayErr(st, k, ek)
+			var ek logosEFKey
+			if dk, ok := p.destKey(lhs[len(lhs)-1]); ok {
+				st = p.setMayErr(st, k, dk)
+				ek = dk
 			}
+			p.noteMay(k, ek)
 		}
 		return st
 	}
@@ -3046,6 +3059,10 @@ func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, e syntax.Expr, miss
 		return p.cond(e, miss)
 	case tagErr != nil && p.isNil(syntax.Unparen(e)):
 		return miss.prove(tagErr), miss
+	case tagErr == nil && p.isNil(syntax.Unparen(e)):
+		if fk, ok := p.destKey(tag); ok {
+			return miss.dropMayFor(fk), miss
+		}
 	}
 	miss = p.expr(e, miss)
 	return miss, miss
@@ -3279,7 +3296,7 @@ func (p *logosEFPass) loopLocalErrShared(errV *Var, k logosEFKey, lit syntax.Nod
 			// instance each iteration, so a store in one iteration
 			// cannot overwrite the value another iteration's defer
 			// captured: the pairing is same-iteration.
-			if p.loopFresh[f][k.root] {
+			if p.loopFresh[f][k.root] && !p.reenter[f] {
 				continue
 			}
 			// A loop that cannot run twice has no earlier iteration
@@ -3514,7 +3531,7 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	}
 	inside := p.defsIn(lit)
 	saved := p.eff
-	eff := &logosEFEffects{inside: inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string)}
+	eff := &logosEFEffects{inside: inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
 	p.eff = eff
 	in := p.capture(st)
 	if p.carve != nil {
@@ -3533,6 +3550,13 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	for k, errName := range eff.created {
 		st = st.set(k, logosEFEntry{name: errName, pos: body.Pos()})
 		p.noteCreated(k, errName)
+	}
+	for k, errKey := range eff.may {
+		st = st.setMay(k)
+		if errKey != (logosEFKey{}) {
+			st = p.setMayErr(st, k, errKey)
+		}
+		p.noteMay(k, errKey)
 	}
 	return st
 }

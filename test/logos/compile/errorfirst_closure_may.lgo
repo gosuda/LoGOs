@@ -1,0 +1,32 @@
+// errorcheck
+
+package p
+
+type efClosureHeld struct {
+	stats int
+	err   error
+}
+
+func efClosureFetch() (int, error) {
+	return 1, nil
+}
+
+// A blank-error store inside an immediately invoked literal still leaves
+// an unchecked value that reaches the deferred read: skipping the retry
+// must fail.
+func efClosureBlankStoreReachesDefer(cond bool) {
+	h := efClosureHeld{}
+	var retryErr error
+	func() {
+		h.stats, _ = efClosureFetch()
+	}()
+	defer func() {
+		if retryErr == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	if cond {
+		h.stats, retryErr = efClosureFetch()
+	}
+	_ = retryErr
+}
