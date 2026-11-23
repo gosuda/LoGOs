@@ -1353,7 +1353,7 @@ func (c *cfLeaf) subMarker(n *syntax.Name) bool {
 		spelling, ok = resolve()
 	case obj.Pkg() != nil && obj.Pkg() != c.fl.pkg.tpkg && obj.Parent() == obj.Pkg().Scope():
 		if !obj.Exported() {
-			c.fl.cfError(sites.at(n.Pos()), "[comptime::unexported_in_exported] comptime source names unexported %s %s of its package", cfObjKind(obj), obj.Name())
+			c.fl.cfOwnerOnly(sites.at(n.Pos()), cfObjKind(obj), obj.Name(), obj.Pkg().Path())
 			return true
 		}
 		var qualifier string

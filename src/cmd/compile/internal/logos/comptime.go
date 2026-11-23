@@ -42,9 +42,18 @@ type cfImport struct {
 	path string
 }
 
+// cfOwnerName is an unexported package-level identifier that an exported
+// comptime generic names. Its own package can instantiate the generic; a
+// copy in another package cannot reach the identifier.
+type cfOwnerName struct {
+	kind string
+	name string
+}
+
 type cfRecord struct {
 	name    string
 	imports []cfImport
+	owner   []cfOwnerName
 	source  string
 	sourceO otext
 }
@@ -54,6 +63,9 @@ func (r *cfRecord) text() string {
 	b.WriteString("//logosct\n")
 	for _, imp := range r.imports {
 		fmt.Fprintf(&b, "//logosimp %s %s\n", imp.name, imp.path)
+	}
+	for _, n := range r.owner {
+		fmt.Fprintf(&b, "//logosowner %s %s\n", n.name, n.kind)
 	}
 	b.WriteString(r.source)
 	return b.String()
@@ -69,6 +81,8 @@ func cfParseRecord(name, text string) (*cfRecord, error) {
 		case fields[0] == "//logosct":
 		case fields[0] == "//logosimp" && len(fields) == 3:
 			rec.imports = append(rec.imports, cfImport{name: fields[1], path: fields[2]})
+		case fields[0] == "//logosowner" && len(fields) >= 3:
+			rec.owner = append(rec.owner, cfOwnerName{name: fields[1], kind: strings.Join(fields[2:], " ")})
 		default:
 			return nil, fmt.Errorf("unknown record header %q", line)
 		}
@@ -296,8 +310,9 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, imports []cfImport) *cfReco
 		export: !def.forward && def.obj != nil && def.obj.Exported() && fl.pkg.tpkg.Name() != "main",
 	}
 	syntax.Inspect(def.decl, b.visit)
+	var owner []cfOwnerName
 	if b.export {
-		fl.cfCheckExportedRecord(def, b)
+		owner = b.ownerNames()
 	}
 	start := fl.cfFuncStart(fl.off(syntax.StartPos(def.decl)))
 	end := fl.off(syntax.EndPos(def.decl)) + 1
@@ -308,25 +323,25 @@ func (fl *fileLower) cfRecordText(def *cfGenericDef, imports []cfImport) *cfReco
 	return &cfRecord{
 		name:    def.decl.Name.Value,
 		imports: imports,
+		owner:   owner,
 		source:  out.s,
 		sourceO: out,
 	}
 }
 
-// cfCheckExportedRecord reports each package-level unexported identifier
-// an exported comptime generic names. The record travels as source text
-// to importing packages, where an unexported name cannot resolve; package
-// main cannot be imported, so the caller skips it. It
-// walks the declaration the way cfRecordBuilder.visit does: a const if
-// condition that folds to a literal never reaches the record, so a
-// constant condition's names are not checked while a non-constant
-// condition's are, and a name without a file position belongs to a
-// synthesized node that has no source to report.
-func (fl *fileLower) cfCheckExportedRecord(def *cfGenericDef, b *cfRecordBuilder) {
+// ownerNames lists, in source order, the unexported package-level
+// identifiers an exported comptime generic names. The record carries them
+// so that an importer refuses its instantiation by name instead of failing
+// on an undefined name in the copy. The walk follows cfRecordBuilder.visit:
+// a const if condition that folds to a literal never reaches the record,
+// and a name without a file position belongs to a synthesized node.
+func (b *cfRecordBuilder) ownerNames() []cfOwnerName {
+	var out []cfOwnerName
+	seen := make(map[string]bool)
 	var visit func(n syntax.Node) bool
 	visit = func(n syntax.Node) bool {
 		if s, ok := n.(*syntax.ConstIfStmt); ok {
-			fl.cfCheckCond(s.Cond, visit)
+			b.fl.cfCheckCond(s.Cond, visit)
 			syntax.Inspect(s.Then, visit)
 			if s.Else != nil {
 				syntax.Inspect(s.Else, visit)
@@ -334,20 +349,26 @@ func (fl *fileLower) cfCheckExportedRecord(def *cfGenericDef, b *cfRecordBuilder
 			return false
 		}
 		name, ok := n.(*syntax.Name)
-		if !ok {
-			return true
-		}
-		if name.Pos().Base() == nil || b.folded[name] {
+		if !ok || name.Pos().Base() == nil || b.folded[name] {
 			return true
 		}
 		obj := b.recordObject(name)
-		if obj == nil || obj.Exported() || !cfPackageLevel(fl, obj) {
+		if obj == nil || obj.Exported() || !cfPackageLevel(b.fl, obj) || seen[obj.Name()] {
 			return true
 		}
-		fl.cfError(name.Pos(), "[comptime::unexported_in_exported] exported comptime generic %s names unexported %s %s of its package", def.decl.Name.Value, cfObjKind(obj), obj.Name())
+		seen[obj.Name()] = true
+		out = append(out, cfOwnerName{kind: cfObjKind(obj), name: obj.Name()})
 		return true
 	}
-	syntax.Inspect(def.decl, visit)
+	syntax.Inspect(b.decl, visit)
+	return out
+}
+
+// cfOwnerOnly reports an unexported identifier of another package that a
+// comptime copy needs: only the defining package can instantiate the
+// generic.
+func (fl *fileLower) cfOwnerOnly(pos syntax.Pos, kind, name, pkgPath string) {
+	fl.cfError(pos, "[comptime::unexported_in_exported] comptime source names unexported %s %s of package %s; only that package can instantiate it", kind, name, pkgPath)
 }
 
 func (b *cfRecordBuilder) recordObject(n *syntax.Name) types2.Object {
@@ -926,6 +947,12 @@ func (fl *fileLower) cfCopyFor(site *cfSite) string {
 	rec, ok := fl.cfRecordFor(site.obj)
 	if !ok {
 		fl.cfError(site.pos, "[comptime::generic_targ] no comptime source for %s", site.obj.Name())
+		return cfCopyName(site.obj, exp.seq)
+	}
+	if pkg := site.obj.Pkg(); pkg != fl.pkg.tpkg && len(rec.owner) != 0 {
+		for _, n := range rec.owner {
+			fl.cfOwnerOnly(site.pos, n.kind, n.name, pkg.Path())
+		}
 		return cfCopyName(site.obj, exp.seq)
 	}
 	name := cfCopyName(site.obj, exp.seq)

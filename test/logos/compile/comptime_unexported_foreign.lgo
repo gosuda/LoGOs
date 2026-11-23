@@ -1,0 +1,28 @@
+// errorcheck
+
+// The defining package's scope opens only its own unexported names. An
+// unexported identifier of another package stays refused in a comptime
+// generic and in each of its instances.
+
+package p
+
+import (
+	"comptime"
+	"strings"
+)
+
+type Pair struct {
+	A int
+	B int
+}
+
+func Count[T any]() int {
+	n := strings.indexFunc("x", nil, true) // ERROR "name indexFunc not exported by package strings"
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+var _ = Count[Pair]()

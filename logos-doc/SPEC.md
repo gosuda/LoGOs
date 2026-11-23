@@ -1214,9 +1214,9 @@ Copies MUST be memoized per type-argument list. [T-205]
 
 An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
 
-An exported comptime generic that names an unexported package-level identifier of its own package MUST fail with `[comptime::unexported_in_exported]` at that identifier in the defining package. [T-205]
+A comptime generic MAY name the unexported package-level identifiers of its own package. Each instance MUST check them in the scope of the defining package. An unexported identifier of another package MUST stay refused. [T-205]
 
-The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. [T-205]
+An exported comptime generic that names such identifiers MUST carry their list in its `__.LOGOS` record. An instantiation of it in another package MUST fail with `[comptime::unexported_in_exported]` at the instantiation for each identifier, because the copy in that package cannot reach it. [T-205]
 
 A `const for` range MUST be `comptime.Fields[T]()` over a struct type. [T-205]
 

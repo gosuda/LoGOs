@@ -2,36 +2,33 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 
 cd w
-# The defining package fails on the unexported identifiers its exported
-# comptime generic names; the importer must never see undefined: names.
+# A comptime generic may name the unexported identifiers of its own
+# package, so the defining package builds (SPEC 2.5, T-205).
+logos build ./app
+# An instantiation in another package cannot reach them. It fails at the
+# importer's instantiation and names each identifier; the importer never
+# sees an undefined: name.
 ! logos build ./...
-stderr 'comptime::unexported_in_exported'
-stderr 'unexported type named'
-stderr 'unexported func collect'
-! stderr 'undefined: app'
+stderr 'main[/\\]main.lgo:14:\d+: \[comptime::unexported_in_exported\] comptime source names unexported type named of package example.com/cfrepro/app; only that package can instantiate it'
+stderr 'main[/\\]main.lgo:14:\d+: \[comptime::unexported_in_exported\] comptime source names unexported func collect of package example.com/cfrepro/app; only that package can instantiate it'
+! stderr 'app[/\\]app.lgo'
+! stderr 'undefined'
 
 cd ../m
-# Package main cannot be imported, so its exported comptime generic may
-# name an unexported function of the package; the program runs.
+# Package main instantiates its own exported comptime generic, which
+# names an unexported function of the package; the program runs.
 logos run .
 stdout '^2$'
 cd ../x
 # The issue's exact shape: an external test package instantiates the
 # generic with a field-type argument and a field projection. The
-# defining package still fails at the declaration, not at the importer.
-! logos build ./...
-stderr 'comptime::unexported_in_exported'
-stderr 'unexported type named'
-stderr 'unexported func collect'
-! stderr 'undefined: app'
-# logos test builds the external test package, which exercises the
-# importer path the issue reported; the diagnostic still lands on the
-# defining package's declaration.
+# defining package builds; the external test package is another package,
+# so its instantiation fails there.
+logos build ./...
 ! logos test ./...
-stderr 'comptime::unexported_in_exported'
-stderr 'unexported type named'
-stderr 'unexported func collect'
-! stderr 'undefined: app'
+stderr 'app_test.lgo:11:\d+: \[comptime::unexported_in_exported\] comptime source names unexported type named of package example.com/x/app; only that package can instantiate it'
+stderr 'app_test.lgo:11:\d+: \[comptime::unexported_in_exported\] comptime source names unexported func collect of package example.com/x/app; only that package can instantiate it'
+! stderr 'undefined'
 
 -- w/go.mod --
 module example.com/cfrepro
