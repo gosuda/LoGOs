@@ -7,7 +7,8 @@ package slog
 import (
 	"fmt"
 	"log/slog"
-	"reflect"
+
+	rtjson "logos/rt/json"
 )
 
 // appendValue appends v with the handler's encoding, converting a
@@ -16,7 +17,7 @@ func (s *handleState) appendValue(v slog.Value) {
 	defer func() {
 		if r := recover(); r != nil {
 			// Adapted from the code in fmt/print.go.
-			if w := reflect.ValueOf(v.Any()); w.Kind() == reflect.Pointer && w.IsNil() {
+			if rtjson.IsNilPointer(v.Any()) {
 				s.appendString("<nil>")
 				return
 			}

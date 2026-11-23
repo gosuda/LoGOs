@@ -12,14 +12,15 @@
 // handler implements slog.Handler, so it plugs into slog.Logger and any
 // existing handler chain, and a twin Logger wraps any slog.Handler.
 //
-// The twin provides the hot path without the two reflect sites and the
-// ...any boxing of the original:
+// The twin formats attributes without the original's dynamic dispatch and
+// without ...any boxing on the way in:
 //
 //   - TextHandler and JSONHandler format the scalar attribute kinds
 //     (string, int64, uint64, float64, bool, duration, time) with plain
-//     appends into a pooled buffer. The single reflect probe that remains
-//     runs only for a dynamic Any value holding a named []byte type; the
-//     type is known only at run time there, so reflect is the honest tool.
+//     appends into a pooled buffer. Shared helpers in logos/rt/json
+//     recognize byte slices in already-boxed values and detect typed
+//     nil pointers during panic recovery. BytesOf converts statically
+//     typed byte slices before boxing.
 //   - Logger takes ...slog.Attr instead of ...any, so typed constructors
 //     never box on the way in.
 //   - JSON floats append through logos/rt/json instead of a pooled

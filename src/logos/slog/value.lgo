@@ -7,16 +7,19 @@ package slog
 import (
 	"log/slog"
 	"time"
+
+	rtjson "logos/rt/json"
 )
 
-// ByteSliceOf returns v as a []byte when v's dynamic type has []byte as
-// its underlying type, along with true. Otherwise it returns nil, false.
-// The probe itself allocates nothing. The twin handlers call the
-// unexported probe on the already-boxed attribute value, so the hot path
-// pays nothing. A generic spelling would box identically at the call
-// boundary and is intentionally not provided.
+// ByteSliceOf returns v as a []byte when v's dynamic type is a slice of
+// uint8 elements, along with true; the slice and element types may be
+// named, and the result shares v's backing array. Otherwise it returns
+// nil, false. The probe itself allocates nothing. The twin handlers run
+// the same logos/rt/json probe on the already-boxed attribute value, so
+// the hot path pays nothing. A generic spelling would box identically at
+// the call boundary and is intentionally not provided.
 func ByteSliceOf(v any) ([]byte, bool) {
-	return byteSliceOf(v)
+	return rtjson.ByteSliceOf(v)
 }
 
 // Bytes returns an Attr holding b. The handler renders it quoted in text

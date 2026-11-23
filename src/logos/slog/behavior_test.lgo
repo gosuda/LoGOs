@@ -365,6 +365,26 @@ func TestTwinBehavior(t *testing.T) {
 			origTextPlain,
 		},
 		{
+			"text nil pointer marshaler",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Any("t", (*twinPanicText)(nil)))
+				return r
+			},
+			twinTextPlain,
+			origTextPlain,
+		},
+		{
+			"json nil pointer marshaler",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Any("t", (*twinPanicText)(nil)))
+				return r
+			},
+			twinJSONPlain,
+			origJSONPlain,
+		},
+		{
 			"text nan inf",
 			func() slog.Record {
 				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)

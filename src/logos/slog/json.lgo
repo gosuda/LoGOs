@@ -114,7 +114,7 @@ func appendJSONAnyValue(s *handleState, a any) error {
 		s.appendString(err.Error())
 		return nil
 	}
-	if bs, ok := byteSliceOf(a); ok {
+	if bs, ok := rtjson.ByteSliceOf(a); ok {
 		appendJSONBytes(s.buf, bs)
 		return nil
 	}

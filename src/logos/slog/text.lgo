@@ -10,11 +10,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"reflect"
 	"strconv"
 	"sync"
 	"unicode"
 	"unicode/utf8"
+
+	rtjson "logos/rt/json"
 )
 
 // TextHandler writes records as space-separated key=value pairs, one
@@ -101,7 +102,7 @@ func appendTextAnyValue(s *handleState, v slog.Value) error {
 		s.appendBytesAsString(data)
 		return nil
 	}
-	if bs, ok := byteSliceOf(v.Any()); ok {
+	if bs, ok := rtjson.ByteSliceOf(v.Any()); ok {
 		*s.buf = strconv.AppendQuote(s.buf.bytes(), string(bs))
 		return nil
 	}
@@ -142,21 +143,6 @@ func (s *handleState) appendBytesAsString(b []byte) {
 	} else {
 		s.buf.write(b)
 	}
-}
-
-// byteSliceOf returns its argument as a []byte if the argument's
-// underlying type is []byte, along with a second return value of true.
-// Otherwise it returns nil, false. It mirrors log/slog's byteSlice,
-// including the named-type probe.
-func byteSliceOf(a any) ([]byte, bool) {
-	if bs, ok := a.([]byte); ok {
-		return bs, true
-	}
-	t := reflect.TypeOf(a)
-	if t != nil && t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8 {
-		return reflect.ValueOf(a).Bytes(), true
-	}
-	return nil, false
 }
 
 func needsQuoting(s string) bool {
