@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"testing"
 )
@@ -46,10 +47,43 @@ func TestCompileComptimeHelperUnit(t *testing.T) {
 			if mode == "ejected" {
 				dir = filepath.Join(t.TempDir(), "ejected")
 				run(t, src, logosTool, "eject", "-o", dir)
+				checkOwnedInstanceNames(t, filepath.Join(dir, "owner"))
 				tool = testenv.GoToolPath(t)
 			}
 			checkComptimeHelperUnit(t, run(t, dir, tool, "run", "-p=1", "-buildvcs=false", "."))
 		})
+	}
+}
+
+// checkOwnedInstanceNames checks the names of the instances that logos eject
+// prints in package owner: <f>_logosct_<h>, h the first 12 hex digits of the
+// instance ID, which hashes the whole type-argument key, so Probe[Shared] and
+// Probe[Distinct] get two names.
+func checkOwnedInstanceNames(t *testing.T, owner string) {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(owner, "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decl := regexp.MustCompile(`func (Probe_logosct_?[0-9a-f]*)\(`)
+	names := make(map[string]bool)
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range decl.FindAllSubmatch(data, -1) {
+			names[string(m[1])] = true
+		}
+	}
+	if len(names) != 2 {
+		t.Fatalf("owned Probe instances in %s: %v, want two", owner, names)
+	}
+	owned := regexp.MustCompile(`^Probe_logosct_[0-9a-f]{12}$`)
+	for name := range names {
+		if !owned.MatchString(name) {
+			t.Errorf("owned instance %s, want Probe_logosct_ and 12 hex digits", name)
+		}
 	}
 }
 
