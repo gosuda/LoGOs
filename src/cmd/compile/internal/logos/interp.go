@@ -6,9 +6,11 @@ package logos
 
 import (
 	"fmt"
+	"go/constant"
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
@@ -225,20 +227,34 @@ type interpNames struct {
 
 func (fl *fileLower) interpSyntax(e *syntax.InterpExpr, operands []interpOperand) syntax.Expr {
 	pos := e.Pos()
-	if len(e.Exprs) == 0 {
-		return litOf(pos, strconv.Quote(e.Parts[0]), syntax.StringLit)
-	}
 	names := interpNames{builtin: fl.ctBuiltin, selector: fl.ctPkgSelector}
 	stmts := interpBody(e, e.Exprs, operands, names)
 	return interpCall(pos, stmts, names.builtin(pos, "string"))
+}
+
+func interpConstString(e *syntax.InterpExpr, info *types2.Info) (string, bool) {
+	var b strings.Builder
+	for i, op := range e.Exprs {
+		typ, val := ctDefaultValue(info, op)
+		if val == nil || val.Kind() != constant.String {
+			return "", false
+		}
+		if kind, ok := types2.LogosInterpKindOf(typ); !ok || kind != types2.LogosInterpString {
+			return "", false
+		}
+		b.WriteString(e.Parts[i])
+		b.WriteString(constant.StringVal(val))
+	}
+	b.WriteString(e.Parts[len(e.Parts)-1])
+	return b.String(), true
 }
 
 func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosInterpKind) (bool, otext) {
 	pos := e.Pos()
 	start := fl.off(pos)
 	end := start + len(e.Raw)
-	if len(e.Exprs) == 0 {
-		text := strconv.Quote(e.Parts[0])
+	if s, ok := interpConstString(e, fl.pkg.info); ok {
+		text := strconv.Quote(s)
 		fl.add(start, end, text)
 		fl.stageReplacement(e, litOf(pos, text, syntax.StringLit))
 		return false, gen(text)

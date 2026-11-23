@@ -6,6 +6,7 @@ package logos
 
 import (
 	"fmt"
+	"strconv"
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
@@ -850,6 +851,9 @@ func (w ctWalker) expr(e syntax.Expr) (syntax.Expr, []syntax.Stmt) {
 }
 
 func (w ctWalker) interpolation(e *syntax.InterpExpr) (syntax.Expr, []syntax.Stmt) {
+	if s, ok := interpConstString(e, w.fl.pkg.info); ok {
+		return litOf(e.Pos(), strconv.Quote(s), syntax.StringLit), nil
+	}
 	ops := w.fl.checkedInterpOperands(e)
 	var pending [][]syntax.Stmt
 	for i, operand := range e.Exprs {
