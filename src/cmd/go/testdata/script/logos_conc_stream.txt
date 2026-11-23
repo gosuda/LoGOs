@@ -48,6 +48,23 @@ logos conc test -count=1 ./oneorder
 stderr '^exit status 3$'
 ! stdout 'conc::'
 
+# A program whose last stderr byte is a colon still forwards its own
+# status: "operation failed:" runs into the wrapper's "exit status 3".
+! logos conc run ./failing
+stderr 'operation failed:exit status 3$'
+! stderr 'conc::'
+[exec:sh] exec sh -c 'logos conc run ./failing; echo status=$?'
+[exec:sh] stdout 'status=3$'
+
+# A helper that inherits stderr and reports its own status after the
+# program exits cannot replace the program's status.
+! logos conc run ./helper
+stderr -count=1 '^exit status 1$'
+stderr 'exit status 9'
+! stderr 'conc::'
+[exec:sh] exec sh -c 'logos conc run ./helper; echo status=$?'
+[exec:sh] stdout 'status=1$'
+
 # A plain build does not carry the monitor.
 logos run ./opposite
 ! stderr .
@@ -169,6 +186,48 @@ func main() {
 		os.Exit(3)
 	}
 }
+
+-- bank/failing/main.lgo --
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	fmt.Fprint(os.Stderr, "operation failed:")
+	os.Exit(3)
+}
+-- bank/helper/main.lgo --
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"time"
+)
+
+func main() {
+	helper := exec.Command(os.Args[0], "-helper-child")
+	helper.Stderr = os.Stderr
+	if err := helper.Start(); err != nil {
+	fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	fmt.Fprintln(os.Stderr, "program done")
+	os.Exit(1)
+}
+
+func init() {
+	if len(os.Args) > 1 && os.Args[1] == "-helper-child" {
+		time.Sleep(200 * time.Millisecond)
+		fmt.Fprintln(os.Stderr, "exit status 9")
+		os.Exit(0)
+	}
+}
+
 -- bank/oneorder/main_test.lgo --
 package main
 
