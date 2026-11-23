@@ -202,18 +202,23 @@ type invocation struct {
 }
 
 // valueFlags reports, for each flag of cmd, whether it takes its value
-// from the next argument.
-func valueFlags(cmd *base.Command) func(name string) bool {
-	return func(name string) bool {
+// from the next argument and whether the flag is known at all. A flag the
+// go command does not know may still take a value: the test binary
+// decides, and its scan keeps looking for go flags past one possible
+// value (see afterFlagWithoutValue in testflag.go), so this scan must do
+// the same to find the same -json boundary.
+func valueFlags(cmd *base.Command) func(name string) (takesValue, known bool) {
+	return func(name string) (bool, bool) {
 		if cmd == nil {
-			return false
+			return false, false
 		}
 		f := cmd.Flag.Lookup(name)
 		if f == nil {
-			return false
+			return false, false
 		}
 		b, isBool := f.Value.(interface{ IsBoolFlag() bool })
-		return !isBool || !b.IsBoolFlag()
+		takes := !isBool || !b.IsBoolFlag()
+		return takes, true
 	}
 }
 
@@ -224,12 +229,7 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 // later arguments belong to the program. The goflags argument carries the
 // effective GOFLAGS, so the test repeat count and the GOFLAGS build tags
 // are decided from explicit values instead of the ambient process
-// configuration. An explicit -tags overrides GOFLAGS in the go command,
-// so the monitor joins the explicit set when one is present and the
-// GOFLAGS set otherwise. A -json of `test` stays in the arguments; it
-// also sets testJSON, as the go command reads it: from GOFLAGS, then
-// from the command line.
-func childArguments(verb string, args []string, takesValue func(string) bool, goflags string) invocation {
+func childArguments(verb string, args []string, flagValue func(string) (takesValue, known bool), goflags string) invocation {
 	inv := invocation{arguments: []string{verb}, durations: map[string]string{}, goflags: goflags}
 	if verb == "test" {
 		inv.testJSON = goflagsTestJSON(goflags)
@@ -239,6 +239,10 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 	inPkgList := false
 	havePackages := false
 	testArgsStarted := false
+	// afterFlagWithoutValue mirrors the child scan: a flag unknown to
+	// the go command may take the next argument as its value, so the
+	// next non-flag argument does not end the package list.
+	afterFlagWithoutValue := false
 	i := 0
 	// The -C flag must stay first: the go command consumes it only in
 	// the leading position, so injected flags go behind it.
@@ -266,17 +270,29 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 				break
 			}
 			if verb == "test" {
-				if testArgsStarted {
+				switch {
+				case testArgsStarted:
 					// Already in test binary arguments.
-				} else if !inPkgList && havePackages {
+				case afterFlagWithoutValue:
+					// The previous flag is unknown to the go command
+					// and may take this argument as its value; like
+					// the child scan, keep looking for go flags after
+					// it. It still reaches the child unchanged.
+					afterFlagWithoutValue = false
+				case !inPkgList && havePackages:
 					testArgsStarted = true
-				} else {
+				default:
 					havePackages = true
 					inPkgList = true
 				}
 			}
 			inv.arguments = append(inv.arguments, arg)
 			continue
+		}
+		if verb == "test" {
+			// A flag ends any pending unknown-flag value: like the
+			// child scan, only a non-flag argument can be one.
+			afterFlagWithoutValue = false
 		}
 		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
 		if name == "count" || name == "test.count" {
@@ -335,9 +351,16 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 			tagged = true
 		default:
 			inv.arguments = append(inv.arguments, arg)
-			if !hasValue && takesValue(name) && i+1 < len(args) {
+			takes, known := flagValue(name)
+			if !hasValue && takes && i+1 < len(args) {
 				i++
 				inv.arguments = append(inv.arguments, args[i])
+			} else if verb == "test" && !hasValue && !known {
+				// Unknown to the go command: the test binary may
+				// read the next argument as this flag's value, so
+				// the package list and the -json scan stay open
+				// past one non-flag argument.
+				afterFlagWithoutValue = true
 			}
 		}
 	}

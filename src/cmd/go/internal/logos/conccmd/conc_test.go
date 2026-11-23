@@ -120,7 +120,12 @@ func TestRelayWritesDiagnosticRecords(t *testing.T) {
 }
 
 func TestChildArguments(t *testing.T) {
-	takesValue := func(name string) bool { return name == "run" || name == "o" || name == "exec" }
+	// Stub flag table: run, -o and -exec take values; the rest is
+	// unknown, which only matters after the package list of `test`.
+	takesValue := func(name string) (bool, bool) {
+		takes := name == "run" || name == "o" || name == "exec"
+		return takes, takes
+	}
 	tests := []struct {
 		verb      string
 		args      string
@@ -153,7 +158,7 @@ func TestChildArguments(t *testing.T) {
 }
 
 func TestChildArgumentsShake(t *testing.T) {
-	neverTakesValue := func(name string) bool { return false }
+	neverTakesValue := func(name string) (bool, bool) { return false, false }
 	tests := []struct {
 		verb      string
 		args      string
@@ -182,7 +187,7 @@ func TestChildArgumentsShake(t *testing.T) {
 }
 
 func TestChildArgumentsKeepsGOFLAGSCount(t *testing.T) {
-	neverTakesValue := func(name string) bool { return false }
+	neverTakesValue := func(name string) (bool, bool) { return false, false }
 	tests := []struct {
 		goflags string
 		args    []string
@@ -202,7 +207,7 @@ func TestChildArgumentsKeepsGOFLAGSCount(t *testing.T) {
 }
 
 func TestChildArgumentsKeepsGOFLAGSTags(t *testing.T) {
-	neverTakesValue := func(name string) bool { return false }
+	neverTakesValue := func(name string) (bool, bool) { return false, false }
 	tests := []struct {
 		goflags string
 		args    []string
@@ -226,10 +231,13 @@ func TestChildArgumentsKeepsGOFLAGSTags(t *testing.T) {
 }
 
 func TestChildArgumentsReadsTestJSON(t *testing.T) {
-	// Mirrors the command's flag table: -run takes its value, so the
-	// scan must consume TestJobs instead of treating it as positional
-	// and stopping the package list there.
-	takesValue := func(name string) bool { return name == "run" }
+	// Mirrors the command's flag table: -run takes its value, -json
+	// and -v are known bool flags, and -custom stands in for a flag
+	// only the test binary registers. The scan must consume TestJobs
+	// instead of treating it as positional and stopping the package
+	// list there, and must keep the list open past one possible value
+	// of an unknown flag, as the child scan does.
+	takesValue := func(name string) (bool, bool) { return name == "run", name == "run" || name == "json" || name == "v" }
 	tests := []struct {
 		verb    string
 		goflags string
@@ -250,6 +258,11 @@ func TestChildArgumentsReadsTestJSON(t *testing.T) {
 		{"test", "", "-json . -run -json=false sentinel", true},
 		{"test", "", "./a sentinel -json=false", false},
 		{"test", "", "-json ./a -tags=x sentinel -json=false", true},
+		{"test", "", ". -custom value -json", true},
+		{"test", "", ". -custom=value -json", true},
+		{"test", "", "./a -custom sentinel -json", true},
+		{"test", "", "./a -v sentinel -json", false},
+		{"test", "", ". -custom -json=false ./a -json", false},
 		{"run", "", "-json .", false},
 		{"run", "-json", ".", false},
 	}
