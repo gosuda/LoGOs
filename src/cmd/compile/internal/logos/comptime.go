@@ -685,10 +685,9 @@ func (fl *fileLower) expandComptime() {
 	// prints the named instances after they are checked.
 	if fl.pkg.info.LogosCtImport != nil {
 		for _, def := range fl.pkg.ctExp.defs {
-			if def.file != fl.file || def.forward {
-				continue
+			if def.file == fl.file {
+				fl.cfRetireDef(def)
 			}
-			fl.cfStubDef(def)
 		}
 		if base.LogosEject != "" {
 			fl.ejectCtSites()
@@ -1438,6 +1437,26 @@ func (fl *fileLower) cfRetireDefs() {
 			fl.cfDeleteDef(def.decl)
 		}
 	}
+}
+
+// cfRetireDef keeps a comptime generic out of native code and out of
+// ejected text. Ejected text keeps an exported generic as a stub and drops
+// an unexported one; a forwarding function keeps its body natively.
+func (fl *fileLower) cfRetireDef(def *cfGenericDef) {
+	fn := def.decl
+	call := "panic(" + strconv.Quote("logos: comptime generic "+fn.Name.Value+" runs only through loGo/s instantiation") + ")"
+	if !def.forward {
+		fn.Body.List = fl.reparseStmts(call, fn.Pos())
+	}
+	switch {
+	case base.LogosEject != "" && (def.obj == nil || !def.obj.Exported()):
+		fl.add(fl.cfFuncStart(fl.off(syntax.StartPos(fn))), fl.off(syntax.EndPos(fn))+1, "")
+	case base.LogosEject != "" || !def.forward:
+		fl.add(fl.off(syntax.StartPos(fn.Body)), fl.off(syntax.EndPos(fn.Body))+1, "{\n\t"+call+"\n}")
+	default:
+		return
+	}
+	fl.changed = true
 }
 
 func (fl *fileLower) cfStubDef(def *cfGenericDef) {
