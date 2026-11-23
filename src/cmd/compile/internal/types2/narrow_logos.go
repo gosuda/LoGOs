@@ -1321,7 +1321,11 @@ func (p *logosEFPass) calleeInLgo(fun syntax.Expr) bool {
 			return p.check.logosFuncInLgo(fn)
 		}
 	}
-	return true
+	// A variable rebound across several Go-only origins is still a Go
+	// call: every recorded assignment resolves to a Go declaration, so
+	// the call keeps the Go contract. Unknown, aliased, or mixed origins
+	// stay conservative.
+	return !p.allGoOrigins(v)
 }
 
 func (p *logosEFPass) sole(v *Var) syntax.Expr {
@@ -1335,6 +1339,33 @@ func (p *logosEFPass) sole(v *Var) syntax.Expr {
 		return exprs[0]
 	}
 	return nil
+}
+
+// allGoOrigins reports whether every recorded assignment of v statically
+// resolves to a Go declaration, so a call through a rebound variable keeps
+// the Go contract. A missing inventory, an unresolvable or varying origin,
+// and any LoGOs origin all answer false.
+func (p *logosEFPass) allGoOrigins(v *Var) bool {
+	if v == nil {
+		return false
+	}
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	exprs, ok := p.assigns[logosEFKey{root: v}]
+	if !ok || len(exprs) == 0 {
+		return false
+	}
+	for _, r := range exprs {
+		if r == nil {
+			return false
+		}
+		fn := p.staticFunc(r)
+		if fn == nil || p.check.logosFuncInLgo(fn) {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *logosEFPass) collectAssigns() {

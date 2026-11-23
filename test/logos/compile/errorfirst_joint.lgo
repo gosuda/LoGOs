@@ -2,7 +2,10 @@
 
 package p
 
-import "strconv"
+import (
+	"bytes"
+	"strconv"
+)
 
 type efP struct {
 	X int
@@ -1285,4 +1288,22 @@ func efFieldErrUncheckedDeferred() {
 		println(h.stats) // ERROR "result_before_error_check"
 	}()
 	_ = h.err
+}
+
+// A function variable rebound from one Go reader to another keeps the Go
+// contract: the deferred read of its byte count needs no LoGOs proof.
+func efGoMultiOriginReaders() {
+	first := bytes.NewReader([]byte("repeat"))
+	second := bytes.NewReader([]byte("again"))
+	read := first.Read
+	var buf [8]byte
+	var n int
+	var err error
+	defer func() {
+		println(n)
+	}()
+	n, err = read(buf[:])
+	read = second.Read
+	n, err = read(buf[:])
+	_ = err
 }
