@@ -29,20 +29,29 @@ cmp skipped.go ../extra/skipped.go
 ! exists next_tasks.json
 rm skipped.go
 
-# A live local replacement cannot be frozen for the staged build; preview
-# still works and --fix refuses before any patch is emitted.
+# A local replacement is staged from its saved bytes: --fix proves the
+# conversion against that frozen copy and changes neither module. An entry
+# of the replacement that is not a regular file cannot be saved, so --fix
+# refuses it before any patch is emitted.
 mkdir ../dep
 cp ../depmod/go.mod ../dep/go.mod
 cp ../depmod/dep.go ../dep/dep.go
 cp ../extra/go.mod.replace go.mod
 cp ../extra/a.go.dep a.go
-! logos next --fix
-! stdout '.'
-stderr 'local replacement'
-stderr 'convert by hand'
+logos next --fix
+stdout '^\+\+\+ b/a\.lgo$'
+stdout '^\+	dep\.Ping\(\)$'
+stderr '^logos next: patch for 1 files'
 cmp a.go ../extra/a.go.dep
+cmp ../dep/dep.go ../depmod/dep.go
+cmp go.mod ../extra/go.mod.replace
 ! exists a.lgo
 ! exists next_tasks.json
+[symlink] symlink ../dep/link.go -> dep.go
+[symlink] ! logos next --fix
+[symlink] ! stdout '.'
+[symlink] stderr 'local replacement example.com/nextreject/dep: link.go is not a regular file'
+[symlink] rm ../dep/link.go
 logos next
 stderr 'review only'
 cp $WORK/go.mod.orig go.mod

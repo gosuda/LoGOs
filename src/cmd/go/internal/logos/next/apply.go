@@ -13,11 +13,13 @@ import (
 	"internal/diff"
 	"internal/logosfile"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -33,6 +35,10 @@ import (
 const planName = "next_tasks.json"
 
 var moduleMetadata = [...]string{"go.mod", "go.sum", "logos.toml"}
+
+// replacementDir holds the staged copies of the main module's filesystem
+// replacements. The leading dot keeps the copies out of the staged ./....
+const replacementDir = ".logos-next-replace"
 
 func checkFixContext(moddir string) error {
 	var staged []string
@@ -159,10 +165,22 @@ func (f savedFile) verify(root *os.Root, name string) error {
 }
 
 type moduleSnapshot struct {
-	sources     map[string]savedFile
-	metadata    map[string]savedFile
-	stagedGoMod []byte
-	plan        savedFile
+	sources      map[string]savedFile
+	metadata     map[string]savedFile
+	replacements []replacementSnapshot
+	stagedGoMod  []byte
+	plan         savedFile
+}
+
+// replacementSnapshot is the saved content of one filesystem replacement,
+// staged at the module-relative slash path staged.
+type replacementSnapshot struct {
+	staged string
+	files  map[string]savedFile
+}
+
+func (r replacementSnapshot) same(other replacementSnapshot) bool {
+	return r.staged == other.staged && maps.EqualFunc(r.files, other.files, savedFile.same)
 }
 
 func checkStagePackages(roots []*load.Package) error {
@@ -202,8 +220,7 @@ func snapshotModule(root *os.Root, moddir string) (*moduleSnapshot, error) {
 	if s.metadata["go.mod"].info == nil {
 		return nil, errors.New("go.mod disappeared before conversion")
 	}
-	s.stagedGoMod, err = s.rebaseModuleReplacements()
-	if err != nil {
+	if err := s.freezeModuleReplacements(moddir); err != nil {
 		return nil, err
 	}
 	err = walkModuleFiles(moddir, func(path string, d os.DirEntry) error {
@@ -266,6 +283,9 @@ func (s *moduleSnapshot) verify(moddir string) error {
 	}
 	if !s.plan.same(current.plan) {
 		return fmt.Errorf("%s changed during conversion", planName)
+	}
+	if !slices.EqualFunc(s.replacements, current.replacements, replacementSnapshot.same) {
+		return errors.New("local replacement changed during conversion")
 	}
 	return checkFixContext(moddir)
 }
@@ -420,30 +440,94 @@ func (s *moduleSnapshot) stage(dir string, files []conversionFile) error {
 		}
 	}
 	for _, file := range files {
-		path := filepath.Join(dir, lgoName(file.source))
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		if err := writeStagedFile(filepath.Join(dir, lgoName(file.source)), file.data); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, file.data, 0o600); err != nil {
-			return err
+	}
+	for _, r := range s.replacements {
+		for name, file := range r.files {
+			if err := writeStagedFile(filepath.Join(dir, filepath.FromSlash(r.staged), name), file.data); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func (s *moduleSnapshot) rebaseModuleReplacements() ([]byte, error) {
+func writeStagedFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
+}
+
+// freezeModuleReplacements saves every filesystem replacement of the main
+// module and points the staged go.mod at a staged copy of the saved bytes, so
+// the preflight build reads exactly the source that verify compares again.
+func (s *moduleSnapshot) freezeModuleReplacements(moddir string) error {
 	data := s.metadata["go.mod"].data
 	file, err := modfile.Parse("go.mod", data, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, replace := range file.Replace {
 		if replace.New.Version != "" {
 			continue
 		}
-		return nil, fmt.Errorf("local replacement %s reads live source the staged build cannot freeze; use logos next --ai-patch and convert by hand", replace.Old.Path)
+		dir := replace.New.Path
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(moddir, dir)
+		}
+		files, err := captureReplacement(dir)
+		if err != nil {
+			return fmt.Errorf("local replacement %s: %w", replace.Old.Path, err)
+		}
+		arrow := slices.Index(replace.Syntax.Token, "=>")
+		if arrow < 0 || arrow+1 >= len(replace.Syntax.Token) {
+			return fmt.Errorf("local replacement %s: unexpected replace line", replace.Old.Path)
+		}
+		staged := replacementDir + "/" + strconv.Itoa(len(s.replacements))
+		replace.Syntax.Token[arrow+1] = modfile.AutoQuote("./" + staged)
+		s.replacements = append(s.replacements, replacementSnapshot{staged: staged, files: files})
 	}
-	return data, nil
+	s.stagedGoMod = data
+	if len(s.replacements) > 0 {
+		s.stagedGoMod = modfile.Format(file.Syntax)
+	}
+	return nil
+}
+
+// captureReplacement saves the regular files of the replacement module in
+// dir. Nested modules and dot directories are not part of it; any other
+// entry that is not a regular file refuses the conversion.
+func captureReplacement(dir string) (files map[string]savedFile, err error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	files = make(map[string]savedFile)
+	err = fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel := filepath.FromSlash(name)
+		if !d.IsDir() {
+			files[rel], err = readSavedFile(root, rel)
+			return err
+		}
+		if name == "." {
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return fs.SkipDir
+		}
+		if st, err := root.Lstat(filepath.Join(rel, "go.mod")); err == nil && st.Mode().IsRegular() {
+			return fs.SkipDir
+		}
+		return nil
+	})
+	return files, err
 }
 
 func publishPlan(root *os.Root, pending string, plan savedFile) (string, error) {
