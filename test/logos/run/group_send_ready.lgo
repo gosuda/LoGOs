@@ -73,6 +73,21 @@ func interpSend(ctx context.Context, ch chan string, n int) error {
 	return nil
 }
 
+func recvChanLookup(key string) chan int {
+	ch := make(chan int, 1)
+	ch <- len(key)
+	return ch
+}
+
+func recvChanSend(ctx context.Context, out chan int, key string) error {
+	go group (ctx) {
+		go {
+			out <- <-recvChanLookup($"k-{key}")
+		}
+	}
+	return nil
+}
+
 var first, second chan int
 
 func redirect() int {
@@ -185,6 +200,20 @@ func interpSendReady() {
 	default:
 	}
 	check("interp-send", err == nil && got == "count=4", fmt.Sprint(err, got), "<nil> count=4")
+}
+
+func recvChanReady() {
+	// A live context: under a cancelled group the hoisted inner
+	// receive races the done branch, which is unrelated to what
+	// this case pins (interpolation lowering in ejected text).
+	ch := make(chan int, 1)
+	err := recvChanSend(context.Background(), ch, "abc")
+	got := -1
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("recv-chan-interp", err == nil && got == 5, fmt.Sprint(err, got), "<nil> 5")
 }
 
 func chanSnapshotBeforeValue() {
@@ -302,6 +331,7 @@ func main() {
 	blockedStillCancels()
 	blockedCallOnce()
 	interpSendReady()
+	recvChanReady()
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
 	gotoPastSend()
