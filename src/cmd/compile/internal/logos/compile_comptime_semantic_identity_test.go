@@ -68,16 +68,25 @@ func TestCompileComptimeSemanticIdentity(t *testing.T) {
 		}
 	})
 	t.Run("exported_forwarder", func(t *testing.T) {
-		t.Helper()
-		cmd := testenv.Command(t, logosTool, "build", "-p=1", "-buildvcs=false", "./...")
-		cmd.Dir = dir
-		cmd.Env = append(archDiffEnv(cmd, runtime.GOOS, runtime.GOARCH), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		if out, err := cmd.Output(); err == nil {
-			t.Fatalf("logos build ./... succeeded, want [comptime::exported_forwarder]\n%s", out)
-		} else if got := stderr.String(); !strings.Contains(got, "[comptime::exported_forwarder]") || !strings.Contains(got, "forward/forward.lgo") {
-			t.Fatalf("stderr = %q, want [comptime::exported_forwarder] for forward/forward.lgo", got)
+		for _, args := range [][]string{
+			{"build", "-p=1", "-buildvcs=false", "./..."},
+			{"eject", "-o", filepath.Join(t.TempDir(), "ejected")},
+		} {
+			cmd := testenv.Command(t, logosTool, args...)
+			cmd.Dir = dir
+			cmd.Env = append(archDiffEnv(cmd, runtime.GOOS, runtime.GOARCH), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			if out, err := cmd.Output(); err == nil {
+				t.Fatalf("logos %s succeeded, want [comptime::exported_forwarder]\n%s", args[0], out)
+			}
+			got := stderr.String()
+			if !strings.Contains(got, "[comptime::exported_forwarder] exported function Pair forwards type parameter A") || !strings.Contains(got, "forward/forward.lgo") {
+				t.Fatalf("logos %s stderr = %q, want [comptime::exported_forwarder] naming Pair and A in forward/forward.lgo", args[0], got)
+			}
+			if strings.Contains(got, "internal compiler error") {
+				t.Fatalf("logos %s crashed\n%s", args[0], got)
+			}
 		}
 	})
 }
