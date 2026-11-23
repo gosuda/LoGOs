@@ -105,15 +105,23 @@ ends. The monitor checks for it six times in the first 6.3 seconds of
 the program, and later after a collection of the program, one time per
 minute at most.
 
-A finding is printed on standard error as soon as the monitor sees it:
+A finding is printed on standard output as soon as the monitor sees it:
 
 	file:line: [rule] message
 		file:line: what this position is
 		fix: how to repair it
 
 The --json-diagnostics flag prints each finding as one JSON object per
-line instead, in the schema that 'logos lint --json-diagnostics' uses.
-The field 'note' holds the position lines and the fix line.
+line on standard error instead, in the schema that 'logos lint
+--json-diagnostics' uses. The field 'note' holds the position lines and
+the fix line. The --ai-patch brief is one JSON object per edit on
+standard output.
+
+When 'logos conc test' runs with -json, standard output carries the
+test2json stream of 'logos test -json'. Each line that the command
+prints there, a line of a text finding or of the brief, is then one
+test2json event with the action "output", so the stream keeps one
+schema.
 
 The exit status is the status of the program or of 'logos test' when
 that is not zero. Otherwise it is 1 when a finding was printed, and 0
@@ -174,6 +182,10 @@ func Register(root *base.Command) {
 type invocation struct {
 	arguments []string
 	asJSON    bool
+	// testJSON reports that the test child runs with -json, from the
+	// command line or from GOFLAGS: its standard output is a test2json
+	// stream.
+	testJSON bool
 	// goflags holds the effective GOFLAGS the child resolves, so flag
 	// lookups that live only there (like -overlay) are still visible.
 	goflags string
@@ -190,19 +202,34 @@ type invocation struct {
 }
 
 // valueFlags reports, for each flag of cmd, whether it takes its value
-// from the next argument.
-func valueFlags(cmd *base.Command) func(name string) bool {
-	return func(name string) bool {
+// from the next argument and whether the flag is known at all. A flag the
+// go command does not know may still take a value: the test binary
+// decides, and its scan keeps looking for go flags past one possible
+// value (see afterFlagWithoutValue in testflag.go), so this scan must do
+// the same to find the same -json boundary.
+func valueFlags(cmd *base.Command) func(name string) (takesValue, known bool) {
+	return func(name string) (bool, bool) {
 		if cmd == nil {
-			return false
+			return false, false
 		}
 		f := cmd.Flag.Lookup(name)
 		if f == nil {
-			return false
+			return false, false
 		}
 		b, isBool := f.Value.(interface{ IsBoolFlag() bool })
-		return !isBool || !b.IsBoolFlag()
+		takes := !isBool || !b.IsBoolFlag()
+		return takes, true
 	}
+}
+
+// wrapperOnlyFlag reports whether the flag is stripped before the child
+// runs, so the child scan never sees it.
+func wrapperOnlyFlag(name string) bool {
+	switch {
+	case name == "json-diagnostics", name == "fix", name == "ai-patch", name == "shake", durationFlags[name] != "":
+		return true
+	}
+	return false
 }
 
 // childArguments turns the arguments of `logos conc <verb>` into the
@@ -212,13 +239,24 @@ func valueFlags(cmd *base.Command) func(name string) bool {
 // later arguments belong to the program. The goflags argument carries the
 // effective GOFLAGS, so the test repeat count and the GOFLAGS build tags
 // are decided from explicit values instead of the ambient process
-// configuration. An explicit -tags overrides GOFLAGS in the go command,
-// so the monitor joins the explicit set when one is present and the
-// GOFLAGS set otherwise.
-func childArguments(verb string, args []string, takesValue func(string) bool, goflags string) invocation {
+func childArguments(verb string, args []string, flagValue func(string) (takesValue, known bool), goflags string) invocation {
 	inv := invocation{arguments: []string{verb}, durations: map[string]string{}, goflags: goflags}
+	if verb == "test" {
+		inv.testJSON = goflagsTestJSON(goflags)
+	}
 	tagged := false
 	countSet := false
+	inPkgList := false
+	havePackages := false
+	testArgsStarted := false
+	// pkgListDone mirrors the child scan past a flag unknown to the go
+	// command: like the child, no later argument reopens the package
+	// list, so later positionals belong to the test binary.
+	pkgListDone := false
+	// afterFlagWithoutValue mirrors the child scan: a flag unknown to
+	// the go command may take the next argument as its value, so the
+	// next non-flag argument does not end the package list.
+	afterFlagWithoutValue := false
 	i := 0
 	// The -C flag must stay first: the go command consumes it only in
 	// the leading position, so injected flags go behind it.
@@ -245,12 +283,55 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 			if verb == "run" {
 				break
 			}
+			if verb == "test" {
+				switch {
+				case testArgsStarted:
+					// Already in test binary arguments.
+				case afterFlagWithoutValue:
+					// The previous flag is unknown to the go command
+					// and may take this argument as its value; like
+					// the child scan, keep looking for go flags after
+					// it. It still reaches the child unchanged.
+					afterFlagWithoutValue = false
+				case pkgListDone:
+					// The package list ended at a flag unknown to the
+					// go command: later positionals belong to the
+					// test binary, as in the child scan.
+					testArgsStarted = true
+				case !inPkgList && havePackages:
+					testArgsStarted = true
+				default:
+					havePackages = true
+					inPkgList = true
+				}
+			}
 			inv.arguments = append(inv.arguments, arg)
 			continue
 		}
 		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if verb == "test" && !wrapperOnlyFlag(name) {
+			// A flag the child receives ends any pending unknown-flag
+			// value: like the child scan, only a non-flag argument can
+			// be one. Wrapper-only flags never reach the child, so they
+			// leave the lookahead alone.
+			afterFlagWithoutValue = false
+		}
 		if name == "count" || name == "test.count" {
 			countSet = true
+		}
+		if verb == "test" && name == "json" && !testArgsStarted {
+			inv.testJSON = boolFlagOn(hasValue, value)
+		}
+		if verb == "test" && inPkgList {
+			switch {
+			case wrapperOnlyFlag(name):
+				// Wrapper-only flags: dropped before the child runs, so the
+				// child never sees them and its package list stays open.
+				// Every other flag reaches the child (tags rewritten), so a
+				// flag closes the package list there too.
+			default:
+				inPkgList = false
+			}
 		}
 		switch {
 		case name == "json-diagnostics":
@@ -291,9 +372,21 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 			tagged = true
 		default:
 			inv.arguments = append(inv.arguments, arg)
-			if !hasValue && takesValue(name) && i+1 < len(args) {
+			takes, known := flagValue(name)
+			if !hasValue && takes && i+1 < len(args) {
 				i++
 				inv.arguments = append(inv.arguments, args[i])
+			} else if verb == "test" && !known {
+				if !hasValue {
+					// Unknown to the go command: the test binary may
+					// read the next argument as this flag's value, so
+					// the package list and the -json scan stay open
+					// past one non-flag argument.
+					afterFlagWithoutValue = true
+				}
+				// Like the child scan, an unknown flag ends the
+				// package list: later positionals are test arguments.
+				pkgListDone = true
 			}
 		}
 	}
@@ -392,6 +485,29 @@ func goflagsTags(goflags string) (string, bool) {
 	return tags, ok
 }
 
+// goflagsTestJSON reports whether the effective GOFLAGS turns on the
+// -json flag of `logos test`. The last entry wins, as in the go command.
+func goflagsTestJSON(goflags string) bool {
+	flags, err := quoted.Split(goflags)
+	if err != nil {
+		return false
+	}
+	on := false
+	for _, flag := range flags {
+		if name, value, hasValue := strings.Cut(strings.TrimLeft(flag, "-"), "="); name == "json" {
+			on = boolFlagOn(hasValue, value)
+		}
+	}
+	return on
+}
+
+// boolFlagOn reads a boolean flag as the flag package does: a bare flag
+// is true, and a value is true when strconv.ParseBool reads it as true.
+func boolFlagOn(hasValue bool, value string) bool {
+	on, err := strconv.ParseBool(value)
+	return !hasValue || (err == nil && on)
+}
+
 func withMonitorTag(tags string) string {
 	if tags == "" {
 		return monitorTag
@@ -421,6 +537,45 @@ type findingLine struct {
 // endOfFindings ends the stream. The monitor never writes an empty
 // line, so the command writes one after the program has exited.
 const endOfFindings = "\n"
+
+// outputs returns where the command prints its findings and its
+// --ai-patch brief. Review output, the text findings and the brief,
+// goes to stdout; the findings under --json-diagnostics are diagnostic
+// records and go to stderr. When stdout carries the test2json stream of
+// `logos test -json`, each review line rides in a test2json output
+// event, so that stream keeps one schema.
+func (inv invocation) outputs(stdout, stderr io.Writer) (findings, brief io.Writer) {
+	review := stdout
+	if inv.testJSON {
+		review = testEvents{stdout}
+	}
+	if inv.asJSON {
+		return stderr, review
+	}
+	return review, review
+}
+
+// testEvents writes each line of a write as one test2json event with
+// the action "output", all in one write to w.
+type testEvents struct{ w io.Writer }
+
+func (e testEvents) Write(p []byte) (int, error) {
+	var events []byte
+	for line := range strings.Lines(string(p)) {
+		event, err := json.Marshal(struct {
+			Action string `json:"Action"`
+			Output string `json:"Output"`
+		}{Action: "output", Output: line})
+		if err != nil {
+			return 0, err
+		}
+		events = append(append(events, event...), '\n')
+	}
+	if _, err := e.w.Write(events); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
 
 // relay prints each finding line of r on w as soon as it arrives and
 // returns how many it printed. It stops at endOfFindings or at the end

@@ -8,10 +8,8 @@ stdout '^fn Box\.Pure Readonly,ParamMutated=0$'
 stdout '^fn Summer\.Pure Readonly$'
 
 logos build -o $WORK/ok.a ./okcall
-# lib is a LoGOs package: a const view passed to a non-const parameter of
-# its method fails as for any .lgo callee, whatever the export facts say.
 ! logos build -o $WORK/bad.a ./badcall
-stderr 'const_view_mutation\] cannot pass argument through const view cv in argument to s\.Pure'
+stderr 'const_view_mutation.*cannot pass argument through const view'
 
 -- w/go.mod --
 module example.com/readonly

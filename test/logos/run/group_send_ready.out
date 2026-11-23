@@ -5,6 +5,7 @@ ok blocked-send-cancelled
 ok blocked-call-cancelled
 ok blocked-call-once
 ok interp-send
+ok send-chan-interp
 ok send-original-chan
 ok shadowed-type-send
 ok goto-skips-send

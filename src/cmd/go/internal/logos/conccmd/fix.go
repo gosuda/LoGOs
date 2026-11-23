@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -446,10 +447,9 @@ func writeFixedFile(file string, data []byte) error {
 	return nil
 }
 
-// printStalledBrief prints one JSON object per fix to standard output
-// without changing files. Under -json-diagnostics it writes each brief
-// inside a test2json output record so the stream keeps one schema.
-func printStalledBrief(fixes []stalledFix, asJSON bool) {
+// printStalledBrief prints one JSON object per fix to w without
+// changing files. The caller picks w with invocation.outputs.
+func printStalledBrief(fixes []stalledFix, w io.Writer) {
 	for _, f := range fixes {
 		rec, err := json.Marshal(struct {
 			File string `json:"file"`
@@ -459,17 +459,6 @@ func printStalledBrief(fixes []stalledFix, asJSON bool) {
 		if err != nil {
 			continue
 		}
-		if asJSON {
-			event, err := json.Marshal(struct {
-				Action string `json:"Action"`
-				Output string `json:"Output"`
-			}{Action: "output", Output: string(rec) + "\n"})
-			if err != nil {
-				continue
-			}
-			_, _ = fmt.Fprintf(os.Stdout, "%s\n", event)
-			continue
-		}
-		_, _ = fmt.Fprintf(os.Stdout, "%s\n", rec)
+		_, _ = w.Write(append(rec, '\n'))
 	}
 }

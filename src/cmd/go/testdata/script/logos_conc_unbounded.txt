@@ -19,24 +19,25 @@ logos lint ./...
 # status 1.
 ! logos conc run ./free
 stdout '^herd done$'
-stderr '^.*free[/\\]main\.lgo:12: \[conc::group_unbounded\] a group without a limit runs 10000 children at one time; the count follows the work the program gives the group$'
-stderr '^\t.*main\.lgo:12: this go group has no limit$'
-stderr '^\t.*main\.lgo:15: the child that made the count reach 10000 started here$'
-stderr '^\tfix: '
-stderr -count=1 'group_unbounded'
+stdout '^.*free[/\\]main\.lgo:12: \[conc::group_unbounded\] a group without a limit runs 10000 children at one time; the count follows the work the program gives the group$'
+stdout '^\t.*main\.lgo:12: this go group has no limit$'
+stdout '^\t.*main\.lgo:15: the child that made the count reach 10000 started here$'
+stdout '^\tfix: '
+stdout -count=1 'group_unbounded'
 
 # The test binary links the monitor too.
 ! logos conc test -count=1 ./free
 stdout '^ok '
-stderr -count=1 'group_unbounded'
+stdout -count=1 'group_unbounded'
 
 # The same herd behind a limit stays silent, and the program still ends.
 logos conc run ./capped
 stdout '^herd done$'
 ! stderr .
+! stdout 'conc::'
 logos conc test -count=1 ./capped
 stdout 'no test files'
-! stderr 'conc::'
+! stdout 'conc::'
 
 -- herd/go.mod --
 module example.com/herd

@@ -470,11 +470,13 @@ Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-10
 `logos conc` MUST build the program with the build tag `logosconc` in addition to the build tags that the user gives [T-106].
 A build without the build tag `logosconc` MUST NOT contain the monitor, and an ejected module MUST NOT contain the monitor [T-106].
 The build tag `logosconc` MUST NOT change the build of an ejected module [T-106].
-`logos conc` MUST print each finding on standard error while the program runs [T-106].
+`logos conc` MUST print each finding while the program runs: the text form on standard output, or with `--json-diagnostics` the object of Section 14 on standard error [T-106][T-Sec14].
 A finding MUST have a rule ID, a message, one or more source positions with the role of each position, and one fix hint [T-106].
 The text form of a finding MUST be the line `<file>:<line>: [<rule>] <message>`, then one line `<tab><file>:<line>: <role>` for each position, then the line `<tab>fix: <hint>` [T-106].
 With `--json-diagnostics`, `logos conc` MUST print each finding as one object of Section 14 with severity `deny` [T-106][T-Sec14].
 In that object, `file` and the two line fields of `span` MUST give the first position, the other fields of `span` MUST be 0, and the field `note` MUST hold the position lines and the fix line of the text form [T-106][T-Sec14].
+`logos conc` MUST print the `--ai-patch` brief on standard output, one JSON object per edit, also with `--json-diagnostics` [T-106].
+When `logos conc test` runs with `-json`, given on the command line or in `GOFLAGS`, `logos conc` MUST write each line that it prints on standard output as one test2json event with the action `output`, so that standard output stays one test2json stream [T-106].
 The exit status of `logos conc` MUST be the exit status of the program or of `logos test` when that status is not 0 [T-106].
 When that status is 0, the exit status MUST be 1 if `logos conc` printed a finding and 0 if it printed no finding [T-106].
 A finding line that `logos conc` cannot read MUST count as a finding [T-106].
@@ -2015,7 +2017,7 @@ Decoding through json.Decoder uses the same method. [T-Sec10]
 Decoding through a reflection-based decoder other than `encoding/json` lies outside this contract; this is a documented hole. [T-Sec10][A-GOBOUNDARY]
 No validate tags are needed. [T-Sec10]
 Unmarshal of a closed union MUST resolve members declared in another package, whatever the import name of that package in the file and whether or not the file imports it. [T-Sec10][T-203.1]
-A member has a static key set when its type is a struct, or a pointer to a struct, that Sec 10.1 makes eligible. The set holds the JSON key of each visible field, and a field is visible when it is exported and has no `-` tag. A keyed member has a static key set with at least one key. A keyless member has none: its type is not an eligible struct, or the struct has no visible field. A keyed member trial MUST count a success only when at least one key in the object is in that member's static key set and its decode then succeeds. A key in the static key set of a sibling member but not in this member's disqualifies this member trial, while a key in no member's static key set is ignored. Keys MUST decide every keyed member trial, including a member that declares its own UnmarshalJSON. Such a decoder MUST run only after its keys match. A keyless member MUST be tried only when no key of a keyed member occurs in the input. Exactly one such member MUST succeed for the union to select it. A closed union member without an UnmarshalJSON method MUST fail with [correctness::union_member_no_json]. [T-Sec10][T-203.1]
+A member has a static key set when its type is a struct, or a pointer to a struct, that Sec 10.1 makes eligible. The set holds the JSON key of each visible field, and a field is visible when it is exported and has no `-` tag. A keyed member has a static key set with at least one key. A keyless member has none: its type is not an eligible struct, or the struct has no visible field. A keyed member trial MUST count a success only when at least one key in the object is in that member's static key set and its decode then succeeds. A key in the static key set of a sibling member but not in this member's disqualifies this member trial, while a key in no member's static key set is ignored. Keys MUST decide every keyed member trial, including a member that declares its own UnmarshalJSON. Such a decoder MUST run only after its keys match. A keyless member MUST be tried only when no key of a keyed member occurs in the input. Exactly one such member MUST succeed for the union to select it. A closed union member without an UnmarshalJSON method MUST fail with [correctness::union_member_no_json] when the holder struct declares at least one json tag. A holder with no json tag gets no check: a field default is a constructor convenience, not a serialization contract. A member with no UnmarshalJSON method MUST be untriable: the generated decoder MUST NOT call it, and a trial MUST NOT count it as a success, so a holder that a default makes eligible still compiles and its union field then reports zero matches when no other member succeeds. [T-Sec10][T-203.1]
 A closed union member that its own package declares unexported, when that package is not the decoding package, MUST fail a field of that union with [correctness::union_member_no_json] at the field, because the decoding package cannot name the member or reach its UnmarshalJSON method. [T-Sec10][T-203.1]
 It assigns the target only on a single success. [T-Sec10][T-203.1]
 Ambiguity returns an error naming the union and the members. [T-Sec10][T-203.1]
@@ -2224,8 +2226,9 @@ Eject MUST keep ordinary scalar source, so its output needs no SIMD package or e
 
 ### 14.1 Emission
 
-- `--json-diagnostics` on `logos lint`, on `logos build`, and on every other command that accepts it MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files. [T-Sec14][T-102][R-U1]
+- `--json-diagnostics` on `logos lint`, on `logos build`, and on every other command that accepts it MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files, and for every finding of `logos conc`. [T-Sec14][T-102][T-106][R-U1]
 - Each line MUST be a complete object with schema version `1.0`. [T-Sec14]
+- `logos conc` MUST keep its review output on stdout: without `--json-diagnostics` the text findings and the `--ai-patch` brief, and under `--json-diagnostics` the `--ai-patch` brief while each finding goes to stderr as a Section 14 record. [T-Sec14][T-106]
 
 ### 14.2 Top-level fields
 

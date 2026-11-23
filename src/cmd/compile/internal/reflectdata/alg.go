@@ -112,6 +112,7 @@ func hashFunc(sig string) *ir.Func {
 	))
 	sym.Def = fn.Nname
 	fn.Pragma |= ir.Noinline // TODO(mdempsky): We need to emit this during the unified frontend instead, to allow inlining.
+	markSharedAlg(fn)
 	typecheck.DeclFunc(fn)
 	np := fn.Dcl[0]
 	nh := fn.Dcl[1]
@@ -347,6 +348,7 @@ func eqFunc(sig string) *ir.Func {
 	))
 	sym.Def = fn.Nname
 	fn.Pragma |= ir.Noinline // TODO(mdempsky): We need to emit this during the unified frontend instead, to allow inlining.
+	markSharedAlg(fn)
 	typecheck.DeclFunc(fn)
 	np := fn.Dcl[0]
 	nq := fn.Dcl[1]
