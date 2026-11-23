@@ -131,6 +131,18 @@ func precancelled() context.Context {
 	return ctx
 }
 
+func tickShadowed() time.Duration { return time.Second }
+
+func shadowedImportSend(ctx context.Context, ch chan time.Duration, time int) error {
+	_ = time
+	go group (ctx) {
+		go {
+			ch <- tickShadowed()
+		}
+	}
+	return nil
+}
+
 func bothArmsReady() {
 	bad := 0
 	for i := 0; i < 100; i++ {
@@ -244,6 +256,17 @@ func shadowedIfaceValue() {
 	check("shadowed-iface-dynamic-type", err == nil && fmt.Sprintf("%T", got) == "int", fmt.Sprint(err, got), "<nil> 8")
 }
 
+func shadowedImportValue() {
+	ch := make(chan time.Duration, 1)
+	err := shadowedImportSend(precancelled(), ch, 0)
+	got := time.Duration(0)
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("shadowed-import-qualifier-send", err == nil && got == time.Second, fmt.Sprint(err, got), "<nil> 1s")
+}
+
 func gotoPastSend() {
 	recordCalls.Store(0)
 	calls.Store(0)
@@ -334,6 +357,7 @@ func main() {
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
 	shadowedIfaceValue()
+	shadowedImportValue()
 	gotoPastSend()
 	nilSendReady()
 	namedElemReady()
