@@ -1,0 +1,50 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A group-child send on a channel with a channel type parameter keeps
+# the typed temporary: the parameter's Underlying is its constraint
+# interface rather than a channel, so resolving the core type first
+# preserves the element type for the shift. Without it the snapshot
+# falls back to inference, defaults to int, and the send is rejected.
+cd good
+logos run .
+stdout '^ok generic 4$'
+logos eject -o out
+cd out
+go run .
+stdout '^ok generic 4$'
+
+-- good/go.mod --
+module example.com/groupgenericchan
+
+go 1.27
+-- good/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+)
+
+func send[C ~chan int8](ctx context.Context, ch C, n uint) error {
+	go group (ctx) {
+		go {
+			ch <- 1 << n
+		}
+	}
+	return nil
+}
+
+func main() {
+	ch := make(chan int8, 1)
+	if err := send(context.Background(), ch, 2); err != nil {
+		fmt.Println("err:", err)
+		return
+	}
+	select {
+	case v := <-ch:
+		fmt.Println("ok generic", v)
+	default:
+		fmt.Println("err: empty")
+	}
+}

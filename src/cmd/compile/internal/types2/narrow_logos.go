@@ -48,6 +48,7 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 		assignOut: make(map[string]bool),
 		declared:  make(map[string]bool),
 		refTop:    make(map[string]bool),
+		deferred:  make(map[*syntax.AssignStmt]*logosDeferredDecl),
 	}
 	if sig := check.sig; sig != nil {
 		for _, vars := range []*Tuple{sig.params, sig.results} {
@@ -181,6 +182,16 @@ type logosDisqualWalk struct {
 	// first scope lands: names declared at or below it belong to the
 	// innermost closure itself, not to a captured frame.
 	frameScopes []int
+	// deferred holds the new bindings of each := statement until its
+	// right-hand side has been walked: a short declaration's scope
+	// begins when the statement ends, so a write to a same-named outer
+	// variable inside the initializer still counts as captured.
+	deferred map[*syntax.AssignStmt]*logosDeferredDecl
+}
+
+type logosDeferredDecl struct {
+	scope map[string]bool
+	names []string
 }
 
 func (w *logosDisqualWalk) Visit(node syntax.Node) syntax.Visitor {
@@ -269,6 +280,16 @@ func (w *logosDisqualWalk) leave() {
 	case *syntax.ForStmt:
 		w.loop--
 		w.scopes = w.scopes[:len(w.scopes)-1]
+	case *syntax.AssignStmt:
+		// Publish the statement's new bindings now that its operands
+		// are walked; until here a same-named outer variable was still
+		// the one its right-hand side referred to.
+		if d, ok := w.deferred[top]; ok {
+			for _, name := range d.names {
+				d.scope[name] = true
+			}
+			delete(w.deferred, top)
+		}
 	case *syntax.BlockStmt, *syntax.CaseClause, *syntax.CommClause,
 		*syntax.IfStmt, *syntax.SwitchStmt, *syntax.SwitchExpr:
 		w.scopes = w.scopes[:len(w.scopes)-1]
@@ -332,8 +353,17 @@ func (w *logosDisqualWalk) assign(s *syntax.AssignStmt) {
 				w.declared[name] = true
 			}
 			redeclared := scope[name] && !header
-			scope[name] = true
 			if !redeclared {
+				// The new binding's scope begins when the statement
+				// ends: its right-hand side still sees an outer
+				// same-named variable, so publish the name in
+				// leave() after the operands are walked.
+				d := w.deferred[s]
+				if d == nil {
+					d = &logosDeferredDecl{scope: scope}
+					w.deferred[s] = d
+				}
+				d.names = append(d.names, name)
 				continue
 			}
 		}

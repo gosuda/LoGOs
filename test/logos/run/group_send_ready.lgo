@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 var failed bool
@@ -175,6 +176,18 @@ func precancelled() context.Context {
 	return ctx
 }
 
+func tickShadowed() time.Duration { return time.Second }
+
+func shadowedImportSend(ctx context.Context, ch chan time.Duration, time int) error {
+	_ = time
+	go group (ctx) {
+		go {
+			ch <- tickShadowed()
+		}
+	}
+	return nil
+}
+
 func bothArmsReady() {
 	bad := 0
 	for i := 0; i < 100; i++ {
@@ -311,6 +324,93 @@ func shadowedTypeName() {
 	check("shadowed-type-send", err == nil && got.N == 9, fmt.Sprint(err, got), "<nil> {9}")
 }
 
+type cargo interface{}
+
+func cargoOutput(out chan cargo) chan cargo {
+	return out
+}
+
+func shadowedIfaceSend(ctx context.Context, n int, out chan cargo) error {
+	type cargo = int8
+	go group (ctx) {
+		go {
+			cargoOutput(out) <- 1 << n
+		}
+	}
+	return nil
+}
+
+func shadowedIfaceValue() {
+	out := make(chan cargo, 1)
+	err := shadowedIfaceSend(precancelled(), 3, out)
+	var got any
+	select {
+	case got = <-out:
+	default:
+	}
+	check("shadowed-iface-dynamic-type", err == nil && fmt.Sprintf("%T", got) == "int", fmt.Sprint(err, got), "<nil> 8")
+}
+
+func shadowedIfaceRecv(ctx context.Context, in <-chan int, n int, out chan cargo) error {
+	type cargo = int8
+	go group (ctx) {
+		go {
+			cargoOutput(out) <- (1 << n) + <-in
+		}
+	}
+	return nil
+}
+
+func shadowedIfaceRecvValue() {
+	in := make(chan int, 1)
+	in <- 2
+	out := make(chan cargo, 1)
+	err := shadowedIfaceRecv(context.Background(), in, 3, out)
+	var got any
+	select {
+	case got = <-out:
+	default:
+	}
+	check("shadowed-iface-recv-hoist", err == nil && fmt.Sprintf("%T", got) == "int" && fmt.Sprint(got) == "10", fmt.Sprint(err, got), "<nil> 10")
+}
+
+func shadowedImportValue() {
+	ch := make(chan time.Duration, 1)
+	err := shadowedImportSend(precancelled(), ch, 0)
+	got := time.Duration(0)
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("shadowed-import-qualifier-send", err == nil && got == time.Second, fmt.Sprint(err, got), "<nil> 1s")
+}
+
+func nextPointer() unsafe.Pointer {
+	v := 7
+	return unsafe.Pointer(&v)
+}
+
+func shadowedUnsafeSend(ctx context.Context, ch chan unsafe.Pointer, unsafe int) error {
+	_ = unsafe
+	go group (ctx) {
+		go {
+			ch <- nextPointer()
+		}
+	}
+	return nil
+}
+
+func shadowedUnsafeValue() {
+	ch := make(chan unsafe.Pointer, 1)
+	err := shadowedUnsafeSend(precancelled(), ch, 0)
+	got := unsafe.Pointer(nil)
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("shadowed-unsafe-qualifier-send", err == nil && got != nil, fmt.Sprint(err, got), "<nil> non-nil")
+}
+
 func gotoPastSend() {
 	recordCalls.Store(0)
 	calls.Store(0)
@@ -403,6 +503,10 @@ func main() {
 	recvStmtReady()
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
+	shadowedIfaceValue()
+	shadowedIfaceRecvValue()
+	shadowedImportValue()
+	shadowedUnsafeValue()
 	gotoPastSend()
 	nilSendReady()
 	namedElemReady()

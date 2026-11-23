@@ -1942,6 +1942,18 @@ func (c *cfLeaf) cfMentionsLocalType(e syntax.Expr, ref syntax.Node) bool {
 // name win.
 func (c *cfLeaf) cfMentionsLocalDecl(e syntax.Expr, ref syntax.Node) bool {
 	found := false
+	// A selector member (the Sel of `X.Sel`) resolves in the
+	// qualifier's scope — a package member, field, or method — never
+	// as a lexical reference to a function-local declaration, so only
+	// qualifiers and bare names can mention one. The syntax walker
+	// visits Sel as a plain Name node, hence the pre-pass.
+	sels := map[*syntax.Name]bool{}
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if sel, ok := n.(*syntax.SelectorExpr); ok {
+			sels[sel.Sel] = true
+		}
+		return true
+	})
 	var visit func(n syntax.Node) bool
 	visit = func(n syntax.Node) bool {
 		if found {
@@ -1953,7 +1965,7 @@ func (c *cfLeaf) cfMentionsLocalDecl(e syntax.Expr, ref syntax.Node) bool {
 			}
 			return false
 		}
-		if name, ok := n.(*syntax.Name); ok &&
+		if name, ok := n.(*syntax.Name); ok && !sels[name] &&
 			(cfLocalTypeDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil ||
 				cfLocalConstDeclBefore(c.declRoot, ref, name.Value, c.declParents) != nil) {
 			found = true
@@ -2194,6 +2206,13 @@ func (c *cfLeaf) cfDeadConstCase(n syntax.Node) bool {
 		if !ok {
 			continue
 		}
+		// A tag naming a function-local type resolves in the switch's
+		// own scope; the record's package scope cannot answer it, so
+		// leave the fold to the copy's own lowering instead of
+		// suppressing specialization of a case that is live there.
+		if c.cfMentionsLocalDecl(sw.Targ, sw) {
+			return false
+		}
 		tag, ok := c.fl.cfResolveTypeExpr(sw.Targ, c.active, c.run.sites)
 		if !ok || tag == nil {
 			return false
@@ -2209,11 +2228,27 @@ func (c *cfLeaf) cfDeadConstCase(n syntax.Node) bool {
 				break
 			}
 		}
-		if live == nil || len(live.Body) == 0 {
-			return live == nil
+		if live == nil {
+			return true
 		}
-		bs := offAt(c.run.ctx.starts, syntax.StartPos(live.Body[0]))
-		be := offAt(c.run.ctx.starts, syntax.EndPos(live.Body[len(live.Body)-1]))
+		var bs, be int
+		if len(live.Body) == 0 {
+			// An empty live arm still bounds the dead region: it runs
+			// from its colon to the next case or the switch's close,
+			// and no statement of a sibling arm sits inside it.
+			bs = offAt(c.run.ctx.starts, live.Colon) + 1
+			be = offAt(c.run.ctx.starts, sw.Rbrace)
+			liveCase := offAt(c.run.ctx.starts, live.Case)
+			for _, cs := range sw.Cases {
+				if cs != live && offAt(c.run.ctx.starts, cs.Case) > liveCase {
+					be = offAt(c.run.ctx.starts, cs.Case)
+					break
+				}
+			}
+		} else {
+			bs = offAt(c.run.ctx.starts, syntax.StartPos(live.Body[0]))
+			be = offAt(c.run.ctx.starts, syntax.EndPos(live.Body[len(live.Body)-1]))
+		}
 		return pos < bs || pos > be
 	}
 	return false
