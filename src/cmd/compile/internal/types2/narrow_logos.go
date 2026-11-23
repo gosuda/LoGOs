@@ -1294,6 +1294,7 @@ type logosEFPass struct {
 	assigns       map[logosEFKey][]syntax.Expr
 	addr          map[*Var]bool
 	initialized   map[*Var]bool
+	declared      map[*Var]bool
 	tracked       map[logosEFKey]string
 	storeErr      map[logosEFKey][]*Var
 	storeErrKey   map[logosEFKey][]logosEFKey
@@ -1564,7 +1565,7 @@ func (p *logosEFPass) sole(v *Var) syntax.Expr {
 	// an incoming value the body inventory never sees, so its recorded
 	// assignments cannot name the call's origin. Only a variable the
 	// body declares starts from a recorded origin.
-	if !p.initialized[v] {
+	if !p.declared[v] {
 		return nil
 	}
 	if exprs := p.assigns[logosEFKey{root: v}]; len(exprs) == 1 && !p.addr[v] {
@@ -1587,7 +1588,7 @@ func (p *logosEFPass) allGoOrigins(v *Var) bool {
 	if p.assigns == nil {
 		p.collectAssigns()
 	}
-	if !p.initialized[v] {
+	if !p.declared[v] {
 		return false
 	}
 	if p.addr[v] {
@@ -1613,6 +1614,7 @@ func (p *logosEFPass) collectAssigns() {
 	p.assigns = make(map[logosEFKey][]syntax.Expr)
 	p.addr = make(map[*Var]bool)
 	p.initialized = make(map[*Var]bool)
+	p.declared = make(map[*Var]bool)
 	p.tracked = make(map[logosEFKey]string)
 	p.storeErr = make(map[logosEFKey][]*Var)
 	p.storeErrKey = make(map[logosEFKey][]logosEFKey)
@@ -1673,6 +1675,7 @@ func (p *logosEFPass) collectAssigns() {
 			p.assigns[k] = append(p.assigns[k], r)
 			if id, isName := syntax.Unparen(l).(*syntax.Name); isName && p.check.Defs[id] == k.root {
 				p.initialized[k.root] = true
+				p.declared[k.root] = true
 			}
 		}
 	}
@@ -1688,13 +1691,14 @@ func (p *logosEFPass) collectAssigns() {
 				note(names, syntax.UnpackListExpr(n.Values), true)
 				break
 			}
-			// A declaration without values assigns nothing, but it still
-			// declares the names in this body: a later assignment is the
-			// only write the inventory can see, so the Go-origin proof
-			// keeps working for `var f T` followed by `f = g`.
+			// A declaration without values declares the names in this
+			// body, which the Go-origin proof needs for `var f T`
+			// followed by `f = g`. It stores nothing, so a later
+			// assignment stays a store besides the declaration and the
+			// result never counts as initialized at its declaration.
 			for _, id := range n.NameList {
 				if v, _ := p.check.Defs[id].(*Var); v != nil {
-					p.initialized[v] = true
+					p.declared[v] = true
 				}
 			}
 		case *syntax.RangeClause:
@@ -3155,9 +3159,6 @@ func (p *logosEFPass) derefRoot(e syntax.Expr) *Var {
 	}
 	if p.assigns == nil {
 		p.collectAssigns()
-	}
-	if !p.initialized[v] {
-		return nil
 	}
 	origin := p.sole(v)
 	if origin == nil {
