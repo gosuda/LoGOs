@@ -36,3 +36,22 @@ func efSwitchTagNoNilFails() {
 		}()
 	}
 }
+
+// A case expression that replaces the result defeats the saved tag: the
+// nil arm matches the pre-replacement tag while the read sees the
+// replacement's value, so the proof must not fire.
+func efSwitchTagStaleRewrite() {
+	h := efSwitchHeld{}
+	h.stats, h.err = efSwitchFetch()
+	switch h.err {
+	case (func() error {
+		h.stats, h.err = efSwitchFetch()
+		return h.err
+	})():
+		println("other")
+	case nil:
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+	}
+}
