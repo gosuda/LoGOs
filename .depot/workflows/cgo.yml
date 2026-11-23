@@ -145,6 +145,17 @@ jobs:
           command -v clang
           echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
           echo "UPROOT1274=$(go env GOROOT)" >> "$GITHUB_ENV"
+      - name: "Select and verify the C23 consumer compiler"
+        run: |
+          compiler="$(command -v gcc-14)"
+          compiler_bin="$RUNNER_TEMP/cgo-c23-bin"
+          mkdir "$compiler_bin"
+          ln -s "$compiler" "$compiler_bin/cc"
+          "$compiler_bin/cc" --version
+          printf 'int main(void) { return 0; }\n' |
+            "$compiler_bin/cc" -std=c23 -x c - -o "$RUNNER_TEMP/cgo-c23-check"
+          "$RUNNER_TEMP/cgo-c23-check"
+          printf '%s\n' "$compiler_bin" >> "$GITHUB_PATH"
       - name: "Install pinned stock oracles"
         run: |
           for version in 1.27.2 1.27.3; do
