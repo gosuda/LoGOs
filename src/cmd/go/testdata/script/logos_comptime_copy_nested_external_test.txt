@@ -188,15 +188,15 @@ type engineItem struct {
 
 func TestExternalAdd(t *testing.T) {
 	got := lib.Add(&engineItem{})
-	if got == "" {
-		t.Fatalf("Add returned empty string")
+	if want := "add:isiwrap-isi"; got != want {
+		t.Fatalf("Add = %q, want %q", got, want)
 	}
 }
 
 func TestExternalDeep(t *testing.T) {
 	got := lib.DeepTop(&engineItem{})
-	if got == "" {
-		t.Fatalf("DeepTop returned empty string")
+	if want := "deep:isi"; got != want {
+		t.Fatalf("DeepTop = %q, want %q", got, want)
 	}
 }
 
