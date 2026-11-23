@@ -406,6 +406,16 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 	uc.members = make([]trialMember, len(members))
 	for i, c := range members {
 		sample, isPtr := strings.CutPrefix(c.code, "*")
+		if !isPtr && c.typ != nil {
+			// An alias can hide a pointer spelling: derive pointer-ness
+			// from the unaliased type while keeping the accessible alias
+			// spelling, so the trial allocates instead of decoding
+			// into a nil value.
+			if p, ok := unaliasConstView(c.typ).(*types2.Pointer); ok {
+				isPtr = true
+				sample = sourceTypeString(unaliasConstView(p.Elem()), js.qualify, js.holderPkg, js.cgoSource)
+			}
+		}
 		uc.members[i] = trialMember{
 			keyed:     c.keyed,
 			spell:     c.code,
