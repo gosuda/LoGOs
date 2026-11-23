@@ -52,8 +52,17 @@ func TestCompileComptimeSemanticIdentity(t *testing.T) {
 		}
 	})
 	t.Run("ejected", func(t *testing.T) {
+		src := t.TempDir()
+		if err := os.CopyFS(src, os.DirFS(dir)); err != nil {
+			t.Fatal(err)
+		}
+		for _, refused := range []string{"forward", "consumer"} {
+			if err := os.RemoveAll(filepath.Join(src, refused)); err != nil {
+				t.Fatal(err)
+			}
+		}
 		outDir := filepath.Join(t.TempDir(), "ejected")
-		run(t, dir, logosTool, "eject", "-o", outDir)
+		run(t, src, logosTool, "eject", "-o", outDir)
 		if got := run(t, outDir, testenv.GoToolPath(t), "run", "-p=1", "-buildvcs=false", "."); got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
