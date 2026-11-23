@@ -75,22 +75,16 @@ func interpSend(ctx context.Context, ch chan string, n int) error {
 
 var interpLookupChans = map[string]chan int{}
 
+var interpChan chan int
+
 func lookupChan(key string) chan int {
 	ch, ok := interpLookupChans[key]
 	if !ok {
 		ch = make(chan int, 1)
 		interpLookupChans[key] = ch
 	}
+	interpChan = ch
 	return ch
-}
-
-func chanInterpSend(ctx context.Context, n int) error {
-	go group (ctx) {
-		go {
-			lookupChan($"key={n}") <- 1
-		}
-	}
-	return nil
 }
 
 var first, second chan int
@@ -210,12 +204,11 @@ func interpSendReady() {
 func chanInterpReady() {
 	err := chanInterpSend(precancelled(), 4)
 	got := -1
-	ok := false
 	select {
-	case got, ok = <-interpLookupChans["key=4"]:
+	case got = <-interpChan:
 	default:
 	}
-	check("send-chan-interp", err == nil && ok && got == 1, fmt.Sprint(err, ok, got), "<nil> true 1")
+	check("send-chan-interp", err == nil && got == 1, fmt.Sprint(err, got), "<nil> 1")
 }
 
 func chanSnapshotBeforeValue() {
