@@ -1252,7 +1252,11 @@ An assignment to it MUST fail with `[comptime::const_for_assign]`. [T-205]
 
 A `comptime.Error(msg)` that is not const-dead MUST fail compilation with `msg`. Termination-dead code is not const-dead. [T-205]
 
-A `const if` branch or a `const switch` case that an instantiation does not take is const-dead. The compiler MUST NOT type-check const-dead code or count it for termination or `break`, and a `comptime.Error` in const-dead code MUST NOT fail compilation. [T-205]
+Const-dead code is code that a compile-time choice removes. It is the branch of a `const if` that a boolean constant condition does not select, in any function. In an instance of a comptime generic and in a field iteration of a `const for`, it is also a `const if` branch or a `const switch` case that the instance or the iteration does not take. [T-205]
+
+The compiler MUST NOT type-check const-dead code, count it for termination or `break`, or lower it, and a `comptime.Error` in const-dead code MUST NOT fail compilation. These rules also apply to const-dead code inside termination-dead code. [T-205]
+
+A `const switch` whose tag is a type parameter of a generic function that is not a comptime generic picks its case at run time, so none of its cases is const-dead. The compiler MUST type-check each case body under its case binding and MUST lower it. [T-205]
 
 Termination-dead code is code that is not const-dead and that control flow cannot reach. A statement is termination-dead when an earlier statement of the same statement list is terminating and no labeled statement stands after that earlier statement, up to and including this statement. A field iteration of a `const for` is termination-dead when it comes after the first iteration whose body is terminating. A statement is terminating by the Go rules for terminating statements, with these changes: a `const if` counts only the branch that it takes, a `const switch` terminates only when it takes a case at compile time and that case body terminates, and a `const for` follows the termination rule above. [T-205]
 
