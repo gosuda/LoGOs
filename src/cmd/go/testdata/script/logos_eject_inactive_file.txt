@@ -1,0 +1,68 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+
+cd variants
+
+# A .lgo file pair under opposite goexperiment build tags: one side is
+# always inactive on any given toolchain. Eject must lower the inactive
+# variant under a context that selects it and keep both build
+# constraints, so the ejected tree builds under every experiment setting
+# the source module builds under.
+logos run .
+stdout '^default jsonv2$'
+cp stdout $WORK/native-default.txt
+
+env GOEXPERIMENT=nojsonv2
+logos run .
+stdout '^default nojsonv2$'
+cp stdout $WORK/native-off.txt
+env GOEXPERIMENT=
+
+logos eject -o out
+exists out/main.go
+exists out/a_v1.go
+exists out/a_v2.go
+grep '^//go:build !goexperiment.jsonv2' out/a_v1.go
+grep '^//go:build goexperiment.jsonv2' out/a_v2.go
+
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native-default.txt
+env GOEXPERIMENT=nojsonv2
+go run .
+cmp stdout $WORK/native-off.txt
+env GOEXPERIMENT=
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native-default.txt
+exec env -u GOROOT GOEXPERIMENT=nojsonv2 $UPROOT1272/bin/go build ./...
+exec env -u GOROOT GOEXPERIMENT=nojsonv2 $UPROOT1272/bin/go run .
+cmp stdout $WORK/native-off.txt
+
+-- variants/go.mod --
+module example.com/experimentvariants
+
+go 1.27
+
+-- variants/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println(which()) }
+
+-- variants/a_v1.lgo --
+//go:build !goexperiment.jsonv2
+
+package main
+
+func which() string { return "default nojsonv2" }
+
+-- variants/a_v2.lgo --
+//go:build goexperiment.jsonv2
+
+package main
+
+func which() string { return "default jsonv2" }

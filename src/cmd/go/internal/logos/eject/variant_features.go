@@ -88,7 +88,7 @@ func variantBuildContext(vc variantCtx) (build.Context, bool) {
 	if err != nil {
 		return build.Context{}, false
 	}
-	experiments, err := buildcfg.ParseGOEXPERIMENT(vc.goos, vc.goarch, cfg.RawGOEXPERIMENT)
+	experiments, err := buildcfg.ParseGOEXPERIMENT(vc.goos, vc.goarch, variantExperiment(vc))
 	if err != nil {
 		return build.Context{}, false
 	}

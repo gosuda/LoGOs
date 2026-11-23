@@ -853,6 +853,7 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 	var goosMentioned []string
 	var goarchMentioned []string
 	var customMentioned []string
+	var expMentioned []string
 	for _, t := range uniqMention {
 		if t == "wasip1" || slices.Contains(ownedGoosTags, t) {
 			goosMentioned = append(goosMentioned, t)
@@ -865,7 +866,14 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 			goarchMentioned = append(goarchMentioned, t)
 			continue
 		}
-		if t == "cgo" || t == "ignore" || t == "unix" || t == "boringcrypto" || t == "logos" || t == "gc" || t == "gccgo" || architectureFeatureTag(t) || slices.Contains(cfg.BuildContext.ToolTags, t) || strings.HasPrefix(t, "go1.") || strings.HasPrefix(t, "goexperiment.") {
+		// Experiment tags vary with the helper's real GOEXPERIMENT
+		// value, solved as their own dimension below; they must not
+		// be mistaken for custom -tags or frozen as host facts.
+		if rest, ok := strings.CutPrefix(t, "goexperiment."); ok && rest != "" {
+			expMentioned = append(expMentioned, rest)
+			continue
+		}
+		if t == "cgo" || t == "ignore" || t == "unix" || t == "boringcrypto" || t == "logos" || t == "gc" || t == "gccgo" || architectureFeatureTag(t) || slices.Contains(cfg.BuildContext.ToolTags, t) || strings.HasPrefix(t, "go1.") {
 			continue
 		}
 		customMentioned = append(customMentioned, t)
@@ -891,7 +899,16 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 		}
 	}
 	slices.Sort(customUniq)
-	if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq, uniqMention); ok {
+	slices.Sort(expMentioned)
+	search := func(goosCands, goarchCands []string) (variantCtx, bool) {
+		for _, experiment := range experimentCombinations(expMentioned) {
+			if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, experiment, customUniq, uniqMention); ok {
+				return vc, true
+			}
+		}
+		return variantCtx{}, false
+	}
+	if vc, ok := search(goosCands, goarchCands); ok {
 		return vc, true
 	}
 	for _, g := range []string{"linux", "darwin", "windows", "freebsd"} {
@@ -915,10 +932,51 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 			goarchCands = append(goarchCands, a)
 		}
 	}
-	return searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq, uniqMention)
+	return search(goosCands, goarchCands)
 }
 
-func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags, customUniq, mentioned []string) (variantCtx, bool) {
+// experimentCombinations lists the GOEXPERIMENT values to try for files
+// mentioning experiment tags, host value first. Later entries set every
+// mentioned experiment explicitly, one combination at a time, so a helper
+// runs with a real GOEXPERIMENT value instead of a synthesized user tag.
+func experimentCombinations(mentioned []string) []string {
+	raw := cfg.RawGOEXPERIMENT
+	if len(mentioned) == 0 {
+		return []string{raw}
+	}
+	out := []string{raw}
+	for mask := range 1 << len(mentioned) {
+		var keep []string
+		if raw != "" {
+			for item := range strings.SplitSeq(raw, ",") {
+				drop := false
+				for _, name := range mentioned {
+					if item == name || item == "no"+name {
+						drop = true
+						break
+					}
+				}
+				if !drop {
+					keep = append(keep, item)
+				}
+			}
+		}
+		for i, name := range mentioned {
+			if mask&(1<<i) != 0 {
+				keep = append(keep, name)
+			} else {
+				keep = append(keep, "no"+name)
+			}
+		}
+		combo := strings.Join(keep, ",")
+		if combo != raw {
+			out = append(out, combo)
+		}
+	}
+	return out
+}
+
+func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags []string, experiment string, customUniq, mentioned []string) (variantCtx, bool) {
 	for _, goos := range goosCands {
 		for _, goarch := range goarchCands {
 			if work.CheckGOOSARCHPair(goos, goarch) != nil {
@@ -926,7 +984,7 @@ func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, 
 			}
 			archName, levels := variantArchLevels(goarch, mentioned)
 			for _, level := range levels {
-				vc := variantCtx{goos: goos, goarch: goarch, archName: archName, archValue: level}
+				vc := variantCtx{goos: goos, goarch: goarch, archName: archName, archValue: level, experiment: experiment}
 				ctxt, ok := variantBuildContext(vc)
 				if !ok {
 					continue
@@ -941,21 +999,32 @@ func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, 
 	return variantCtx{}, false
 }
 
-// variantCtx is one helper-eject build context: the GOOS, GOARCH, and
-// full -tags list that select a group of inactive files with correct
-// dependencies.
+// variantCtx is one helper-eject build context: the GOOS, GOARCH,
+// GOEXPERIMENT value, and full -tags list that select a group of inactive
+// files with correct dependencies.
 type variantCtx struct {
-	goos      string
-	goarch    string
-	archName  string
-	archValue string
-	tags      []string
-	packages  []string
-	files     []inactiveFile
+	goos       string
+	goarch     string
+	archName   string
+	archValue  string
+	experiment string
+	tags       []string
+	packages   []string
+	files      []inactiveFile
 }
 
 func variantKey(vc variantCtx) string {
-	return vc.goos + "\x00" + vc.goarch + "\x00" + vc.archValue + "\x00" + strings.Join(vc.tags, ",")
+	return vc.goos + "\x00" + vc.goarch + "\x00" + vc.archValue + "\x00" + vc.experiment + "\x00" + strings.Join(vc.tags, ",")
+}
+
+// variantExperiment returns the GOEXPERIMENT value a variant helper must
+// receive. Contexts selected without an experiment dimension carry the
+// host value; selected ones carry the synthesized combination.
+func variantExperiment(vc variantCtx) string {
+	if vc.experiment == "" {
+		return cfg.RawGOEXPERIMENT
+	}
+	return vc.experiment
 }
 
 // variantContextsForFiles groups inactive files by one satisfying
@@ -970,7 +1039,7 @@ func variantContextsForFiles(files []inactiveFile) []variantCtx {
 	for _, f := range files {
 		vc, ok := selectVariantContext(f.pkg.Dir, f.name, hostGOOS, hostGOARCH, hostTags)
 		if !ok {
-			base.Fatalf("logos eject: no build context selects inactive file %s", filepath.Join(f.pkg.Dir, f.name))
+			base.Fatalf("logos eject: no build context selects inactive file %s: %s", filepath.Join(f.pkg.Dir, f.name), inactiveConstraintHint(f.pkg.Dir, f.name))
 		}
 		key := variantKey(vc)
 		if existing, exists := byKey[key]; exists {
@@ -990,6 +1059,31 @@ func variantContextsForFiles(files []inactiveFile) []variantCtx {
 		out = append(out, byKey[k])
 	}
 	return out
+}
+
+// inactiveConstraintHint names the build constraint no GOOS/GOARCH/tags/
+// GOEXPERIMENT combination could satisfy, so the failure points at the
+// file's own //go:build lines instead of the search. A file constrained
+// only by its name gets the filename rule instead.
+func inactiveConstraintHint(pkgDir, name string) string {
+	const fixed = "no GOOS/GOARCH/tags/GOEXPERIMENT combination satisfies its build constraint"
+	data, err := fsys.ReadFile(filepath.Join(pkgDir, name))
+	if err != nil {
+		return fixed
+	}
+	var lines []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(trimmed, "//go:build "); ok {
+			lines = append(lines, strings.TrimSpace(rest))
+		} else if strings.HasPrefix(trimmed, "package ") {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return "no GOOS/GOARCH/tags/GOEXPERIMENT combination satisfies its filename and build constraints"
+	}
+	return fixed + " (" + strings.Join(lines, " / ") + "); check for an unsatisfiable feature combination"
 }
 
 // spawnVariantEjects runs one plain helper eject per variant context.
@@ -1033,7 +1127,7 @@ func spawnVariantEjects(ctx context.Context, ctxs []variantCtx) []string {
 		if vc.archName != "" {
 			env = append(env, vc.archName+"="+vc.archValue)
 		}
-		env = append(env, "GOEXPERIMENT="+cfg.RawGOEXPERIMENT)
+		env = append(env, "GOEXPERIMENT="+variantExperiment(vc))
 		cgo := "0"
 		if cfg.BuildContext.CgoEnabled {
 			cgo = "1"
