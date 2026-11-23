@@ -249,6 +249,10 @@ func childArguments(verb string, args []string, flagValue func(string) (takesVal
 	inPkgList := false
 	havePackages := false
 	testArgsStarted := false
+	// pkgListDone mirrors the child scan past a flag unknown to the go
+	// command: like the child, no later argument reopens the package
+	// list, so later positionals belong to the test binary.
+	pkgListDone := false
 	// afterFlagWithoutValue mirrors the child scan: a flag unknown to
 	// the go command may take the next argument as its value, so the
 	// next non-flag argument does not end the package list.
@@ -289,6 +293,11 @@ func childArguments(verb string, args []string, flagValue func(string) (takesVal
 					// the child scan, keep looking for go flags after
 					// it. It still reaches the child unchanged.
 					afterFlagWithoutValue = false
+				case pkgListDone:
+					// The package list ended at a flag unknown to the
+					// go command: later positionals belong to the
+					// test binary, as in the child scan.
+					testArgsStarted = true
 				case !inPkgList && havePackages:
 					testArgsStarted = true
 				default:
@@ -367,12 +376,17 @@ func childArguments(verb string, args []string, flagValue func(string) (takesVal
 			if !hasValue && takes && i+1 < len(args) {
 				i++
 				inv.arguments = append(inv.arguments, args[i])
-			} else if verb == "test" && !hasValue && !known {
-				// Unknown to the go command: the test binary may
-				// read the next argument as this flag's value, so
-				// the package list and the -json scan stay open
-				// past one non-flag argument.
-				afterFlagWithoutValue = true
+			} else if verb == "test" && !known {
+				if !hasValue {
+					// Unknown to the go command: the test binary may
+					// read the next argument as this flag's value, so
+					// the package list and the -json scan stay open
+					// past one non-flag argument.
+					afterFlagWithoutValue = true
+				}
+				// Like the child scan, an unknown flag ends the
+				// package list: later positionals are test arguments.
+				pkgListDone = true
 			}
 		}
 	}

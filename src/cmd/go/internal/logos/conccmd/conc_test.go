@@ -262,6 +262,8 @@ func TestChildArgumentsReadsTestJSON(t *testing.T) {
 		{"test", "", ". -custom -stall=1s value -json", true},
 		{"test", "", ". -custom=value -json", true},
 		{"test", "", "./a -custom sentinel -json", true},
+		{"test", "-json", "-custom=value sentinel -json=false", true},
+		{"test", "", ". -custom --ai-patch value -json", true},
 		{"test", "", "./a -v sentinel -json", false},
 		{"test", "", ". -custom -json=false ./a -json", false},
 		{"run", "", "-json .", false},
