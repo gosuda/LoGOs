@@ -1,0 +1,1009 @@
+package binary
+
+import (
+	"bytes"
+	"math"
+	"strings"
+	"testing"
+
+	obinary "encoding/binary"
+)
+
+type RStruct struct {
+	Int8       int8
+	Int16      int16
+	Int32      int32
+	Int64      int64
+	Uint8      uint8
+	Uint16     uint16
+	Uint32     uint32
+	Uint64     uint64
+	Float32    float32
+	Float64    float64
+	Complex64  complex64
+	Complex128 complex128
+	Array      [4]uint8
+	Bool       bool
+	BoolArray  [4]bool
+}
+
+var rS = RStruct{
+	0x01,
+	0x0203,
+	0x04050607,
+	0x08090a0b0c0d0e0f,
+	0x10,
+	0x1112,
+	0x13141516,
+	0x1718191a1b1c1d1e,
+
+	math.Float32frombits(0x1f202122),
+	math.Float64frombits(0x232425262728292a),
+	complex(
+		math.Float32frombits(0x2b2c2d2e),
+		math.Float32frombits(0x2f303132),
+	),
+	complex(
+		math.Float64frombits(0x333435363738393a),
+		math.Float64frombits(0x3b3c3d3e3f404142),
+	),
+
+	[4]uint8{0x43, 0x44, 0x45, 0x46},
+
+	true,
+	[4]bool{true, false, true, false},
+}
+
+var rBig = []byte{
+	1,
+	2, 3,
+	4, 5, 6, 7,
+	8, 9, 10, 11, 12, 13, 14, 15,
+	16,
+	17, 18,
+	19, 20, 21, 22,
+	23, 24, 25, 26, 27, 28, 29, 30,
+
+	31, 32, 33, 34,
+	35, 36, 37, 38, 39, 40, 41, 42,
+	43, 44, 45, 46, 47, 48, 49, 50,
+	51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66,
+
+	67, 68, 69, 70,
+
+	1,
+	1, 0, 1, 0,
+}
+
+var rLittle = []byte{
+	1,
+	3, 2,
+	7, 6, 5, 4,
+	15, 14, 13, 12, 11, 10, 9, 8,
+	16,
+	18, 17,
+	22, 21, 20, 19,
+	30, 29, 28, 27, 26, 25, 24, 23,
+
+	34, 33, 32, 31,
+	42, 41, 40, 39, 38, 37, 36, 35,
+	46, 45, 44, 43, 50, 49, 48, 47,
+	58, 57, 56, 55, 54, 53, 52, 51, 66, 65, 64, 63, 62, 61, 60, 59,
+
+	67, 68, 69, 70,
+
+	1,
+	1, 0, 1, 0,
+}
+
+type RInner struct {
+	Tag  uint16
+	Vals [3]int32
+}
+
+type ROuter struct {
+	Head  RInner
+	Flag  bool
+	Foot  RInner
+	Scale float64
+}
+
+type RBad struct {
+	Age    int
+	Weight float64
+}
+
+type RWithSlice struct {
+	A int32
+	S []int32
+}
+
+type RUnexported struct {
+	A int32
+	b int32
+}
+
+func checkAppendBytes(t *testing.T, name string, order Order, ob, tb []byte, oerr, terr error) {
+	t.Helper()
+	if oerr != nil {
+		t.Fatalf("%s: original append: %v", name, oerr)
+		return
+	}
+	if terr != nil {
+		t.Fatalf("%s %v: twin append: %v", name, order, terr)
+		return
+	}
+	if !bytes.Equal(ob, tb) {
+		t.Fatalf("%s %v: bytes differ\norig %x\ntwin %x", name, order, ob, tb)
+	}
+}
+
+func TestTwinStructLayout(t *testing.T) {
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		ob, oerr := obinary.Append(nil, order, rS)
+		if oerr != nil {
+			t.Fatalf("struct: original append: %v", oerr)
+			return
+		}
+		tb, terr := Append(nil, order, rS)
+		if terr != nil {
+			t.Fatalf("struct %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "struct", order, ob, tb, oerr, terr)
+		var ov, tv RStruct
+		if _, err := obinary.Decode(ob, order, &ov); err != nil {
+			t.Fatalf("struct: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tv); err != nil {
+			t.Fatalf("struct %v: twin decode: %v", order, err)
+			return
+		}
+		if ov != tv || tv != rS {
+			t.Fatalf("struct %v: round trip changed value", order)
+		}
+		pb, perr := Append(nil, order, &rS)
+		if perr != nil {
+			t.Fatalf("structptr %v: twin append: %v", order, perr)
+			return
+		}
+		po, poerr := obinary.Append(nil, order, &rS)
+		if poerr != nil {
+			t.Fatalf("structptr: original append: %v", poerr)
+			return
+		}
+		checkAppendBytes(t, "structptr", order, po, pb, poerr, perr)
+	}
+	tb, err := Append(nil, BigEndian, rS)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if !bytes.Equal(tb, rBig) {
+		t.Fatalf("big-endian struct bytes do not match the reference vector")
+	}
+	tl, err := Append(nil, LittleEndian, rS)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if !bytes.Equal(tl, rLittle) {
+		t.Fatalf("little-endian struct bytes do not match the reference vector")
+	}
+	if Size(rS) != len(rBig) {
+		t.Fatalf("Size(struct) = %d, want %d", Size(rS), len(rBig))
+	}
+}
+
+func TestTwinScalars(t *testing.T) {
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		ob, oerr := obinary.Append(nil, order, true)
+		if oerr != nil {
+			t.Fatalf("bool: original append: %v", oerr)
+			return
+		}
+		tb, terr := Append(nil, order, true)
+		if terr != nil {
+			t.Fatalf("bool %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "bool", order, ob, tb, oerr, terr)
+		var ovb, tvb bool
+		if _, err := obinary.Decode(ob, order, &ovb); err != nil {
+			t.Fatalf("bool: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvb); err != nil {
+			t.Fatalf("bool %v: twin decode: %v", order, err)
+			return
+		}
+		if ovb != tvb || !tvb {
+			t.Fatalf("bool %v: decoded %v", order, tvb)
+		}
+		v8 := int8(-5)
+		ob, oerr = obinary.Append(nil, order, v8)
+		if oerr != nil {
+			t.Fatalf("int8: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, v8)
+		if terr != nil {
+			t.Fatalf("int8 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "int8", order, ob, tb, oerr, terr)
+		var ov8, tv8 int8
+		if _, err := obinary.Decode(ob, order, &ov8); err != nil {
+			t.Fatalf("int8: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tv8); err != nil {
+			t.Fatalf("int8 %v: twin decode: %v", order, err)
+			return
+		}
+		if ov8 != tv8 || tv8 != v8 {
+			t.Fatalf("int8 %v: decoded %d, want %d", order, tv8, v8)
+		}
+		u8 := uint8(250)
+		ob, oerr = obinary.Append(nil, order, u8)
+		if oerr != nil {
+			t.Fatalf("uint8: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, u8)
+		if terr != nil {
+			t.Fatalf("uint8 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "uint8", order, ob, tb, oerr, terr)
+		var ovu8, tvu8 uint8
+		if _, err := obinary.Decode(ob, order, &ovu8); err != nil {
+			t.Fatalf("uint8: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvu8); err != nil {
+			t.Fatalf("uint8 %v: twin decode: %v", order, err)
+			return
+		}
+		if ovu8 != tvu8 || tvu8 != u8 {
+			t.Fatalf("uint8 %v: decoded %d, want %d", order, tvu8, u8)
+		}
+		v16 := int16(-1000)
+		ob, oerr = obinary.Append(nil, order, v16)
+		if oerr != nil {
+			t.Fatalf("int16: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, v16)
+		if terr != nil {
+			t.Fatalf("int16 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "int16", order, ob, tb, oerr, terr)
+		var ov16, tv16 int16
+		if _, err := obinary.Decode(ob, order, &ov16); err != nil {
+			t.Fatalf("int16: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tv16); err != nil {
+			t.Fatalf("int16 %v: twin decode: %v", order, err)
+			return
+		}
+		if ov16 != tv16 || tv16 != v16 {
+			t.Fatalf("int16 %v: decoded %d, want %d", order, tv16, v16)
+		}
+		u16 := uint16(60000)
+		ob, oerr = obinary.Append(nil, order, u16)
+		if oerr != nil {
+			t.Fatalf("uint16: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, u16)
+		if terr != nil {
+			t.Fatalf("uint16 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "uint16", order, ob, tb, oerr, terr)
+		var ovu16, tvu16 uint16
+		if _, err := obinary.Decode(ob, order, &ovu16); err != nil {
+			t.Fatalf("uint16: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvu16); err != nil {
+			t.Fatalf("uint16 %v: twin decode: %v", order, err)
+			return
+		}
+		if ovu16 != tvu16 || tvu16 != u16 {
+			t.Fatalf("uint16 %v: decoded %d, want %d", order, tvu16, u16)
+		}
+		v32 := int32(-100000)
+		ob, oerr = obinary.Append(nil, order, v32)
+		if oerr != nil {
+			t.Fatalf("int32: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, v32)
+		if terr != nil {
+			t.Fatalf("int32 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "int32", order, ob, tb, oerr, terr)
+		var ov32, tv32 int32
+		if _, err := obinary.Decode(ob, order, &ov32); err != nil {
+			t.Fatalf("int32: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tv32); err != nil {
+			t.Fatalf("int32 %v: twin decode: %v", order, err)
+			return
+		}
+		if ov32 != tv32 || tv32 != v32 {
+			t.Fatalf("int32 %v: decoded %d, want %d", order, tv32, v32)
+		}
+		u32 := uint32(3000000000)
+		ob, oerr = obinary.Append(nil, order, u32)
+		if oerr != nil {
+			t.Fatalf("uint32: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, u32)
+		if terr != nil {
+			t.Fatalf("uint32 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "uint32", order, ob, tb, oerr, terr)
+		var ovu32, tvu32 uint32
+		if _, err := obinary.Decode(ob, order, &ovu32); err != nil {
+			t.Fatalf("uint32: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvu32); err != nil {
+			t.Fatalf("uint32 %v: twin decode: %v", order, err)
+			return
+		}
+		if ovu32 != tvu32 || tvu32 != u32 {
+			t.Fatalf("uint32 %v: decoded %d, want %d", order, tvu32, u32)
+		}
+		v64 := int64(-1 << 60)
+		ob, oerr = obinary.Append(nil, order, v64)
+		if oerr != nil {
+			t.Fatalf("int64: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, v64)
+		if terr != nil {
+			t.Fatalf("int64 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "int64", order, ob, tb, oerr, terr)
+		var ov64, tv64 int64
+		if _, err := obinary.Decode(ob, order, &ov64); err != nil {
+			t.Fatalf("int64: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tv64); err != nil {
+			t.Fatalf("int64 %v: twin decode: %v", order, err)
+			return
+		}
+		if ov64 != tv64 || tv64 != v64 {
+			t.Fatalf("int64 %v: decoded %d, want %d", order, tv64, v64)
+		}
+		u64 := uint64(1 << 63)
+		ob, oerr = obinary.Append(nil, order, u64)
+		if oerr != nil {
+			t.Fatalf("uint64: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, u64)
+		if terr != nil {
+			t.Fatalf("uint64 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "uint64", order, ob, tb, oerr, terr)
+		var ovu64, tvu64 uint64
+		if _, err := obinary.Decode(ob, order, &ovu64); err != nil {
+			t.Fatalf("uint64: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvu64); err != nil {
+			t.Fatalf("uint64 %v: twin decode: %v", order, err)
+			return
+		}
+		if ovu64 != tvu64 || tvu64 != u64 {
+			t.Fatalf("uint64 %v: decoded %d, want %d", order, tvu64, u64)
+		}
+		f32 := math.Float32frombits(0x40490fdb)
+		ob, oerr = obinary.Append(nil, order, f32)
+		if oerr != nil {
+			t.Fatalf("float32: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, f32)
+		if terr != nil {
+			t.Fatalf("float32 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "float32", order, ob, tb, oerr, terr)
+		var ovf32, tvf32 float32
+		if _, err := obinary.Decode(ob, order, &ovf32); err != nil {
+			t.Fatalf("float32: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvf32); err != nil {
+			t.Fatalf("float32 %v: twin decode: %v", order, err)
+			return
+		}
+		if ovf32 != tvf32 || tvf32 != f32 {
+			t.Fatalf("float32 %v: decoded %v, want %v", order, tvf32, f32)
+		}
+		f64 := math.Float64frombits(0x400921fb54442d18)
+		ob, oerr = obinary.Append(nil, order, f64)
+		if oerr != nil {
+			t.Fatalf("float64: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, f64)
+		if terr != nil {
+			t.Fatalf("float64 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "float64", order, ob, tb, oerr, terr)
+		var ovf64, tvf64 float64
+		if _, err := obinary.Decode(ob, order, &ovf64); err != nil {
+			t.Fatalf("float64: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvf64); err != nil {
+			t.Fatalf("float64 %v: twin decode: %v", order, err)
+			return
+		}
+		if ovf64 != tvf64 || tvf64 != f64 {
+			t.Fatalf("float64 %v: decoded %v, want %v", order, tvf64, f64)
+		}
+		c64 := complex64(complex(1.5, -2.5))
+		ob, oerr = obinary.Append(nil, order, c64)
+		if oerr != nil {
+			t.Fatalf("complex64: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, c64)
+		if terr != nil {
+			t.Fatalf("complex64 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "complex64", order, ob, tb, oerr, terr)
+		var ovc64, tvc64 complex64
+		if _, err := obinary.Decode(ob, order, &ovc64); err != nil {
+			t.Fatalf("complex64: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvc64); err != nil {
+			t.Fatalf("complex64 %v: twin decode: %v", order, err)
+			return
+		}
+		if ovc64 != tvc64 || tvc64 != c64 {
+			t.Fatalf("complex64 %v: decoded %v, want %v", order, tvc64, c64)
+		}
+		c128 := complex128(complex(1e100, -1e-100))
+		ob, oerr = obinary.Append(nil, order, c128)
+		if oerr != nil {
+			t.Fatalf("complex128: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, c128)
+		if terr != nil {
+			t.Fatalf("complex128 %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "complex128", order, ob, tb, oerr, terr)
+		var ovc128, tvc128 complex128
+		if _, err := obinary.Decode(ob, order, &ovc128); err != nil {
+			t.Fatalf("complex128: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvc128); err != nil {
+			t.Fatalf("complex128 %v: twin decode: %v", order, err)
+			return
+		}
+		if ovc128 != tvc128 || tvc128 != c128 {
+			t.Fatalf("complex128 %v: decoded %v, want %v", order, tvc128, c128)
+		}
+	}
+}
+
+func TestTwinBoolRules(t *testing.T) {
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		for _, tc := range []struct {
+			in   byte
+			want bool
+		}{{0, false}, {1, true}, {2, true}, {255, true}} {
+			var ov, tv bool
+			if _, err := obinary.Decode([]byte{tc.in}, order, &ov); err != nil {
+				t.Fatal(err)
+				return
+			}
+			if _, err := Decode([]byte{tc.in}, order, &tv); err != nil {
+				t.Fatal(err)
+				return
+			}
+			if ov != tv || tv != tc.want {
+				t.Fatalf("bool byte %d: orig=%v twin=%v want=%v", tc.in, ov, tv, tc.want)
+			}
+		}
+	}
+}
+
+func TestTwinArrays(t *testing.T) {
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		a8 := [4]uint8{0x43, 0x44, 0x45, 0x46}
+		ob, oerr := obinary.Append(nil, order, a8)
+		if oerr != nil {
+			t.Fatalf("u8array: original append: %v", oerr)
+			return
+		}
+		tb, terr := Append(nil, order, a8)
+		if terr != nil {
+			t.Fatalf("u8array %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "u8array", order, ob, tb, oerr, terr)
+		var ova8, tva8 [4]uint8
+		if _, err := obinary.Decode(ob, order, &ova8); err != nil {
+			t.Fatalf("u8array: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tva8); err != nil {
+			t.Fatalf("u8array %v: twin decode: %v", order, err)
+			return
+		}
+		if ova8 != tva8 || tva8 != a8 {
+			t.Fatalf("u8array %v: round trip changed value", order)
+		}
+		ab := [4]bool{true, false, true, false}
+		ob, oerr = obinary.Append(nil, order, ab)
+		if oerr != nil {
+			t.Fatalf("boolarray: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, ab)
+		if terr != nil {
+			t.Fatalf("boolarray %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "boolarray", order, ob, tb, oerr, terr)
+		var ovab, tvab [4]bool
+		if _, err := obinary.Decode(ob, order, &ovab); err != nil {
+			t.Fatalf("boolarray: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvab); err != nil {
+			t.Fatalf("boolarray %v: twin decode: %v", order, err)
+			return
+		}
+		if ovab != tvab || tvab != ab {
+			t.Fatalf("boolarray %v: round trip changed value", order)
+		}
+		i3 := [3]int32{1, -2, 300}
+		ob, oerr = obinary.Append(nil, order, i3)
+		if oerr != nil {
+			t.Fatalf("i32array: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, i3)
+		if terr != nil {
+			t.Fatalf("i32array %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "i32array", order, ob, tb, oerr, terr)
+		var ovi3, tvi3 [3]int32
+		if _, err := obinary.Decode(ob, order, &ovi3); err != nil {
+			t.Fatalf("i32array: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tvi3); err != nil {
+			t.Fatalf("i32array %v: twin decode: %v", order, err)
+			return
+		}
+		if ovi3 != tvi3 || tvi3 != i3 {
+			t.Fatalf("i32array %v: round trip changed value", order)
+		}
+	}
+}
+
+func TestTwinNested(t *testing.T) {
+	v := ROuter{Head: RInner{Tag: 7, Vals: [3]int32{1, 2, 3}}, Flag: true, Foot: RInner{Tag: 8}, Scale: 0.5}
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		ob, oerr := obinary.Append(nil, order, v)
+		if oerr != nil {
+			t.Fatalf("nested: original append: %v", oerr)
+			return
+		}
+		tb, terr := Append(nil, order, v)
+		if terr != nil {
+			t.Fatalf("nested %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "nested", order, ob, tb, oerr, terr)
+		var ov, tv ROuter
+		if _, err := obinary.Decode(ob, order, &ov); err != nil {
+			t.Fatalf("nested: original decode: %v", err)
+			return
+		}
+		if _, err := Decode(tb, order, &tv); err != nil {
+			t.Fatalf("nested %v: twin decode: %v", order, err)
+			return
+		}
+		if ov != tv || tv != v {
+			t.Fatalf("nested %v: round trip changed value", order)
+		}
+		pb, perr := Append(nil, order, &v)
+		if perr != nil {
+			t.Fatalf("nestedptr %v: twin append: %v", order, perr)
+			return
+		}
+		po, poerr := obinary.Append(nil, order, &v)
+		if poerr != nil {
+			t.Fatalf("nestedptr: original append: %v", poerr)
+			return
+		}
+		checkAppendBytes(t, "nestedptr", order, po, pb, poerr, perr)
+	}
+}
+
+func TestTwinSlices(t *testing.T) {
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		v := []int32{0x01020304, 0x05060708}
+		ob, oerr := obinary.Append(nil, order, v)
+		if oerr != nil {
+			t.Fatalf("int32slice: original append: %v", oerr)
+			return
+		}
+		tb, terr := Append(nil, order, v)
+		if terr != nil {
+			t.Fatalf("int32slice %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "int32slice", order, ob, tb, oerr, terr)
+		tv := make([]int32, len(v))
+		if _, err := Decode(tb, order, &tv); err != nil {
+			t.Fatalf("int32slice %v: twin decode: %v", order, err)
+			return
+		}
+		rb, rerr := Append(nil, order, tv)
+		if rerr != nil {
+			t.Fatalf("int32slice %v: twin re-append: %v", order, rerr)
+			return
+		}
+		if !bytes.Equal(tb, rb) {
+			t.Fatalf("int32slice %v: round trip changed bytes", order)
+		}
+		vb := []bool{false, true, true, true}
+		ob, oerr = obinary.Append(nil, order, vb)
+		if oerr != nil {
+			t.Fatalf("boolslice: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, vb)
+		if terr != nil {
+			t.Fatalf("boolslice %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "boolslice", order, ob, tb, oerr, terr)
+		vu := []uint8{1, 2, 3, 4}
+		ob, oerr = obinary.Append(nil, order, vu)
+		if oerr != nil {
+			t.Fatalf("u8slice: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, vu)
+		if terr != nil {
+			t.Fatalf("u8slice %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "u8slice", order, ob, tb, oerr, terr)
+		ve := []int32{}
+		ob, oerr = obinary.Append(nil, order, ve)
+		if oerr != nil {
+			t.Fatalf("emptyslice: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, ve)
+		if terr != nil {
+			t.Fatalf("emptyslice %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "emptyslice", order, ob, tb, oerr, terr)
+		vs := []RInner{{Tag: 1}, {Tag: 2, Vals: [3]int32{9, 8, 7}}}
+		ob, oerr = obinary.Append(nil, order, vs)
+		if oerr != nil {
+			t.Fatalf("structslice: original append: %v", oerr)
+			return
+		}
+		tb, terr = Append(nil, order, vs)
+		if terr != nil {
+			t.Fatalf("structslice %v: twin append: %v", order, terr)
+			return
+		}
+		checkAppendBytes(t, "structslice", order, ob, tb, oerr, terr)
+		ts := make([]RInner, len(vs))
+		if _, err := Decode(tb, order, &ts); err != nil {
+			t.Fatalf("structslice %v: twin decode: %v", order, err)
+			return
+		}
+		rb2, rerr2 := Append(nil, order, ts)
+		if rerr2 != nil {
+			t.Fatalf("structslice %v: twin re-append: %v", order, rerr2)
+			return
+		}
+		if !bytes.Equal(tb, rb2) {
+			t.Fatalf("structslice %v: round trip changed bytes", order)
+		}
+	}
+}
+
+func TestTwinSize(t *testing.T) {
+	if got := Size(rS); got != len(rBig) {
+		t.Fatalf("Size(struct) = %d, want %d", got, len(rBig))
+	}
+	if got := Size(true); got != 1 {
+		t.Fatalf("Size(bool) = %d, want 1", got)
+	}
+	if got := Size(int16(0)); got != 2 {
+		t.Fatalf("Size(int16) = %d, want 2", got)
+	}
+	if got := Size([4]uint8{}); got != 4 {
+		t.Fatalf("Size([4]uint8) = %d, want 4", got)
+	}
+	if got := Size([]int32{1, 2, 3}); got != 12 {
+		t.Fatalf("Size([]int32 x3) = %d, want 12", got)
+	}
+	if got := Size(int(0)); got != -1 {
+		t.Fatalf("Size(int) = %d, want -1", got)
+	}
+	if got := Size("nope"); got != -1 {
+		t.Fatalf("Size(string) = %d, want -1", got)
+	}
+	if got := Size([4]int{}); got != -1 {
+		t.Fatalf("Size([4]int) = %d, want -1", got)
+	}
+	if got := Size(RBad{}); got != -1 {
+		t.Fatalf("Size(bad) = %d, want -1", got)
+	}
+	if got := Size(RWithSlice{}); got != -1 {
+		t.Fatalf("Size(struct with slice) = %d, want -1", got)
+	}
+}
+
+func TestTwinEncodeSizes(t *testing.T) {
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		size := Size(rS)
+		buf := make([]byte, size)
+		n, err := Encode(buf, order, rS)
+		if err != nil {
+			t.Fatal(err)
+			return
+		}
+		if n != size {
+			t.Fatalf("%v: Encode = %d, want %d", order, n, size)
+		}
+		ab, err := Append(nil, order, rS)
+		if err != nil {
+			t.Fatal(err)
+			return
+		}
+		if !bytes.Equal(buf, ab) {
+			t.Fatalf("%v: Encode bytes differ from Append", order)
+		}
+		var back RStruct
+		n, err = Decode(buf, order, &back)
+		if err != nil {
+			t.Fatal(err)
+			return
+		}
+		if n != size {
+			t.Fatalf("%v: Decode = %d, want %d", order, n, size)
+		}
+		if back != rS {
+			t.Fatalf("%v: Decode round trip changed value", order)
+		}
+		var origBack RStruct
+		if _, err := obinary.Decode(buf, order, &origBack); err != nil {
+			t.Fatal(err)
+			return
+		}
+		if origBack != rS {
+			t.Fatalf("%v: original cannot decode twin bytes", order)
+		}
+		origBuf := new(bytes.Buffer)
+		if err := obinary.Write(origBuf, order, rS); err != nil {
+			t.Fatal(err)
+			return
+		}
+		var twinBack RStruct
+		if _, err := Decode(origBuf.Bytes(), order, &twinBack); err != nil {
+			t.Fatal(err)
+			return
+		}
+		if twinBack != rS {
+			t.Fatalf("%v: twin cannot decode original bytes", order)
+		}
+	}
+}
+
+func TestTwinShortBuffer(t *testing.T) {
+	size := Size(rS)
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		if _, err := Encode(make([]byte, size-1), order, rS); err == nil || err.Error() != "buffer too small" {
+			t.Fatalf("%v: Encode short: got %v", order, err)
+		}
+		var back RStruct
+		if _, err := Decode(make([]byte, size-1), order, &back); err == nil || err.Error() != "buffer too small" {
+			t.Fatalf("%v: Decode short: got %v", order, err)
+		}
+		if _, err := obinary.Encode(make([]byte, size-1), order, rS); err == nil || err.Error() != "buffer too small" {
+			t.Fatalf("%v: original Encode short: got %v", order, err)
+		}
+		sentinel := RStruct{Int8: 7}
+		back = sentinel
+		if _, err := Decode(make([]byte, size-1), order, &back); err == nil {
+			t.Fatalf("%v: Decode short succeeded", order)
+		}
+		if back != sentinel {
+			t.Fatalf("%v: failed Decode touched the target", order)
+		}
+	}
+}
+
+func TestTwinInvalidTypes(t *testing.T) {
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		if _, err := Append(nil, order, RBad{Age: 27}); err == nil || !strings.Contains(err.Error(), "not fixed-sized") {
+			t.Fatalf("%v: twin Append(bad): got %v", order, err)
+		}
+		if _, err := obinary.Append(nil, order, RBad{Age: 27}); err == nil || !strings.Contains(err.Error(), "not fixed-sized") {
+			t.Fatalf("%v: original Append(bad): got %v", order, err)
+		}
+		if err := Write(new(bytes.Buffer), order, RBad{}); err == nil || !strings.Contains(err.Error(), "not fixed-sized") {
+			t.Fatalf("%v: twin Write(bad): got %v", order, err)
+		}
+		var x int
+		if err := ReadInto(bytes.NewReader(rBig), order, &x); err == nil || !strings.Contains(err.Error(), "invalid type") {
+			t.Fatalf("%v: twin ReadInto(int): got %v", order, err)
+		}
+		if _, err := Decode(rBig, order, &x); err == nil || !strings.Contains(err.Error(), "invalid type") {
+			t.Fatalf("%v: twin Decode(int): got %v", order, err)
+		}
+		if err := obinary.Read(bytes.NewReader(rBig), order, x); err == nil || !strings.Contains(err.Error(), "invalid type") {
+			t.Fatalf("%v: original Read(int): got %v", order, err)
+		}
+	}
+}
+
+func TestTwinUnexported(t *testing.T) {
+	u1 := RUnexported{A: 1, b: 2}
+	var buf bytes.Buffer
+	if err := Write(&buf, LittleEndian, &u1); err != nil {
+		t.Fatal(err)
+		return
+	}
+	var origBuf bytes.Buffer
+	if err := obinary.Write(&origBuf, LittleEndian, &u1); err != nil {
+		t.Fatal(err)
+		return
+	}
+	if !bytes.Equal(buf.Bytes(), origBuf.Bytes()) {
+		t.Fatalf("unexported write bytes differ")
+	}
+	didPanic := false
+	func() {
+		defer func() {
+			if recover() != nil {
+				didPanic = true
+			}
+		}()
+		var u2 RUnexported
+		_, _ = Decode[RUnexported](buf.Bytes(), LittleEndian, &u2)
+	}()
+	if !didPanic {
+		t.Fatalf("Decode: did not panic")
+	}
+	didPanic = false
+	func() {
+		defer func() {
+			if recover() != nil {
+				didPanic = true
+			}
+		}()
+		var u2 RUnexported
+		_ = ReadInto[RUnexported](bytes.NewReader(buf.Bytes()), LittleEndian, &u2)
+	}()
+	if !didPanic {
+		t.Fatalf("ReadInto: did not panic")
+	}
+}
+
+func TestTwinShortStream(t *testing.T) {
+	data, err := Append(nil, BigEndian, rS)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	orders := []Order{BigEndian, LittleEndian}
+	for _, order := range orders {
+		for i := 0; i <= len(data); i++ {
+			var ov RStruct
+			oerr := obinary.Read(bytes.NewReader(data[:i]), order, &ov)
+			var tv RStruct
+			terr := ReadInto(bytes.NewReader(data[:i]), order, &tv)
+			if oerr != terr {
+				t.Fatalf("struct len %d %v: orig=%v twin=%v", i, order, oerr, terr)
+			}
+			if oerr == nil && ov != tv {
+				t.Fatalf("struct len %d %v: values differ", i, order)
+			}
+		}
+		sliceData, err := Append(nil, BigEndian, []int32{1, 2, 3, 4})
+		if err != nil {
+			t.Fatal(err)
+			return
+		}
+		for i := 0; i <= len(sliceData); i++ {
+			ov := make([]int32, 4)
+			oerr := obinary.Read(bytes.NewReader(sliceData[:i]), order, ov)
+			tv := make([]int32, 4)
+			terr := ReadInto(bytes.NewReader(sliceData[:i]), order, &tv)
+			if oerr != terr {
+				t.Fatalf("slice len %d %v: orig=%v twin=%v", i, order, oerr, terr)
+			}
+		}
+	}
+}
+
+func TestTwinEncodeDecodeAllocs(t *testing.T) {
+	size := Size(rS)
+	buf := make([]byte, size)
+	if _, err := Encode(buf, LittleEndian, rS); err != nil {
+		t.Fatal(err)
+		return
+	}
+	var back RStruct
+	if _, err := Decode(buf, LittleEndian, &back); err != nil {
+		t.Fatal(err)
+		return
+	}
+	if allocs := testing.AllocsPerRun(100, func() {
+		_, _ = Encode(buf, LittleEndian, rS)
+	}); allocs != 0 {
+		t.Fatalf("twin Encode allocated %v", allocs)
+	}
+	t.Logf("twin Encode allocs: 0")
+	if allocs := testing.AllocsPerRun(100, func() {
+		var dst RStruct
+		_, _ = Decode(buf, LittleEndian, &dst)
+	}); allocs != 0 {
+		t.Fatalf("twin Decode allocated %v", allocs)
+	}
+	t.Logf("twin Decode allocs: 0")
+}
+
+func TestTwinNativeEndian(t *testing.T) {
+	const val = 0x12345678
+	i := uint32(val)
+	b := make([]byte, 4)
+	NativeEndian.PutUint32(b, i)
+	if v := obinary.NativeEndian.Uint32(b); v != val {
+		t.Fatalf("NativeEndian round trip: %#x want %#x", v, val)
+	}
+	if NativeEndian.String() != obinary.NativeEndian.String() {
+		t.Fatalf("NativeEndian names differ")
+	}
+}

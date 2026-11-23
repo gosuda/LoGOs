@@ -1,0 +1,221 @@
+package binary
+
+import (
+	"comptime"
+	stdbinary "encoding/binary"
+	"io"
+	"sync"
+)
+
+const readStageSize = 8 << 10
+
+var readPool sync.Pool
+
+func getReadStage() *[readStageSize]byte {
+	if p, ok := readPool.Get().(*[readStageSize]byte); ok {
+		return p
+	}
+	return new([readStageSize]byte)
+}
+
+func putReadStage(p *[readStageSize]byte) {
+	readPool.Put(p)
+}
+
+func StageBytes(r io.Reader, n int) ([]byte, func(), error) {
+	if n > readStageSize {
+		buf := make([]byte, n)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return nil, nil, err
+		}
+		return buf, func() {}, nil
+	}
+	p := getReadStage()
+	buf := (*p)[:n]
+	if _, err := io.ReadFull(r, buf); err != nil {
+		putReadStage(p)
+		return nil, nil, err
+	}
+	return buf, func() { putReadStage(p) }, nil
+}
+
+func Size[T any](v T) int {
+	const if comptime.IsStruct[T]() {
+		return StructSizeOf[T]()
+	}
+	if n := FixedSizeNonStruct[T](); n >= 0 {
+		return n
+	}
+	return stdbinary.Size(v)
+}
+
+func ReadInto[T any](r io.Reader, order Order, data *T) error {
+	if data == nil {
+		return stdbinary.Read(r, order, data)
+	}
+	const if comptime.IsStruct[T]() {
+		n := StructSizeOf[T]()
+		if n < 0 {
+			return stdbinary.Read(r, order, data)
+		}
+		if n == 0 {
+			return nil
+		}
+		buf, release, err := StageBytes(r, n)
+		if err != nil {
+			return err
+		}
+		off := 0
+		derr := DecStruct[T](buf, order, &off, data)
+		release()
+		return derr
+	}
+	n := FixedSizeNonStruct[T]()
+	if n < 0 {
+		return stdbinary.Read(r, order, data)
+	}
+	if n == 0 {
+		return nil
+	}
+	buf, release, err := StageBytes(r, n)
+	if err != nil {
+		return err
+	}
+	off := 0
+	derr := DecNonStruct[T](buf, order, &off, data)
+	release()
+	return derr
+}
+
+func Write[T any](w io.Writer, order Order, data T) error {
+	const if comptime.IsStruct[T]() {
+		n := StructSizeOf[T]()
+		if n < 0 {
+			return stdbinary.Write(w, order, data)
+		}
+		buf := make([]byte, n)
+		off := 0
+		err := EncStruct[T](buf, &off, order, data)
+		if err != nil {
+			return err
+		}
+		_, err = w.Write(buf)
+		return err
+	}
+	n := FixedSizeNonStruct[T]()
+	if n < 0 {
+		return stdbinary.Write(w, order, data)
+	}
+	buf := make([]byte, n)
+	off := 0
+	err := EncNonStruct[T](buf, &off, order, data)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(buf)
+	return err
+}
+
+func Encode[T any](buf []byte, order Order, data T) (int, error) {
+	const if comptime.IsStruct[T]() {
+		n := StructSizeOf[T]()
+		if n < 0 {
+			return stdbinary.Encode(buf, order, data)
+		}
+		if len(buf) < n {
+			return 0, ErrTooSmall
+		}
+		off := 0
+		err := EncStruct[T](buf, &off, order, data)
+		if err != nil {
+			return 0, err
+		}
+		return n, nil
+	}
+	n := FixedSizeNonStruct[T]()
+	if n < 0 {
+		return stdbinary.Encode(buf, order, data)
+	}
+	if len(buf) < n {
+		return 0, ErrTooSmall
+	}
+	off := 0
+	err := EncNonStruct[T](buf, &off, order, data)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func Decode[T any](buf []byte, order Order, data *T) (int, error) {
+	if data == nil {
+		return stdbinary.Decode(buf, order, data)
+	}
+	const if comptime.IsStruct[T]() {
+		n := StructSizeOf[T]()
+		if n < 0 {
+			return stdbinary.Decode(buf, order, data)
+		}
+		if len(buf) < n {
+			return 0, ErrTooSmall
+		}
+		off := 0
+		err := DecStruct[T](buf, order, &off, data)
+		if err != nil {
+			return 0, err
+		}
+		return n, nil
+	}
+	n := FixedSizeNonStruct[T]()
+	if n < 0 {
+		return stdbinary.Decode(buf, order, data)
+	}
+	if len(buf) < n {
+		return 0, ErrTooSmall
+	}
+	off := 0
+	err := DecNonStruct[T](buf, order, &off, data)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func Append[T any](buf []byte, order Order, data T) ([]byte, error) {
+	const if comptime.IsStruct[T]() {
+		n := StructSizeOf[T]()
+		if n < 0 {
+			return stdbinary.Append(buf, order, data)
+		}
+		l := len(buf)
+		if cap(buf)-l < n {
+			tmp := make([]byte, l+n)
+			copy(tmp, buf)
+			buf = tmp
+		}
+		buf = buf[:l+n]
+		off := l
+		err := EncStruct[T](buf, &off, order, data)
+		if err != nil {
+			return nil, err
+		}
+		return buf, nil
+	}
+	n := FixedSizeNonStruct[T]()
+	if n < 0 {
+		return stdbinary.Append(buf, order, data)
+	}
+	l := len(buf)
+	if cap(buf)-l < n {
+		tmp := make([]byte, l+n)
+		copy(tmp, buf)
+		buf = tmp
+	}
+	buf = buf[:l+n]
+	off := l
+	err := EncNonStruct[T](buf, &off, order, data)
+	if err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
