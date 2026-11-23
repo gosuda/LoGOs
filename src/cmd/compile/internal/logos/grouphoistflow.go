@@ -235,13 +235,24 @@ func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp st
 			}
 	}
 	// The caller reads the channel type before slotsThrough runs: by now
-	// s.Chan may be a fresh snapshot name with no checked type.
+	// s.Chan may be a fresh snapshot name with no checked type. A type
+	// parameter's Underlying is its constraint interface rather than a
+	// channel, so resolve the core type before extracting the element:
+	// without it a valid generic send falls back to inference and the
+	// default int rejects the value.
 	if chType == nil {
 		return fallback()
 	}
 	ch, ok := chType.Underlying().(*types2.Chan)
 	if !ok {
-		return fallback()
+		core := types2.CoreType(chType)
+		if core == nil {
+			return fallback()
+		}
+		ch, ok = core.Underlying().(*types2.Chan)
+		if !ok {
+			return fallback()
+		}
 	}
 	elemNative, elemSpelled, ok := h.fc.fl.spellTypeBoth(ch.Elem(), pos)
 	if !ok || h.fc.fl.spelledTypeShadowed(ch.Elem(), pos) {
