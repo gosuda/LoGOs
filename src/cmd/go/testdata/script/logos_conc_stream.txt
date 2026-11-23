@@ -1,5 +1,6 @@
 [GOOS:windows] skip 'logos conc needs named pipes'
 [GOOS:plan9] skip 'logos conc needs named pipes'
+[!exec:sh] skip 'logos conc stream exit checks need a shell'
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
