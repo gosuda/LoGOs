@@ -3,16 +3,13 @@ env GOTOOLCHAIN=local
 
 cd w
 # A comptime generic may name the unexported identifiers of its own
-# package, so the defining package builds (SPEC 2.5, T-205).
-logos build ./app
-# An instantiation in another package cannot reach them. It fails at the
-# importer's instantiation and names each identifier; the importer never
-# sees an undefined: name.
-! logos build ./...
-stderr 'main[/\\]main.lgo:14:\d+: \[comptime::unexported_in_exported\] comptime source names unexported type named of package example.com/cfrepro/app; only that package can instantiate it'
-stderr 'main[/\\]main.lgo:14:\d+: \[comptime::unexported_in_exported\] comptime source names unexported func collect of package example.com/cfrepro/app; only that package can instantiate it'
-! stderr 'app[/\\]app.lgo'
-! stderr 'undefined'
+# package. Each instance is checked in the scope of the defining package,
+# so an instantiation in another package builds and runs, and no
+# undefined: name or refusal appears (SPEC 2.5, T-205).
+logos build ./...
+! stderr .
+logos run ./main
+stdout '^2$'
 
 cd ../m
 # Package main instantiates its own exported comptime generic, which
@@ -21,14 +18,11 @@ logos run .
 stdout '^2$'
 cd ../x
 # The issue's exact shape: an external test package instantiates the
-# generic with a field-type argument and a field projection. The
-# defining package builds; the external test package is another package,
-# so its instantiation fails there.
+# generic with a field-type argument and a field projection. The external
+# test package is another package, and its instantiation builds and runs.
 logos build ./...
-! logos test ./...
-stderr 'app_test.lgo:11:\d+: \[comptime::unexported_in_exported\] comptime source names unexported type named of package example.com/x/app; only that package can instantiate it'
-stderr 'app_test.lgo:11:\d+: \[comptime::unexported_in_exported\] comptime source names unexported func collect of package example.com/x/app; only that package can instantiate it'
-! stderr 'undefined'
+logos test ./...
+stdout '^ok\s+example.com/x/app'
 
 -- w/go.mod --
 module example.com/cfrepro
@@ -45,7 +39,7 @@ type named struct {
 }
 
 func collect[F any](parts []named, name string, field F) []named {
-	return parts
+	return append(parts, named{name: name})
 }
 
 func Run[T any](root *T) int {
@@ -143,4 +137,8 @@ import (
 
 type root struct{ A int }
 
-func TestRun(t *testing.T) { _ = app.Run[root](&root{}) }
+func TestRun(t *testing.T) {
+	if n := app.Run[root](&root{}); n != 1 {
+		t.Fatalf("Run = %d, want 1", n)
+	}
+}

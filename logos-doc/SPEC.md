@@ -1216,7 +1216,7 @@ An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
 
 A comptime generic MAY name the unexported package-level identifiers of its own package. Each instance MUST check them in the scope of the defining package. An unexported identifier of another package MUST stay refused. [T-205]
 
-An exported comptime generic that names such identifiers MUST carry their list in its `__.LOGOS` record. An instantiation of it in another package MUST fail with `[comptime::unexported_in_exported]` at the instantiation for each identifier, because the copy in that package cannot reach it. [T-205]
+An instantiation of such a generic in another package MUST build and run. The instance is compiled for the defining package, so it reaches those identifiers; the instantiating package never resolves them. [T-205]
 
 A `const for` range MUST be `comptime.Fields[T]()` over a struct type. [T-205]
 
