@@ -1349,14 +1349,18 @@ func (p *logosEFPass) sole(v *Var) syntax.Expr {
 
 // allGoOrigins reports whether every recorded assignment of v statically
 // resolves to a Go declaration, so a call through a rebound variable keeps
-// the Go contract. A missing inventory, an unresolvable or varying origin,
-// and any LoGOs origin all answer false.
+// the Go contract. A missing inventory, an address-taken variable, an
+// unresolvable or varying origin, and any LoGOs origin all answer false:
+// a write through the address never reaches the inventory.
 func (p *logosEFPass) allGoOrigins(v *Var) bool {
 	if v == nil {
 		return false
 	}
 	if p.assigns == nil {
 		p.collectAssigns()
+	}
+	if p.addr[v] {
+		return false
 	}
 	exprs, ok := p.assigns[logosEFKey{root: v}]
 	if !ok || len(exprs) == 0 {

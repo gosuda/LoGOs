@@ -1308,6 +1308,27 @@ func efGoMultiOriginReaders() {
 	_ = err
 }
 
+// An address-taken function variable can be rewritten through its pointer,
+// which the inventory never records, so even all-Go origins stay
+// conservative.
+func efGoOriginAddrTaken() {
+	first := bytes.NewReader([]byte("repeat"))
+	second := bytes.NewReader([]byte("again"))
+	read := first.Read
+	alias := &read
+	var buf [8]byte
+	var n int
+	var err error
+	defer func() {
+		println(n) // ERROR "result_before_error_check"
+	}()
+	n, err = read(buf[:])
+	read = second.Read
+	n, err = read(buf[:])
+	_ = alias
+	_ = err
+}
+
 // A var declaration with a discarded error activates the deferred check
 // just like the short declaration form.
 func efVarBlankDeferred() {
