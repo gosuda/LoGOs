@@ -1,0 +1,68 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos build ./...
+logos run ./main
+stdout '^mid-struct struct$'
+stdout '^mid-int other$'
+
+-- w/go.mod --
+module example.com/fwshadow
+
+go 1.27
+
+-- w/leaf/leaf.lgo --
+package leaf
+
+import "comptime"
+
+func Describe[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return "struct"
+	} else {
+		return "other"
+	}
+}
+
+-- w/mid/mid.lgo --
+package mid
+
+import (
+	"comptime"
+
+	"example.com/fwshadow/leaf"
+)
+
+type Choice int
+
+func WrapAlias[T any]() string {
+	type Choice = struct{}
+	const if comptime.IsStruct[T]() {
+		return leaf.Describe[Choice]()
+	} else {
+		return leaf.Describe[Choice]()
+	}
+}
+
+func WrapNamed[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return leaf.Describe[Choice]()
+	} else {
+		return leaf.Describe[Choice]()
+	}
+}
+
+-- w/main/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/fwshadow/mid"
+)
+
+func main() {
+	fmt.Println("mid-struct", mid.WrapAlias[int]())
+	fmt.Println("mid-int", mid.WrapNamed[int]())
+}
