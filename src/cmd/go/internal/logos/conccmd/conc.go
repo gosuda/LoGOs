@@ -236,6 +236,9 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 	}
 	tagged := false
 	countSet := false
+	inPkgList := false
+	havePackages := false
+	testArgsStarted := false
 	i := 0
 	// The -C flag must stay first: the go command consumes it only in
 	// the leading position, so injected flags go behind it.
@@ -262,6 +265,16 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 			if verb == "run" {
 				break
 			}
+			if verb == "test" {
+				if testArgsStarted {
+					// Already in test binary arguments.
+				} else if !inPkgList && havePackages {
+					testArgsStarted = true
+				} else {
+					havePackages = true
+					inPkgList = true
+				}
+			}
 			inv.arguments = append(inv.arguments, arg)
 			continue
 		}
@@ -269,8 +282,19 @@ func childArguments(verb string, args []string, takesValue func(string) bool, go
 		if name == "count" || name == "test.count" {
 			countSet = true
 		}
-		if verb == "test" && name == "json" {
+		if verb == "test" && name == "json" && !testArgsStarted {
 			inv.testJSON = boolFlagOn(hasValue, value)
+		}
+		if verb == "test" && inPkgList {
+			switch {
+			case name == "json-diagnostics", name == "fix", name == "ai-patch", name == "shake", durationFlags[name] != "":
+				// Wrapper-only flags: dropped before the child runs, so the
+				// child never sees them and its package list stays open.
+				// Every other flag reaches the child (tags rewritten), so a
+				// flag closes the package list there too.
+			default:
+				inPkgList = false
+			}
 		}
 		switch {
 		case name == "json-diagnostics":

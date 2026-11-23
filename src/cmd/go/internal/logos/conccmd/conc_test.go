@@ -243,6 +243,9 @@ func TestChildArgumentsReadsTestJSON(t *testing.T) {
 		{"test", "-json=1", "./a", true},
 		{"test", "-json", "-json=false ./a", false},
 		{"test", "-json -json=false", "./a", false},
+		{"test", "", "-json . -run TestJobs sentinel -json=false", true},
+		{"test", "", "./a sentinel -json=false", false},
+		{"test", "", "-json ./a -tags=x sentinel -json=false", true},
 		{"run", "", "-json .", false},
 		{"run", "-json", ".", false},
 	}
