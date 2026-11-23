@@ -1070,14 +1070,15 @@ func (s *logosEFState) prove(errV *Var) *logosEFState {
 // dropMayFor stops marking the results guarded by errKey as may-reach:
 // the nil test proved the guarding call succeeded on this path. It also
 // discharges seeded entries that every live store pairs with errKey, so a
-// nil check inside the deferred literal can prove its own read.
-func (s *logosEFState) dropMayFor(errKey logosEFKey) *logosEFState {
+// nil check inside the deferred literal can prove its own read. Results
+// that rewritten wrote since the guard was read keep their marks.
+func (s *logosEFState) dropMayFor(errKey logosEFKey, rewritten *logosEFEffects) *logosEFState {
 	if (s.may == nil || len(s.mayErr) == 0) && len(s.m) == 0 {
 		return s
 	}
 	var out map[logosEFKey]bool
 	for v := range s.may {
-		if ek, ok := s.mayErr[v]; !ok || ek != errKey {
+		if ek, ok := s.mayErr[v]; !ok || ek != errKey || (rewritten != nil && rewritten.writes(v)) {
 			continue
 		}
 		if out == nil {
@@ -1087,7 +1088,7 @@ func (s *logosEFState) dropMayFor(errKey logosEFKey) *logosEFState {
 	}
 	var mout map[logosEFKey]logosEFEntry
 	for k, e := range s.m {
-		if e.proven || e.err != nil || e.errKey != errKey || s.mayErr[k] != errKey {
+		if e.proven || e.err != nil || e.errKey != errKey || s.mayErr[k] != errKey || (rewritten != nil && rewritten.writes(k)) {
 			continue
 		}
 		if mout == nil {
@@ -2581,9 +2582,9 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 		// may-reach mark, so a later deferred read stays accepted.
 		if fk, ok := p.nilTestFieldKey(op); ok {
 			if isNeq {
-				return st, st.dropMayFor(fk)
+				return st, st.dropMayFor(fk, nil)
 			}
-			return st.dropMayFor(fk), st
+			return st.dropMayFor(fk, nil), st
 		}
 		return st, st
 	}
@@ -3353,8 +3354,9 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 	miss := st
 	// Case expressions run after the tag was evaluated, so a store they
 	// make can replace the value the tag described. Collect their writes
-	// in a scratch summary, and once the tag destination or a result it
-	// guards was rewritten, a later nil match proves nothing.
+	// in a scratch summary: once the tag destination was rewritten, a
+	// later nil match proves nothing, and a result rewritten since the
+	// tag was read stays unproven.
 	var tagKey logosEFKey
 	if s.Tag != nil {
 		tagKey, _ = p.destKey(s.Tag)
@@ -3362,7 +3364,6 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 	savedEff := p.eff
 	scratch := &logosEFEffects{inside: make(map[*Var]bool), assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
 	p.eff = scratch
-	var disturbed bool
 	hasDefault := false
 	for i, c := range s.Body {
 		if c.Cases == nil {
@@ -3370,11 +3371,8 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 			continue
 		}
 		for _, e := range syntax.UnpackListExpr(c.Cases) {
-			if p.scratchDisturbed(scratch, tagKey, miss) {
-				disturbed = true
-			}
 			var hit *logosEFState
-			hit, miss = p.caseCond(s.Tag, tagErr, e, miss, disturbed)
+			hit, miss = p.caseCond(s.Tag, tagErr, tagKey, e, miss, scratch)
 			enter[i] = logosEFJoin(enter[i], hit)
 		}
 	}
@@ -3407,62 +3405,20 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 	return logosEFJoin(out, f.brk)
 }
 
-func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, e syntax.Expr, miss *logosEFState, disturbed bool) (hit, rest *logosEFState) {
+func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, tagKey logosEFKey, e syntax.Expr, miss *logosEFState, written *logosEFEffects) (hit, rest *logosEFState) {
 	switch {
 	case tag == nil:
 		return p.cond(e, miss)
-	case tagErr != nil && p.isNil(syntax.Unparen(e)):
-		if disturbed {
-			return miss, miss
-		}
+	case !p.isNil(syntax.Unparen(e)):
+	case tagKey != (logosEFKey{}) && written.writes(tagKey):
+		return miss, miss
+	case tagErr != nil:
 		return miss.prove(tagErr), miss
-	case tagErr == nil && p.isNil(syntax.Unparen(e)):
-		if !disturbed {
-			if fk, ok := p.destKey(tag); ok {
-				return miss.dropMayFor(fk), miss
-			}
-		}
+	case tagKey != (logosEFKey{}):
+		return miss.dropMayFor(tagKey, written), miss
 	}
 	miss = p.expr(e, miss)
 	return miss, miss
-}
-
-// scratchDisturbed reports whether the analyzed case expressions wrote to
-// the tag destination or to a result the tag currently guards: the tag
-// value predates those writes, so a later nil match proves nothing about
-// the replacement.
-func (p *logosEFPass) scratchDisturbed(scratch *logosEFEffects, tagKey logosEFKey, st *logosEFState) bool {
-	if tagKey == (logosEFKey{}) || st == nil {
-		return false
-	}
-	guarded := func(k logosEFKey) bool {
-		if k == tagKey {
-			return true
-		}
-		if ek, ok := st.mayErr[k]; ok && ek == tagKey {
-			return true
-		}
-		if e, ok := st.m[k]; ok && e.err == nil && e.errKey == tagKey {
-			return true
-		}
-		return false
-	}
-	for k := range scratch.assigned {
-		if guarded(k) {
-			return true
-		}
-	}
-	for k := range scratch.created {
-		if guarded(k) {
-			return true
-		}
-	}
-	for k := range scratch.may {
-		if guarded(k) {
-			return true
-		}
-	}
-	return false
 }
 
 func (p *logosEFPass) selectStmt(s *syntax.SelectStmt, label string, st *logosEFState) *logosEFState {
