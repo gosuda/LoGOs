@@ -2465,9 +2465,9 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 	return st.prove(errV), st
 }
 
-func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState) *logosEFState {
+func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState, top bool) *logosEFState {
 	for i, s := range list {
-		if next, ok := p.deferStmt(s, list[i+1:], st); ok {
+		if next, ok := p.deferStmt(s, list[i+1:], st, top); ok {
 			st = next
 			continue
 		}
@@ -2479,12 +2479,15 @@ func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState) *logosEFState 
 // deferStmt analyzes a direct defer of a function literal, letting a later
 // unconditional plain overwrite in the same list satisfy the deferred read:
 // the literal observes the value at function exit, not at registration.
-// The carve touches only the literal's capture input; the flow state is
-// untouched, so reads between the defer and the overwrite still fail. Any
-// other statement returns false for normal handling.
-func (p *logosEFPass) deferStmt(s syntax.Stmt, rest []syntax.Stmt, st *logosEFState) (*logosEFState, bool) {
+// The carve applies only at the function body's top level, where the rest
+// of the list is everything that can still run: inside a nested block a
+// later store after the enclosing block is invisible to the remainder
+// check. The carve touches only the literal's capture input; the flow
+// state is untouched, so reads between the defer and the overwrite still
+// fail. Any other statement returns false for normal handling.
+func (p *logosEFPass) deferStmt(s syntax.Stmt, rest []syntax.Stmt, st *logosEFState, top bool) (*logosEFState, bool) {
 	cs, ok := s.(*syntax.CallStmt)
-	if !ok || cs.Tok != syntax.Defer || p.loopDepth > 0 {
+	if !ok || cs.Tok != syntax.Defer || p.loopDepth > 0 || !top {
 		return nil, false
 	}
 	call, ok := syntax.Unparen(cs.Call).(*syntax.CallExpr)
@@ -2728,7 +2731,7 @@ func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	}
 	switch s := s.(type) {
 	case *syntax.BlockStmt:
-		return p.stmts(s.List, st)
+		return p.stmts(s.List, st, s == p.body)
 	case *syntax.ExprStmt:
 		return p.exprStmt(s, st)
 	case *syntax.SendStmt:
@@ -2765,7 +2768,7 @@ func (p *logosEFPass) logosStmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	case *syntax.ConstSwitchStmt:
 		out := st
 		for _, c := range s.Cases {
-			out = logosEFJoin(out, p.stmts(c.Body, st))
+			out = logosEFJoin(out, p.stmts(c.Body, st, false))
 		}
 		return out
 	case *syntax.ConstForStmt:
@@ -3143,7 +3146,7 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 			enter[i] = miss
 		}
 		p.ctx.fall = nil
-		out = logosEFJoin(out, p.stmts(c.Body, logosEFJoin(enter[i], fall)))
+		out = logosEFJoin(out, p.stmts(c.Body, logosEFJoin(enter[i], fall), false))
 		fall = p.ctx.fall
 	}
 	p.ctx.fall = nil
@@ -3169,7 +3172,7 @@ func (p *logosEFPass) selectStmt(s *syntax.SelectStmt, label string, st *logosEF
 	f := p.pushFrame(label, false)
 	var out *logosEFState
 	for _, c := range s.Body {
-		out = logosEFJoin(out, p.stmts(c.Body, p.stmt(c.Comm, st)))
+		out = logosEFJoin(out, p.stmts(c.Body, p.stmt(c.Comm, st), false))
 	}
 	p.popFrame()
 	return logosEFJoin(out, f.brk)
@@ -3636,7 +3639,7 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 			in = p.capture(cs)
 		}
 	}
-	p.run(body, p.lateCaptures(in, lit, inside))
+	end := p.run(body, p.lateCaptures(in, lit, inside))
 	p.eff = saved
 	for k := range eff.assigned {
 		if k.path == "" {
@@ -3647,6 +3650,23 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	for k, errName := range eff.created {
 		st = st.set(k, logosEFEntry{name: errName, pos: body.Pos()})
 		p.noteCreated(k, errName)
+	}
+	// A literal that stores a result may run after a later capture
+	// registers, so its may-reach marks join the outer flow with their
+	// pairings. Keys defined inside the literal stay local.
+	if end != nil {
+		for k := range end.may {
+			if inside[k.root] {
+				continue
+			}
+			st = st.setMay(k)
+		}
+		for k, ek := range end.mayErr {
+			if inside[k.root] || inside[ek.root] {
+				continue
+			}
+			st = p.setMayErr(st, k, ek)
+		}
 	}
 	return st
 }
