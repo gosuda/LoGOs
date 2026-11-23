@@ -1216,11 +1216,11 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 
 // mayErrJoin keeps a pairing when both branches agree on it, and keeps
 // one branch's pairing when the other branch holds nothing unchecked for
-// the result: a branch with no may mark and no pairing for the key
-// contributes only a safe value, so it cannot invalidate the pairing. A
-// branch with an unpaired or differently paired unchecked entry still
-// vetoes it, so a check on one branch never proves a value the other
-// branch paired elsewhere.
+// the result: a branch with no may mark, no unproven entry, and no
+// pairing for the key contributes only a safe value, so it cannot
+// invalidate the pairing. A branch with an unpaired or differently
+// paired unchecked value still vetoes it, so a check on one branch never
+// proves a value the other branch paired elsewhere.
 func mayErrJoin(a, b *logosEFState) map[logosEFKey]logosEFKey {
 	if len(a.mayErr) == 0 && len(b.mayErr) == 0 {
 		return nil
@@ -1240,7 +1240,7 @@ func mayErrJoin(a, b *logosEFState) map[logosEFKey]logosEFKey {
 		case ok:
 			// Disagreeing pairings veto each other.
 		default:
-			if _, has := b.may[k]; !has {
+			if !b.unchecked(k) {
 				keep(k, ea)
 			}
 		}
@@ -1249,11 +1249,21 @@ func mayErrJoin(a, b *logosEFState) map[logosEFKey]logosEFKey {
 		if _, ok := a.mayErr[k]; ok {
 			continue
 		}
-		if _, has := a.may[k]; !has {
+		if !a.unchecked(k) {
 			keep(k, eb)
 		}
 	}
 	return out
+}
+
+// unchecked reports whether k may hold a value no proof covers: a
+// may-reach mark or an unproven entry.
+func (s *logosEFState) unchecked(k logosEFKey) bool {
+	if s.may[k] {
+		return true
+	}
+	e, ok := s.m[k]
+	return ok && !e.proven
 }
 
 func logosEFSame(a, b *logosEFState) bool {
