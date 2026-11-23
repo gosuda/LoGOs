@@ -261,11 +261,341 @@ func (fl *fileLower) unrollConstFor(cf *syntax.ConstForStmt, info *types2.LogosC
 		active := cfPushField(nil, info, fd)
 		text := fl.expandLevel(cf.Body, active, bodySrc, 0, &cfMapper{start: bodyOff}, run, info.Iterations[fd.index])
 		stmts, region := fl.reparseTopCopy(text, cf, fctx)
+		pairs := fl.pairNestedSiteKeys(cf, info, fd.index, stmts)
+		fl.hoistNestedLocalTypes(cf, info, fd.index, stmts, pairs)
 		out = append(out, stmts...)
 		host.regions = append(host.regions, region)
 	}
 	fl.cfCountNodes(out, cf.Pos())
 	return out, host
+}
+
+// nestedSitePair links one freshly unrolled comptime call to the staged
+// instance the drain recorded for the corresponding original call.
+type nestedSitePair struct {
+	orig, fresh *syntax.Name
+	id          string
+}
+
+// pairNestedSiteKeys records writer site keys for comptime calls in a
+// freshly unrolled const-for copy. The drain staged instances for the
+// original call sites per iteration and recorded keys against the
+// original nodes; the copies are fresh nodes, so pair them with the
+// originals in order and copy the staged ids. Only calls whose type
+// arguments mention function-local types are paired: other nested
+// calls still lower as text copies. Skips silently on any shape
+// mismatch, leaving writer fallback behavior unchanged.
+func (fl *fileLower) pairNestedSiteKeys(cf *syntax.ConstForStmt, info *types2.LogosConstFor, index int, stmts []syntax.Stmt) []nestedSitePair {
+	if fl.pkg.info.LogosCtImport == nil {
+		return nil
+	}
+	if index < 0 || index >= len(info.Iterations) {
+		return nil
+	}
+	iter := info.Iterations[index]
+	if iter == nil || len(iter.LogosCtSiteKeys) == 0 {
+		return nil
+	}
+	orig := cfNestedComptimeCalls(cf.Body, func(name *syntax.Name) bool {
+		if _, ok := iter.LogosCtSiteKeys[name]; !ok {
+			return false
+		}
+		inst, ok := iter.Instances[name]
+		return ok && cfTargsMentionLocal(typeArgsOf(inst.TypeArgs))
+	})
+	var fresh []*syntax.Name
+	for _, s := range stmts {
+		fresh = append(fresh, cfNestedComptimeCalls(s, func(name *syntax.Name) bool {
+			inst, ok := fl.pkg.info.Instances[name]
+			if !ok {
+				return false
+			}
+			obj, _ := fl.pkg.info.Uses[name].(*types2.Func)
+			return obj != nil && fl.cfIsGeneric(obj) && cfTargsMentionLocal(typeArgsOf(inst.TypeArgs))
+		})...)
+	}
+	if len(orig) == 0 || len(orig) != len(fresh) {
+		return nil
+	}
+	if fl.pkg.info.LogosCtSiteKeys == nil {
+		fl.pkg.info.LogosCtSiteKeys = make(map[*syntax.Name]string)
+	}
+	var pairs []nestedSitePair
+	for i, name := range orig {
+		id := iter.LogosCtSiteKeys[name]
+		if id == "" {
+			return nil
+		}
+		pairs = append(pairs, nestedSitePair{orig: name, fresh: fresh[i], id: id})
+	}
+	if fl.pkg.info.LogosCtSiteKeys == nil {
+		fl.pkg.info.LogosCtSiteKeys = make(map[*syntax.Name]string)
+	}
+	for _, p := range pairs {
+		fl.pkg.info.LogosCtSiteKeys[p.fresh] = p.id
+	}
+	return pairs
+}
+
+// cfNestedComptimeCalls collects the callee names of calls in order,
+// descending everywhere except nested const-for bodies (whose calls
+// belong to their own iterations). keep decides membership.
+func cfNestedComptimeCalls(root syntax.Node, keep func(*syntax.Name) bool) []*syntax.Name {
+	var out []*syntax.Name
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		if _, ok := n.(*syntax.ConstForStmt); ok {
+			return false
+		}
+		if call, ok := n.(*syntax.CallExpr); ok {
+			if name := cfNestedCalleeName(call.Fun); name != nil && keep(name) {
+				out = append(out, name)
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// cfNestedCalleeName mirrors the writer's callee resolution: through
+// index expressions to the function name or selector.
+func cfNestedCalleeName(e syntax.Expr) *syntax.Name {
+	e = syntax.Unparen(e)
+	if idx, ok := e.(*syntax.IndexExpr); ok {
+		return cfNestedCalleeName(idx.X)
+	}
+	if sel, ok := e.(*syntax.SelectorExpr); ok {
+		return sel.Sel
+	}
+	if name, ok := e.(*syntax.Name); ok {
+		return name
+	}
+	return nil
+}
+
+// cfDirectLocalType reports the declared name when t is directly a
+// function-local named or alias type.
+func cfDirectLocalType(t types2.Type) (*types2.TypeName, bool) {
+	var obj *types2.TypeName
+	switch t := t.(type) {
+	case *types2.Named:
+		obj = t.Obj()
+	case *types2.Alias:
+		obj = t.Obj()
+	default:
+		return nil, false
+	}
+	if obj == nil || obj.Pkg() == nil || obj.Parent() == nil || obj.Parent() == obj.Pkg().Scope() {
+		return nil, false
+	}
+	return obj, true
+}
+
+// hoistNestedLocalTypes moves function-local type declarations referenced
+// by transferred nested comptime calls out of unrolled const-for copies
+// to package level with fresh names, so staged owner-package instances
+// can name them. Only direct local type arguments with in-copy
+// declarations and fully covered references are moved; anything else is
+// left in place for the finish check to report.
+func (fl *fileLower) hoistNestedLocalTypes(cf *syntax.ConstForStmt, info *types2.LogosConstFor, index int, stmts []syntax.Stmt, pairs []nestedSitePair) {
+	if len(pairs) == 0 {
+		return
+	}
+	if index < 0 || index >= len(info.Iterations) {
+		return
+	}
+	iter := info.Iterations[index]
+	if iter == nil {
+		return
+	}
+	// Link fresh local type arguments back to the original
+	// iteration-local types, positionally per call.
+	type link struct {
+		fresh, orig *types2.TypeName
+		id          string
+	}
+	var links []link
+	seen := make(map[*types2.TypeName]bool)
+	for _, p := range pairs {
+		oinst, ok1 := iter.Instances[p.orig]
+		finst, ok2 := fl.pkg.info.Instances[p.fresh]
+		if !ok1 || !ok2 {
+			continue
+		}
+		ot, ft := typeArgsOf(oinst.TypeArgs), typeArgsOf(finst.TypeArgs)
+		if len(ot) != len(ft) {
+			continue
+		}
+		for i := range ot {
+			oo, ook := cfDirectLocalType(ot[i])
+			fo, fok := cfDirectLocalType(ft[i])
+			if !ook || !fok || seen[fo] {
+				continue
+			}
+			seen[fo] = true
+			links = append(links, link{fresh: fo, orig: oo, id: p.id})
+		}
+	}
+	if len(links) == 0 {
+		return
+	}
+	// Find each linked fresh type's declaration in this iteration's copies.
+	declOf := make(map[*types2.TypeName]*syntax.TypeDecl)
+	for _, s := range stmts {
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			if _, ok := n.(*syntax.ConstForStmt); ok {
+				return false
+			}
+			if td, ok := n.(*syntax.TypeDecl); ok && td.Name != nil {
+				if obj, ok := fl.pkg.info.Defs[td.Name].(*types2.TypeName); ok && obj.Parent() != nil && obj.Parent() != fl.pkg.tpkg.Scope() {
+					declOf[obj] = td
+				}
+			}
+			return true
+		})
+	}
+	hoisted := make(map[*types2.TypeName]bool)
+	for _, l := range links {
+		if hoisted[l.fresh] {
+			continue
+		}
+		td, ok := declOf[l.fresh]
+		if !ok {
+			continue
+		}
+		if !fl.cfHoistableUnderlying(td, declOf) {
+			continue
+		}
+		if fl.hoistNestedLocalDecl(stmts, td, l.fresh, l.orig, l.id) {
+			hoisted[l.fresh] = true
+		}
+	}
+}
+
+// cfHoistableUnderlying reports whether every function-local type named
+// in td is declared by an in-copy declaration, so moving those
+// declarations to package level leaves no dangling reference.
+func (fl *fileLower) cfHoistableUnderlying(td *syntax.TypeDecl, declOf map[*types2.TypeName]*syntax.TypeDecl) bool {
+	if td.Type == nil {
+		return false
+	}
+	ok := true
+	seen := make(map[*syntax.TypeDecl]bool)
+	var visit func(d *syntax.TypeDecl)
+	visit = func(d *syntax.TypeDecl) {
+		if !ok || seen[d] {
+			return
+		}
+		seen[d] = true
+		if d.Type == nil {
+			ok = false
+			return
+		}
+		syntax.Inspect(d.Type, func(n syntax.Node) bool {
+			if !ok {
+				return false
+			}
+			id, isName := n.(*syntax.Name)
+			if !isName {
+				return true
+			}
+			obj, isTN := fl.pkg.info.Uses[id].(*types2.TypeName)
+			if !isTN {
+				return true
+			}
+			if obj.Pkg() == nil || obj.Parent() == nil || obj.Parent() == obj.Pkg().Scope() {
+				return true
+			}
+			sub, hasDecl := declOf[obj]
+			if !hasDecl {
+				ok = false
+				return false
+			}
+			visit(sub)
+			return true
+		})
+	}
+	visit(td)
+	return ok
+}
+
+// hoistNestedLocalDecl moves one fresh local type declaration out of an
+// unrolled const-for copy to package level under a fresh name and
+// rewrites its uses within this iteration's copies, recording the
+// original iteration-local type for the finish pass. It returns false
+// leaving everything untouched when the declaration cannot be moved.
+func (fl *fileLower) hoistNestedLocalDecl(stmts []syntax.Stmt, td *syntax.TypeDecl, fresh, orig *types2.TypeName, id string) bool {
+	// Remove the declaration from its enclosing statement list first so
+	// a failure below leaves the copies unchanged.
+	removed := false
+	var excise func(list *[]syntax.Stmt)
+	excise = func(list *[]syntax.Stmt) {
+		if removed {
+			return
+		}
+		for i := 0; i < len(*list); i++ {
+			if ds, ok := (*list)[i].(*syntax.DeclStmt); ok {
+				for j, d := range ds.DeclList {
+					if d != syntax.Decl(td) {
+						continue
+					}
+					if len(ds.DeclList) == 1 {
+						*list = append((*list)[:i], (*list)[i+1:]...)
+						i--
+					} else {
+						ds.DeclList = append(ds.DeclList[:j], ds.DeclList[j+1:]...)
+					}
+					removed = true
+				}
+			}
+		}
+		if !removed {
+			for _, s := range *list {
+				eachStmtList(s, func(child *[]syntax.Stmt) {
+					excise(child)
+				})
+				if removed {
+					return
+				}
+			}
+		}
+	}
+	for _, s := range stmts {
+		if blk, ok := s.(*syntax.BlockStmt); ok {
+			excise(&blk.List)
+			if removed {
+				break
+			}
+		}
+	}
+	if !removed {
+		return false
+	}
+	suffix := id
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	name := td.Name.Value + "_" + suffix
+	for i := 2; fl.pkg.tpkg.Scope().Lookup(name) != nil; i++ {
+		name = fmt.Sprintf("%s_%s_%d", td.Name.Value, suffix, i)
+	}
+	td.Name.Value = name
+	for _, s := range stmts {
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			if id, ok := n.(*syntax.Name); ok && id != td.Name {
+				if obj, ok := fl.pkg.info.Uses[id]; ok && obj == types2.Object(fresh) {
+					id.Value = name
+				}
+			}
+			return true
+		})
+	}
+	fl.file.DeclList = append(fl.file.DeclList, td)
+	fl.changed = true
+	if fl.pkg.ctLocalHoists == nil {
+		fl.pkg.ctLocalHoists = make(map[*syntax.Name]*types2.TypeName)
+	}
+	fl.pkg.ctLocalHoists[td.Name] = orig
+	return true
 }
 
 func cfPushField(active cfChain, loop *types2.LogosConstFor, field cfField) cfChain {

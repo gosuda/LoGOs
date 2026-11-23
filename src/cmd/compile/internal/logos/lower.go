@@ -121,6 +121,18 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			}
 			prepared.sites.appendDecls(traceFile)
 		}
+		// Hoisted const-for-local declarations were moved to package
+		// level after staging; link them to their original
+		// iteration-local types so the finish pass rebinds instance
+		// type references to the package-level declarations.
+		if len(shared.ctLocalHoists) != 0 {
+			if prepared.localDefs == nil {
+				prepared.localDefs = make(map[*syntax.Name]*types2.TypeName)
+			}
+			for name, old := range shared.ctLocalHoists {
+				prepared.localDefs[name] = old
+			}
+		}
 		info.LogosCtFinish = prepared.finish
 		changed = true
 	}
@@ -199,6 +211,11 @@ type packageLower struct {
 	src        map[*syntax.File][]byte
 	typeDecls  map[*types2.TypeName]*syntax.TypeDecl
 	declSrc    map[*syntax.TypeDecl][]byte
+	// ctLocalHoists maps hoisted const-for-local type declarations
+	// (fresh nodes) to the original iteration-local types they were
+	// copied from, so the finish pass can rebind instance type
+	// references to the package-level declarations.
+	ctLocalHoists map[*syntax.Name]*types2.TypeName
 }
 
 // declOf maps a package-level TypeName back to its TypeDecl and the file's

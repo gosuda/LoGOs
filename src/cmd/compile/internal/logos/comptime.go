@@ -1363,6 +1363,13 @@ func (fl *fileLower) cfNestedSite(call *syntax.CallExpr, run *cfRun) (int, int, 
 		fl.cfError(pos, "[comptime::generic_targ] cannot resolve the type arguments of %s", obj.Name())
 		return 0, 0, "", false
 	}
+	if fl.pkg.info.LogosCtImport != nil && cfTargsMentionLocal(targs) {
+		// Native owner-package emission resolves nested call sites in
+		// the writer through LogosCtSiteKeys paired during unrolling.
+		// A text copy is checked where a function-local type argument
+		// is not in scope, so leave the call spelled and emit no copy.
+		return 0, 0, "", false
+	}
 	name := fl.cfCopyFor(&cfSite{fun: call.Fun, targs: targs, obj: obj, pos: pos})
 	return offAt(run.ctx.starts, syntax.StartPos(call.Fun)), cfExactEnd(run.ctx, call.Fun), name, true
 }
@@ -1446,6 +1453,64 @@ func cfHasTypeParam(t types2.Type) bool {
 		return cfHasTypeParam(t.Elem())
 	case *types2.Named:
 		return slices.ContainsFunc(typeArgsOf(t.TypeArgs()), cfHasTypeParam)
+	}
+	return false
+}
+
+// cfTargsMentionLocal reports whether any type argument names a type
+// declared below package scope (for example a function-local type). A
+// text copy is checked at package scope and can never spell such an
+// argument; those call sites lower natively instead.
+func cfTargsMentionLocal(targs []types2.Type) bool {
+	for _, t := range targs {
+		if cfTypeMentionsLocal(t) {
+			return true
+		}
+	}
+	return false
+}
+
+func cfTypeMentionsLocal(t types2.Type) bool {
+	switch t := t.(type) {
+	case *types2.Named:
+		if old := t.Obj(); old != nil && old.Pkg() != nil && old.Parent() != nil && old.Parent() != old.Pkg().Scope() {
+			return true
+		}
+		return slices.ContainsFunc(typeArgsOf(t.TypeArgs()), cfTypeMentionsLocal)
+	case *types2.Alias:
+		if old := t.Obj(); old != nil && old.Pkg() != nil && old.Parent() != nil && old.Parent() != old.Pkg().Scope() {
+			return true
+		}
+		return cfTypeMentionsLocal(t.Rhs())
+	case *types2.Pointer:
+		return cfTypeMentionsLocal(t.Elem())
+	case *types2.Slice:
+		return cfTypeMentionsLocal(t.Elem())
+	case *types2.Array:
+		return cfTypeMentionsLocal(t.Elem())
+	case *types2.Map:
+		return cfTypeMentionsLocal(t.Key()) || cfTypeMentionsLocal(t.Elem())
+	case *types2.Chan:
+		return cfTypeMentionsLocal(t.Elem())
+	case *types2.Option:
+		return cfTypeMentionsLocal(t.Elem)
+	case *types2.ConstView:
+		return cfTypeMentionsLocal(t.Elem)
+	case *types2.Signature:
+		if t.Params() != nil {
+			for i := range t.Params().Len() {
+				if cfTypeMentionsLocal(t.Params().At(i).Type()) {
+					return true
+				}
+			}
+		}
+		if t.Results() != nil {
+			for i := range t.Results().Len() {
+				if cfTypeMentionsLocal(t.Results().At(i).Type()) {
+					return true
+				}
+			}
+		}
 	}
 	return false
 }
