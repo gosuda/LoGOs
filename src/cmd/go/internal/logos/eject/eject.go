@@ -70,9 +70,13 @@ leaves out .git contents, logos.toml files, .lgo sources, the
 destination subtree, symlinks and special files, and foreign
 nested modules.
 
-DIR must not exist or must be empty. The ejected tree builds with an
-upstream Go 1.27.2 or newer toolchain. Eject never writes into the
-source tree.
+DIR must not exist or must be empty. DIR/go.mod keeps the go
+directive of the main module, which logos mod init sets to the
+version logos version reports, and the shared support module copies
+it. Build the ejected tree with an upstream Go toolchain that
+satisfies every go directive in it; the ejected code needs Go 1.27.2
+or newer. Eject leaves the source tree unchanged apart from DIR,
+which may lie inside it.
 	`,
 }
 
