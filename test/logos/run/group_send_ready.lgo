@@ -255,6 +255,29 @@ func shadowedIfaceValue() {
 	check("shadowed-iface-dynamic-type", err == nil && fmt.Sprintf("%T", got) == "int", fmt.Sprint(err, got), "<nil> 8")
 }
 
+func shadowedIfaceRecv(ctx context.Context, in <-chan int, n int, out chan cargo) error {
+	type cargo = int8
+	go group (ctx) {
+		go {
+			cargoOutput(out) <- (1 << n) + <-in
+		}
+	}
+	return nil
+}
+
+func shadowedIfaceRecvValue() {
+	in := make(chan int, 1)
+	in <- 2
+	out := make(chan cargo, 1)
+	err := shadowedIfaceRecv(context.Background(), in, 3, out)
+	var got any
+	select {
+	case got = <-out:
+	default:
+	}
+	check("shadowed-iface-recv-hoist", err == nil && fmt.Sprintf("%T", got) == "int" && fmt.Sprint(got) == "10", fmt.Sprint(err, got), "<nil> 10")
+}
+
 func shadowedImportValue() {
 	ch := make(chan time.Duration, 1)
 	err := shadowedImportSend(precancelled(), ch, 0)
@@ -382,6 +405,7 @@ func main() {
 	chanSnapshotBeforeValue()
 	shadowedTypeName()
 	shadowedIfaceValue()
+	shadowedIfaceRecvValue()
 	shadowedImportValue()
 	shadowedUnsafeValue()
 	gotoPastSend()

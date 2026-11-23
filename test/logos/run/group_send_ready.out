@@ -8,6 +8,7 @@ ok interp-send
 ok send-original-chan
 ok shadowed-type-send
 ok shadowed-iface-dynamic-type
+ok shadowed-iface-recv-hoist
 ok shadowed-import-qualifier-send
 ok shadowed-unsafe-qualifier-send
 ok goto-skips-send
