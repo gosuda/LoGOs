@@ -312,7 +312,7 @@ jobs:
         with:
           name: toolchain
           path: "~/tc"
-      - run: bash .github/scripts/setup.sh restore oracles
+      - run: bash .github/scripts/setup.sh restore oracles c23
       - name: C compilers (gccgo)
         run: bash .github/scripts/cgo-compilers.sh
       - name: cgo full default-short dist under each cgo experiment
