@@ -1954,9 +1954,6 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 			if _, val, ok := p.check.logosChecked(x); ok && val != nil {
 				return false
 			}
-			if p.excusedCall(x, st) {
-				return false
-			}
 		case *syntax.Operation:
 			if x.Y == nil || (x.Op != syntax.AndAnd && x.Op != syntax.OrOr) {
 				return true
@@ -2307,36 +2304,6 @@ func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState 
 	}
 	p.ctx.exit = logosEFJoin(p.ctx.exit, st)
 	return nil
-}
-func (p *logosEFPass) excusedCall(call *syntax.CallExpr, st *logosEFState) bool {
-	passed := make(map[*Var]bool, len(call.ArgList))
-	for _, a := range call.ArgList {
-		if v := p.varOf(a); v != nil {
-			passed[v] = true
-		}
-	}
-	excused := false
-	for _, a := range call.ArgList {
-		if k, ok := p.destKey(a); ok {
-			if e, found := st.m[k]; found && e.err != nil && passed[e.err] {
-				excused = true
-				break
-			}
-		}
-	}
-	if !excused {
-		return false
-	}
-	p.expr(call.Fun, st)
-	for _, a := range call.ArgList {
-		if k, ok := p.destKey(a); ok {
-			if e, found := st.m[k]; found && e.err != nil && passed[e.err] {
-				continue
-			}
-		}
-		p.expr(a, st)
-	}
-	return true
 }
 
 func (p *logosEFPass) branch(s *syntax.BranchStmt, st *logosEFState) *logosEFState {

@@ -26,7 +26,11 @@ func printRun(label string, row Row) {
 	total, err := sum[Row](row, func(event string) {
 		trace = append(trace, event)
 	})
-	fmt.Println(label, total, err)
+	if err != nil {
+		fmt.Println(label, 0, err)
+	} else {
+		fmt.Println(label, total, err)
+	}
 	fmt.Println(strings.Join(trace, " "))
 }
 
