@@ -13,46 +13,11 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
-	"strings"
 
 	"cmd/compile/internal/base"
-	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
-
-type cfImport struct {
-	name string
-	path string
-}
-
-// cfOwnerName is an unexported package-level identifier that an exported
-// comptime generic names. Its own package can instantiate the generic; a
-// copy in another package cannot reach the identifier.
-type cfOwnerName struct {
-	kind string
-	name string
-}
-
-type cfRecord struct {
-	name    string
-	imports []cfImport
-	owner   []cfOwnerName
-	source  string
-}
-
-func (r *cfRecord) text() string {
-	var b strings.Builder
-	b.WriteString("//logosct\n")
-	for _, imp := range r.imports {
-		fmt.Fprintf(&b, "//logosimp %s %s\n", imp.name, imp.path)
-	}
-	for _, n := range r.owner {
-		fmt.Fprintf(&b, "//logosowner %s %s\n", n.name, n.kind)
-	}
-	b.WriteString(r.source)
-	return b.String()
-}
 
 func cfFirstFunc(file *syntax.File) *syntax.FuncDecl {
 	if file == nil {
@@ -70,7 +35,6 @@ type cfGenericDef struct {
 	decl    *syntax.FuncDecl
 	obj     *types2.Func
 	file    *syntax.File
-	record  *cfRecord
 	forward bool
 }
 
@@ -89,74 +53,34 @@ func newCfExpander(shared *packageLower, files []*syntax.File, src map[*syntax.F
 		pkgs:   make(map[string]*types2.Package),
 	}
 	shared.ctExp = exp
-	f := facts.Current()
 	var lowers []*fileLower
 	for _, file := range files {
-		data, ok := src[file]
-		if !ok {
+		if _, ok := src[file]; !ok {
 			continue
 		}
-		fl := &fileLower{pkg: shared, file: file, src: data, orig: len(data), start: lineStarts(data)}
-		fl.srcMap = origBuf(data)
-		f = fl.registerComptime(exp, f)
+		fl := &fileLower{pkg: shared, file: file}
+		exp.cfRegisterDefs(fl.cfCollectGenerics())
 		lowers = append(lowers, fl)
 	}
 	for found := true; found; {
 		found = false
 		for _, fl := range lowers {
 			if defs := fl.cfCollectForwarders(); len(defs) != 0 {
-				f = fl.cfRegisterDefs(exp, f, defs)
+				exp.cfRegisterDefs(defs)
 				found = true
 			}
 		}
 	}
-	if f != nil {
-		facts.SetCurrent(f)
-	}
 }
 
-func cfFactObject(obj *types2.Func) string {
-	if obj == nil {
-		return ""
-	}
-	if q := facts.ObjectName(obj); q != "" {
-		return q
-	}
-	return obj.Name()
-}
-
-func (fl *fileLower) registerComptime(exp *cfExpander, f *facts.Facts) *facts.Facts {
-	return fl.cfRegisterDefs(exp, f, fl.cfCollectGenerics())
-}
-
-func (fl *fileLower) cfRegisterDefs(exp *cfExpander, f *facts.Facts, defs []*cfGenericDef) *facts.Facts {
-	if len(defs) == 0 {
-		return f
-	}
-	var imports []cfImport
-	for _, decl := range fl.file.DeclList {
-		if imp, ok := decl.(*syntax.ImportDecl); ok {
-			if pn := fl.pkg.info.PkgNameOf(imp); pn != nil && pn.Name() != "_" {
-				imports = append(imports, cfImport{name: pn.Name(), path: pn.Imported().Path()})
-			}
-		}
-	}
+func (exp *cfExpander) cfRegisterDefs(defs []*cfGenericDef) {
 	for _, def := range defs {
-		def.record = fl.cfRecordText(def, imports)
 		exp.defs = append(exp.defs, def)
 		exp.byDecl[def.decl] = def
 		if def.obj != nil {
 			exp.byObj[def.obj] = def
 		}
-		if def.forward || def.obj == nil || !def.obj.Exported() {
-			continue
-		}
-		if f == nil {
-			f = &facts.Facts{}
-		}
-		f.Comptimes = append(f.Comptimes, facts.ComptimeFact{Object: cfFactObject(def.obj), Source: []byte(def.record.text())})
 	}
-	return f
 }
 
 func (fl *fileLower) cfCollectGenerics() []*cfGenericDef {
@@ -211,369 +135,12 @@ func (fl *fileLower) cfForwards(body *syntax.BlockStmt) bool {
 	return found
 }
 
-type cfRecordBuilder struct {
-	fl      *fileLower
-	decl    *syntax.FuncDecl
-	subs    []splice
-	parents map[syntax.Node]syntax.Node
-	folded  map[*syntax.Name]bool
-	export  bool
-}
-
-func (fl *fileLower) cfRecordText(def *cfGenericDef, imports []cfImport) *cfRecord {
-	b := &cfRecordBuilder{
-		fl:     fl,
-		decl:   def.decl,
-		export: !def.forward && def.obj != nil && def.obj.Exported() && fl.pkg.tpkg.Name() != "main",
-	}
-	syntax.Inspect(def.decl, b.visit)
-	var owner []cfOwnerName
-	if b.export {
-		owner = b.ownerNames()
-	}
-	start := fl.cfFuncStart(fl.off(syntax.StartPos(def.decl)))
-	end := fl.off(syntax.EndPos(def.decl)) + 1
-	out, err := applyChunks(fl.srcMap.sliceO(start, end), shiftSplices(b.subs, -start))
-	if err != nil {
-		base.Fatalf("logos: overlapping comptime record at %s", def.decl.Pos().String())
-	}
-	return &cfRecord{
-		name:    def.decl.Name.Value,
-		imports: imports,
-		owner:   owner,
-		source:  out.s,
-	}
-}
-
-// ownerNames lists, in source order, the unexported package-level
-// identifiers an exported comptime generic names. The record carries them
-// so that an importer refuses its instantiation by name instead of failing
-// on an undefined name in the copy. The walk follows cfRecordBuilder.visit:
-// a const if condition that folds to a literal never reaches the record,
-// and a name without a file position belongs to a synthesized node.
-func (b *cfRecordBuilder) ownerNames() []cfOwnerName {
-	var out []cfOwnerName
-	seen := make(map[string]bool)
-	var visit func(n syntax.Node) bool
-	visit = func(n syntax.Node) bool {
-		if s, ok := n.(*syntax.ConstIfStmt); ok {
-			b.fl.cfCheckCond(s.Cond, visit)
-			syntax.Inspect(s.Then, visit)
-			if s.Else != nil {
-				syntax.Inspect(s.Else, visit)
-			}
-			return false
-		}
-		name, ok := n.(*syntax.Name)
-		if !ok || name.Pos().Base() == nil || b.folded[name] {
-			return true
-		}
-		obj := b.recordObject(name)
-		if obj == nil || obj.Exported() || !cfPackageLevel(b.fl, obj) || seen[obj.Name()] {
-			return true
-		}
-		seen[obj.Name()] = true
-		out = append(out, cfOwnerName{kind: cfObjKind(obj), name: obj.Name()})
-		return true
-	}
-	syntax.Inspect(b.decl, visit)
-	return out
-}
-
-func (b *cfRecordBuilder) recordObject(n *syntax.Name) types2.Object {
-	info := b.fl.pkg.info
-	if obj := info.Uses[n]; obj != nil {
-		return obj
-	}
-	if info.Defs[n] != nil {
-		return nil
-	}
-	obj := b.fl.pkg.tpkg.Scope().Lookup(n.Value)
-	if obj == nil || obj.Exported() {
-		return nil
-	}
-	if b.parents == nil {
-		b.parents = cfParents(b.decl)
-	}
-	if b.fl.cfRecordNameUse(n, b.parents) {
-		return obj
-	}
-	return nil
-}
-
-func (fl *fileLower) cfRecordNameUse(n *syntax.Name, parents map[syntax.Node]syntax.Node) bool {
-	parent := parents[n]
-	if fl.cfBareSkip(n, parent) {
-		return false
-	}
-	if key, ok := parent.(*syntax.KeyValueExpr); ok && key.Key == n {
-		lit, ok := parents[key].(*syntax.CompositeLit)
-		if !ok || !fl.cfRecordIndexKeys(lit, parents) {
-			return false
-		}
-	}
-	if file := fl.pkg.info.Scopes[fl.file]; file != nil && file.Lookup(n.Value) != nil {
-		return false
-	}
-	for child, scope := syntax.Node(n), parent; scope != nil; child, scope = scope, parents[scope] {
-		if cfRecordScopeBinds(scope, child, parents[scope], n.Value) {
-			return false
-		}
-	}
-	return true
-}
-
-func (fl *fileLower) cfRecordIndexKeys(lit *syntax.CompositeLit, parents map[syntax.Node]syntax.Node) bool {
-	switch syntax.Unparen(lit.Type).(type) {
-	case *syntax.ArrayType, *syntax.SliceType, *syntax.MapType:
-		return true
-	}
-	t := fl.pkg.info.TypeOf(lit)
-	if id, ok := syntax.Unparen(lit.Type).(*syntax.Name); t == nil && ok && fl.cfRecordNameUse(id, parents) {
-		if obj, ok := fl.pkg.tpkg.Scope().Lookup(id.Value).(*types2.TypeName); ok {
-			t = obj.Type()
-		}
-	}
-	if t == nil {
-		return false
-	}
-	switch t.Underlying().(type) {
-	case *types2.Array, *types2.Slice, *types2.Map:
-		return true
-	}
-	return false
-}
-
-func cfRecordScopeBinds(scope, child, outer syntax.Node, name string) bool {
-	switch s := scope.(type) {
-	case *syntax.FuncDecl:
-		return cfRecordParam(s.TParamList, name) || child == s.Body && cfRecordFuncParam(s.Type, name)
-	case *syntax.FuncLit:
-		return child == s.Body && cfRecordFuncParam(s.Type, name)
-	case *syntax.LambdaExpr:
-		return child == s.Body && cfRecordHasName(s.Params, name)
-	case *syntax.BlockStmt:
-		return cfRecordPriorStmt(s.List, child, name)
-	case *syntax.DeclStmt:
-		return cfRecordDecls(s.DeclList, child, name)
-	case *syntax.TypeDecl:
-		return s.Name.Value == name || cfRecordParam(s.TParamList, name)
-	case *syntax.ConstForStmt:
-		return child == s.Body && (s.Field.Value == name || s.Index != nil && s.Index.Value == name)
-	case *syntax.ConstSwitchStmt:
-		stmt, ok := child.(syntax.Stmt)
-		if !ok {
-			return false
-		}
-		for _, c := range s.Cases {
-			if slices.Contains(c.Body, stmt) {
-				return cfRecordPriorStmt(c.Body, stmt, name)
-			}
-		}
-	case *syntax.IfStmt:
-		return child != s.Init && cfRecordStmtBinds(s.Init, name)
-	case *syntax.ForStmt:
-		return child != s.Init && cfRecordStmtBinds(s.Init, name)
-	case *syntax.SwitchStmt:
-		return child != s.Init && cfRecordStmtBinds(s.Init, name)
-	case *syntax.SwitchExpr:
-		return child != s.Init && cfRecordStmtBinds(s.Init, name)
-	case *syntax.CaseClause:
-		if child != s.Cases {
-			sw, _ := outer.(*syntax.SwitchStmt)
-			return cfRecordPriorStmt(s.Body, child, name) || sw != nil && cfRecordTypeSwitchName(sw.Tag, name)
-		}
-	case *syntax.ArmClause:
-		sw, _ := outer.(*syntax.SwitchExpr)
-		return child == s.Body && sw != nil && cfRecordTypeSwitchName(sw.Tag, name)
-	case *syntax.CommClause:
-		return child != s.Comm && (cfRecordStmtBinds(s.Comm, name) || cfRecordPriorStmt(s.Body, child, name))
-	}
-	return false
-}
-
-func cfRecordTypeSwitchName(tag syntax.Expr, name string) bool {
-	guard, ok := tag.(*syntax.TypeSwitchGuard)
-	return ok && guard.Lhs != nil && guard.Lhs.Value == name
-}
-
-func cfRecordFuncParam(t *syntax.FuncType, name string) bool {
-	return cfRecordParam(t.ParamList, name) || cfRecordParam(t.ResultList, name)
-}
-
-func cfRecordParam(fields []*syntax.Field, name string) bool {
-	for _, f := range fields {
-		if f.Name != nil && f.Name.Value == name {
-			return true
-		}
-	}
-	return false
-}
-
-func cfRecordHasName(names []*syntax.Name, name string) bool {
-	for _, n := range names {
-		if n.Value == name {
-			return true
-		}
-	}
-	return false
-}
-
-func cfRecordPriorStmt(stmts []syntax.Stmt, child syntax.Node, name string) bool {
-	for _, stmt := range stmts {
-		if stmt == child {
-			break
-		}
-		if cfRecordStmtBinds(stmt, name) {
-			return true
-		}
-	}
-	return false
-}
-
-func cfRecordStmtBinds(stmt syntax.Stmt, name string) bool {
-	var lhs syntax.Expr
-	switch s := stmt.(type) {
-	case *syntax.DeclStmt:
-		return cfRecordDecls(s.DeclList, nil, name)
-	case *syntax.LabeledStmt:
-		return cfRecordStmtBinds(s.Stmt, name)
-	case *syntax.AssignStmt:
-		if s.Op == syntax.Def {
-			lhs = s.Lhs
-		}
-	case *syntax.RangeClause:
-		if s.Def {
-			lhs = s.Lhs
-		}
-	}
-	for _, expr := range syntax.UnpackListExpr(lhs) {
-		if n, ok := expr.(*syntax.Name); ok && n.Value == name {
-			return true
-		}
-	}
-	return false
-}
-
-func cfRecordDecls(decls []syntax.Decl, child syntax.Node, name string) bool {
-	for _, decl := range decls {
-		if decl == child {
-			break
-		}
-		switch d := decl.(type) {
-		case *syntax.ConstDecl:
-			if cfRecordHasName(d.NameList, name) {
-				return true
-			}
-		case *syntax.VarDecl:
-			if cfRecordHasName(d.NameList, name) {
-				return true
-			}
-		case *syntax.TypeDecl:
-			if d.Name.Value == name {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// cfCheckCond walks a const if condition the way cfRecordBuilder.foldCond
-// does: an operand that folds to a constant bool is replaced by a literal
-// in the record, so its names are skipped, while the names of every
-// remaining operand reach the record and are checked.
-func (fl *fileLower) cfCheckCond(e syntax.Expr, visit func(syntax.Node) bool) {
-	if val, ok := typeConst(fl.pkg.info, e); ok && val.Kind() == constant.Bool {
-		return
-	}
-	switch e := e.(type) {
-	case *syntax.ParenExpr:
-		fl.cfCheckCond(e.X, visit)
-	case *syntax.Operation:
-		fl.cfCheckCond(e.X, visit)
-		if e.Y != nil {
-			fl.cfCheckCond(e.Y, visit)
-		}
-	default:
-		syntax.Inspect(e, visit)
-	}
-}
-
-func cfPackageLevel(fl *fileLower, obj types2.Object) bool {
-	pkg := fl.pkg.tpkg
-	return obj.Pkg() == pkg && pkg.Scope().Lookup(obj.Name()) == obj
-}
-
-func cfObjKind(obj types2.Object) string {
-	switch obj := obj.(type) {
-	case *types2.TypeName:
-		if obj.IsAlias() {
-			return "type alias"
-		}
-		return "type"
-	case *types2.Func:
-		return "func"
-	case *types2.Var:
-		return "var"
-	case *types2.Const:
-		return "const"
-	case *types2.PkgName:
-		return "package"
-	}
-	return "name"
-}
-
-func (b *cfRecordBuilder) visit(n syntax.Node) bool {
-	if s, ok := n.(*syntax.ConstIfStmt); ok {
-		b.foldCond(s.Cond)
-		if b.export {
-			b.foldDeferredBools(s.Cond)
-		}
-		syntax.Inspect(s.Then, b.visit)
-		if s.Else != nil {
-			syntax.Inspect(s.Else, b.visit)
-		}
-		return false
-	}
-	return true
-}
-
-func (b *cfRecordBuilder) foldDeferredBools(e syntax.Expr) {
-	b.fl.cfCheckCond(e, func(n syntax.Node) bool {
-		id, ok := n.(*syntax.Name)
-		if !ok || id.Pos().Base() == nil || b.folded[id] {
-			return false
-		}
-		obj, ok := b.recordObject(id).(*types2.Const)
-		if !ok || obj.Val().Kind() != constant.Bool || obj.Exported() || !cfPackageLevel(b.fl, obj) {
-			return false
-		}
-		start := b.fl.off(id.Pos())
-		b.subs = append(b.subs, splice{start: start, end: start + len(id.Value), text: strconv.FormatBool(constant.BoolVal(obj.Val()))})
-		if b.folded == nil {
-			b.folded = make(map[*syntax.Name]bool)
-		}
-		b.folded[id] = true
-		return false
-	})
-}
-
 func (fl *fileLower) cfFuncStart(off int) int {
 	kw, ok := fl.keywords.Start(fl.src, token.FUNC, off)
 	if !ok {
 		base.Fatalf("logos: no func keyword before offset %d", off)
 	}
 	return kw
-}
-
-func shiftSplices(subs []splice, off int) []splice {
-	out := make([]splice, 0, len(subs))
-	for _, s := range subs {
-		s.start += off
-		s.end += off
-		out = append(out, s)
-	}
-	return out
 }
 
 // expandComptime retires the comptime generics of the file. Each instance
@@ -729,14 +296,11 @@ func (fl *fileLower) cfIsGeneric(obj *types2.Func) bool {
 	if _, ok := fl.pkg.ctExp.byObj[obj]; ok {
 		return true
 	}
-	if obj.Pkg() == nil || obj.Pkg() == fl.pkg.tpkg {
+	if obj.Pkg() == nil || obj.Pkg() == fl.pkg.tpkg || fl.pkg.info.LogosCtImport == nil {
 		return false
 	}
-	f, ok := facts.Lookup(obj.Pkg().Path())
-	if !ok {
-		return false
-	}
-	return slices.ContainsFunc(f.Comptimes, func(c facts.ComptimeFact) bool { return c.Object == cfFactObject(obj) })
+	generic, ok := fl.pkg.info.LogosCtImport(obj.Origin())
+	return ok && generic.Decl != nil && types2.LogosUsesComptime(generic.Decl, generic.Scope)
 }
 
 func (fl *fileLower) cfRuntimeBindings() types2.LogosTypeBindings {

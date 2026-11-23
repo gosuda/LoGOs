@@ -1273,31 +1273,6 @@ func cfExactEnd(ctx cfCtx, n syntax.Node) int {
 	return end
 }
 
-func cfFoldEnd(ctx cfCtx, e syntax.Expr) int {
-	end := cfExactEnd(ctx, e)
-	depth := 0
-	scanSegment(ctx.buf.b, end, len(ctx.buf.b), func(t tok) bool {
-		switch t.kind {
-		case token.LPAREN:
-			depth++
-		case token.RPAREN:
-			depth--
-			if depth < 0 {
-				return false
-			}
-			if depth == 0 {
-				end = t.end
-				return false
-			}
-		case token.COMMENT:
-		default:
-			return false
-		}
-		return true
-	})
-	return end
-}
-
 type cfLeaf struct {
 	fl      *fileLower
 	run     *cfRun

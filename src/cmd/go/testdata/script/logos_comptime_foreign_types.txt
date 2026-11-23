@@ -17,12 +17,6 @@ stdout '^bad: expected integer$'
 
 logos lint ./...
 
-logos build -o $WORK/wire.a ./wire
-go tool pack p $WORK/wire.a __.LOGOS
-stdout 'comptime Describe'
-! stdout 'deep'
-! stdout 'gotypes'
-
 cp patched.txt ../godep/deep/deep.go
 logos build ./...
 logos run ./main

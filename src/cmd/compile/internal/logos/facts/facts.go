@@ -72,11 +72,6 @@ type ConformsFact struct {
 	Iface     string
 }
 
-type ComptimeFact struct {
-	Object string
-	Source []byte
-}
-
 type ConstFuncFact struct {
 	Object string
 	Source []byte
@@ -111,7 +106,6 @@ type Facts struct {
 	Readonlys         []ReadonlyFact
 	Props             []PropFact
 	Conforms          []ConformsFact
-	Comptimes         []ComptimeFact
 	ConstFuncs        []ConstFuncFact
 	ConstMaps         []ConstMapFact
 	ConstComps        []string
@@ -131,7 +125,7 @@ type Facts struct {
 func (f *Facts) empty() bool {
 	return len(f.Opts) == 0 && len(f.Consts) == 0 && len(f.Fns) == 0 &&
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
-		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
+		len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
 		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && len(f.JsonMetas) == 0 &&
 		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.BareUnions) == 0 && len(f.DualUse) == 0 &&
 		!f.CheckedUnionTypes && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && len(f.Deriveds) == 0 && !f.GoPackage
@@ -244,11 +238,6 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 		for _, c := range f.Conforms {
 			if c.Type != "" && c.IfacePath != "" && c.Iface != "" {
 				recs = append(recs, factRecord{line: "conforms " + c.Type + " " + c.IfacePath + " " + c.Iface})
-			}
-		}
-		for _, c := range f.Comptimes {
-			if c.Object != "" && len(c.Source) > 0 {
-				recs = append(recs, factRecord{line: "comptime " + c.Object + " " + strconv.Itoa(len(c.Source)), body: c.Source})
 			}
 		}
 		for _, c := range f.ConstFuncs {
@@ -793,25 +782,6 @@ func Decode(data []byte) (*Facts, error) {
 				return nil, err
 			}
 			f.Defaults = append(f.Defaults, DefaultFact{Type: fields[1], Field: fields[2], Text: string(text)})
-		case strings.HasPrefix(line, "comptime "):
-			if len(fields) != 3 {
-				return nil, fmt.Errorf(`logos facts line %d: bad comptime record %q (want "comptime <object> <length>")`, ln, line)
-			}
-			if !ValidObject(fields[1]) {
-				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
-			}
-			n, aerr := strconv.Atoi(fields[2])
-			if aerr != nil || n < 0 {
-				return nil, fmt.Errorf("logos facts line %d: bad comptime length %q", ln, fields[2])
-			}
-			if err := d.dup(ln, "comptime", fields[1], fields[1]); err != nil {
-				return nil, err
-			}
-			src, err := d.takeBody(ln, "comptime", fields[1], n)
-			if err != nil {
-				return nil, err
-			}
-			f.Comptimes = append(f.Comptimes, ComptimeFact{Object: fields[1], Source: src})
 		case strings.HasPrefix(line, "constfn "):
 			if len(fields) != 3 {
 				return nil, fmt.Errorf(`logos facts line %d: bad constfn record %q (want "constfn <object> <length>")`, ln, line)

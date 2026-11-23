@@ -7,8 +7,6 @@ package logos
 import (
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
-	"go/constant"
-	"strconv"
 )
 
 func cfLiveBranch(s *syntax.ConstIfStmt, info *types2.Info) (live *syntax.BlockStmt, ok bool) {
@@ -67,25 +65,4 @@ func cfInnerConstFors(body *syntax.BlockStmt, info *types2.Info) []*syntax.Const
 	}
 	syntax.Inspect(body, visit)
 	return out
-}
-
-func (b *cfRecordBuilder) foldCond(e syntax.Expr) {
-	if val, ok := typeConst(b.fl.pkg.info, e); ok && val.Kind() == constant.Bool {
-		ctx := cfCtx{buf: b.fl.srcMap, starts: b.fl.start}
-		s := offAt(ctx.starts, syntax.StartPos(e))
-		end := cfFoldEnd(ctx, e)
-		b.subs = append(b.subs, splice{start: s, end: end, text: keepComments(ctx.buf.b, s, end, strconv.FormatBool(constant.BoolVal(val)))})
-		return
-	}
-	switch e := e.(type) {
-	case *syntax.ParenExpr:
-		b.foldCond(e.X)
-	case *syntax.Operation:
-		b.foldCond(e.X)
-		if e.Y != nil {
-			b.foldCond(e.Y)
-		}
-	default:
-		syntax.Inspect(e, b.visit)
-	}
 }

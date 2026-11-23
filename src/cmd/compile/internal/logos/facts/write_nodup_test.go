@@ -126,9 +126,6 @@ type BotB struct : Carrier {
 	if fnCounts["DupBox.Dup"] != 1 {
 		t.Errorf("fn records for DupBox.Dup = %d, want 1", fnCounts["DupBox.Dup"])
 	}
-	for _, c := range got.Comptimes {
-		t.Errorf("source-phase Write emitted comptime record for %q", c.Object)
-	}
 	for _, c := range got.ConstFuncs {
 		if c.Object == "Gen" {
 			t.Errorf("writer emitted constfunc record for generic Gen")

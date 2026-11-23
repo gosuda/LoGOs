@@ -1214,8 +1214,6 @@ Instances MUST be memoized per type-argument list. [T-205]
 
 `logos eject` MUST print each instance that a package needs as a non-generic function `<f>_logosct<N>` in that package and MUST rename its call sites. An instance that names an unexported identifier, field, or method of another package MUST fail eject with `[comptime::unexported_in_exported]`. [T-205]
 
-An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
-
 A comptime generic MAY name the unexported package-level identifiers of its own package. Each instance MUST check them in the scope of the defining package. An unexported identifier of another package MUST stay refused. [T-205]
 
 An instantiation of such a generic in another package MUST build and run. The instance is compiled for the defining package, so it reaches those identifiers; the instantiating package never resolves them. [T-205]
