@@ -54,6 +54,7 @@ func TestMSAN(t *testing.T) {
 		{src: "msan7.go"},
 		{src: "msan8.go"},
 		{src: "msan_eq.go"},
+		{src: "msan_eq_fail.go", wantErr: true},
 		{src: "msan_fail.go", wantErr: true},
 	}
 	for _, tc := range cases {
