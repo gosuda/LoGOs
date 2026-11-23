@@ -222,6 +222,16 @@ func valueFlags(cmd *base.Command) func(name string) (takesValue, known bool) {
 	}
 }
 
+// wrapperOnlyFlag reports whether the flag is stripped before the child
+// runs, so the child scan never sees it.
+func wrapperOnlyFlag(name string) bool {
+	switch {
+	case name == "json-diagnostics", name == "fix", name == "ai-patch", name == "shake", durationFlags[name] != "":
+		return true
+	}
+	return false
+}
+
 // childArguments turns the arguments of `logos conc <verb>` into the
 // arguments of `logos <verb>`: it removes -json-diagnostics and the
 // duration flags, and adds the monitor tag to the build tags. It reads
@@ -289,12 +299,14 @@ func childArguments(verb string, args []string, flagValue func(string) (takesVal
 			inv.arguments = append(inv.arguments, arg)
 			continue
 		}
-		if verb == "test" {
-			// A flag ends any pending unknown-flag value: like the
-			// child scan, only a non-flag argument can be one.
+		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		if verb == "test" && !wrapperOnlyFlag(name) {
+			// A flag the child receives ends any pending unknown-flag
+			// value: like the child scan, only a non-flag argument can
+			// be one. Wrapper-only flags never reach the child, so they
+			// leave the lookahead alone.
 			afterFlagWithoutValue = false
 		}
-		name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
 		if name == "count" || name == "test.count" {
 			countSet = true
 		}
@@ -303,7 +315,7 @@ func childArguments(verb string, args []string, flagValue func(string) (takesVal
 		}
 		if verb == "test" && inPkgList {
 			switch {
-			case name == "json-diagnostics", name == "fix", name == "ai-patch", name == "shake", durationFlags[name] != "":
+			case wrapperOnlyFlag(name):
 				// Wrapper-only flags: dropped before the child runs, so the
 				// child never sees them and its package list stays open.
 				// Every other flag reaches the child (tags rewritten), so a
