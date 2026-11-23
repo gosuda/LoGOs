@@ -16,8 +16,10 @@ stdout '^describe-svc struct$'
 stdout '^describe-cfg struct$'
 stdout '^describe-int scalar$'
 stdout '^describe-off silent$'
+cp stdout $WORK/native-main.txt
 logos run ./names
 stdout '^\[Port secret\]$'
+cp stdout $WORK/native-names.txt
 
 # SPEC 2.5: each type-argument list compiles to one native instance in the
 # package that defines the generic; package main holds no copy.
@@ -29,12 +31,19 @@ stdout -count=2 ' T example\.com/wiretest/wire\.Labels\.logosct\.[0-9a-f]{64}$'
 stdout -count=3 ' T example\.com/wiretest/wire\.Describe\.logosct\.[0-9a-f]{64}$'
 ! stdout ' T main\..*logosct'
 
-# SPEC 2.5: eject prints the instance Autowire[wire.Config] in package main,
-# where it cannot set the unexported field secret, so eject refuses it.
-! logos eject -o $WORK/out
-stderr '^(\./)?wire/wire\.lgo:33:6: \[comptime::unexported_in_exported\] a comptime instance ejected into package main names unexported secret of package example\.com/wiretest/wire$'
+# SPEC 2.5: eject prints Autowire[wire.Config] once, in a generated file of
+# package wire, which can set the unexported field secret, so eject succeeds
+# and the ejected programs print what the native ones print.
+logos eject -o $WORK/out
 ! stderr 'internal compiler error'
-cd ..
+cd $WORK/out
+go run ./main
+cmp stdout $WORK/native-main.txt
+go run ./names
+cmp stdout $WORK/native-names.txt
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
 
 -- w/go.mod --
 module example.com/wiretest

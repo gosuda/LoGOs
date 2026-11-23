@@ -15,7 +15,7 @@ import (
 func TestCtEjectNameShape(t *testing.T) {
 	pkg := types2.NewPackage("example.com/p", "p")
 	obj := types2.NewFunc(syntax.Pos{}, pkg, "Autowire", nil)
-	names := ctEjectNames(map[string]*types2.Func{"id1": obj, "id0": obj})
+	names := ctEjectNames(map[string]*types2.Func{"id1": obj, "id0": obj}, nil)
 	if got, want := names["id0"], "Autowire_logosct0"; got != want {
 		t.Fatalf("ctEjectNames[id0] = %q, want %q", got, want)
 	}

@@ -1214,7 +1214,9 @@ A use of the switched type parameter inside a `const switch` case body MUST spel
 
 Instances MUST be memoized per type-argument list. [T-205]
 
-`logos eject` MUST print each instance that a package needs as a non-generic function `<f>_logosct<N>` in that package and MUST rename its call sites. An instance that names an unexported identifier, field, or method of another package MUST fail eject with `[comptime::unexported_in_exported]`. [T-205]
+`logos eject` MUST print an instance only one time, in a generated file of its defining package, as a non-generic function `<f>_logosct_<h>`, when all of these conditions are true. The defining package is not `main` and is not an external test package. The first element of its import path contains a dot, so it is not a standard-library package. Each named type in the type arguments is a package-level type of the defining package or an exported type of a package that the defining package imports. Each field and each method of a type literal in the type arguments is exported or belongs to the defining package. Each instance that the instance calls obeys this rule too. `h` is the first 12 hexadecimal digits of the instance ID, so each package that needs the instance prints the same file. [T-205]
+
+`logos eject` MUST print each other instance that a package needs as a non-generic function `<f>_logosct<N>` in that package. N counts the instances of one name that the package prints. `logos eject` MUST rename the call sites of all instances. An instance printed outside its defining package that names an unexported identifier, field, or method of another package MUST fail eject with `[comptime::unexported_in_exported]`. [T-205]
 
 A comptime generic MAY name the unexported package-level identifiers of its own package. Each instance MUST check them in the scope of the defining package. An unexported identifier of another package MUST stay refused. [T-205]
 

@@ -24,8 +24,10 @@ exists out/top/top.go
 ! grep '_logos_tparam' out/main/main.go
 # Forwarded instantiations share one copy per type-argument list:
 # Describe[probe] is reached directly and through two forwarding paths.
-grep -count=3 'func Describe_logosct' out/main/main.go
-grep -count=2 'func Wrap_logosct' out/main/main.go
+# SPEC 2.5: Describe[int], Describe[leaf.Fixed] and Wrap[int] name only
+# types their defining packages can name, so eject prints them there.
+grep -count=1 'func Describe_logosct' out/main/main.go
+grep -count=1 'func Wrap_logosct' out/main/main.go
 grep -count=1 'func Wrap2_logosct' out/main/main.go
 grep -count=1 'func WrapFixed_logosct' out/main/main.go
 

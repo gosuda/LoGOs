@@ -180,6 +180,7 @@ type packageLower struct {
 	tpkg               *types2.Package
 	siteSeq            int
 	ejectNames         map[string]string
+	ejectOwners        map[string]*types2.Package
 	constMaps          map[*types2.Const]*constMapGen
 	importedMaps       map[*types2.Var]*constMapGen
 	importedSeq        int

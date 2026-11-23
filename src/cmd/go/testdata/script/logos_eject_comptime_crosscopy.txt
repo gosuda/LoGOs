@@ -11,8 +11,10 @@ cp stdout $WORK/native.txt
 logos eject -o out
 exists out/main.go
 exists out/wire/wire.go
+# SPEC 2.5: Names[wire.Config] names only a type of wire, so eject prints it
+# once, in package wire; main prints only Names[Service].
 grep '^func Names_logosct' out/main.go
-grep -count=2 '^func .*_logosct[0-9][(]' out/main.go
+grep -count=1 '^func .*_logosct[0-9][(]' out/main.go
 ! grep 'Names_logosct[0-9][[]' out/main.go
 ! grep 'Names_logosct' out/wire/wire.go
 

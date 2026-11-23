@@ -175,6 +175,13 @@ func (fl *fileLower) emitOwnedRequest(owner, pkg, source string, decls []logosow
 	if base.LogosEject == "" {
 		return true
 	}
+	return emitOwnedSource(owner, pkg, ownedConstraintHeader(fl), source, decls)
+}
+
+// emitOwnedSource queues one generated file of package owner: cond is its
+// build-constraint text, and every owner import qualifier that source uses
+// gets its import line.
+func emitOwnedSource(owner, pkg, cond, source string, decls []logosowned.Declaration) bool {
 	if imports := ownedOwnerImports[owner]; len(imports) > 0 {
 		packageClause, rest, ok := strings.Cut(source, "\n")
 		if !ok {
@@ -202,7 +209,7 @@ func (fl *fileLower) emitOwnedRequest(owner, pkg, source string, decls []logosow
 		}
 		source = header.String() + rest
 	}
-	source = ownedConstraintHeader(fl) + source
+	source = cond + source
 	if ownedPendingSeen == nil {
 		ownedPendingSeen = make(map[string]bool)
 	}

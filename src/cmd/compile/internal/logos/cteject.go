@@ -16,18 +16,22 @@ import (
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
+	"cmd/internal/logosowned"
 )
 
-// ctEjectInfix joins a comptime generic's name and the per-package
-// sequence number of one of its instances in ejected source.
+// ctEjectInfix joins a comptime generic's name and the suffix that tells
+// its instances apart in ejected source (see ctEjectNames).
 const ctEjectInfix = "_logosct"
 
 var ctEjectBlanked map[*syntax.File]map[string]bool
 
 // ctEjectNames names every comptime instance of the compiled package for
-// logos eject: <origin>_logosct<N>, where N counts the instances of one
-// origin name in package path and instance id order.
-func ctEjectNames(origins map[string]*types2.Func) map[string]string {
+// logos eject. An instance printed in its defining package (owners) is
+// <origin>_logosct_<h>, h the first 12 hex digits of its instance ID, so
+// every package that needs it spells the same name. Any other instance is
+// <origin>_logosct<N>, where N counts the instances of one origin name that
+// the package prints, in package path and instance id order.
+func ctEjectNames(origins map[string]*types2.Func, owners map[string]*types2.Package) map[string]string {
 	ids := slices.Collect(maps.Keys(origins))
 	slices.SortFunc(ids, func(a, b string) int {
 		oa, ob := origins[a], origins[b]
@@ -37,6 +41,10 @@ func ctEjectNames(origins map[string]*types2.Func) map[string]string {
 	seq := make(map[string]int)
 	for _, id := range ids {
 		origin := origins[id].Name()
+		if owners[id] != nil {
+			names[id] = origin + ctEjectInfix + "_" + id[:min(len(id), 12)]
+			continue
+		}
 		names[id] = origin + ctEjectInfix + strconv.Itoa(seq[origin])
 		seq[origin]++
 	}
@@ -45,13 +53,157 @@ func ctEjectNames(origins map[string]*types2.Func) map[string]string {
 
 func (p *packageLower) ctEjectNames() map[string]string {
 	if p.ejectNames == nil {
-		origins := make(map[string]*types2.Func, len(p.info.LogosCtInst))
-		for _, inst := range p.info.LogosCtInst {
-			origins[inst.ID] = inst.Origin
-		}
-		p.ejectNames = ctEjectNames(origins)
+		recs := ctEjectRecords(p.info)
+		p.ejectOwners = ctEjectOwners(recs)
+		p.ejectNames = ctEjectNames(ctEjectOrigins(recs), p.ejectOwners)
 	}
 	return p.ejectNames
+}
+
+// ctEjectRecords returns the comptime instances of the package by instance
+// ID. The checked record wins over the prepared one, so the call-site
+// renames, made before preparation, and the printed instances decide names
+// and owners from the same records.
+func ctEjectRecords(info *types2.Info) map[string]*types2.LogosCtInst {
+	recs := make(map[string]*types2.LogosCtInst, len(info.LogosCtInst)+len(info.LogosCtPrepared))
+	for _, rec := range info.LogosCtPrepared {
+		recs[rec.ID] = rec
+	}
+	for _, rec := range info.LogosCtInst {
+		recs[rec.ID] = rec
+	}
+	return recs
+}
+
+func ctEjectOrigins(recs map[string]*types2.LogosCtInst) map[string]*types2.Func {
+	origins := make(map[string]*types2.Func, len(recs))
+	for id, rec := range recs {
+		origins[id] = rec.Origin
+	}
+	return origins
+}
+
+// ctEjectOwners returns, by instance ID, the defining package of every
+// instance that logos eject prints once, in that package: the package can
+// be imported, lies outside the standard library, and can name every type
+// argument, and every instance the instance calls is printed the same way.
+// The rule reads only the instance and the defining package's imports, so
+// every package that needs the instance decides it the same way.
+func ctEjectOwners(recs map[string]*types2.LogosCtInst) map[string]*types2.Package {
+	owners := make(map[string]*types2.Package)
+	for id, rec := range recs {
+		if ctEjectOwnable(rec) {
+			owners[id] = rec.Origin.Pkg()
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for id := range owners {
+			for _, child := range ctEjectChildren(recs[id], recs) {
+				if owners[child] == nil {
+					delete(owners, id)
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return owners
+}
+
+// ctEjectOwnable reports whether the defining package of rec can hold its
+// ejected text. Package main and external test packages cannot be
+// imported, and a standard-library package (an import path whose first
+// element has no dot) is not written by logos eject.
+func ctEjectOwnable(rec *types2.LogosCtInst) bool {
+	owner := rec.Origin.Pkg()
+	if owner == nil || owner.Name() == "main" || strings.HasSuffix(owner.Path(), "_test") {
+		return false
+	}
+	if first, _, _ := strings.Cut(owner.Path(), "/"); !strings.Contains(first, ".") {
+		return false
+	}
+	imported := map[string]bool{owner.Path(): true}
+	for _, imp := range owner.Imports() {
+		imported[imp.Path()] = true
+	}
+	for _, targ := range rec.Targs {
+		if !ctEjectNameable(targ, owner, imported) {
+			return false
+		}
+	}
+	return true
+}
+
+// ctEjectNameable reports whether package owner can spell t: each named
+// type in t is a package-level type of owner or an exported type of a
+// package owner imports, and each field or method of a type literal in t
+// is exported or belongs to owner.
+func ctEjectNameable(t types2.Type, owner *types2.Package, imported map[string]bool) bool {
+	member := func(obj types2.Object) bool {
+		return obj.Exported() || obj.Pkg() != nil && obj.Pkg().Path() == owner.Path()
+	}
+	typeName := func(obj *types2.TypeName, targs *types2.TypeList) bool {
+		if pkg := obj.Pkg(); pkg != nil {
+			if pkg.Scope().Lookup(obj.Name()) != obj || pkg.Path() != owner.Path() && (!obj.Exported() || !imported[pkg.Path()]) {
+				return false
+			}
+		}
+		for i := range targs.Len() {
+			if !ctEjectNameable(targs.At(i), owner, imported) {
+				return false
+			}
+		}
+		return true
+	}
+	vars := func(tuple *types2.Tuple) bool {
+		for i := range tuple.Len() {
+			if !ctEjectNameable(tuple.At(i).Type(), owner, imported) {
+				return false
+			}
+		}
+		return true
+	}
+	switch t := t.(type) {
+	case *types2.Basic:
+		return true
+	case *types2.Named:
+		return typeName(t.Obj(), t.TypeArgs())
+	case *types2.Alias:
+		return typeName(t.Obj(), t.TypeArgs())
+	case *types2.Pointer:
+		return ctEjectNameable(t.Elem(), owner, imported)
+	case *types2.Slice:
+		return ctEjectNameable(t.Elem(), owner, imported)
+	case *types2.Array:
+		return ctEjectNameable(t.Elem(), owner, imported)
+	case *types2.Chan:
+		return ctEjectNameable(t.Elem(), owner, imported)
+	case *types2.Map:
+		return ctEjectNameable(t.Key(), owner, imported) && ctEjectNameable(t.Elem(), owner, imported)
+	case *types2.Signature:
+		return vars(t.Params()) && vars(t.Results())
+	case *types2.Struct:
+		for i := range t.NumFields() {
+			if f := t.Field(i); !member(f) || !ctEjectNameable(f.Type(), owner, imported) {
+				return false
+			}
+		}
+		return true
+	case *types2.Interface:
+		for i := range t.NumExplicitMethods() {
+			if m := t.ExplicitMethod(i); !member(m) || !ctEjectNameable(m.Type(), owner, imported) {
+				return false
+			}
+		}
+		for i := range t.NumEmbeddeds() {
+			if !ctEjectNameable(t.EmbeddedType(i), owner, imported) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // ejectCtSites renames, in the ejected text only, every call site of a
@@ -70,26 +222,40 @@ func (fl *fileLower) ejectCtSites() {
 	})
 }
 
-// ejectCtSite renames one keyed site, with its qualifier and type
-// arguments, to the ejected name of its instance in the ejected text.
+// ejectCtSite renames one keyed site, with its type arguments, to the
+// ejected name of its instance in the ejected text. The site loses its
+// qualifier unless the instance is printed in its defining package.
 func (fl *fileLower) ejectCtSite(name *syntax.Name, parents map[syntax.Node]syntax.Node) {
-	eject, ok := fl.pkg.ctEjectNames()[fl.pkg.info.LogosCtSiteKeys[name]]
+	id := fl.pkg.info.LogosCtSiteKeys[name]
+	eject, ok := fl.pkg.ctEjectNames()[id]
 	if !ok {
 		return
 	}
+	owned := fl.pkg.ejectOwners[id] != nil
 	var site syntax.Expr = name
+	replaced := []syntax.Node{name}
 	if sel, ok := parents[site].(*syntax.SelectorExpr); ok && sel.Sel == name {
 		site = sel
+		if !owned {
+			replaced = []syntax.Node{sel}
+		}
 	}
 	if index, ok := parents[site].(*syntax.IndexExpr); ok && index.X == site {
 		site = index
+		if owned {
+			replaced = append(replaced, index.Index)
+		} else {
+			replaced = []syntax.Node{index}
+		}
 	}
 	ctx := cfCtx{buf: fl.srcMap, starts: fl.start}
-	fl.add(offAt(fl.start, syntax.StartPos(site)), cfExactEnd(ctx, site), eject)
+	fl.add(offAt(fl.start, syntax.StartPos(replaced[0])), cfExactEnd(ctx, site), eject)
 	if fl.ejectSites == nil {
 		fl.ejectSites = make(map[syntax.Node]bool)
 	}
-	fl.ejectSites[site] = true
+	for _, n := range replaced {
+		fl.ejectSites[n] = true
+	}
 	fl.changed = true
 }
 
@@ -112,20 +278,22 @@ func (fl *fileLower) ejectBlankImport(imp *syntax.ImportDecl) {
 }
 
 // EjectCtInstances appends to edits the ejected source of every checked
-// comptime instance of the package. An instance is printed as plain Go in
-// the file of its first call site, non-test files first; an instance that
-// only another instance calls joins the file of its caller. Names of the
-// defining package are qualified through an import of that package, so an
-// instance that names an unexported declaration of another package cannot
-// be ejected.
+// comptime instance of the package. An instance whose defining package can
+// hold it (ctEjectOwners) is printed once, in a generated file of that
+// package, through the owned-request transport. Any other instance is
+// printed as plain Go in the file of its first call site, non-test files
+// first; an instance that only another instance calls joins the file of its
+// caller. Names of the defining package are qualified through an import of
+// that package, so such an instance that names an unexported declaration of
+// another package cannot be ejected.
 func EjectCtInstances(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map[*syntax.File][]byte, edits map[*syntax.File][]Edit) error {
+	recs := ctEjectRecords(info)
+	owners := ctEjectOwners(recs)
+	names := ctEjectNames(ctEjectOrigins(recs), owners)
 	byID := make(map[string]*types2.LogosCtInst, len(info.LogosCtPrepared))
-	origins := make(map[string]*types2.Func, len(info.LogosCtPrepared))
 	for _, rec := range info.LogosCtPrepared {
 		byID[rec.ID] = rec
-		origins[rec.ID] = rec.Origin
 	}
-	names := ctEjectNames(origins)
 	sites := ctEjectTraceSites(files)
 	order := make([]*syntax.File, 0, len(files))
 	for _, file := range files {
@@ -139,19 +307,49 @@ func EjectCtInstances(pkg *types2.Package, info *types2.Info, files []*syntax.Fi
 	slices.SortStableFunc(order, func(a, b *syntax.File) int {
 		return cmp.Compare(ctEjectTestRank(a), ctEjectTestRank(b))
 	})
-	for _, file := range order {
-		ids := ctEjectPlaced(file, order, info.LogosCtSiteKeys, byID)
-		if len(ids) == 0 {
+	placed, owned := ctEjectPlace(order, info.LogosCtSiteKeys, byID, owners)
+	for i, file := range order {
+		if len(placed[i]) == 0 {
 			continue
 		}
-		p := newCtEjectPrinter(pkg, info, file, names)
+		p := newCtEjectPrinter(pkg, info, file, names, owners)
 		p.sites = sites
-		for _, id := range ids {
+		for _, id := range placed[i] {
 			if err := p.instance(byID[id]); err != nil {
 				return err
 			}
 		}
 		edits[file] = append(edits[file], p.edits(src[file])...)
+	}
+	for _, id := range owned {
+		if err := ctEjectOwned(byID[id], names, owners, sites); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ctEjectOwned prints rec in its defining package as one generated file,
+// requested through the owned-request transport. The text depends only on
+// the instance, so the requests of every package that needs it carry the
+// same source and merge into one file.
+func ctEjectOwned(rec *types2.LogosCtInst, names map[string]string, owners map[string]*types2.Package, sites map[string]*syntax.VarDecl) error {
+	owner := rec.Origin.Pkg()
+	p := &ctEjectPrinter{consumer: owner, names: names, owners: owners, imports: make(map[string]string), taken: make(map[string]bool), sites: sites}
+	if err := p.instance(rec); err != nil {
+		return err
+	}
+	decls, ok := ownedDeclsForTypes(rec.Targs...)
+	if !ok {
+		decls = []logosowned.Declaration{}
+	}
+	if fb := rec.Origin.Pos().FileBase(); fb != nil {
+		if file := ownedDeclBasename(fb.Filename()); file != "" && file != "." && file != ".." {
+			decls = append(decls, logosowned.Declaration{Owner: owner.Path(), File: file})
+		}
+	}
+	if !emitOwnedSource(owner.Path(), owner.Name(), "", "package "+owner.Name()+"\n"+p.text.String()+"\n", decls) {
+		return fmt.Errorf("ejected comptime instance %s has no package clause", names[rec.ID])
 	}
 	return nil
 }
@@ -164,9 +362,10 @@ func ctEjectTestRank(file *syntax.File) int {
 	return 0
 }
 
-// ctEjectPlaced returns the instances printed in file, in breadth-first
-// order from the file's own call sites.
-func ctEjectPlaced(file *syntax.File, order []*syntax.File, keys map[*syntax.Name]string, byID map[string]*types2.LogosCtInst) []string {
+// ctEjectPlace returns, per file of order, the instances printed in that
+// file, in breadth-first order from the file's own call sites, and the
+// instances printed in their defining package.
+func ctEjectPlace(order []*syntax.File, keys map[*syntax.Name]string, byID map[string]*types2.LogosCtInst, owners map[string]*types2.Package) ([][]string, []string) {
 	rank := make(map[*syntax.PosBase]int, len(order))
 	for i, f := range order {
 		rank[f.Pos().FileBase()] = i
@@ -181,8 +380,9 @@ func ctEjectPlaced(file *syntax.File, order []*syntax.File, keys map[*syntax.Nam
 		}
 	}
 	seen := make(map[string]bool)
-	var mine []string
-	for i, f := range order {
+	placed := make([][]string, len(order))
+	var owned []string
+	for i := range order {
 		sites := roots[i]
 		slices.SortFunc(sites, func(a, b *syntax.Name) int { return a.Pos().Cmp(b.Pos()) })
 		queue := make([]string, 0, len(sites))
@@ -196,13 +396,15 @@ func ctEjectPlaced(file *syntax.File, order []*syntax.File, keys map[*syntax.Nam
 				continue
 			}
 			seen[id] = true
-			if f == file {
-				mine = append(mine, id)
+			if owners[id] != nil {
+				owned = append(owned, id)
+			} else {
+				placed[i] = append(placed[i], id)
 			}
 			queue = append(queue, ctEjectChildren(byID[id], byID)...)
 		}
 	}
-	return mine
+	return placed, owned
 }
 
 func ctEjectChildren(rec *types2.LogosCtInst, byID map[string]*types2.LogosCtInst) []string {
@@ -222,10 +424,15 @@ func ctEjectChildren(rec *types2.LogosCtInst, byID map[string]*types2.LogosCtIns
 	return ids
 }
 
+// ctEjectPrinter prints instances into one file of the consumer package,
+// or, with no file, into a generated file of the defining package
+// (consumer), where every other package is named through its owner
+// import qualifier.
 type ctEjectPrinter struct {
 	consumer *types2.Package
 	file     *syntax.File
 	names    map[string]string
+	owners   map[string]*types2.Package
 	imports  map[string]string
 	taken    map[string]bool
 	locals   map[string]bool
@@ -243,8 +450,8 @@ type ctEjectImport struct {
 	name, path string
 }
 
-func newCtEjectPrinter(consumer *types2.Package, info *types2.Info, file *syntax.File, names map[string]string) *ctEjectPrinter {
-	p := &ctEjectPrinter{consumer: consumer, file: file, names: names, imports: make(map[string]string), taken: make(map[string]bool)}
+func newCtEjectPrinter(consumer *types2.Package, info *types2.Info, file *syntax.File, names map[string]string, owners map[string]*types2.Package) *ctEjectPrinter {
+	p := &ctEjectPrinter{consumer: consumer, file: file, names: names, owners: owners, imports: make(map[string]string), taken: make(map[string]bool)}
 	blanked := ctEjectBlanked[file]
 	for _, decl := range file.DeclList {
 		imp, ok := decl.(*syntax.ImportDecl)
@@ -273,6 +480,9 @@ func newCtEjectPrinter(consumer *types2.Package, info *types2.Info, file *syntax
 }
 
 func (p *ctEjectPrinter) alias(pkg *types2.Package) string {
+	if p.file == nil {
+		return ownedOwnerImport(p.consumer.Path(), pkg.Path())
+	}
 	if name, ok := p.imports[pkg.Path()]; ok && !p.locals[name] {
 		return name
 	}
@@ -291,6 +501,21 @@ func (p *ctEjectPrinter) qualify(pkg *types2.Package) string {
 		return ""
 	}
 	return p.alias(pkg)
+}
+
+// instName returns the ejected spelling of a call of instance id, or false
+// when the package does not name that instance.
+func (p *ctEjectPrinter) instName(id string) (string, bool) {
+	name, ok := p.names[id]
+	if !ok {
+		return "", false
+	}
+	if owner := p.owners[id]; owner != nil {
+		if q := p.qualify(owner); q != "" {
+			return q + "." + name, true
+		}
+	}
+	return name, true
 }
 
 type ctEjectSlot struct {
@@ -337,12 +562,14 @@ func (p *ctEjectPrinter) instance(rec *types2.LogosCtInst) (err error) {
 			return
 		}
 		if id := ctEjectSiteID(e, facts); id != "" {
-			if name, ok := p.names[id]; ok {
+			if name, ok := p.instName(id); ok {
 				slots = append(slots, ctEjectSlot{slot, reflect.ValueOf(slot.Interface())})
 				slot.Set(reflect.ValueOf(syntax.NewName(e.Pos(), name)))
 			}
 		}
 	}
+	p.locals = ctEjectLocals(roots, facts)
+	defer func() { p.locals, p.boxed = nil, nil }()
 	renames := make(map[types2.Object]string)
 	if obj := facts.Defs[rec.Decl.Name]; obj != nil {
 		renames[obj] = own
@@ -386,8 +613,6 @@ func (p *ctEjectPrinter) instance(rec *types2.LogosCtInst) (err error) {
 			p.boxed[facts.Defs[d.NameList[0]]] = true
 		}
 	}
-	p.locals = ctEjectLocals(roots, facts)
-	defer func() { p.locals, p.boxed = nil, nil }()
 	sels := make(map[*syntax.Name]bool)
 	for _, root := range roots {
 		syntax.Inspect(root, func(n syntax.Node) bool {
