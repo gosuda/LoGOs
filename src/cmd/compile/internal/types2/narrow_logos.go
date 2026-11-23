@@ -2474,6 +2474,9 @@ func (p *logosEFPass) carveStep(ks *logosEFState, s syntax.Stmt) (*logosEFState,
 			if !p.quietExpr(r) {
 				return ks, false
 			}
+			if p.platformChecked(r) {
+				return ks, false
+			}
 		}
 		for _, l := range lhs {
 			if !p.quietDest(l) {
@@ -2493,6 +2496,9 @@ func (p *logosEFPass) carveStep(ks *logosEFState, s syntax.Stmt) (*logosEFState,
 			if vd.Values != nil {
 				for _, r := range syntax.UnpackListExpr(vd.Values) {
 					if !p.quietExpr(r) {
+						return ks, false
+					}
+					if p.platformChecked(r) {
 						return ks, false
 					}
 				}
@@ -2540,6 +2546,18 @@ func (p *logosEFPass) quietDest(l syntax.Expr) bool {
 		return p.quietDest(l.X)
 	}
 	return false
+}
+
+// platformChecked reports whether e is the recorded source of a MustNonNil
+// store: the lowering wraps it in a check that can panic, so the scan stops
+// before it instead of folding past it.
+func (p *logosEFPass) platformChecked(e syntax.Expr) bool {
+	info := p.check.Info
+	if info == nil || len(info.LogosChecks) == 0 {
+		return false
+	}
+	_, ok := info.LogosChecks[syntax.Unparen(e)]
+	return ok
 }
 
 // carveDrop drops the entries a quiet write overwrites, mirroring dropDest

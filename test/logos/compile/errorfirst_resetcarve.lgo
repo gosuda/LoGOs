@@ -1,0 +1,115 @@
+// errorcheck
+
+package p
+
+import "flag"
+
+type efrcHeld struct {
+	stats int
+	err   error
+}
+
+func efrcFetch() (int, error) {
+	return 1, nil
+}
+
+func efrcFetchHeld() (int, error) {
+	return 1, nil
+}
+
+type efrcPair struct {
+	X int
+	Y int
+}
+
+func efrcFetchPair() (efrcPair, error) {
+	return efrcPair{X: 1, Y: -1}, nil
+}
+
+func efrcUsePair(p efrcPair) {}
+
+// A MustNonNil store between the defer and the reset can panic and run the
+// deferred body before the reset executes, so the carve stops before it.
+func efrcResetAfterPlatformStore() {
+	missing := flag.Lookup("no-such-flag-efrc")
+	n, err := efrcFetch()
+	defer func() {
+		println(n) // ERROR "result_before_error_check"
+	}()
+	var f *flag.Flag = missing
+	n = 0
+	_, _ = f, err
+}
+
+// A reset before the platform-checked store does not save the carve either:
+// the remainder still holds the checking store.
+func efrcResetBeforePlatformStore() {
+	missing := flag.Lookup("no-such-flag-efrc")
+	n, err := efrcFetch()
+	defer func() {
+		println(n) // ERROR "result_before_error_check"
+	}()
+	n = 0
+	var f *flag.Flag = missing
+	_, _ = f, err
+}
+
+// Thread 11 probe: explicit return forwards into named results.
+func efrcProbeNamedReturn() (n int, err error) {
+	n, err = efrcFetch()
+	m, otherErr := efrcFetch()
+	defer func() {
+		println(n)
+	}()
+	n = 0
+	return m, otherErr
+}
+
+// Thread 11 control: unnamed results, return cannot overwrite.
+func efrcProbeUnnamedReturn() (int, error) {
+	n, err := efrcFetch()
+	defer func() {
+		println(n)
+	}()
+	n = 0
+	return n, err
+}
+
+// Thread 12 probe A: exact thread example, no outer store.
+func efrcProbeNestedA(c bool) error {
+	h := efrcHeld{}
+	g := func() { h.stats, h.err = efrcFetchHeld() }
+	if c {
+		defer func() {
+			println(h.stats)
+		}()
+		h.stats = 0
+	}
+	g()
+	return h.err
+}
+
+// Thread 12 probe B: outer store plus nested defer and reset.
+func efrcProbeNestedB(c bool) error {
+	h := efrcHeld{}
+	h.stats, h.err = efrcFetchHeld()
+	g := func() { h.stats, h.err = efrcFetchHeld() }
+	if c {
+		defer func() {
+			println(h.stats)
+		}()
+		h.stats = 0
+	}
+	g()
+	return h.err
+}
+
+// Thread 13 probe: partial reset, whole-value read.
+func efrcProbePartial() {
+	p, err := efrcFetchPair()
+	defer func() {
+		efrcUsePair(p)
+	}()
+	p.X = 0
+	_ = err
+}
