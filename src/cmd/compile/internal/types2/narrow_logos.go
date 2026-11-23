@@ -1633,6 +1633,16 @@ func (p *logosEFPass) collectAssigns() {
 			if n.Values != nil {
 				names := logosEFNames(n)
 				note(names, syntax.UnpackListExpr(n.Values), true)
+				break
+			}
+			// A declaration without values assigns nothing, but it still
+			// declares the names in this body: a later assignment is the
+			// only write the inventory can see, so the Go-origin proof
+			// keeps working for `var f T` followed by `f = g`.
+			for _, id := range n.NameList {
+				if v, _ := p.check.Defs[id].(*Var); v != nil {
+					p.initialized[v] = true
+				}
 			}
 		case *syntax.RangeClause:
 			note(syntax.UnpackListExpr(n.Lhs), nil, false)

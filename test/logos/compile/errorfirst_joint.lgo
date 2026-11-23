@@ -1603,3 +1603,22 @@ func efLocalGoParser(input string) {
 	n, err := parse(input)
 	println(err, n)
 }
+
+// A variable declared without values still starts in this body, so a
+// single Go assignment keeps the Go contract.
+func efLocalNoInitParser(input string) {
+	var parse func(string) (int, error)
+	parse = strconv.Atoi
+	n, err := parse(input)
+	println(err, n)
+}
+
+// A LoGOs assignment to such a variable still needs the check: the
+// declaration form must not widen the contract.
+func efLocalNoInitLogosParser(input string) {
+	var parse func(string) (int, error)
+	parse = efParseLogos
+	n, err := parse(input)
+	println(n) // ERROR "result_before_error_check"
+	_ = err
+}
