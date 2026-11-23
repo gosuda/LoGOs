@@ -10,6 +10,10 @@ import (
 	"sync/atomic"
 )
 
+// maxKernelReps bounds the repeats of one vector kernel while waiting for
+// the requested collection to complete inside it.
+const maxKernelReps = 1024
+
 func inputValue(i int, seed uint64) uint64 {
 	return uint64(i)*0x9e3779b97f4a7c15 ^ seed
 }
@@ -42,10 +46,20 @@ func gcMap(n int, sequence uint64, request, completed *atomic.Uint64) ([]uint64,
 	}
 	k := sequence * 0xd1b54a32d192ed03
 	request.Store(sequence)
-	for i := range dst {
-		x, y := a[i], b[i]
-		s := x + k
-		dst[i] = (s ^ (y - k)) + (s & (x | y))
+	// Repeat the vector kernel until the requested collection is observed
+	// inside it. One pass outruns a full collection cycle on a fast
+	// machine, so a single pass flakes by wall clock; repeats keep the
+	// same property (a collection strictly inside kernel execution) while
+	// the cap bounds a kernel that lost its reschedule check.
+	for rep := 0; rep < maxKernelReps; rep++ {
+		for i := range dst {
+			x, y := a[i], b[i]
+			s := x + k
+			dst[i] = (s ^ (y - k)) + (s & (x | y))
+		}
+		if completed.Load() == sequence {
+			break
+		}
 	}
 	return backing, completed.Load() == sequence
 }
