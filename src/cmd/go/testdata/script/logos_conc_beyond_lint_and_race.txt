@@ -20,7 +20,7 @@ logos lint ./order
 [race] [cgo] stdout '^ok '
 ! logos conc test -count=1 ./order
 stdout '^ok '
-stderr '\[conc::lock_order_inversion\] two goroutines take the same two Locked values in opposite orders; when both run at once, each waits for the other'
+stdout '\[conc::lock_order_inversion\] two goroutines take the same two Locked values in opposite orders; when both run at once, each waits for the other'
 
 # --- conc::lock_held_long ---
 # A slow call inside a WithLock callback while another goroutine waits.
@@ -30,7 +30,7 @@ logos lint ./hold
 [race] [cgo] stdout '^ok '
 ! logos conc test -hold=50ms -count=1 ./hold
 stdout '^ok '
-stderr '\[conc::lock_held_long\] a goroutine held a Locked value for .* while another goroutine waited for it; the limit is 50ms'
+stdout '\[conc::lock_held_long\] a goroutine held a Locked value for .* while another goroutine waited for it; the limit is 50ms'
 
 # --- conc::group_child_stalled ---
 # A child that ignores its context still sleeps after the group fails.
@@ -40,7 +40,7 @@ logos lint ./stall
 [race] [cgo] stdout '^ok '
 ! logos conc test -stall=200ms -count=1 ./stall
 stdout '^ok '
-stderr '\[conc::group_child_stalled\] a group child did not return within 200ms after its group was cancelled; the group cannot join before the child returns'
+stdout '\[conc::group_child_stalled\] a group child did not return within 200ms after its group was cancelled; the group cannot join before the child returns'
 
 # --- conc::group_unbounded ---
 # A group without a limit runs 10000 children at one time.
@@ -50,7 +50,7 @@ logos lint ./growth
 [race] [cgo] stdout '^ok '
 ! logos conc test -count=1 ./growth
 stdout '^ok '
-stderr '\[conc::group_unbounded\] a group without a limit runs 10000 children at one time; the count follows the work the program gives the group'
+stdout '\[conc::group_unbounded\] a group without a limit runs 10000 children at one time; the count follows the work the program gives the group'
 
 # --- conc::goroutine_leak ---
 # A goroutine of a Go helper package waits on a channel nothing holds,
@@ -61,7 +61,7 @@ logos lint ./leak
 [race] [cgo] stdout '^ok '
 ! logos conc test -count=1 ./leak
 stdout '^ok '
-stderr '\[conc::goroutine_leak\] a goroutine waits, and no goroutine that can run reaches what it waits for; it never ends'
+stdout '\[conc::goroutine_leak\] a goroutine waits, and no goroutine that can run reaches what it waits for; it never ends'
 
 # --- schedule fault under -shake ---
 # One thread only: the fault is the order the spawns give, and stealing
@@ -79,6 +79,7 @@ logos lint ./sched
 logos conc test -count=1 ./sched
 stdout '^ok '
 ! stderr .
+! stdout 'conc::'
 
 # With seed 1 the lock taker yields and the direct child sends first,
 # so the test fails. The command prints the seed that replays it.

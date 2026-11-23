@@ -19,7 +19,7 @@ LoGOs runs goroutines inside `go group` blocks. Shared state lives in `logos/syn
 3. Run `logos lint` and `logos test -race` first. `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH.
 4. Run the program under the monitor only when it is lint-clean and race-clean.
 5. Use `logos conc run` for a program and `logos conc test` for tests.
-6. Read each finding on standard error while the child still runs.
+6. Read each finding on standard output while the child still runs. Under `--json-diagnostics`, read the records on standard error.
 7. Repair the named position, then rerun without `conc` to confirm the behavior.
 8. Retry a shake failure with the printed seed to shake the run again. The seed fixes the yield counts, not the exact goroutine schedule, so treat a rerun as a retry, not an exact replay.
 
@@ -148,13 +148,19 @@ logos conc test -shake -count=1 ./ord
 
 Expect exit 1 for the test: the order flips and the test fails. Expect exit 1 for the run: the program prints the flipped order and `logos run` reports `exit status 2`. Expect exit 0 or 1 for the bare seed: the drawn order decides. Every one prints its `shake seed` line on standard error.
 
-Pass `--json-diagnostics` to print each finding as one JSON object per line in the `logos lint --json-diagnostics` schema. Expect the `note` field to hold the position lines and the fix line. Expect tab-separated text output otherwise. Apply every repair by hand. This revision offers no `--fix` flag.
+Pass `--json-diagnostics` to print each finding as one JSON object per line on standard error, in the `logos lint --json-diagnostics` schema. Expect the `note` field to hold the position lines and the fix line. Expect the tab-separated text form on standard output otherwise.
+
+Pass `--fix` to rewrite a stalled child that waits on a plain receive in a function that takes a context: the line becomes a select on the receive and the context. Pass `--ai-patch` instead to print that edit as one JSON object per line on standard output without changing files. Repair every other finding by hand.
+
+Expect review output on standard output: the text findings and the `--ai-patch` edits. Under `logos conc test -json`, standard output is the test2json stream, and each line of review output arrives as one event with `"Action":"output"`. The `logos conc: fixed` lines of `--fix` and the `shake seed` line stay on standard error.
 
 ```sh
 logos conc run --json-diagnostics ./opposite
+logos conc test -json --json-diagnostics ./opposite
+logos conc test -json ./opposite
 ```
 
-Expect exit 1 with one JSON object on standard error.
+Expect exit 1 for each. Expect one JSON object on standard error for the first two. Expect the test2json stream on standard output for the last two; in the last one, the lines of the text finding arrive as its `output` events, and standard error stays empty.
 
 ## Read exit codes
 
