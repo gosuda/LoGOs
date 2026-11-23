@@ -257,14 +257,13 @@ func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp st
 }
 
 // spelledTypeShadowed reports whether declaring a variable with the
-// spelling of typ at pos would resolve a bare type name to a different
+// spelling of typ at pos would resolve a name to a different
 // declaration than the checked type names: a function-local type,
 // const, or variable in scope at pos shadows the package-level or
-// universe name the spelling uses. Qualified names keep an import
-// qualifier owned by generated import machinery, so only bare
-// spellings (the current package and the universe) are checked.
-// Anything the walk cannot prove unshadowed falls back to inference,
-// which keeps the value's own type.
+// universe name the spelling uses, or a local shadows the import
+// qualifier the spelling reuses. Anything the walk cannot prove
+// unshadowed falls back to inference, which keeps the value's own
+// type.
 func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 	scope := fl.sortedScopeAt(pos)
 	if scope == nil {
@@ -276,11 +275,14 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 	// to obj. LookupParent walks the enclosing scopes, so a
 	// function-local type, const, or variable reports its own object
 	// instead of the package-level or universe name the spelling uses.
-	// Qualified names keep an import qualifier owned by generated import
-	// machinery, so only bare spellings (the current package and the
-	// universe) are checked. Anything the walk cannot prove unshadowed,
-	// including a name that resolves nowhere, falls back to inference,
-	// which keeps the value's own type.
+	// Anything the walk cannot prove unshadowed, including a name that
+	// resolves nowhere, falls back to inference, which keeps the
+	// value's own type.
+	// qualified reports whether spelling the qualifier spellTypeBoth
+	// recorded for path at pos resolves to that import. synthQualifier
+	// reuses an existing import alias, so a function parameter or local
+	// with the same name shadows the qualifier and the spelling names
+	// the wrong declaration.
 	bare := func(name string, obj *types2.TypeName) {
 		if shadowed {
 			return
@@ -293,6 +295,28 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 			return
 		}
 		if got := scope.LookupParent(name, pos); got != types2.Object(obj) {
+			shadowed = true
+		}
+	}
+	qualified := func(path string) {
+		if shadowed {
+			return
+		}
+		if fl.genImps == nil {
+			shadowed = true
+			return
+		}
+		q := fl.genImps.qual[path]
+		if q == "" {
+			shadowed = true
+			return
+		}
+		got := scope.LookupParent(q, pos)
+		if got == nil {
+			return
+		}
+		pn, ok := got.(*types2.PkgName)
+		if !ok || pn.Imported() == nil || pn.Imported().Path() != path {
 			shadowed = true
 		}
 	}
@@ -321,7 +345,11 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 		case *types2.TypeParam:
 			bare(t.Obj().Name(), t.Obj())
 		case *types2.Alias:
-			bare(t.Obj().Name(), t.Obj())
+			if pkg := t.Obj().Pkg(); pkg != nil && pkg != self {
+				qualified(pkg.Path())
+			} else {
+				bare(t.Obj().Name(), t.Obj())
+			}
 			if args := t.TypeArgs(); args != nil {
 				for i := range args.Len() {
 					walk(args.At(i))
@@ -344,7 +372,11 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 		case *types2.Tuple:
 			walkTuple(t)
 		case *types2.Named:
-			bare(t.Obj().Name(), t.Obj())
+			if pkg := t.Obj().Pkg(); pkg != nil && pkg != self {
+				qualified(pkg.Path())
+			} else {
+				bare(t.Obj().Name(), t.Obj())
+			}
 			if args := t.TypeArgs(); args != nil {
 				for i := range args.Len() {
 					walk(args.At(i))
@@ -358,8 +390,16 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 				walk(t.EmbeddedType(i))
 			}
 		case *types2.Struct:
+			// A struct spelling lists its fields structurally, so an
+			// unexported field from another package cannot be spelled:
+			// the field's identity includes its declaring package.
 			for i := range t.NumFields() {
-				walk(t.Field(i).Type())
+				f := t.Field(i)
+				if !f.Exported() && f.Pkg() != self {
+					shadowed = true
+					return
+				}
+				walk(f.Type())
 			}
 		}
 	}
