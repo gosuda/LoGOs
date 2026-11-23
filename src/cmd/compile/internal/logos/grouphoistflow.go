@@ -246,10 +246,10 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp string, valText otext, chType types2.Type) ([]syntax.Stmt, []otext) {
 	fallback := func() ([]syntax.Stmt, []otext) {
 		return []syntax.Stmt{
-				defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
-			}, []otext{
-				cat(gen(valTmp+" := "), valText),
-			}
+			defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
+		}, []otext{
+			cat(gen(valTmp+" := "), valText),
+		}
 	}
 	// The caller reads the channel type before slotsThrough runs: by now
 	// s.Chan may be a fresh snapshot name with no checked type. A type
@@ -276,12 +276,12 @@ func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp st
 		return fallback()
 	}
 	return []syntax.Stmt{
-			typedVarDecl(pos, nameOf(pos, valTmp), elemNative),
-			assignOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
-		}, []otext{
-			gen("var " + valTmp + " " + elemSpelled),
-			cat(gen(valTmp+" = "), valText),
-		}
+		typedVarDecl(pos, nameOf(pos, valTmp), elemNative),
+		assignOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
+	}, []otext{
+		gen("var " + valTmp + " " + elemSpelled),
+		cat(gen(valTmp+" = "), valText),
+	}
 }
 
 // spelledTypeShadowed reports whether declaring a variable with the
