@@ -2754,7 +2754,7 @@ Anchor: Tony Hoare, Claude Shannon
 
 Anchor: Christopher Alexander, Kenya Hara
 
-Notes (m10): a module with a nonstandard outside dependency needs that dependency present through the existing `replace`; `logos next` does not fetch it. `logos next --fix` saves the files of each filesystem `replace` target with the module snapshot, builds the preflight against that saved copy, and compares the target again before it prints the patch; a target entry that is not a regular file refuses the conversion.
+Notes (m10): a module with a nonstandard outside dependency needs that dependency present through the existing `replace`; `logos next` does not fetch it. `logos next --fix` saves the files of each filesystem `replace` target with the module snapshot, builds the preflight against that saved copy, and compares the target again before it prints the patch; a target entry that is not a regular file refuses the conversion. The saved copy of one target holds at most 20000 files and 64 MiB of file bytes: the file that would pass either cap refuses the conversion before it is read, and the refusal names the `replace` path and the cap (`logos_next_replace_cap.txt`).
 
 ### M10-S1 `logos next`
 Anchor: Christopher Alexander, Tony Hoare
@@ -4969,4 +4969,4 @@ Anchor: Tony Hoare
 
 Anchor: Christopher Alexander, Kenya Hara
 
-Notes (m10): a module with a nonstandard outside dependency needs that dependency present through the existing `replace`; `logos next` does not fetch it. `logos next --fix` saves the files of each filesystem `replace` target with the module snapshot, builds the preflight against that saved copy, and compares the target again before it prints the patch; a target entry that is not a regular file refuses the conversion.
+Notes (m10): a module with a nonstandard outside dependency needs that dependency present through the existing `replace`; `logos next` does not fetch it. `logos next --fix` saves the files of each filesystem `replace` target with the module snapshot, builds the preflight against that saved copy, and compares the target again before it prints the patch; a target entry that is not a regular file refuses the conversion. The saved copy of one target holds at most 20000 files and 64 MiB of file bytes: the file that would pass either cap refuses the conversion before it is read, and the refusal names the `replace` path and the cap (`logos_next_replace_cap.txt`).

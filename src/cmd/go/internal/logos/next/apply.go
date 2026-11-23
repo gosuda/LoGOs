@@ -40,6 +40,14 @@ var moduleMetadata = [...]string{"go.mod", "go.sum", "logos.toml"}
 // replacements. The leading dot keeps the copies out of the staged ./....
 const replacementDir = ".logos-next-replace"
 
+// replacementFileCap and replacementByteCap bound the saved copy of one
+// filesystem replacement, so a target such as /, $HOME, or a tree that holds
+// node_modules is refused before its files are read into memory.
+const (
+	replacementFileCap = 20000
+	replacementByteCap = 64 << 20
+)
+
 func checkFixContext(moddir string) error {
 	var staged []string
 	for _, flag := range base.GOFLAGS() {
@@ -474,11 +482,7 @@ func (s *moduleSnapshot) freezeModuleReplacements(moddir string) error {
 		if replace.New.Version != "" {
 			continue
 		}
-		dir := replace.New.Path
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(moddir, dir)
-		}
-		files, err := captureReplacement(dir)
+		files, err := captureReplacement(moddir, replace.New.Path)
 		if err != nil {
 			return fmt.Errorf("local replacement %s: %w", replace.Old.Path, err)
 		}
@@ -497,24 +501,52 @@ func (s *moduleSnapshot) freezeModuleReplacements(moddir string) error {
 	return nil
 }
 
-// captureReplacement saves the regular files of the replacement module in
-// dir. Nested modules and dot directories are not part of it; any other
-// entry that is not a regular file refuses the conversion.
-func captureReplacement(dir string) (files map[string]savedFile, err error) {
+// captureReplacement saves the regular files of the replacement module at
+// target, a replace path of the go.mod in moddir. Nested modules and dot
+// directories are not part of it; any other entry that is not a regular
+// file refuses the conversion, and so does the file that would take the
+// copy past replacementFileCap files or replacementByteCap bytes, before it
+// is opened.
+func captureReplacement(moddir, target string) (files map[string]savedFile, err error) {
+	dir := target
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(moddir, dir)
+	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, root.Close()) }()
+	tooLarge := func(limit int64, unit string) error {
+		return fmt.Errorf("%s: too large to freeze: more than %d %s", target, limit, unit)
+	}
 	files = make(map[string]savedFile)
+	var size int64
 	err = fs.WalkDir(root.FS(), ".", func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		rel := filepath.FromSlash(name)
 		if !d.IsDir() {
-			files[rel], err = readSavedFile(root, rel)
-			return err
+			if len(files) == replacementFileCap {
+				return tooLarge(replacementFileCap, "files")
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if size+info.Size() > replacementByteCap {
+				return tooLarge(replacementByteCap, "bytes")
+			}
+			file, err := readSavedFile(root, rel)
+			if err != nil {
+				return err
+			}
+			if size += int64(len(file.data)); size > replacementByteCap {
+				return tooLarge(replacementByteCap, "bytes")
+			}
+			files[rel] = file
+			return nil
 		}
 		if name == "." {
 			return nil
