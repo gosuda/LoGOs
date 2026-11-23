@@ -1292,6 +1292,7 @@ type logosEFEffects struct {
 	assigned map[logosEFKey]bool
 	created  map[logosEFKey]string
 	may      map[logosEFKey]logosEFKey
+	deferred *logosEFEffects
 }
 
 // writes reports whether the effects wrote a destination that overlaps k.
@@ -2944,8 +2945,41 @@ func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 		return p.switchStmt(s, "", st)
 	case *syntax.SelectStmt:
 		return p.selectStmt(s, "", st)
+	case *syntax.CallStmt:
+		return p.callStmt(s, st)
 	}
 	return p.logosStmt(s, st)
+}
+
+// callStmt analyzes a defer or go statement. Inside a literal, a deferred
+// call runs when the literal returns, after its exit state, so its writes
+// are also kept apart for the literal's summary.
+func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFState {
+	outer := p.eff
+	if outer == nil || s.Tok != syntax.Defer {
+		return p.expr(s, st)
+	}
+	d := &logosEFEffects{inside: outer.inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
+	p.eff = d
+	st = p.expr(s, st)
+	p.eff = outer
+	for k := range d.assigned {
+		p.noteAssigned(k)
+	}
+	for k, v := range d.created {
+		p.noteCreated(k, v)
+	}
+	for k, v := range d.may {
+		p.noteMay(k, v)
+	}
+	if outer.deferred == nil {
+		outer.deferred = d
+		return st
+	}
+	maps.Copy(outer.deferred.assigned, d.assigned)
+	maps.Copy(outer.deferred.created, d.created)
+	maps.Copy(outer.deferred.may, d.may)
+	return st
 }
 
 func (p *logosEFPass) logosStmt(s syntax.Stmt, st *logosEFState) *logosEFState {
@@ -3917,6 +3951,9 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	}
 	end := p.run(body, p.lateCaptures(in, lit, inside))
 	p.eff = saved
+	if end != nil && eff.deferred != nil {
+		end = end.afterDeferred(eff.deferred)
+	}
 	before := st
 	for k := range eff.assigned {
 		if k.path == "" {
@@ -3957,6 +3994,28 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 		}
 	}
 	return st.literalPairings(before, end, eff)
+}
+
+// afterDeferred applies the writes of literals deferred inside a literal
+// to its exit state: they run when the literal returns, so a reset in its
+// body cannot hide them. A result a deferred literal writes loses its
+// pairing, and so does a result whose error it writes, because the order
+// in which several deferred writes land is unknown.
+func (s *logosEFState) afterDeferred(d *logosEFEffects) *logosEFState {
+	may := maps.Clone(s.may)
+	if may == nil {
+		may = make(map[logosEFKey]bool, len(d.may))
+	}
+	for k := range d.may {
+		may[k] = true
+	}
+	mayErr := maps.Clone(s.mayErr)
+	for k, ek := range s.mayErr {
+		if d.writes(k) || d.writes(ek) {
+			delete(mayErr, k)
+		}
+	}
+	return &logosEFState{m: s.m, may: may, mayErr: mayErr}
 }
 
 // literalPairings joins the caller's error pairings, held in before, with

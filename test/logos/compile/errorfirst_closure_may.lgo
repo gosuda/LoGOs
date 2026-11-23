@@ -159,3 +159,19 @@ func efClosureSamePairingAccepted() {
 		}()
 	}
 }
+
+// A defer inside an immediately invoked literal runs when the literal
+// returns, after the literal's own reset, so the stored value reaches a
+// later deferred read unchecked.
+func efClosureNestedDeferAfterReset() {
+	h := efClosureHeld{}
+	func() {
+		defer func() {
+			h.stats, _ = efClosureFetch()
+		}()
+		h.stats = 0
+	}()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+}
