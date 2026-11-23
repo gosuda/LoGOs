@@ -126,6 +126,7 @@ func EjectCtInstances(pkg *types2.Package, info *types2.Info, files []*syntax.Fi
 		origins[rec.ID] = rec.Origin
 	}
 	names := ctEjectNames(origins)
+	sites := ctEjectTraceSites(files)
 	order := make([]*syntax.File, 0, len(files))
 	for _, file := range files {
 		if _, ok := src[file]; ok {
@@ -144,6 +145,7 @@ func EjectCtInstances(pkg *types2.Package, info *types2.Info, files []*syntax.Fi
 			continue
 		}
 		p := newCtEjectPrinter(pkg, info, file, names)
+		p.sites = sites
 		for _, id := range ids {
 			if err := p.instance(byID[id]); err != nil {
 				return err
@@ -230,6 +232,11 @@ type ctEjectPrinter struct {
 	boxed    map[types2.Object]bool
 	added    []ctEjectImport
 	text     strings.Builder
+
+	sites     map[string]*syntax.VarDecl
+	own       string
+	siteNames map[*types2.Var]string
+	siteText  []string
 }
 
 type ctEjectImport struct {
@@ -241,7 +248,7 @@ func newCtEjectPrinter(consumer *types2.Package, info *types2.Info, file *syntax
 	blanked := ctEjectBlanked[file]
 	for _, decl := range file.DeclList {
 		imp, ok := decl.(*syntax.ImportDecl)
-		if !ok || imp.Path == nil {
+		if !ok || imp.Path == nil || imp.LocalPkgName != nil && imp.LocalPkgName.Value == ctTraceRT {
 			continue
 		}
 		path, err := strconv.Unquote(imp.Path.Value)
@@ -298,6 +305,7 @@ var ctEjectExprType = reflect.TypeFor[syntax.Expr]()
 func (p *ctEjectPrinter) instance(rec *types2.LogosCtInst) (err error) {
 	facts := rec.Info
 	own := p.names[rec.ID]
+	p.own, p.siteNames, p.siteText = own, nil, nil
 	roots := make([]syntax.Node, 0, 1+len(rec.Helpers))
 	roots = append(roots, rec.Decl)
 	for _, helper := range rec.Helpers {
@@ -423,6 +431,10 @@ func (p *ctEjectPrinter) instance(rec *types2.LogosCtInst) (err error) {
 		b.WriteString("\n\n")
 		b.WriteString(box)
 	}
+	for _, site := range p.siteText {
+		b.WriteString("\n\n")
+		b.WriteString(site)
+	}
 	text := b.String()
 	if _, err := syntax.Parse(syntax.NewFileBase(own), strings.NewReader("package p\n\n"+text), nil, nil, 0); err != nil {
 		return fmt.Errorf("ejected comptime instance %s is not Go: %v\n%s", own, err, text)
@@ -463,6 +475,9 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 	if obj == nil {
 		return n.Value, nil
 	}
+	if v, ok := obj.(*types2.Var); ok && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && p.sites[v.Name()] != nil {
+		return p.siteName(v)
+	}
 	if c, ok := obj.(*types2.Const); ok && c.Pkg() == nil && c.Parent() == nil {
 		return p.constText(c), nil
 	}
@@ -494,6 +509,55 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 		return p.alias(pkg) + "." + obj.Name(), nil
 	}
 	return obj.Name(), nil
+}
+
+// ctEjectTraceSites returns the trace site declarations that the lowering of
+// comptime instances adds to the package files, by name. Their names hold a
+// middle dot, so the ejected text cannot spell them.
+func ctEjectTraceSites(files []*syntax.File) map[string]*syntax.VarDecl {
+	sites := make(map[string]*syntax.VarDecl)
+	for _, file := range files {
+		for _, decl := range file.DeclList {
+			if d, ok := decl.(*syntax.VarDecl); ok && len(d.NameList) == 1 && strings.HasPrefix(d.NameList[0].Value, ctTraceSite) {
+				sites[d.NameList[0].Value] = d
+			}
+		}
+	}
+	return sites
+}
+
+// siteName names, per printed instance, a trace site that a lowered
+// failure path of the instance passes by address, and records its
+// declaration for the text after the instance.
+func (p *ctEjectPrinter) siteName(v *types2.Var) (string, error) {
+	if name, ok := p.siteNames[v]; ok {
+		return name, nil
+	}
+	fields := make(map[string]string)
+	if lit, ok := p.sites[v.Name()].Values.(*syntax.CompositeLit); ok {
+		for _, elem := range lit.ElemList {
+			kv, _ := elem.(*syntax.KeyValueExpr)
+			if kv == nil {
+				continue
+			}
+			key, _ := kv.Key.(*syntax.Name)
+			value, _ := kv.Value.(*syntax.BasicLit)
+			if key != nil && value != nil {
+				fields[key.Value] = value.Value
+			}
+		}
+	}
+	if fields["File"] == "" || fields["Line"] == "" {
+		return "", fmt.Errorf("%s: comptime trace site %s has no file and line", v.Pos(), v.Name())
+	}
+	name := p.own + "_site" + strconv.Itoa(len(p.siteNames))
+	if p.siteNames == nil {
+		p.siteNames = make(map[*types2.Var]string)
+	}
+	p.siteNames[v] = name
+	rt := p.alias(types2.NewPackage(rtImportPath, "rt"))
+	p.siteText = append(p.siteText, fmt.Sprintf("var %s = %s.Site{File: %s, Line: %s}", name, rt, fields["File"], fields["Line"]))
+	return name, nil
 }
 
 func (p *ctEjectPrinter) unexported(pos syntax.Pos, name, path string) error {

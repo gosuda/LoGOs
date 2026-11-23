@@ -14,7 +14,10 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-const ctTraceRT = "_logos·ct·rt"
+const (
+	ctTraceRT   = "_logos·ct·rt"
+	ctTraceSite = "_logos·ct·site"
+)
 
 type ctTracePosition struct {
 	file string
@@ -46,7 +49,7 @@ func (fl *fileLower) ctTrySite(pos syntax.Pos) *syntax.Name {
 		if sites.byLocation == nil {
 			sites.byLocation = make(map[ctTracePosition]*syntax.Name)
 		}
-		def = nameOf(pos, "_logos·ct·site"+strconv.Itoa(len(sites.decls)))
+		def = nameOf(pos, ctTraceSite+strconv.Itoa(len(sites.decls)))
 		decl := siteDecl(pos, def, file, line)
 		decl.Values.(*syntax.CompositeLit).Type.(*syntax.SelectorExpr).X.(*syntax.Name).Value = ctTraceRT
 		sites.byLocation[key] = def
