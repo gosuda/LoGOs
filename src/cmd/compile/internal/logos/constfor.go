@@ -508,12 +508,16 @@ func (fl *fileLower) cfHoistableUnderlying(td *syntax.TypeDecl, declOf map[*type
 // hoistNestedLocalDecl moves one fresh local type declaration out of an
 // unrolled const-for copy to package level under a fresh name and
 // rewrites its uses within this iteration's copies, recording the
-// original iteration-local type for the finish pass. It returns false
-// leaving everything untouched when the declaration cannot be moved.
+// original iteration-local type for the finish pass. The ejected text
+// follows the tree: the declaration leaves the copy, its uses take the
+// fresh name, and the file ends with the package-level declaration. It
+// returns false leaving everything untouched when the declaration cannot
+// be moved.
 func (fl *fileLower) hoistNestedLocalDecl(stmts []syntax.Stmt, td *syntax.TypeDecl, fresh, orig *types2.TypeName, id string) bool {
 	// Remove the declaration from its enclosing statement list first so
 	// a failure below leaves the copies unchanged.
 	removed := false
+	var cut syntax.Node = td
 	var excise func(list *[]syntax.Stmt)
 	excise = func(list *[]syntax.Stmt) {
 		if removed {
@@ -528,6 +532,7 @@ func (fl *fileLower) hoistNestedLocalDecl(stmts []syntax.Stmt, td *syntax.TypeDe
 					if len(ds.DeclList) == 1 {
 						*list = append((*list)[:i], (*list)[i+1:]...)
 						i--
+						cut = ds
 					} else {
 						ds.DeclList = append(ds.DeclList[:j], ds.DeclList[j+1:]...)
 					}
@@ -565,17 +570,29 @@ func (fl *fileLower) hoistNestedLocalDecl(stmts []syntax.Stmt, td *syntax.TypeDe
 	for i := 2; fl.pkg.tpkg.Scope().Lookup(name) != nil; i++ {
 		name = fmt.Sprintf("%s_%s_%d", td.Name.Value, suffix, i)
 	}
+	ctx := cfCtx{buf: fl.srcMap, starts: fl.start}
+	fl.add(fl.off(syntax.StartPos(cut)), cfExactEnd(ctx, cut), "")
+	width := len(td.Name.Value)
 	td.Name.Value = name
 	for _, s := range stmts {
+		parents := cfParents(s)
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			if id, ok := n.(*syntax.Name); ok && id != td.Name {
 				if obj, ok := fl.pkg.info.Uses[id]; ok && obj == types2.Object(fresh) {
 					id.Value = name
+					if !fl.cfInEjectSite(id, parents) {
+						fl.add(fl.off(id.Pos()), fl.off(id.Pos())+width, name)
+					}
 				}
 			}
 			return true
 		})
 	}
+	var decl strings.Builder
+	if _, err := syntax.Fprint(&decl, ctEjectUngrouped(td), 0); err != nil {
+		base.Fatalf("logos: print hoisted local type %s: %v", name, err)
+	}
+	fl.constText += "\n" + decl.String() + "\n"
 	fl.file.DeclList = append(fl.file.DeclList, td)
 	fl.changed = true
 	if fl.pkg.ctLocalHoists == nil {
@@ -583,6 +600,17 @@ func (fl *fileLower) hoistNestedLocalDecl(stmts []syntax.Stmt, td *syntax.TypeDe
 	}
 	fl.pkg.ctLocalHoists[td.Name] = orig
 	return true
+}
+
+// cfInEjectSite reports whether n lies inside a comptime call site whose
+// ejected text is already replaced by its instance name.
+func (fl *fileLower) cfInEjectSite(n syntax.Node, parents map[syntax.Node]syntax.Node) bool {
+	for ; n != nil; n = parents[n] {
+		if fl.ejectSites[n] {
+			return true
+		}
+	}
+	return false
 }
 
 func cfPushField(active cfChain, loop *types2.LogosConstFor, field cfField) cfChain {

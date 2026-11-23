@@ -227,6 +227,7 @@ type ctEjectPrinter struct {
 	imports  map[string]string
 	taken    map[string]bool
 	locals   map[string]bool
+	boxed    map[types2.Object]bool
 	added    []ctEjectImport
 	text     strings.Builder
 }
@@ -367,8 +368,18 @@ func (p *ctEjectPrinter) instance(rec *types2.LogosCtInst) (err error) {
 			return true
 		})
 	}
+	local, err := ctEjectPlanLocal(rec)
+	if err != nil {
+		return err
+	}
+	p.boxed = make(map[types2.Object]bool)
+	for i := range local.bound {
+		if d, ok := rec.Helpers[i].(*syntax.VarDecl); ok {
+			p.boxed[facts.Defs[d.NameList[0]]] = true
+		}
+	}
 	p.locals = ctEjectLocals(roots, facts)
-	defer func() { p.locals = nil }()
+	defer func() { p.locals, p.boxed = nil, nil }()
 	sels := make(map[*syntax.Name]bool)
 	for _, root := range roots {
 		syntax.Inspect(root, func(n syntax.Node) bool {
@@ -390,15 +401,27 @@ func (p *ctEjectPrinter) instance(rec *types2.LogosCtInst) (err error) {
 		return err
 	}
 	setValue(rec.Decl.Name, own)
+	boxes, restore, err := p.placeLocal(rec, local, renames)
+	defer restore()
+	if err != nil {
+		return err
+	}
 	var b strings.Builder
 	if _, err := syntax.Fprint(&b, rec.Decl, 0); err != nil {
 		return err
 	}
-	for _, helper := range rec.Helpers {
+	for i, helper := range rec.Helpers {
+		if _, bound := local.bound[i]; bound {
+			continue
+		}
 		b.WriteString("\n\n")
 		if _, err := syntax.Fprint(&b, ctEjectUngrouped(helper), 0); err != nil {
 			return err
 		}
+	}
+	for _, box := range boxes {
+		b.WriteString("\n\n")
+		b.WriteString(box)
 	}
 	text := b.String()
 	if _, err := syntax.Parse(syntax.NewFileBase(own), strings.NewReader("package p\n\n"+text), nil, nil, 0); err != nil {
@@ -444,6 +467,9 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 		return p.constText(c), nil
 	}
 	if name, ok := renames[obj]; ok {
+		if p.boxed[obj] {
+			return "(*" + name + ")", nil
+		}
 		return name, nil
 	}
 	if pn, ok := obj.(*types2.PkgName); ok {
