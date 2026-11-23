@@ -32,7 +32,9 @@ func TestRelayPrintsAFindingBeforeTheStreamEnds(t *testing.T) {
 	count := make(chan int)
 	go func() { count <- relay(r, out, false) }()
 
-	io.WriteString(w, inversion)
+	if _, err := io.WriteString(w, inversion); err != nil {
+		t.Fatal(err)
+	}
 	<-out.written // The stream is still open here.
 	want := "main.lgo:12: [conc::lock_order_inversion] two goroutines took the same two locks in opposite orders\n" +
 		"\tmain.lgo:12: first goroutine: outer lock\n" +
@@ -42,7 +44,9 @@ func TestRelayPrintsAFindingBeforeTheStreamEnds(t *testing.T) {
 		t.Fatalf("printed\n%s\nwant\n%s", got, want)
 	}
 
-	io.WriteString(w, endOfFindings)
+	if _, err := io.WriteString(w, endOfFindings); err != nil {
+		t.Fatal(err)
+	}
 	if got := <-count; got != 1 {
 		t.Fatalf("relay counted %d findings, want 1", got)
 	}

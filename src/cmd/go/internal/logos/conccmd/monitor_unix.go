@@ -8,6 +8,7 @@ package conccmd
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -29,7 +30,7 @@ import (
 // monitor runs `logos <verb>` with the monitor tag and relays the
 // findings of the program from a named pipe while the program runs, to
 // the outputs that invocation.outputs names.
-func monitor(verb string, inv invocation) {
+func monitor(ctx context.Context, verb string, inv invocation) {
 	self, err := os.Executable()
 	if err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
@@ -41,7 +42,7 @@ func monitor(verb string, inv invocation) {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	base.AtExit(func() { os.RemoveAll(dir) })
+	base.AtExit(func() { _ = os.RemoveAll(dir) })
 
 	// The command holds the pipe open for reading and writing. A program
 	// can then open it for writing at any time without blocking, and the
@@ -54,7 +55,7 @@ func monitor(verb string, inv invocation) {
 	if err != nil {
 		base.Fatalf("logos conc %s: %v", verb, err)
 	}
-	defer pipe.Close()
+	defer func() { _ = pipe.Close() }()
 
 	stream := io.Reader(pipe)
 	var raw strings.Builder
@@ -65,7 +66,7 @@ func monitor(verb string, inv invocation) {
 	findingsOut, briefOut := inv.outputs(os.Stdout, os.Stderr)
 	go func() { findings <- relay(stream, findingsOut, inv.asJSON) }()
 
-	child := exec.Command(self, inv.arguments...)
+	child := exec.CommandContext(ctx, self, inv.arguments...)
 	child.Args[0] = os.Args[0]
 	child.Stdin = os.Stdin
 	child.Stdout = os.Stdout
@@ -84,10 +85,10 @@ func monitor(verb string, inv invocation) {
 		if err != nil {
 			base.Fatalf("logos conc %s: %v", verb, err)
 		}
-		defer stderrR.Close()
+		defer func() { _ = stderrR.Close() }()
 		child.Stderr = stderrW
 		go func() {
-			io.Copy(scanner, stderrR)
+			_, _ = io.Copy(scanner, stderrR)
 			close(copyDone)
 		}()
 	} else {
@@ -113,15 +114,19 @@ func monitor(verb string, inv invocation) {
 		// The run is over and the exit-status line is already in the
 		// pipe, but inherited writers keep it open — drain only what
 		// is buffered, never wait for an EOF that may never come.
-		stderrW.Close()
+		_ = stderrW.Close()
 		// An expired deadline wakes the background copy but also
 		// prevents it from reading the buffered tail, so retire it
 		// first, then drain under a short grace deadline: buffered
 		// bytes return at once and the wait stays bounded.
-		stderrR.SetReadDeadline(time.Now())
+		if err := stderrR.SetReadDeadline(time.Now()); err != nil {
+			base.Fatalf("logos conc %s: %v", verb, err)
+		}
 		<-copyDone
-		stderrR.SetReadDeadline(time.Now().Add(3 * time.Second))
-		io.Copy(scanner, stderrR)
+		if err := stderrR.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			base.Fatalf("logos conc %s: %v", verb, err)
+		}
+		_, _ = io.Copy(scanner, stderrR)
 	}
 	scanner.finish()
 

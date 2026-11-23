@@ -7,11 +7,12 @@
 package conccmd
 
 import (
+	"context"
 	"runtime"
 
 	"cmd/go/internal/base"
 )
 
-func monitor(verb string, inv invocation) {
+func monitor(_ context.Context, verb string, inv invocation) {
 	base.Fatalf("logos conc %s: not supported on %s", verb, runtime.GOOS)
 }
