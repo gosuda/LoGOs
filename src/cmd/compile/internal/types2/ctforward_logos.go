@@ -6,27 +6,11 @@ package types2
 
 import (
 	"slices"
-	"sync"
 
 	"cmd/compile/internal/syntax"
 
 	. "internal/types/errors"
 )
-
-var logosImportedComptimes = struct {
-	sync.RWMutex
-	m map[string]bool
-}{m: make(map[string]bool)}
-
-// LogosNoteImportedComptimes records the comptime generics that an imported
-// loGo/s package exports as __.LOGOS records.
-func LogosNoteImportedComptimes(pkgPath string, names []string) {
-	logosImportedComptimes.Lock()
-	defer logosImportedComptimes.Unlock()
-	for _, name := range names {
-		logosImportedComptimes.m[pkgPath+"."+name] = true
-	}
-}
 
 // logosCtForward is the first instantiation through which a forwarding
 // function passes one of its type parameters on.
@@ -141,12 +125,7 @@ func (check *Checker) logosCtComptimeTarget(fn *Func) bool {
 	if fn.pkg == nil || fn.pkg == check.pkg {
 		return false
 	}
-	if check.logosIsComptimeGeneric(fn) {
-		return true
-	}
-	logosImportedComptimes.RLock()
-	defer logosImportedComptimes.RUnlock()
-	return logosImportedComptimes.m[fn.pkg.path+"."+fn.name]
+	return check.logosIsComptimeGeneric(fn)
 }
 
 // logosCtForwardedParam returns the first type parameter that t holds as

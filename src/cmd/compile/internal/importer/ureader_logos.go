@@ -25,26 +25,7 @@ func logosOverlayHook(pkg *types2.Package) *types2.Package {
 	logosRegisterDefaultFacts(pkg)
 	logosRegisterUnionFacts(pkg)
 	logosRegisterBareUnionFacts(pkg)
-	logosRegisterComptimeFacts(pkg)
 	return pkg
-}
-
-// logosRegisterComptimeFacts records the comptime generics that an imported
-// loGo/s package exports as __.LOGOS records, so an .lgo importer can tell a
-// forwarding function that names one of them (SPEC 2.5, T-205).
-func logosRegisterComptimeFacts(pkg *types2.Package) {
-	if pkg == nil {
-		return
-	}
-	f, ok := facts.Lookup(pkg.Path())
-	if !ok || f == nil || len(f.Comptimes) == 0 {
-		return
-	}
-	names := make([]string, 0, len(f.Comptimes))
-	for _, c := range f.Comptimes {
-		names = append(names, c.Object)
-	}
-	types2.LogosNoteImportedComptimes(pkg.Path(), names)
 }
 
 func logosRegisterUnionFacts(pkg *types2.Package) {
