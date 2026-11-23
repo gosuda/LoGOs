@@ -1094,6 +1094,7 @@ type logosEFPass struct {
 	loopMaybe     map[*syntax.ForStmt]map[*Var]bool
 	loopTuple     map[*syntax.ForStmt]map[logosEFKey]bool
 	reenter       map[*syntax.ForStmt]bool
+	runsOnce      map[*syntax.ForStmt]bool
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
 	trackedByRoot map[*Var][]logosEFKey
 }
@@ -2972,6 +2973,21 @@ func (p *logosEFPass) loopLocalErrShared(errV *Var, k logosEFKey, lit syntax.Nod
 // back edge, no continue targets f, and no goto can re-enter it. A nil
 // body or an unknown branch target stays multi-iteration.
 func (p *logosEFPass) loopRunsOnce(f *syntax.ForStmt) bool {
+	if v, ok := p.runsOnce[f]; ok {
+		return v
+	}
+	// The re-entry inventory is fixed once collectAssigns runs, and the
+	// body never changes during the pass, so the answer is stable for
+	// the whole pass and can be memoized per loop.
+	v := p.loopRunsOnceScan(f)
+	if p.runsOnce == nil {
+		p.runsOnce = make(map[*syntax.ForStmt]bool)
+	}
+	p.runsOnce[f] = v
+	return v
+}
+
+func (p *logosEFPass) loopRunsOnceScan(f *syntax.ForStmt) bool {
 	if f.Body == nil || p.reenter[f] {
 		return false
 	}
