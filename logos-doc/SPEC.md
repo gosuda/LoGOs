@@ -1204,13 +1204,15 @@ Any run-time use of those compile-time-only forms MUST fail with `[comptime::run
 
 A generic function that uses them MUST become a comptime generic. [T-205]
 
-Each instantiation MUST expand into a non-generic copy `<f>_logosct<N>` in the instantiating package. [T-205]
+Each list of type arguments MUST be analyzed once in the scope of the defining package and MUST compile to one non-generic instance. [T-205]
 
-A comptime call inside an expansion whose type arguments are concrete after substitution MUST expand into the same copy, at any depth and across package boundaries. [T-205]
+A comptime call inside an instance whose type arguments are concrete after substitution MUST resolve to the same instance, at any depth and across package boundaries. [T-205]
 
-A use of the switched type parameter inside a `const switch` case body MUST spell the instantiation's type argument in the copy, for tilde and exact cases alike. [T-205]
+A use of the switched type parameter inside a `const switch` case body MUST spell the instantiation's type argument in the instance, for tilde and exact cases alike. [T-205]
 
-Copies MUST be memoized per type-argument list. [T-205]
+Instances MUST be memoized per type-argument list. [T-205]
+
+`logos eject` MUST print each instance that a package needs as a non-generic function `<f>_logosct<N>` in that package and MUST rename its call sites. An instance that names an unexported identifier of another package MUST fail eject with `[comptime::unexported_in_exported]`. [T-205]
 
 An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
 
@@ -1266,7 +1268,7 @@ An instantiation of a comptime generic with a type parameter MUST occur in the b
 
 The type argument MAY be the type parameter or a pointer, slice, array, map, channel, or instantiated named type that contains it. [T-205]
 
-The compiler MUST expand a forwarding function once for each list of concrete type arguments, in its defining package. [T-205]
+The compiler MUST expand a forwarding function once for each list of concrete type arguments, in its defining package. `logos eject` MUST print each such expansion like a comptime instance. [T-205]
 
 The compile-time forms in each expansion MUST evaluate on the substituted type. For example, `*T` with `T` bound to `Triple` gives `*Triple` to the comptime generic. [T-205]
 

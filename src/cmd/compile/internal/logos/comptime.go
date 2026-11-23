@@ -676,18 +676,22 @@ type cfSite struct {
 
 func (fl *fileLower) expandComptime() {
 	// Native owner-package emission resolves call sites in the writer
-	// through LogosCtSiteKeys. No text copy is expanded and no call site
-	// is renamed. Comptime-generic definitions become unreachable stubs;
-	// their templates travel in the export and each instance is checked
-	// in the defining package. Forwarding definitions keep their bodies:
-	// the backend stencils them and resolves their nested calls through
-	// the instance dictionary.
+	// through LogosCtSiteKeys. No text copy is expanded. Comptime-generic
+	// definitions become unreachable stubs; their templates travel in the
+	// export and each instance is checked in the defining package.
+	// Forwarding definitions keep their bodies: the backend stencils them
+	// and resolves their nested calls through the instance dictionary.
+	// Eject renames each call site in its text only; EjectCtInstances
+	// prints the named instances after they are checked.
 	if fl.pkg.info.LogosCtImport != nil {
 		for _, def := range fl.pkg.ctExp.defs {
 			if def.file != fl.file || def.forward {
 				continue
 			}
 			fl.cfStubDef(def)
+		}
+		if base.LogosEject != "" {
+			fl.ejectCtSites()
 		}
 		return
 	}
@@ -713,14 +717,24 @@ func (fl *fileLower) endComptime() {
 }
 
 func (fl *fileLower) cfDemoteErasedImports() {
-	used := fl.cfNamesInUse()
+	used := fl.cfNamesInUse(nil)
+	var textUsed map[string]bool
+	if fl.ejectSites != nil {
+		textUsed = fl.cfNamesInUse(fl.ejectSites)
+	}
 	for _, decl := range fl.file.DeclList {
 		imp, ok := decl.(*syntax.ImportDecl)
 		if !ok || imp.Path == nil {
 			continue
 		}
 		local, ok := fl.cfImportLocalName(imp)
-		if !ok || used[local] {
+		if !ok {
+			continue
+		}
+		if used[local] {
+			if textUsed != nil && !textUsed[local] {
+				fl.ejectBlankImport(imp)
+			}
 			continue
 		}
 		path, _ := strconv.Unquote(imp.Path.Value)
@@ -743,7 +757,7 @@ func (fl *fileLower) cfDemoteImport(imp *syntax.ImportDecl, path string) {
 }
 
 func (fl *fileLower) cfDemoteImportsUnusedByGenerated() {
-	used := fl.cfNamesInUse()
+	used := fl.cfNamesInUse(nil)
 	for _, imp := range fl.importsPendingGeneratedUse {
 		local, ok := fl.cfImportLocalName(imp)
 		if !ok || used[local] {
@@ -755,10 +769,13 @@ func (fl *fileLower) cfDemoteImportsUnusedByGenerated() {
 	fl.importsPendingGeneratedUse = nil
 }
 
-func (fl *fileLower) cfNamesInUse() map[string]bool {
+func (fl *fileLower) cfNamesInUse(skip map[syntax.Node]bool) map[string]bool {
 	used := make(map[string]bool)
 	var visit func(syntax.Node) bool
 	visit = func(n syntax.Node) bool {
+		if skip[n] {
+			return false
+		}
 		switch n := n.(type) {
 		case *syntax.ImportDecl:
 			return false

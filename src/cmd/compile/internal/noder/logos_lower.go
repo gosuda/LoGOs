@@ -31,6 +31,20 @@ var logosStore = struct {
 	edits map[*syntax.File][]logos.Edit
 }{src: make(map[*syntax.File][]byte), cgo: make(map[*syntax.File][]byte), names: make(map[*syntax.File]string)}
 
+func logosEjectCtInstances(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
+	if base.LogosEject == "" || len(info.LogosCtPrepared) == 0 {
+		return
+	}
+	logosStore.Lock()
+	defer logosStore.Unlock()
+	if logosStore.edits == nil {
+		logosStore.edits = make(map[*syntax.File][]logos.Edit)
+	}
+	if err := logos.EjectCtInstances(pkg, info, files, logosStore.src, logosStore.edits); err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+}
+
 func logosStashesGo() bool {
 	return base.LogosNextOut != "" || base.LogosLintEnabled() || base.LogosMode == "hints"
 }

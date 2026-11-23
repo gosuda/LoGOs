@@ -75,6 +75,7 @@ recheck:
 		Logos:               allLogos(noders) && !didLogos,
 		LogosUnions:         allLogos(noders), // logos M2-S1 hook: unions stay legal in the recheck.
 		LogosProvenReadonly: provenForThisCheck,
+		LogosCtEject:        base.LogosEject != "",
 	}
 	if base.Flag.ErrorURL {
 		conf.ErrorURL = " [go.dev/e/%s]"
@@ -332,6 +333,7 @@ recheck:
 			base.ExitIfErrors()
 			base.FatalfAt(src.NoXPos, "comptime package initialization: %v", err)
 		}
+		logosEjectCtInstances(pkg, info, files)
 	}
 	logos.LogosClearErasedAnonReadonly()
 	for _, path := range info.LogosCtImports {

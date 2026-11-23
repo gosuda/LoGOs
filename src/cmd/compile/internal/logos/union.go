@@ -350,7 +350,7 @@ func (fl *fileLower) flushTypeImports() {
 	if reg == nil || len(reg.order) == 0 {
 		return
 	}
-	nativeUsed := fl.cfNamesInUse()
+	nativeUsed := fl.cfNamesInUse(nil)
 	var ejectTexts []string
 	if fl.constText != "" {
 		ejectTexts = append(ejectTexts, fl.constText)

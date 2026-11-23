@@ -49,6 +49,25 @@ func (check *Checker) logosCtExportedForwarders() {
 	if !check.conf.Logos || check.pkg.name == "main" || check.Uses == nil || check.Instances == nil {
 		return
 	}
+	fns, bodies, forwards := check.logosCtForwarders()
+	for _, fn := range fns {
+		if !forwards[fn] || !fn.Exported() {
+			continue
+		}
+		f, _ := check.logosCtFirstForward(bodies[fn], forwards)
+		kind := "comptime generic"
+		if f.forward {
+			kind = "forwarding function"
+		}
+		check.errorf(f.site, InvalidPkgUse, "[comptime::exported_forwarder] exported function %s forwards type parameter %s to %s %s; a caller in another package cannot instantiate it", fn.name, f.param.obj.name, kind, f.target.name)
+	}
+}
+
+// logosCtForwarders returns the package-level generic functions that are
+// not comptime generics in source order, their bodies, and the set of
+// those that forward a type parameter to a comptime generic or to another
+// forwarding function.
+func (check *Checker) logosCtForwarders() ([]*Func, map[*Func]*syntax.BlockStmt, map[*Func]bool) {
 	var fns []*Func
 	bodies := make(map[*Func]*syntax.BlockStmt)
 	for obj, di := range check.objMap {
@@ -73,17 +92,7 @@ func (check *Checker) logosCtExportedForwarders() {
 			}
 		}
 	}
-	for _, fn := range fns {
-		if !forwards[fn] || !fn.Exported() {
-			continue
-		}
-		f, _ := check.logosCtFirstForward(bodies[fn], forwards)
-		kind := "comptime generic"
-		if f.forward {
-			kind = "forwarding function"
-		}
-		check.errorf(f.site, InvalidPkgUse, "[comptime::exported_forwarder] exported function %s forwards type parameter %s to %s %s; a caller in another package cannot instantiate it", fn.name, f.param.obj.name, kind, f.target.name)
-	}
+	return fns, bodies, forwards
 }
 
 // logosCtFirstForward finds the first instantiation in body, in source order,

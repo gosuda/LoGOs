@@ -83,7 +83,7 @@ func (check *Checker) logosIsComptimeGeneric(fn *Func) bool {
 		return false
 	}
 	generic, ok := imported(origin)
-	return ok && generic.Decl != nil
+	return ok && generic.Decl != nil && LogosUsesComptime(generic.Decl, generic.Scope)
 }
 
 func (check *Checker) logosRejectGenericMethod(decl *declInfo, body *syntax.BlockStmt) {
@@ -117,6 +117,10 @@ func (check *Checker) logosCtDrain() {
 		graph:  make(map[string][]string),
 	}
 	decls := make(map[*syntax.FuncDecl]bool)
+	var forwards map[*Func]bool
+	if check.conf.LogosCtEject {
+		_, _, forwards = check.logosCtForwarders()
+	}
 	for obj, di := range check.objMap {
 		fn, ok := obj.(*Func)
 		if !ok || di == nil || di.fdecl == nil || di.fdecl.Body == nil || fn.Signature().Recv() != nil || fn.Signature().TypeParams().Len() == 0 {
@@ -124,7 +128,7 @@ func (check *Checker) logosCtDrain() {
 		}
 		decl := di.fdecl
 		var generic LogosCtGeneric
-		if LogosUsesComptime(decl, di.file) {
+		if LogosUsesComptime(decl, di.file) || forwards[fn] {
 			decls[decl] = true
 			generic = LogosCtGeneric{Decl: decl, Scope: di.file, GoVersion: string(di.version)}
 		} else {

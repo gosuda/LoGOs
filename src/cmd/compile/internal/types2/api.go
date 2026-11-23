@@ -188,6 +188,10 @@ type Config struct {
 	// max_comptime_ast_nodes.
 	LogosComptimeNodeLimit int
 
+	// LogosCtEject analyzes forwarding functions per instantiation like
+	// comptime generics, so logos eject can print a concrete copy of each.
+	LogosCtEject bool
+
 	// LogosOwnedTypes carries exact-node owned-type descriptors for the
 	// final recheck of native private-type support. Keys are
 	// compiler-created nodes; type nodes carry a full descriptor while

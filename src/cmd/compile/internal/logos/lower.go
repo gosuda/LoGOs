@@ -68,6 +68,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	shared.composites, shared.compositeSeq = collectComposites(files, info)
 	shared.importedComposites = map[*types2.Var]*importedComposite{}
 	newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
+	ctEjectBlanked = nil
 	var prepared *ctPreparedPackage
 	if info.LogosCtImport != nil && len(info.LogosCtInst) != 0 {
 		var err error
@@ -178,6 +179,7 @@ type packageLower struct {
 	info               *types2.Info
 	tpkg               *types2.Package
 	siteSeq            int
+	ejectNames         map[string]string
 	constMaps          map[*types2.Const]*constMapGen
 	importedMaps       map[*types2.Var]*constMapGen
 	importedSeq        int
@@ -275,6 +277,7 @@ type fileLower struct {
 	names                      map[*types2.Package]string
 	genImps                    *genImports
 	importsPendingGeneratedUse []*syntax.ImportDecl
+	ejectSites                 map[syntax.Node]bool
 	// Option lowering state: optMemo pins one lowering per shared
 	// `T?` type node, narrowDone pins rewritten narrowed reads,
 	// wrapSpan remembers original spans of synthetic wrapper tops for
