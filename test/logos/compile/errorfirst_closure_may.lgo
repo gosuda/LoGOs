@@ -30,3 +30,40 @@ func efClosureBlankStoreReachesDefer(cond bool) {
 	}
 	_ = retryErr
 }
+
+// A reset inside an immediately invoked literal is visible to every later
+// capture: the summary must not re-export the intermediate mark, so the
+// deferred read stays accepted.
+func efClosureSyncResetAccepted() {
+	h := efClosureHeld{}
+	func() {
+		h.stats, _ = efClosureFetch()
+		h.stats = 0
+	}()
+	defer func() {
+		println(h.stats)
+	}()
+}
+
+// Overwriting the error inside the literal drops the pairing in the exit
+// state, so a later field check cannot discharge the read even when a
+// conditional retry pairs elsewhere.
+func efClosureErrorOverwriteStale(cond bool) {
+	h := efClosureHeld{}
+	var retryErr error
+	func() {
+		h.stats, h.err = efClosureFetch()
+		h.err = nil
+	}()
+	if h.err == nil {
+		defer func() {
+			if retryErr == nil {
+				println(h.stats) // ERROR "result_before_error_check"
+			}
+		}()
+		if cond {
+			h.stats, retryErr = efClosureFetch()
+		}
+	}
+	_ = retryErr
+}

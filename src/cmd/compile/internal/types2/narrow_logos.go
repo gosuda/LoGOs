@@ -3862,11 +3862,26 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 		p.noteCreated(k, errName)
 	}
 	for k, errKey := range eff.may {
-		st = st.setMay(k)
-		if errKey != (logosEFKey{}) {
-			st = p.setMayErr(st, k, errKey)
+		// The summary records every store, including ones the literal
+		// later overwrote: only the exit state's marks still describe
+		// values a later capture can observe. A result the literal
+		// reset exports no mark, and a result whose error it overwrote
+		// exports the mark without the dead guard, so a later check
+		// cannot prove it. The recorded guard still propagates outward
+		// for enclosing literals.
+		exitEk := errKey
+		if end != nil {
+			if !end.may[k] {
+				p.noteMay(k, logosEFKey{})
+				continue
+			}
+			exitEk = end.mayErr[k]
 		}
-		p.noteMay(k, errKey)
+		st = st.setMay(k)
+		if exitEk != (logosEFKey{}) {
+			st = p.setMayErr(st, k, exitEk)
+		}
+		p.noteMay(k, exitEk)
 	}
 	// A literal that stores a result may run after a later capture
 	// registers, so its may-reach marks join the outer flow with their
