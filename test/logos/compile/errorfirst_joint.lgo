@@ -406,6 +406,7 @@ type efHeld struct {
 	inner  efInner
 	labels map[string]int
 	vals   []int
+	err    error
 }
 
 // SPEC 2.5/T-202 names the read of a result, not the form of the
@@ -1249,4 +1250,39 @@ func efGotoInnerLabelRetry(done bool) {
 		}
 		break
 	}
+}
+
+// A nil check on a field error proves the guarding call on that path, so a
+// deferred read of the stored field stays accepted.
+func efFieldErrCheckedDeferred() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats)
+	}()
+}
+
+// The == nil form proves the same path inside the branch.
+func efFieldErrCheckedDeferredEqNil() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	if h.err == nil {
+		defer func() {
+			println(h.stats)
+		}()
+	}
+}
+
+// Without the check the deferred read still fails: the field error never
+// proves the stored value.
+func efFieldErrUncheckedDeferred() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	_ = h.err
 }

@@ -924,6 +924,31 @@ func (s *logosEFState) prove(errV *Var) *logosEFState {
 	})
 }
 
+// dropMayFor stops marking the results guarded by errKey as may-reach:
+// the nil test proved the guarding call succeeded on this path.
+func (s *logosEFState) dropMayFor(errKey logosEFKey, paired map[logosEFKey]logosEFKey) *logosEFState {
+	if s.may == nil || len(paired) == 0 {
+		return s
+	}
+	var out map[logosEFKey]bool
+	for v := range s.may {
+		if ek, ok := paired[v]; !ok || ek != errKey {
+			continue
+		}
+		if out == nil {
+			out = maps.Clone(s.may)
+		}
+		delete(out, v)
+	}
+	if out == nil {
+		return s
+	}
+	if len(out) == 0 {
+		out = nil
+	}
+	return &logosEFState{m: s.m, may: out}
+}
+
 func (s *logosEFState) detach(errV *Var) *logosEFState {
 	return s.remap(func(e logosEFEntry) logosEFEntry {
 		if e.err == errV {
@@ -1061,6 +1086,7 @@ type logosEFPass struct {
 	initialized   map[*Var]bool
 	tracked       map[logosEFKey]string
 	storeErr      map[logosEFKey][]*Var
+	errMay        map[logosEFKey]logosEFKey
 	sliced        map[logosEFKey]bool
 	storePos      map[logosEFKey][]syntax.Pos
 	inLoop        map[logosEFKey]bool
@@ -1197,6 +1223,30 @@ func (p *logosEFPass) nilTest(op *syntax.Operation) (errV *Var, isNeq bool) {
 	return errV, op.Op == syntax.Neq
 }
 
+// nilTestFieldKey names the trackable destination a nil comparison tests
+// when the tested side is not a plain error variable: a field or element
+// path whose nil proof drops the may-reach marks of the results stored
+// under it.
+func (p *logosEFPass) nilTestFieldKey(op *syntax.Operation) (logosEFKey, bool) {
+	if op.Y == nil || (op.Op != syntax.Eql && op.Op != syntax.Neq) {
+		return logosEFKey{}, false
+	}
+	x, y := syntax.Unparen(op.X), syntax.Unparen(op.Y)
+	var tested syntax.Expr
+	switch {
+	case p.isNil(y):
+		tested = x
+	case p.isNil(x):
+		tested = y
+	default:
+		return logosEFKey{}, false
+	}
+	if p.varOf(tested) != nil {
+		return logosEFKey{}, false
+	}
+	return p.destKey(tested)
+}
+
 func (p *logosEFPass) tuple(lhs []syntax.Expr, rhs syntax.Expr) (errV *Var, keys []logosEFKey) {
 	call, ok := syntax.Unparen(rhs).(*syntax.CallExpr)
 	if !ok || len(lhs) < 2 {
@@ -1293,6 +1343,7 @@ func (p *logosEFPass) collectAssigns() {
 	p.initialized = make(map[*Var]bool)
 	p.tracked = make(map[logosEFKey]string)
 	p.storeErr = make(map[logosEFKey][]*Var)
+	p.errMay = make(map[logosEFKey]logosEFKey)
 	p.sliced = make(map[logosEFKey]bool)
 	p.storePos = make(map[logosEFKey][]syntax.Pos)
 	p.inLoop = make(map[logosEFKey]bool)
@@ -1310,8 +1361,11 @@ func (p *logosEFPass) collectAssigns() {
 			// calls, need no check and record nothing.
 			if p.errCallShape(lhs, rhs) {
 				errName := "its error"
+				var errKey logosEFKey
+				hasErrKey := false
 				if k, ok := p.destKey(lhs[len(lhs)-1]); ok {
 					errName = k.displayName()
+					errKey, hasErrKey = k, true
 				}
 				for _, e := range lhs[:len(lhs)-1] {
 					if k, ok := p.destKey(e); ok {
@@ -1320,6 +1374,21 @@ func (p *logosEFPass) collectAssigns() {
 						}
 						p.storePos[k] = append(p.storePos[k], e.Pos())
 						p.storeErr[k] = append(p.storeErr[k], nil)
+						// Record which error destination guards this
+						// may-reach result. A nil check on that key
+						// drops the mark. Stores that disagree on
+						// the key leave no record, so checking one
+						// error never proves a value another call
+						// may have failed on.
+						if hasErrKey {
+							if prev, ok := p.errMay[k]; ok {
+								if prev != errKey {
+									delete(p.errMay, k)
+								}
+							} else {
+								p.errMay[k] = errKey
+							}
+						}
 					}
 				}
 			}
@@ -2155,6 +2224,15 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 	st = p.expr(op, st)
 	errV, isNeq := p.nilTest(op)
 	if errV == nil {
+		// A nil test on a field error proves the guarding call on the
+		// passing path just like a variable test does: it drops the
+		// may-reach mark, so a later deferred read stays accepted.
+		if fk, ok := p.nilTestFieldKey(op); ok {
+			if isNeq {
+				return st, st.dropMayFor(fk, p.errMay)
+			}
+			return st.dropMayFor(fk, p.errMay), st
+		}
 		return st, st
 	}
 	if isNeq {
