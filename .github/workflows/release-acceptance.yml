@@ -95,7 +95,9 @@ jobs:
 
   repro-b:
     name: "repro-host-ubuntu-current"
-    runs-on: "depot-ubuntu-24.04"
+    # This leg tracks the moving Ubuntu image while repro-a stays pinned,
+    # so a pass still covers two different host images.
+    runs-on: "ubuntu-latest"
     timeout-minutes: 180
     outputs:
       result: "${{ steps.repro.outputs.result }}"
