@@ -1095,6 +1095,8 @@ type logosEFPass struct {
 	loopTuple     map[*syntax.ForStmt]map[logosEFKey]bool
 	reenter       map[*syntax.ForStmt]bool
 	runsOnce      map[*syntax.ForStmt]bool
+	loopDepth     int
+	carve         map[syntax.Node]*logosEFState
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
 	trackedByRoot map[*Var][]logosEFKey
 }
@@ -2283,10 +2285,204 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 }
 
 func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState) *logosEFState {
-	for _, s := range list {
+	for i, s := range list {
+		if next, ok := p.deferStmt(s, list[i+1:], st); ok {
+			st = next
+			continue
+		}
 		st = p.stmt(s, st)
 	}
 	return st
+}
+
+// deferStmt analyzes a direct defer of a function literal, letting a later
+// unconditional plain overwrite in the same list satisfy the deferred read:
+// the literal observes the value at function exit, not at registration.
+// The carve touches only the literal's capture input; the flow state is
+// untouched, so reads between the defer and the overwrite still fail. Any
+// other statement returns false for normal handling.
+func (p *logosEFPass) deferStmt(s syntax.Stmt, rest []syntax.Stmt, st *logosEFState) (*logosEFState, bool) {
+	cs, ok := s.(*syntax.CallStmt)
+	if !ok || cs.Tok != syntax.Defer || p.loopDepth > 0 {
+		return nil, false
+	}
+	call, ok := syntax.Unparen(cs.Call).(*syntax.CallExpr)
+	if !ok {
+		return nil, false
+	}
+	lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit)
+	if !ok || lit.Body == nil {
+		return nil, false
+	}
+	carved, ok := p.carveAfter(rest, st)
+	if !ok {
+		return nil, false
+	}
+	if p.carve == nil {
+		p.carve = make(map[syntax.Node]*logosEFState)
+	}
+	p.carve[lit] = carved
+	st = p.stmt(s, st)
+	delete(p.carve, lit)
+	return st, true
+}
+
+// carveAfter folds the overwrites of straight-line panic-free statements
+// onto a scratch copy of st, so a deferred literal registered before an
+// unconditional reset observes the reset value. It stops at the first
+// statement that can do more than a quiet write; the caller then rejects
+// the carve if the remainder can still rewrite a dropped value.
+func (p *logosEFPass) carveAfter(rest []syntax.Stmt, st *logosEFState) (*logosEFState, bool) {
+	if st == nil || (len(st.m) == 0 && len(st.may) == 0) {
+		return nil, false
+	}
+	ks := &logosEFState{m: maps.Clone(st.m), may: maps.Clone(st.may)}
+	i := 0
+	for i < len(rest) {
+		var cont bool
+		ks, cont = p.carveStep(ks, rest[i])
+		if !cont {
+			break
+		}
+		i++
+	}
+	if logosEFSame(ks, st) {
+		return nil, false
+	}
+	if p.remainderHazards(rest[i:]) {
+		return nil, false
+	}
+	return ks, true
+}
+
+// carveStep folds one overwriting statement into the scratch state, or
+// reports false when the statement can do anything beyond a quiet write.
+func (p *logosEFPass) carveStep(ks *logosEFState, s syntax.Stmt) (*logosEFState, bool) {
+	switch s := s.(type) {
+	case *syntax.AssignStmt:
+		if s.Op != 0 && s.Op != syntax.Def {
+			return ks, false
+		}
+		lhs := syntax.UnpackListExpr(s.Lhs)
+		rhs := syntax.UnpackListExpr(s.Rhs)
+		for _, r := range rhs {
+			if !p.quietExpr(r) {
+				return ks, false
+			}
+		}
+		for _, l := range lhs {
+			if !p.quietDest(l) {
+				return ks, false
+			}
+		}
+		for _, l := range lhs {
+			ks = p.carveDrop(ks, l)
+		}
+		return ks, true
+	case *syntax.DeclStmt:
+		for _, d := range s.DeclList {
+			vd, ok := d.(*syntax.VarDecl)
+			if !ok {
+				continue
+			}
+			if vd.Values != nil {
+				for _, r := range syntax.UnpackListExpr(vd.Values) {
+					if !p.quietExpr(r) {
+						return ks, false
+					}
+				}
+				for _, name := range vd.NameList {
+					ks = p.carveDrop(ks, name)
+				}
+			}
+		}
+		return ks, true
+	}
+	return ks, false
+}
+
+// quietExpr reports whether e can neither panic nor exit: a literal, a
+// plain name, or a direct value-struct field path over quiet operands.
+// Anything else, including calls, indices, and operations, ends the scan.
+func (p *logosEFPass) quietExpr(e syntax.Expr) bool {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.BasicLit:
+		return true
+	case *syntax.Name:
+		return true
+	case *syntax.SelectorExpr:
+		sel := p.check.Selections[e]
+		if sel == nil || sel.Kind() != FieldVal || sel.Indirect() || len(sel.Index()) != 1 {
+			return false
+		}
+		return p.quietExpr(e.X)
+	}
+	return false
+}
+
+// quietDest reports whether l is a write that can neither panic nor exit:
+// a plain name, including the blank identifier, or a direct value-struct
+// field path over quiet destinations.
+func (p *logosEFPass) quietDest(l syntax.Expr) bool {
+	switch l := syntax.Unparen(l).(type) {
+	case *syntax.Name:
+		return true
+	case *syntax.SelectorExpr:
+		sel := p.check.Selections[l]
+		if sel == nil || sel.Kind() != FieldVal || sel.Indirect() || len(sel.Index()) != 1 {
+			return false
+		}
+		return p.quietDest(l.X)
+	}
+	return false
+}
+
+// carveDrop drops the entries a quiet write overwrites, mirroring dropDest
+// for the destination forms quietDest allows. It touches only the scratch
+// state, never effects.
+func (p *logosEFPass) carveDrop(st *logosEFState, l syntax.Expr) *logosEFState {
+	l = syntax.Unparen(l)
+	if v := p.varOf(l); v != nil {
+		return st.dropWriting(logosEFKey{root: v}).detach(v)
+	}
+	if k, ok := p.rawKey(l); ok {
+		return st.dropWriting(k)
+	}
+	return st
+}
+
+// remainderHazards reports whether rest can still rewrite a dropped value
+// or steer control off the straight line: any call, any assignment-like
+// statement, any branch, loop, label, or literal that may run later.
+func (p *logosEFPass) remainderHazards(rest []syntax.Stmt) bool {
+	hazard := false
+	for _, s := range rest {
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			switch n.(type) {
+			case *syntax.CallExpr,
+				*syntax.AssignStmt,
+				*syntax.DeclStmt,
+				*syntax.RangeClause,
+				*syntax.BranchStmt,
+				*syntax.LabeledStmt,
+				*syntax.ForStmt,
+				*syntax.IfStmt,
+				*syntax.SwitchStmt,
+				*syntax.SelectStmt,
+				*syntax.GroupStmt,
+				*syntax.GroupChild,
+				*syntax.FuncLit,
+				*syntax.LambdaExpr:
+				hazard = true
+				return false
+			}
+			return !hazard
+		})
+		if hazard {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
@@ -2457,6 +2653,32 @@ func (p *logosEFPass) decls(s *syntax.DeclStmt, st *logosEFState) *logosEFState 
 		}
 	}
 	return st
+}
+
+func (p *logosEFPass) loop(body *syntax.BlockStmt, cond syntax.Expr, post syntax.SimpleStmt, label string, st *logosEFState, rc *syntax.RangeClause) *logosEFState {
+	if st == nil {
+		return nil
+	}
+	p.loopDepth++
+	defer func() { p.loopDepth-- }()
+	head := st
+	for {
+		f := p.pushFrame(label, true)
+		in, out := head, (*logosEFState)(nil)
+		switch {
+		case rc != nil:
+			in, out = p.rangeAssign(rc, head), head
+		case cond != nil:
+			in, out = p.cond(cond, head)
+		}
+		end := p.stmt(post, logosEFJoin(p.stmt(body, in), f.cnt))
+		p.popFrame()
+		next := logosEFJoin(head, end)
+		if logosEFSame(next, head) {
+			return logosEFJoin(out, f.brk)
+		}
+		head = next
+	}
 }
 
 func (p *logosEFPass) assign(s *syntax.AssignStmt, st *logosEFState) *logosEFState {
@@ -2638,30 +2860,6 @@ func (p *logosEFPass) forStmt(s *syntax.ForStmt, label string, st *logosEFState)
 		return p.loop(s.Body, s.Cond, s.Post, label, p.stmt(s.Init, st), nil)
 	}
 	return p.loop(s.Body, nil, nil, label, p.expr(rc.X, st), rc)
-}
-
-func (p *logosEFPass) loop(body *syntax.BlockStmt, cond syntax.Expr, post syntax.SimpleStmt, label string, st *logosEFState, rc *syntax.RangeClause) *logosEFState {
-	if st == nil {
-		return nil
-	}
-	head := st
-	for {
-		f := p.pushFrame(label, true)
-		in, out := head, (*logosEFState)(nil)
-		switch {
-		case rc != nil:
-			in, out = p.rangeAssign(rc, head), head
-		case cond != nil:
-			in, out = p.cond(cond, head)
-		}
-		end := p.stmt(post, logosEFJoin(p.stmt(body, in), f.cnt))
-		p.popFrame()
-		next := logosEFJoin(head, end)
-		if logosEFSame(next, head) {
-			return logosEFJoin(out, f.brk)
-		}
-		head = next
-	}
 }
 
 func (p *logosEFPass) rangeAssign(rc *syntax.RangeClause, st *logosEFState) *logosEFState {
@@ -3183,7 +3381,13 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	saved := p.eff
 	eff := &logosEFEffects{inside: inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string)}
 	p.eff = eff
-	p.run(body, p.lateCaptures(p.capture(st), lit, inside))
+	in := p.capture(st)
+	if p.carve != nil {
+		if cs, ok := p.carve[lit]; ok {
+			in = p.capture(cs)
+		}
+	}
+	p.run(body, p.lateCaptures(in, lit, inside))
 	p.eff = saved
 	for k := range eff.assigned {
 		if k.path == "" {

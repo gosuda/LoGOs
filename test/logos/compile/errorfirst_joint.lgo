@@ -1344,3 +1344,110 @@ func efShortBlankDeferred() {
 		println(v) // ERROR "result_before_error_check"
 	}()
 }
+
+// A later unconditional plain reset means the deferred literal only ever
+// observes the reset value, so the earlier unchecked store needs no proof.
+func efDeferredResetAfterDefer() error {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats)
+	}()
+	h.stats = 0
+	return h.err
+}
+
+// The same holds for a plain result: the reset drops the entry, and the
+// deferred body reads the replacement.
+func efDeferredPlainResetAfter() {
+	n, err := efFetchHeld()
+	defer func() {
+		println(n)
+	}()
+	n = 0
+	_ = err
+}
+
+// A return between the defer and the reset exits before the reset runs,
+// so the carve does not apply and the deferred read still fails.
+func efDeferredResetAfterReturn(cond bool) error {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	if cond {
+		return h.err
+	}
+	h.stats = 0
+	return h.err
+}
+
+// A call between the defer and the reset can panic and run the deferred
+// body early, so the carve does not apply either.
+func efDeferredResetAfterCall() error {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	efUse(0)
+	h.stats = 0
+	return h.err
+}
+
+// A conditional reset does not run on every path, so the deferred read
+// still fails.
+func efDeferredResetConditional(cond bool) error {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	if cond {
+		h.stats = 0
+	}
+	return h.err
+}
+
+// Inside a loop a later iteration can store again after the reset, so the
+// carve does not apply there either.
+func efDeferredResetInLoop() {
+	h := efHeld{}
+	for i := 0; i < 2; i++ {
+		var err error
+		h.stats, err = efFetchHeld()
+		defer func() {
+			println(h.stats) // ERROR "result_before_error_check"
+		}()
+		h.stats = 0
+		_ = err
+		_ = i
+	}
+}
+
+// A stored literal can run before the reset, so only direct defers get
+// the carve.
+func efStoredLiteralResetAfter() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	f := func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}
+	h.stats = 0
+	_ = h.err
+	f()
+}
+
+// A store after the reset dirties the value again, so the carve is
+// cancelled and the deferred read still fails.
+func efDeferredResetThenRestored() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+	h.stats = 0
+	h.stats, h.err = efFetchHeld()
+	_ = h.err
+}
