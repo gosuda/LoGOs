@@ -829,9 +829,8 @@ func (fl *fileLower) cfCopyFor(site *cfSite) string {
 	reported := base.Errors()
 	text, ok := fl.cfBuildCopy(site, rec, name)
 	exp.stack = exp.stack[:len(exp.stack)-1]
-	exp.memo[key] = name
-	if ok && base.Errors() == reported {
-		fl.cfEmitCopy(text, site)
+	if ok && base.Errors() == reported && fl.cfEmitCopy(text, site) {
+		exp.memo[key] = name
 	}
 	return name
 }
@@ -1276,18 +1275,19 @@ func (fl *fileLower) cfCaseBoundTypes(n syntax.Node, run *cfRun, parents map[syn
 	return bound
 }
 
-func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) {
+func (fl *fileLower) cfEmitCopy(text otext, site *cfSite) bool {
 	file, errs := cfParseSource("package cfcopy\n" + text.s)
 	fn := cfFirstFunc(file)
 	if len(errs) > 0 || fn == nil {
 		base.Fatalf("logos: cannot parse comptime copy at %s: %v", site.pos.String(), errs)
 	}
 	if !fl.cfCheckCopyFunc(fn, site.pos) {
-		return
+		return false
 	}
 	region := fl.adoptRegion(text, site.pos, fn.Pos().FileBase(), 2, []syntax.Node{fn})
 	fl.file.DeclList = append(fl.file.DeclList, fn)
 	fl.addHost(fl.orig, fl.orig, &cfHost{regions: []*cfRegion{region}, head: "\n\n", tail: "\n"})
+	return true
 }
 
 func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos) bool {
@@ -1295,7 +1295,7 @@ func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos) bool {
 	ctx := types2.LogosCopyContext{
 		Scope:     fl.pkg.info.Scopes[fl.file],
 		Funcs:     exp.copyFuncs,
-		Aliases:   fl.cfAliases(),
+		Aliases:   fl.cfCopyCheckAliases(fn),
 		MaxSteps:  fl.pkg.info.LogosCTFEMaxSteps,
 		NodeLimit: base.LogosComptimeNodes,
 		Importer:  fl.pkg.info.LogosImporter,
@@ -1309,6 +1309,59 @@ func (fl *fileLower) cfCheckCopyFunc(fn *syntax.FuncDecl, pos syntax.Pos) bool {
 		fl.cfError(pos, "%s", err.Msg)
 	}
 	return len(errs) == 0
+}
+
+// rtSelectorUsed reports whether fn spells the reserved runtime alias as
+// a package qualifier. A string literal that merely contains the alias
+// text is not a reference and must not pull the package into scope.
+func rtSelectorUsed(fn *syntax.FuncDecl) bool {
+	used := false
+	syntax.Inspect(fn, func(n syntax.Node) bool {
+		if s, ok := n.(*syntax.SelectorExpr); ok {
+			if id, ok := s.X.(*syntax.Name); ok && id.Value == rtAlias {
+				used = true
+				return false
+			}
+		}
+		return true
+	})
+	return used
+}
+
+// cfCopyCheckAliases returns the import aliases one copy check resolves:
+// the file's synthesized imports plus every runtime alias the copy
+// spells. Copy construction spells some types in lowered form
+// (`_logos_rt.Option[T]` for an option), and the check must resolve
+// those names even though no user import declares them. One package can
+// hold two qualifiers at once: an explicit reference the copy rewrote to
+// a fresh alias alongside a generated `_logos_rt` one. The file import
+// gate emits each import once the copy is adopted.
+func (fl *fileLower) cfCopyCheckAliases(fn *syntax.FuncDecl) map[*types2.Package][]string {
+	out := make(map[*types2.Package][]string)
+	for pkg, q := range fl.cfAliases() {
+		out[pkg] = []string{q}
+	}
+	if !rtSelectorUsed(fn) {
+		return out
+	}
+	for pkg, qs := range out {
+		if pkg.Path() != rtImportPath {
+			continue
+		}
+		for _, q := range qs {
+			if q == rtAlias {
+				return out
+			}
+		}
+		out[pkg] = append(out[pkg], rtAlias)
+		return out
+	}
+	pkg, err := fl.cfLoadPackage(rtImportPath)
+	if err != nil || pkg == nil {
+		return out
+	}
+	out[pkg] = []string{rtAlias}
+	return out
 }
 
 func (fl *fileLower) cfRetireDefs() {
