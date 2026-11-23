@@ -649,9 +649,15 @@ func (check *Checker) logosCallResultIsTParam(call *syntax.CallExpr, i int) bool
 // logosReceiverTypeArgs returns the type arguments of the named type
 // a method call selects on, so substituted parameters count as
 // type-parameter positions (platform arguments pass unchecked).
+// Only a plain method selection qualifies: an explicitly
+// instantiated call (`x.M[T](...)`) resolves its declaration and
+// results through logosCallSelector, but its argument exemption stays
+// type-only, so a concrete parameter that coincides with a receiver
+// argument must keep its nil check. Per-parameter derivation from the
+// declaration is future work.
 func (check *Checker) logosReceiverTypeArgs(call *syntax.CallExpr) []Type {
-	sel := logosCallSelector(call.Fun)
-	if sel == nil || check.Info == nil {
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok || check.Info == nil {
 		return nil
 	}
 	selection := check.Selections[sel]
