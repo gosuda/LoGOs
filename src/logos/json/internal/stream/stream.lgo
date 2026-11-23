@@ -8,6 +8,7 @@ package stream
 
 import (
 	"bytes"
+	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	jsonv2 "encoding/json/v2"
 	"errors"
@@ -30,11 +31,7 @@ var (
 // without consuming input, telling the caller to try its next
 // decoder; declining after consuming input is a contract violation.
 func FromValue(u jsonv2.UnmarshalerFrom, val []byte) (declined bool, err error) {
-	dec := jsontext.NewDecoder(bytes.NewReader(val),
-		jsonv2.MatchCaseInsensitiveNames(true),
-		jsontext.AllowDuplicateNames(true),
-		jsontext.AllowInvalidUTF8(true),
-	)
+	dec := jsontext.NewDecoder(bytes.NewReader(val), stdjson.DefaultOptionsV1())
 	if err := u.UnmarshalJSONFrom(dec); err != nil {
 		if errors.Is(err, errors.ErrUnsupported) {
 			if dec.StackDepth() == 0 && dec.InputOffset() == 0 {

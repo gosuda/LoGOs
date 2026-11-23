@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Path routing. The workflow has no on.paths filter, so derive one true/false output per suite from the
 # changed files (pull request: vs its base, push: the last commit, dispatch: the "suites" input).
-# A change under .github/scripts/ or .github/workflows/ runs every suite, as each old workflow ran when its own file changed.
+# A change under .github/scripts/, .github/workflows/, or .depot/workflows/ runs every suite, as each
+# old workflow ran when its own file changed.
 set -euo pipefail
 ev=${GITHUB_EVENT_NAME:-}
 files=; base=; all=false
@@ -19,7 +20,7 @@ case $ev in
     git fetch -q --no-tags --depth=2 origin "$GITHUB_SHA"
     files=$(git diff --name-only HEAD~1 HEAD) || files= ;;
 esac
-if grep -Eq '^\.github/scripts/|^\.github/workflows/' <<< "$files"; then all=true; fi
+if grep -Eq '^\.github/scripts/|^\.github/workflows/|^\.depot/workflows/' <<< "$files"; then all=true; fi
 want() { [[ " ${INPUT_SUITES:-all} " == *" all "* || " ${INPUT_SUITES:-all} " == *" $1 "* ]]; }
 hit() { [ $all = true ] || grep -Eq "$1" <<< "$files"; }
 any=false

@@ -112,6 +112,14 @@ func nonNil(e *Err) error {
 	return e
 }
 
+type BoxHolder struct{ P *int }
+
+func makeBoxHolder[T any]() BoxHolder { return BoxHolder{P: new(int)} }
+
+func concreteGenericBox() any {
+	return makeBoxHolder[int]().P
+}
+
 func optionNestedBlock(p *Err?) any {
 	{
 		if p == nil {
