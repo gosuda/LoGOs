@@ -16,9 +16,10 @@ changed=$(git diff --name-only "$base" "$head")
 
 any() { grep -Eq "$1" <<< "$changed"; }
 
-# Shared infrastructure that every gate depends on.
+# Shared infrastructure that every gate depends on. Both workflow twins
+# count: a change to either feature-gates.yml must run every gate.
 if any '^\.github/scripts/(install-ci-tool|install-upstream-oracles|gate-changes|feature-gate|gate-setup|gates/)\.?' \
-   || any '^\.github/workflows/feature-gates\.yml$'; then
+   || any '^(\.github/workflows/|\.depot/workflows/)feature-gates\.yml$'; then
   shared=1
 else
   shared=0
