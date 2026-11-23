@@ -23,13 +23,12 @@ logos build -gcflags=all=-l -o $WORK/identity.exe .
 go tool nm $WORK/identity.exe
 stdout -count=2 ' T example\.com/identity/lib\.Describe\.logosct\.[0-9a-f]{64}$'
 
-# The ejected module builds with Go and prints the same lines.
-logos eject -o out
-cd out
-go build ./...
-go vet ./...
-go run .
-cmp stdout $WORK/native.txt
+# SPEC 2.5: logos eject prints each instance in the package that instantiates
+# it, and lib.Describe names the unexported type lib.entry, so eject refuses
+# the module.
+! logos eject -o out
+stderr '^(\./)?lib/lib\.lgo:[0-9]+:[0-9]+: \[comptime::unexported_in_exported\] a comptime instance ejected into package example\.com/identity/a names unexported entry of package example\.com/identity/lib$'
+! stderr 'internal compiler error'
 
 -- m/go.mod --
 module example.com/identity
