@@ -611,10 +611,17 @@ func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Pack
 		sel = append(sel, f.Name())
 		ft := unaliasConstView(f.Type())
 		var elem types2.Type
+		elemSpell := ""
 		isPtr := false
 		if p, ok := types2.Unalias(ft).(*types2.Pointer); ok {
 			isPtr = true
 			elem = unaliasConstView(p.Elem())
+			// Spell the allocation through the field's own pointer
+			// element, which keeps an accessible alias: for an
+			// embedded *Exported where Exported is an alias for an
+			// unexported type, the holder writes new(g.Exported),
+			// not new(g.hidden), which names an unreachable type.
+			elemSpell = types2.TypeString(p.Elem(), qual)
 			ft = elem
 		}
 		if unboundParams(ft) {
@@ -633,7 +640,7 @@ func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Pack
 				if !assignable {
 					return nil, false
 				}
-				out = append(out, promotedDecoderInit{sel: strings.Join(sel, "."), elem: types2.TypeString(elem, qual)})
+				out = append(out, promotedDecoderInit{sel: strings.Join(sel, "."), elem: elemSpell})
 			}
 			st = c
 		case *types2.Pointer, *types2.Interface:
@@ -643,7 +650,7 @@ func promotedDecoderInits(st *types2.Struct, index []int, holderPkg *types2.Pack
 				if !assignable {
 					return nil, false
 				}
-				out = append(out, promotedDecoderInit{sel: strings.Join(sel, "."), elem: types2.TypeString(elem, qual)})
+				out = append(out, promotedDecoderInit{sel: strings.Join(sel, "."), elem: elemSpell})
 			}
 			if !last {
 				return nil, false
