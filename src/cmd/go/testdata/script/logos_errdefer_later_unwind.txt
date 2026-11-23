@@ -1,9 +1,11 @@
 # errdefer runs when a later deferred function literal starts unwinding after a
 # successful return, by panic and by runtime.Goexit; it stays skipped on a plain
 # success and when that literal returns normally, and recover() in the literal
-# keeps its Go meaning. A later named-callee defer that panics after a
-# successful return leaves errdefer skipped: the documented limit. The same
-# holds in a comptime generic instance, which lowers on its own path.
+# keeps its Go meaning. A later named-callee defer, a later literal with
+# results, and a later literal that defers a call of its own each leave
+# errdefer skipped when they panic after a successful return: the documented
+# limit. The same holds in a comptime generic instance, which lowers on its
+# own path.
 # Native and ejected output must match. SPEC T-104.2.
 
 env GOPROXY=off
@@ -13,7 +15,7 @@ cd m
 
 logos run .
 # One anchored semantic check: all required events, in order.
-stdout '(?s)\Aplain ok: cleanup skipped\ndefer-second\ndefer-first\nstart-panic\nerrdefer-ran\nrecovered: late-boom\nstart-panic\nrecovered named: late-boom\nquiet-literal\nliteral-recovered: inner-boom\nerrdefer-ran-recovered\nliteral err: <nil>\nct-quiet\nct-quiet\nstart-panic\nct-errdefer-ran\nrecovered ct: late-boom\nerrdefer-ran-goexit\ndone\n\z'
+stdout '(?s)\Aplain ok: cleanup skipped\ndefer-second\ndefer-first\nstart-panic\nerrdefer-ran\nrecovered: late-boom\nstart-panic\nrecovered named: late-boom\nstart-panic\nrecovered result: late-boom\nstart-panic\ninner-deferred\nrecovered deferring: late-boom\nquiet-literal\nliteral-recovered: inner-boom\nerrdefer-ran-recovered\nliteral err: <nil>\nct-quiet\nct-quiet\nstart-panic\nct-errdefer-ran\nrecovered ct: late-boom\nerrdefer-ran-goexit\ndone\n\z'
 
 # The ejected run must print the same lines as this native run.
 cp stdout $WORK/native-stdout.txt
@@ -87,6 +89,24 @@ func startPanic() {
 	panic("late-boom")
 }
 
+func resultLiteralPanic() (err error) {
+	errdefer note("result-errdefer-must-not-run")
+	defer func() int {
+		startPanic()
+		return 0
+	}()
+	return nil
+}
+
+func deferringLiteralPanic() (err error) {
+	errdefer note("deferring-errdefer-must-not-run")
+	defer func() {
+		defer note("inner-deferred")
+		startPanic()
+	}()
+	return nil
+}
+
 func quietLiteral() (err error) {
 	errdefer note("quiet-errdefer-must-not-run")
 	defer func() {
@@ -155,6 +175,14 @@ func main() {
 	func() {
 		defer func() { fmt.Println("recovered named:", recover()) }()
 		_ = namedLaterPanic()
+	}()
+	func() {
+		defer func() { fmt.Println("recovered result:", recover()) }()
+		_ = resultLiteralPanic()
+	}()
+	func() {
+		defer func() { fmt.Println("recovered deferring:", recover()) }()
+		_ = deferringLiteralPanic()
 	}()
 	if err := quietLiteral(); err != nil {
 		fmt.Println("quiet err:", err)
