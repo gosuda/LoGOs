@@ -516,6 +516,28 @@ func jsonUnmarshalMethod(t types2.Type, name string) *types2.Func {
 	return fn
 }
 
+// jsonPromotedUnmarshalJSON reports whether t is an anonymous struct whose
+// method set promotes an UnmarshalJSON with the signature the generated union
+// trial calls. The trial declares an addressable scratch value of the member
+// type, so a promoted pointer method is callable there. Every other unnamed
+// form stays untriable.
+func jsonPromotedUnmarshalJSON(t types2.Type) bool {
+	u := unaliasConstView(t)
+	if p, ok := u.(*types2.Pointer); ok {
+		u = unaliasConstView(p.Elem())
+	}
+	st, ok := u.(*types2.Struct)
+	if !ok {
+		return false
+	}
+	m, _, _ := types2.LookupFieldOrMethod(types2.NewPointer(st), false, nil, "UnmarshalJSON")
+	fn, ok := m.(*types2.Func)
+	if !ok {
+		return false
+	}
+	return jsonUnmarshalSignature("UnmarshalJSON", fn)
+}
+
 func jsonIsDecoderPointer(t types2.Type) bool {
 	p, ok := types2.Unalias(t).(*types2.Pointer)
 	if !ok {

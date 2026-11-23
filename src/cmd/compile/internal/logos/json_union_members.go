@@ -154,10 +154,13 @@ func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]b
 	}
 	named, ok := unaliasConstView(elem).(*types2.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-		// A built-in or otherwise unnamed member has no decoder to call,
-		// but the union itself is well-formed: classify it as untriable
-		// so the trial is omitted instead of aborting the build.
-		return unionMemberClass{spell: spell, keyed: false, hasJSON: hasUnmarshalMethods(m), decodable: hasUnmarshalJSON(m), typ: m}, true
+		// A built-in or otherwise unnamed member has no decoder of its own,
+		// but an anonymous struct promotes the UnmarshalJSON of its
+		// embedded fields onto the addressable scratch value the trial
+		// declares. Trial exactly that case; everything else stays
+		// untriable so the trial is omitted instead of aborting the build.
+		decodable := hasUnmarshalJSON(m) || jsonPromotedUnmarshalJSON(m)
+		return unionMemberClass{spell: spell, keyed: false, hasJSON: hasUnmarshalMethods(m) || decodable, decodable: decodable, typ: m}, true
 	}
 	if args := named.TypeArgs(); args != nil && args.Len() > 0 {
 		for i := range args.Len() {
