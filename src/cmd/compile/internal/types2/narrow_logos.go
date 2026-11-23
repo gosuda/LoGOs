@@ -98,6 +98,14 @@ func (check *Checker) logosEnterFuncBody(body *syntax.BlockStmt) {
 	}
 	if outermost {
 		check.logosEFBody = body
+		check.logosEFResults = check.logosEFResults[:0]
+		if sig := check.sig; sig != nil && sig.results != nil {
+			for i := range sig.results.Len() {
+				if v := sig.results.At(i); v != nil {
+					check.logosEFResults = append(check.logosEFResults, v)
+				}
+			}
+		}
 		tainted := make(map[string]bool)
 		for name := range dq.refInClos {
 			if dq.assignOut[name] {
@@ -903,6 +911,67 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 	return &logosEFState{m: m, may: may, mayErr: mayErr}
 }
 
+// dropCovered forgets the entries a quiet field write fully overwrites:
+// the destination itself and anything nested inside it. It keeps strict
+// ancestors: resetting one field does not prove the whole value was
+// reset. Pairings whose error destination the write overlaps are still
+// dropped, mirroring the flow state.
+func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
+	var out map[logosEFKey]logosEFEntry
+	for v := range s.m {
+		if v.root != k.root {
+			continue
+		}
+		if logosEFPathUnder(v.path, k.path) {
+			if out == nil {
+				out = maps.Clone(s.m)
+			}
+			delete(out, v)
+		}
+	}
+	var mayOut map[logosEFKey]bool
+	for v := range s.may {
+		if v.root != k.root {
+			continue
+		}
+		if logosEFPathUnder(v.path, k.path) {
+			if mayOut == nil {
+				mayOut = maps.Clone(s.may)
+			}
+			delete(mayOut, v)
+		}
+	}
+	var errOut map[logosEFKey]logosEFKey
+	for v, ek := range s.mayErr {
+		overlapped := v.root == k.root && logosEFPathUnder(v.path, k.path)
+		if !overlapped && ek.root == k.root {
+			overlapped = logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path)
+		}
+		if overlapped {
+			if errOut == nil {
+				errOut = maps.Clone(s.mayErr)
+			}
+			delete(errOut, v)
+		}
+	}
+	if out == nil && mayOut == nil && errOut == nil {
+		return s
+	}
+	m := s.m
+	if out != nil {
+		m = out
+	}
+	may := s.may
+	if mayOut != nil {
+		may = mayOut
+	}
+	mayErr := s.mayErr
+	if errOut != nil {
+		mayErr = errOut
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErr}
+}
+
 // logosEFPathUnder reports whether path denotes prefix or a destination
 // nested inside it; the empty prefix is the whole root.
 func logosEFPathUnder(path, prefix string) bool {
@@ -1187,6 +1256,7 @@ type logosEFPass struct {
 	carve         map[syntax.Node]*logosEFState
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
 	trackedByRoot map[*Var][]logosEFKey
+	results       map[*Var]bool
 }
 
 func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
@@ -1194,6 +1264,12 @@ func (check *Checker) logosErrorFirst(body *syntax.BlockStmt) {
 		return
 	}
 	p := &logosEFPass{check: check, body: body, seen: make(map[syntax.Pos]bool)}
+	if len(check.logosEFResults) > 0 {
+		p.results = make(map[*Var]bool, len(check.logosEFResults))
+		for _, v := range check.logosEFResults {
+			p.results[v] = true
+		}
+	}
 	if p.hasTuple() {
 		p.run(body, &logosEFState{})
 	}
@@ -2414,9 +2490,9 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 	return st.prove(errV), st
 }
 
-func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState) *logosEFState {
+func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState, top bool) *logosEFState {
 	for i, s := range list {
-		if next, ok := p.deferStmt(s, list[i+1:], st); ok {
+		if next, ok := p.deferStmt(s, list[i+1:], st, top); ok {
 			st = next
 			continue
 		}
@@ -2428,12 +2504,15 @@ func (p *logosEFPass) stmts(list []syntax.Stmt, st *logosEFState) *logosEFState 
 // deferStmt analyzes a direct defer of a function literal, letting a later
 // unconditional plain overwrite in the same list satisfy the deferred read:
 // the literal observes the value at function exit, not at registration.
-// The carve touches only the literal's capture input; the flow state is
-// untouched, so reads between the defer and the overwrite still fail. Any
-// other statement returns false for normal handling.
-func (p *logosEFPass) deferStmt(s syntax.Stmt, rest []syntax.Stmt, st *logosEFState) (*logosEFState, bool) {
+// The carve applies only at the function body's top level, where the rest
+// of the list is everything that can still run: inside a nested block a
+// later store after the enclosing block is invisible to the remainder
+// check. The carve touches only the literal's capture input; the flow
+// state is untouched, so reads between the defer and the overwrite still
+// fail. Any other statement returns false for normal handling.
+func (p *logosEFPass) deferStmt(s syntax.Stmt, rest []syntax.Stmt, st *logosEFState, top bool) (*logosEFState, bool) {
 	cs, ok := s.(*syntax.CallStmt)
-	if !ok || cs.Tok != syntax.Defer || p.loopDepth > 0 {
+	if !ok || cs.Tok != syntax.Defer || p.loopDepth > 0 || !top {
 		return nil, false
 	}
 	call, ok := syntax.Unparen(cs.Call).(*syntax.CallExpr)
@@ -2479,10 +2558,53 @@ func (p *logosEFPass) carveAfter(rest []syntax.Stmt, st *logosEFState) (*logosEF
 	if logosEFSame(ks, st) {
 		return nil, false
 	}
-	if p.remainderHazards(rest[i:]) {
+	// A MustNonNil store can panic, but the resets folded before it
+	// already ran on every path, so keep them and fold only tails that
+	// change nothing after it. The checking store itself writes a
+	// platform pointer, never an unchecked result, and its panic
+	// preserves the prior resets.
+	if i < len(rest) && p.isCheckStore(rest[i]) {
+		for j := i + 1; j < len(rest); j++ {
+			trial, cont := p.carveStep(ks, rest[j])
+			if !cont {
+				if p.remainderHazards(rest[j:], p.carvedRoots(st, trial)) {
+					return nil, false
+				}
+				return ks, true
+			}
+			if !logosEFSame(trial, ks) {
+				return nil, false
+			}
+			ks = trial
+		}
+		return ks, true
+	}
+	if p.remainderHazards(rest[i:], p.carvedRoots(st, ks)) {
 		return nil, false
 	}
 	return ks, true
+}
+
+// carvedRoots lists the variables the carve dropped: an explicit return
+// that writes any of them through the named results cancels the carve.
+func (p *logosEFPass) carvedRoots(st, ks *logosEFState) map[*Var]bool {
+	out := make(map[*Var]bool)
+	for k := range st.m {
+		if _, ok := ks.m[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	for k := range st.may {
+		if _, ok := ks.may[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	for k := range st.mayErr {
+		if _, ok := ks.mayErr[k]; !ok {
+			out[k.root] = true
+		}
+	}
+	return out
 }
 
 // carveStep folds one overwriting statement into the scratch state, or
@@ -2497,6 +2619,9 @@ func (p *logosEFPass) carveStep(ks *logosEFState, s syntax.Stmt) (*logosEFState,
 		rhs := syntax.UnpackListExpr(s.Rhs)
 		for _, r := range rhs {
 			if !p.quietExpr(r) {
+				return ks, false
+			}
+			if p.platformChecked(r) {
 				return ks, false
 			}
 		}
@@ -2518,6 +2643,9 @@ func (p *logosEFPass) carveStep(ks *logosEFState, s syntax.Stmt) (*logosEFState,
 			if vd.Values != nil {
 				for _, r := range syntax.UnpackListExpr(vd.Values) {
 					if !p.quietExpr(r) {
+						return ks, false
+					}
+					if p.platformChecked(r) {
 						return ks, false
 					}
 				}
@@ -2567,8 +2695,65 @@ func (p *logosEFPass) quietDest(l syntax.Expr) bool {
 	return false
 }
 
-// carveDrop drops the entries a quiet write overwrites, mirroring dropDest
-// for the destination forms quietDest allows. It touches only the scratch
+// platformChecked reports whether e is the recorded source of a MustNonNil
+// store: the lowering wraps it in a check that can panic, so the scan stops
+// before it instead of folding past it.
+func (p *logosEFPass) platformChecked(e syntax.Expr) bool {
+	info := p.check.Info
+	if info == nil || len(info.LogosChecks) == 0 {
+		return false
+	}
+	_, ok := info.LogosChecks[syntax.Unparen(e)]
+	return ok
+}
+
+// isCheckStore reports whether carveStep stops at s because of a recorded
+// MustNonNil source rather than a louder statement: a plain assignment or
+// declaration whose operands are all quiet with one of them checked. It
+// mirrors the scan order so the partial carve keeps only the resets that
+// already ran before the checking store.
+func (p *logosEFPass) isCheckStore(s syntax.Stmt) bool {
+	switch s := s.(type) {
+	case *syntax.AssignStmt:
+		if s.Op != 0 && s.Op != syntax.Def {
+			return false
+		}
+		rhs := syntax.UnpackListExpr(s.Rhs)
+		if len(rhs) == 0 {
+			return false
+		}
+		for _, r := range rhs {
+			if !p.quietExpr(r) {
+				return false
+			}
+			if p.platformChecked(r) {
+				return true
+			}
+		}
+		return false
+	case *syntax.DeclStmt:
+		for _, d := range s.DeclList {
+			vd, ok := d.(*syntax.VarDecl)
+			if !ok || vd.Values == nil {
+				continue
+			}
+			for _, r := range syntax.UnpackListExpr(vd.Values) {
+				if !p.quietExpr(r) {
+					return false
+				}
+				if p.platformChecked(r) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// carveDrop drops the entries a quiet write overwrites: whole-variable
+// writes mirror dropDest, while field writes drop only covered
+// destinations and keep strict ancestors. It touches only the scratch
 // state, never effects.
 func (p *logosEFPass) carveDrop(st *logosEFState, l syntax.Expr) *logosEFState {
 	l = syntax.Unparen(l)
@@ -2576,18 +2761,27 @@ func (p *logosEFPass) carveDrop(st *logosEFState, l syntax.Expr) *logosEFState {
 		return st.dropWriting(logosEFKey{root: v}).detach(v)
 	}
 	if k, ok := p.rawKey(l); ok {
-		return st.dropWriting(k)
+		return st.dropCovered(k)
 	}
 	return st
 }
 
 // remainderHazards reports whether rest can still rewrite a dropped value
 // or steer control off the straight line: any call, any assignment-like
-// statement, any branch, loop, label, or literal that may run later.
-func (p *logosEFPass) remainderHazards(rest []syntax.Stmt) bool {
+// statement, any branch, loop, label, or literal that may run later, and
+// any result-carrying return that writes a dropped named result.
+func (p *logosEFPass) remainderHazards(rest []syntax.Stmt, dropped map[*Var]bool) bool {
 	hazard := false
 	for _, s := range rest {
 		syntax.Inspect(s, func(n syntax.Node) bool {
+			if rs, ok := n.(*syntax.ReturnStmt); ok && len(syntax.UnpackListExpr(rs.Results)) > 0 {
+				for v := range dropped {
+					if p.results[v] {
+						hazard = true
+						return false
+					}
+				}
+			}
 			switch n.(type) {
 			case *syntax.CallExpr,
 				*syntax.AssignStmt,
@@ -2627,7 +2821,7 @@ func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	}
 	switch s := s.(type) {
 	case *syntax.BlockStmt:
-		return p.stmts(s.List, st)
+		return p.stmts(s.List, st, s == p.body)
 	case *syntax.ExprStmt:
 		return p.exprStmt(s, st)
 	case *syntax.SendStmt:
@@ -2664,7 +2858,7 @@ func (p *logosEFPass) logosStmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	case *syntax.ConstSwitchStmt:
 		out := st
 		for _, c := range s.Cases {
-			out = logosEFJoin(out, p.stmts(c.Body, st))
+			out = logosEFJoin(out, p.stmts(c.Body, st, false))
 		}
 		return out
 	case *syntax.ConstForStmt:
@@ -3042,7 +3236,7 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 			enter[i] = miss
 		}
 		p.ctx.fall = nil
-		out = logosEFJoin(out, p.stmts(c.Body, logosEFJoin(enter[i], fall)))
+		out = logosEFJoin(out, p.stmts(c.Body, logosEFJoin(enter[i], fall), false))
 		fall = p.ctx.fall
 	}
 	p.ctx.fall = nil
@@ -3072,7 +3266,7 @@ func (p *logosEFPass) selectStmt(s *syntax.SelectStmt, label string, st *logosEF
 	f := p.pushFrame(label, false)
 	var out *logosEFState
 	for _, c := range s.Body {
-		out = logosEFJoin(out, p.stmts(c.Body, p.stmt(c.Comm, st)))
+		out = logosEFJoin(out, p.stmts(c.Body, p.stmt(c.Comm, st), false))
 	}
 	p.popFrame()
 	return logosEFJoin(out, f.brk)
@@ -3539,7 +3733,7 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 			in = p.capture(cs)
 		}
 	}
-	p.run(body, p.lateCaptures(in, lit, inside))
+	end := p.run(body, p.lateCaptures(in, lit, inside))
 	p.eff = saved
 	for k := range eff.assigned {
 		if k.path == "" {
@@ -3557,6 +3751,23 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 			st = p.setMayErr(st, k, errKey)
 		}
 		p.noteMay(k, errKey)
+	}
+	// A literal that stores a result may run after a later capture
+	// registers, so its may-reach marks join the outer flow with their
+	// pairings. Keys defined inside the literal stay local.
+	if end != nil {
+		for k := range end.may {
+			if inside[k.root] {
+				continue
+			}
+			st = st.setMay(k)
+		}
+		for k, ek := range end.mayErr {
+			if inside[k.root] || inside[ek.root] {
+				continue
+			}
+			st = p.setMayErr(st, k, ek)
+		}
 	}
 	return st
 }
