@@ -278,6 +278,7 @@ type fileLower struct {
 	names                      map[*types2.Package]string
 	genImps                    *genImports
 	importsPendingGeneratedUse []*syntax.ImportDecl
+	genImportsPendingNativeUse []*syntax.ImportDecl
 	ejectSites                 map[syntax.Node]bool
 	ctRuntimeUnsafe            bool // the ejected text imports unsafe for a comptime run-time body
 	// Option lowering state: optMemo pins one lowering per shared

@@ -221,6 +221,16 @@ func (fl *fileLower) cfDemoteImportsUnusedByGenerated() {
 		fl.cfDemoteImport(imp, path)
 	}
 	fl.importsPendingGeneratedUse = nil
+	ejectOnly := make(map[syntax.Decl]bool)
+	for _, imp := range fl.genImportsPendingNativeUse {
+		if !used[imp.LocalPkgName.Value] {
+			ejectOnly[imp] = true
+		}
+	}
+	if len(ejectOnly) > 0 {
+		fl.file.DeclList = slices.DeleteFunc(fl.file.DeclList, func(d syntax.Decl) bool { return ejectOnly[d] })
+	}
+	fl.genImportsPendingNativeUse = nil
 }
 
 func (fl *fileLower) cfNamesInUse(skip map[syntax.Node]bool) map[string]bool {
