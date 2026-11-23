@@ -146,22 +146,41 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 	// elements, and neither fault changes the read and loop counts above.
 	// Ordering lifts the index reset out of the loop node, so the reset
 	// is the zero assign ahead of the loop in the same block.
-	resets, loopAt := 0, -1
+	cond, ok := loop.Cond.(*ir.BinaryExpr)
+	if !ok || cond.Op() != ir.OLT {
+		t.Fatalf("nested loop condition is not a less-than bound: %v", loop.Cond)
+	}
+	idx, ok := cond.X.(*ir.Name)
+	if !ok || idx.Sym() == nil {
+		t.Fatalf("nested loop index is not a variable: %v", loop.Cond)
+	}
+	loopAt := -1
 	for i, n := range blk.List {
-		if as, ok := n.(*ir.AssignStmt); ok {
-			if v, ok := eqLoopConst(t, as.Y); ok && v == 0 {
-				resets++
-			}
-		}
 		if _, ok := n.(*ir.ForStmt); ok {
 			loopAt = i
 		}
 	}
-	if resets != 1 || loopAt < 1 {
-		t.Fatalf("nested loop block holds %d index resets before loop at %d, want one reset: %v", resets, loopAt, body[2])
+	if loopAt < 1 {
+		t.Fatalf("nested loop block holds no loop after setup: %v", body[2])
 	}
-	cond, ok := loop.Cond.(*ir.BinaryExpr)
-	if bound, ok := eqLoopConst(t, cond.Y); !ok || cond.Op() != ir.OLT || bound != subs.Size() {
+	resets := 0
+	for _, n := range blk.List[:loopAt] {
+		as, ok := n.(*ir.AssignStmt)
+		if !ok {
+			continue
+		}
+		xn, ok := as.X.(*ir.Name)
+		if !ok || xn.Sym() != idx.Sym() {
+			continue
+		}
+		if v, ok := eqLoopConst(t, as.Y); ok && v == 0 {
+			resets++
+		}
+	}
+	if resets != 1 {
+		t.Fatalf("nested loop index reset is not one zero assign to the loop variable: %v", body[2])
+	}
+	if bound, ok := eqLoopConst(t, cond.Y); !ok || bound != subs.Size() {
 		t.Fatalf("nested loop bound is not the whole array: %v", loop.Cond)
 	}
 	// Ordering wraps the post statement in a block, like every other
@@ -180,6 +199,28 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 	step, ok := post.Y.(*ir.BinaryExpr)
 	if stride, ok := eqLoopConst(t, step.Y); !ok || step.Op() != ir.OADD || stride != sub.Size() {
 		t.Fatalf("nested loop does not stride by one element: %v", loop.Post)
+	}
+	bodyReads := 0
+	oneBody := func(n ir.Node) {
+		switch n.Op() {
+		case ir.OCALL, ir.OCALLFUNC:
+			bodyReads++
+		case ir.OAS:
+		default:
+			t.Fatalf("nested loop body holds %v, want a field read: %v", n.Op(), loop.Body)
+		}
+	}
+	for _, n := range loop.Body {
+		if b, ok := n.(*ir.BlockStmt); ok {
+			for _, m := range b.List {
+				oneBody(m)
+			}
+			continue
+		}
+		oneBody(n)
+	}
+	if bodyReads != 2 {
+		t.Fatalf("nested loop body holds %d field reads, want one per struct field: %v", bodyReads, loop.Body)
 	}
 }
 
