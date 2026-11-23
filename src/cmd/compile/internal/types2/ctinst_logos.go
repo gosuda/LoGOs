@@ -314,9 +314,11 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 
 func logosCtEdges(info *Info, root syntax.Node, generics map[*syntax.FuncDecl]bool) []LogosCtEdge {
 	var edges []LogosCtEdge
+	top := info
 	var visit func(*Info, syntax.Node)
-	visit = func(info *Info, root syntax.Node) {
-		syntax.Inspect(root, func(n syntax.Node) bool {
+	visit = func(info *Info, node syntax.Node) {
+		shadows := logosConstShadows(top, info)
+		syntax.Inspect(node, func(n syntax.Node) bool {
 			switch n := n.(type) {
 			case *syntax.FuncDecl:
 				return !generics[n]
@@ -340,7 +342,14 @@ func logosCtEdges(info *Info, root syntax.Node, generics map[*syntax.FuncDecl]bo
 				}
 				sig := fn.Signature()
 				if sig.Recv() == nil && sig.TypeParams().Len() != 0 && sig.TypeParams().Len() == inst.TypeArgs.Len() {
-					edges = append(edges, LogosCtEdge{Origin: fn.Origin(), Targs: inst.TypeArgs.list(), Pos: n.Pos(), Site: n, info: info})
+					targs := inst.TypeArgs.list()
+					if shadows != nil {
+						targs = slices.Clone(targs)
+						for i, targ := range targs {
+							targs[i] = (*Checker)(nil).subst(n.Pos(), targ, shadows, nil, NewContext())
+						}
+					}
+					edges = append(edges, LogosCtEdge{Origin: fn.Origin(), Targs: targs, Pos: n.Pos(), Site: n, info: info})
 				}
 			}
 			return true
@@ -348,6 +357,28 @@ func logosCtEdges(info *Info, root syntax.Node, generics map[*syntax.FuncDecl]bo
 	}
 	visit(info, root)
 	return edges
+}
+
+func logosConstShadows(infos ...*Info) substMap {
+	switched := make(map[*TypeParam]*TypeParam)
+	for _, info := range infos {
+		for _, c := range info.LogosConstCases {
+			if c.Switched != nil {
+				switched[c.Target.Type().(*TypeParam)] = c.Switched
+			}
+		}
+	}
+	if len(switched) == 0 {
+		return nil
+	}
+	shadows := make(substMap, len(switched))
+	for shadow, tpar := range switched {
+		for next, ok := switched[tpar]; ok; next, ok = switched[tpar] {
+			tpar = next
+		}
+		shadows[shadow] = tpar
+	}
+	return shadows
 }
 
 func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []Type, id string, subst substMap, generic LogosCtGeneric) *LogosCtInst {

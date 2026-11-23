@@ -34,8 +34,9 @@ type logosCaseInfo struct {
 }
 
 type LogosConstCase struct {
-	Target *TypeName
-	Vars   map[*Var]Type
+	Target   *TypeName
+	Vars     map[*Var]Type
+	Switched *TypeParam
 }
 
 type logosIfaceCase struct {
@@ -452,6 +453,7 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 	pos := info.syn.Type.Pos()
 	bind := info.typ
 	var shadow *TypeName
+	var switched *TypeParam
 	if info.kind == logosCaseTilde {
 		// Inside a ~B case the switched type keeps its identity — a nested
 		// const switch still dispatches on the actual type argument — but
@@ -459,11 +461,12 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 		// converted to it and variables naming it keep their spelling.
 		shadow = NewTypeName(pos, check.pkg, tpar.Obj().Name(), nil)
 		bind = NewTypeParam(shadow, NewInterfaceType(nil, []Type{NewUnion([]*Term{NewTerm(true, info.typ)})}))
+		switched = tpar
 	} else {
 		shadow = NewTypeName(pos, check.pkg, tpar.Obj().Name(), bind)
 	}
 	check.scope.Insert(shadow)
-	rec := LogosConstCase{Target: shadow, Vars: make(map[*Var]Type)}
+	rec := LogosConstCase{Target: shadow, Vars: make(map[*Var]Type), Switched: switched}
 	seen := make(map[string]bool)
 	for sc := check.scope.Parent(); sc != nil; sc = sc.Parent() {
 		for _, objName := range sc.Names() {
