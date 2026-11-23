@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"cmd/compile/internal/syntax"
+	"cmd/compile/internal/types2"
 )
 
 func (h *groupHoist) child() *groupHoist {
@@ -131,18 +132,18 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	// Snapshot both operands in source order so each is evaluated once and
 	// the two send arms share no expression nodes; the snapshots live in a
 	// block so no declaration lands in the enclosing scope where a forward
-	// goto might cross it, and `:=` avoids spelling a type that a local
-	// declaration could shadow.
+	// goto might cross it.
 	chText, valText := fl.textOf(chSpan), fl.textOf(valSpan)
 	chTmp, valTmp := fc.groupTempName("c"), fc.groupTempName("v")
 	// A leaf value (a name, nil, or a literal) needs no snapshot: the
 	// send arms can spell it directly, which also keeps the channel's
-	// element typing for `ch <- nil` and `ch <- 1` that `v :=` loses.
-	// Any other expression is snapshotted once and the arms share the
-	// temporary.
+	// element typing for `ch <- nil` and `ch <- 1` that a temporary
+	// would give the default type. Any other expression is snapshotted
+	// once and the arms share the temporary.
 	var valArmA, valArmB syntax.Expr
 	var valTxtA, valTxtB otext
-	var valDef syntax.Stmt
+	var valDefs []syntax.Stmt
+	var valDefTexts []otext
 	switch v := syntax.Unparen(s.Value).(type) {
 	case *syntax.Name:
 		valArmA, valArmB = nameOf(pos, v.Value), nameOf(pos, v.Value)
@@ -154,7 +155,7 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	default:
 		// Only an untyped constant is spelled in each send arm: only one
 		// arm evaluates it, and spelling it keeps the channel element's
-		// contextual typing (-1, 1 << 3, math.Pi) that a `:=` snapshot
+		// contextual typing (-1, 1 << 3, math.Pi) that a temporary
 		// would give the default type. Every other value snapshots through
 		// its original checked node, so later passes keep the annotations
 		// a reparsed clone would lose: fresh addresses, tuple fields, and
@@ -170,8 +171,9 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 		}
 		valArmA, valArmB = nameOf(pos, valTmp), nameOf(pos, valTmp)
 		valTxtA, valTxtB = gen(valTmp), gen(valTmp)
-		valDef = defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value})
+		valDefs, valDefTexts = h.sendValueTemp(pos, s, valTmp, valText)
 	}
+
 	armVal := func(valE syntax.Expr) *syntax.CommClause {
 		return at(&syntax.CommClause{Comm: at(&syntax.SendStmt{
 			Chan:  nameOf(pos, chTmp),
@@ -193,9 +195,7 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	blockList := []syntax.Stmt{
 		defineOf(pos, []syntax.Expr{nameOf(pos, chTmp)}, []syntax.Expr{s.Chan}),
 	}
-	if valDef != nil {
-		blockList = append(blockList, valDef)
-	}
+	blockList = append(blockList, valDefs...)
 	blockList = append(blockList, ready)
 	block := blockOf(pos, blockList)
 	preNative, preText := h.native[nMark:], h.text[tMark:]
@@ -206,12 +206,47 @@ func (h *groupHoist) send(s *syntax.SendStmt) span {
 	block.List = append(slices.Clone(preNative), block.List...)
 	selText := cat(gen("select { case "+chTmp+" <- "), valTxtA, gen(": default:\nselect { case "+chTmp+" <- "), valTxtB, gen(": "+fc.groupDoneText(h.top)+" }\n}"))
 	texts := append(preText, cat(gen(chTmp+" := "), chText))
-	if valDef != nil {
-		texts = append(texts, cat(gen(valTmp+" := "), valText))
-	}
+	texts = append(texts, valDefTexts...)
 	texts = append(texts, selText)
 	h.add([]syntax.Stmt{block}, cat(gen("{\n"), joinO(texts, "\n"), gen("\n}")))
 	return span{start: chSpan.start, end: valSpan.end}
+}
+
+// sendValueTemp snapshots a send value into valTmp. The temporary is
+// declared with the channel element type when it can be spelled, so the
+// value keeps the send's contextual typing: `v := 1 << n` would give v
+// the default int instead of the element type, rejecting sends to
+// chan int8 (and untyped comparisons to a channel of a defined bool
+// type). An assignment to the typed temporary applies exactly the
+// send's assignability rule. spellTypeBoth refuses names a local
+// declaration could shadow; then the snapshot falls back to `:=`.
+func (h *groupHoist) sendValueTemp(pos syntax.Pos, s *syntax.SendStmt, valTmp string, valText otext) ([]syntax.Stmt, []otext) {
+	fallback := func() ([]syntax.Stmt, []otext) {
+		return []syntax.Stmt{
+				defineOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
+			}, []otext{
+				cat(gen(valTmp+" := "), valText),
+			}
+	}
+	chT := h.fc.fl.pkg.info.TypeOf(s.Chan)
+	if chT == nil {
+		return fallback()
+	}
+	ch, ok := chT.Underlying().(*types2.Chan)
+	if !ok {
+		return fallback()
+	}
+	elemNative, elemSpelled, ok := h.fc.fl.spellTypeBoth(ch.Elem(), pos)
+	if !ok {
+		return fallback()
+	}
+	return []syntax.Stmt{
+			typedVarDecl(pos, nameOf(pos, valTmp), elemNative),
+			assignOf(pos, []syntax.Expr{nameOf(pos, valTmp)}, []syntax.Expr{s.Value}),
+		}, []otext{
+			gen("var " + valTmp + " " + elemSpelled),
+			cat(gen(valTmp+" = "), valText),
+		}
 }
 
 func (h *groupHoist) recvStmt(s *syntax.ExprStmt, op *syntax.Operation) (syntax.Stmt, otext, span) {
