@@ -8,6 +8,7 @@ import (
 	"bytes"
 	stdjson "encoding/json"
 	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"strings"
 	"testing"
@@ -97,6 +98,50 @@ func TestStreamingConsumptionContract(t *testing.T) {
 	ute := &stdjson.UnmarshalTypeError{}
 	if !errors.As(err, &ute) {
 		t.Fatalf("clean decline: got %T %v, want *UnmarshalTypeError", err, err)
+	}
+}
+
+// streamBox delegates its streaming decode to the v2 decoder, so the
+// option set FromValue installs decides the merge behavior a nested
+// decode sees.
+type streamBox struct {
+	Count int
+	Name  string
+}
+
+func (b *streamBox) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	// The shadow type carries no methods, so the delegated decode
+	// fills the fields instead of recursing into this method.
+	type plain streamBox
+	return jsonv2.UnmarshalDecode(dec, (*plain)(b))
+}
+
+func TestStreamingFromValueV1Merge(t *testing.T) {
+	got, err := twinjson.Unmarshal[streamBox]([]byte(`{"count":7,"count":null}`))
+	if err != nil {
+		t.Fatalf("repeated member ending in null: %v", err)
+	}
+	var want struct {
+		Count int
+	}
+	if err := stdjson.Unmarshal([]byte(`{"count":7,"count":null}`), &want); err != nil {
+		t.Fatalf("oracle: %v", err)
+	}
+	if got.Count != 7 || got.Count != want.Count {
+		t.Fatalf("count = %d, want %d: encoding/json keeps the earlier number", got.Count, want.Count)
+	}
+}
+
+func TestStreamingFromValueDuplicatesAndUTF8(t *testing.T) {
+	got, err := twinjson.Unmarshal[streamBox]([]byte("{\"count\":1,\"count\":2,\"name\":\"\xff\"}"))
+	if err != nil {
+		t.Fatalf("duplicates and invalid UTF-8: %v", err)
+	}
+	if got.Count != 2 {
+		t.Fatalf("count = %d, want 2: the last duplicate wins", got.Count)
+	}
+	if got.Name != "�" {
+		t.Fatalf("name = %q, want the U+FFFD replacement", got.Name)
 	}
 }
 

@@ -528,12 +528,28 @@ func (check *Checker) logosReceiverWasGeneric(call *syntax.CallExpr, fn *Func) b
 	return false
 }
 
+// logosCallSelector returns the selector expression a call's function
+// position denotes, looking through parentheses and one level of
+// explicit type arguments (`x.M[T](...)`), or nil for a plain name or
+// any other callee shape.
+func logosCallSelector(fun syntax.Expr) *syntax.SelectorExpr {
+	fun = syntax.Unparen(fun)
+	if ix, ok := fun.(*syntax.IndexExpr); ok {
+		fun = syntax.Unparen(ix.X)
+	}
+	sel, ok := fun.(*syntax.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	return sel
+}
+
 // logosMethodDeclSignature returns the declared signature of the method
 // call selects, or nil when the callee is not a method selection or the
 // origin Func has no signature.
 func (check *Checker) logosMethodDeclSignature(call *syntax.CallExpr, fn *Func) *Signature {
-	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
-	if !ok || check.Info == nil {
+	sel := logosCallSelector(call.Fun)
+	if sel == nil || check.Info == nil {
 		return nil
 	}
 	selection := check.Selections[sel]
@@ -609,20 +625,36 @@ func (check *Checker) logosCallResultIsTParam(call *syntax.CallExpr, i int) bool
 	if !ok {
 		return false
 	}
+	dsig := check.logosMethodDeclSignature(call, fn)
+	if dsig != nil {
+		// A method's declared result is a type-parameter position
+		// when it is one of the method's own parameters or one of
+		// the receiver's. The instantiated signature has already
+		// substituted the receiver's parameters, so the check
+		// reads the declaration.
+		if i >= dsig.Results().Len() {
+			return false
+		}
+		tparams := dsig.TypeParams().list()
+		tparams = append(tparams, logosRecvTParams(dsig)...)
+		return logosResultIsTParam(tparams, dsig.Results().At(i).Type())
+	}
 	if sig.TypeParams().Len() > 0 {
 		results := sig.Results()
 		return i < results.Len() && logosResultIsTParam(sig.TypeParams().list(), results.At(i).Type())
 	}
-	dsig := check.logosMethodDeclSignature(call, fn)
-	if dsig == nil || i >= dsig.Results().Len() {
-		return false
-	}
-	return logosResultIsTParam(logosRecvTParams(dsig), dsig.Results().At(i).Type())
+	return false
 }
 
 // logosReceiverTypeArgs returns the type arguments of the named type
 // a method call selects on, so substituted parameters count as
 // type-parameter positions (platform arguments pass unchecked).
+// Only a plain method selection qualifies: an explicitly
+// instantiated call (`x.M[T](...)`) resolves its declaration and
+// results through logosCallSelector, but its argument exemption stays
+// type-only, so a concrete parameter that coincides with a receiver
+// argument must keep its nil check. Per-parameter derivation from the
+// declaration is future work.
 func (check *Checker) logosReceiverTypeArgs(call *syntax.CallExpr) []Type {
 	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
 	if !ok || check.Info == nil {
