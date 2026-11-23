@@ -851,6 +851,12 @@ func (check *Checker) logosExprIsPlatform(e syntax.Expr) bool {
 		// provenance: `P(x)` of a platform pointer stays platform.
 		return check.logosExprIsPlatform(call.ArgList[0])
 	}
+	if call, ok := syntax.Unparen(e).(*syntax.CallExpr); ok && check.logosCalleeWasGeneric(call) {
+		// A generic call with a pointer result is itself a platform
+		// source, so a field or element read straight off the call
+		// stays platform exactly as it does through a variable.
+		return true
+	}
 	if name, ok := syntax.Unparen(e).(*syntax.Name); ok {
 		if obj := check.lookup(name.Value); obj != nil {
 			if v, ok := obj.(*Var); ok {
