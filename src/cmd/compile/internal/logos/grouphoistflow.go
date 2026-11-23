@@ -302,11 +302,13 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 		if shadowed {
 			return
 		}
-		if fl.genImps == nil {
-			shadowed = true
-			return
+		var q string
+		if fl.genImps != nil {
+			q = fl.genImps.qual[path]
 		}
-		q := fl.genImps.qual[path]
+		if q == "" {
+			q = ownedEjectImports[fl.file][path]
+		}
 		if q == "" {
 			shadowed = true
 			return
@@ -335,9 +337,8 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 		}
 		switch t := t.(type) {
 		case *types2.Basic:
-			// unsafe.Pointer spells qualified; a bare local cannot
-			// shadow it the way bare universe names can.
 			if t.Kind() == types2.UnsafePointer {
+				qualified(types2.Unsafe.Path())
 				break
 			}
 			obj, _ := types2.Universe.Lookup(t.Name()).(*types2.TypeName)
@@ -384,7 +385,12 @@ func (fl *fileLower) spelledTypeShadowed(typ types2.Type, pos syntax.Pos) bool {
 			}
 		case *types2.Interface:
 			for i := range t.NumMethods() {
-				walk(t.Method(i).Type())
+				m := t.Method(i)
+				if !m.Exported() && m.Pkg() != self {
+					shadowed = true
+					return
+				}
+				walk(m.Type())
 			}
 			for i := range t.NumEmbeddeds() {
 				walk(t.EmbeddedType(i))

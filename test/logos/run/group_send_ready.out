@@ -9,6 +9,7 @@ ok send-original-chan
 ok shadowed-type-send
 ok shadowed-iface-dynamic-type
 ok shadowed-import-qualifier-send
+ok shadowed-unsafe-qualifier-send
 ok goto-skips-send
 ok goto-send-not-evaluated
 ok goto-record-ran

@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 var failed bool
@@ -267,6 +268,32 @@ func shadowedImportValue() {
 	check("shadowed-import-qualifier-send", err == nil && got == time.Second, fmt.Sprint(err, got), "<nil> 1s")
 }
 
+func nextPointer() unsafe.Pointer {
+	v := 7
+	return unsafe.Pointer(&v)
+}
+
+func shadowedUnsafeSend(ctx context.Context, ch chan unsafe.Pointer, unsafe int) error {
+	_ = unsafe
+	go group (ctx) {
+		go {
+			ch <- nextPointer()
+		}
+	}
+	return nil
+}
+
+func shadowedUnsafeValue() {
+	ch := make(chan unsafe.Pointer, 1)
+	err := shadowedUnsafeSend(precancelled(), ch, 0)
+	got := unsafe.Pointer(nil)
+	select {
+	case got = <-ch:
+	default:
+	}
+	check("shadowed-unsafe-qualifier-send", err == nil && got != nil, fmt.Sprint(err, got), "<nil> non-nil")
+}
+
 func gotoPastSend() {
 	recordCalls.Store(0)
 	calls.Store(0)
@@ -358,6 +385,7 @@ func main() {
 	shadowedTypeName()
 	shadowedIfaceValue()
 	shadowedImportValue()
+	shadowedUnsafeValue()
 	gotoPastSend()
 	nilSendReady()
 	namedElemReady()
