@@ -51,15 +51,15 @@ Each row shows the LoGOs form and the plain Go it replaces.
 | `v := f()?` | `v, err := f()` then `if err != nil { return zero, err }` |
 | `f()?` | `if err := f(); err != nil { return err }` |
 | `defer f()?` | `defer` that joins a non-nil cleanup error into the result with `errors.Join` |
-| `errdefer f()` | cleanup that runs only on error return or panic |
-| `errdefer f()?` | cleanup that runs only on error return or panic, and joins its error |
+| `errdefer f()` | cleanup that runs on a non-nil error result, panic, or `runtime.Goexit` |
+| `errdefer f()?` | same cleanup, with its error joined into the result |
 
 Rules for `?`:
 
 - The operand is a call whose last result is exactly `error`. The enclosing function returns `error` last.
 - `?` ends an assignment, an expression statement, a `defer`, or an `errdefer`. Anywhere else is an error.
 - On error, each other result is its zero value, and the returned error is the call's error unchanged. Assignments in the statement run before the check.
-- `defer f()?` leaves a nil result alone. `errdefer` also fires on panic and on `runtime.Goexit`. Deferred calls run last in, first out. Each call's function value, receiver, and arguments are fixed where written.
+- `defer f()?` leaves a nil result alone. Deferred calls run last in, first out. Each call's function value, receiver, and arguments are fixed where written.
 - `errdefer` needs a function whose last result is `error`. A name that starts with `_logos_` or `Logos_` is an error.
 
 ## Syntax (M2)
