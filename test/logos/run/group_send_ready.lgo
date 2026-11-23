@@ -99,17 +99,19 @@ func chanInterpSend(ctx context.Context, n int) error {
 
 var stmtSawKey = make(chan string, 1)
 
-func recvChanLookup(key string) chan int {
+// recvChanLookup answers with the key it was called with, so a test
+// that receives from its channel checks the looked-up key by value.
+func recvChanLookup(key string) chan string {
 	select {
 	case stmtSawKey <- key:
 	default:
 	}
-	ch := make(chan int, 1)
-	ch <- len(key)
+	ch := make(chan string, 1)
+	ch <- key
 	return ch
 }
 
-func recvChanSend(ctx context.Context, out chan int, key string) error {
+func recvChanSend(ctx context.Context, out chan string, key string) error {
 	go group (ctx) {
 		go {
 			out <- <-recvChanLookup($"k-{key}")
@@ -259,14 +261,14 @@ func recvChanReady() {
 	// A live context: under a cancelled group the hoisted inner
 	// receive races the done branch, which is unrelated to what
 	// this case pins (interpolation lowering in ejected text).
-	ch := make(chan int, 1)
+	ch := make(chan string, 1)
 	err := recvChanSend(context.Background(), ch, "abc")
-	got := -1
+	got := ""
 	select {
 	case got = <-ch:
 	default:
 	}
-	check("recv-chan-interp", err == nil && got == 5, fmt.Sprint(err, got), "<nil> 5")
+	check("recv-chan-interp", err == nil && got == "k-abc", fmt.Sprint(err, " ", got), "<nil> k-abc")
 }
 
 func recvStmtDrain(ctx context.Context, key string) error {
@@ -287,12 +289,12 @@ func recvStmtReady() {
 	case <-stmtSawKey:
 	default:
 	}
-	err := recvStmtDrain(context.Background(), "abc")
+	err := recvStmtDrain(context.Background(), "xyz")
 	select {
 	case got := <-stmtSawKey:
-		check("recv-stmt-interp", err == nil && got == "k-abc", fmt.Sprint(err, got), "<nil> k-abc")
+		check("recv-stmt-interp", err == nil && got == "k-xyz", fmt.Sprint(err, " ", got), "<nil> k-xyz")
 	case <-time.After(5 * time.Second):
-		check("recv-stmt-interp", false, "lookup never ran", "<nil> k-abc")
+		check("recv-stmt-interp", false, "lookup never ran", "<nil> k-xyz")
 	}
 }
 
