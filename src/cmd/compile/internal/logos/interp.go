@@ -117,7 +117,7 @@ func interpLitsUnder(root syntax.Node) []*syntax.InterpExpr {
 }
 
 func (fl *fileLower) lowerInterp() {
-	needConv, needUnsafe := fl.interpNeedConv, fl.interpNeedUnsafe
+	needConv := fl.interpNeedConv
 	for _, e := range interpLitsUnder(fl.file) {
 		kinds := interpKinds[e]
 		delete(interpKinds, e)
@@ -126,12 +126,9 @@ func (fl *fileLower) lowerInterp() {
 		}
 		need, _ := fl.lowerInterpExpr(e, kinds)
 		needConv = needConv || need
-		if len(e.Exprs) > 0 {
-			needUnsafe = true
-		}
 	}
 	fl.flushInnerFirst()
-	fl.flushInterpImports(needConv, needUnsafe)
+	fl.flushInterpImports(needConv, fl.interpNeedUnsafe)
 }
 
 func replaceFieldExprs(n syntax.Node, interfaceField func(reflect.Type) bool, repl func(syntax.Expr) syntax.Expr) {
@@ -266,6 +263,7 @@ func (fl *fileLower) lowerInterpExpr(e *syntax.InterpExpr, kinds []types2.LogosI
 	exprs := make([]syntax.Expr, len(e.Exprs))
 	operands := make([]interpOperand, len(e.Exprs))
 	needRT := false
+	fl.interpNeedUnsafe = true
 	for i, op := range e.Exprs {
 		if native, ok := fl.stagedReplacements[op]; ok {
 			op = native

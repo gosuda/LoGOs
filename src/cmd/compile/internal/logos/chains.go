@@ -1047,9 +1047,6 @@ func (fl *fileLower) preLowerCaptureInterps(root syntax.Node) {
 		delete(interpKinds, e)
 		need, _ := fl.lowerInterpExpr(e, kinds)
 		fl.interpNeedConv = fl.interpNeedConv || need
-		if len(e.Exprs) > 0 {
-			fl.interpNeedUnsafe = true
-		}
 	}
 }
 
