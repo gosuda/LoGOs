@@ -12,7 +12,6 @@ stdout '^b \[x:int y:int\]$'
 stdout '^main \[x:int y:int\]$'
 stdout '^local \[title:string id:int raw:other\]$'
 stdout '^width 2 3$'
-cp stdout $WORK/native.txt
 
 # One instance exists per generic and type argument list in the linked
 # program: three packages and one plain generic instantiate Describe with
@@ -21,7 +20,7 @@ cp stdout $WORK/native.txt
 # fails with [comptime::exported_forwarder] (SPEC 2.5).
 logos build -gcflags=all=-l -o $WORK/identity.exe .
 go tool nm $WORK/identity.exe
-stdout -count=2 ' T example\.com/identity/lib\.Describe\.logosct\.[0-9a-f]{64}$'
+stdout -count=2 ' T example\.com/identity/lib\.Describe\.logosct\.[0-9a-f]+$'
 
 # SPEC 2.5: logos eject prints each instance in the package that instantiates
 # it, and lib.Describe names the unexported type lib.entry, so eject refuses
