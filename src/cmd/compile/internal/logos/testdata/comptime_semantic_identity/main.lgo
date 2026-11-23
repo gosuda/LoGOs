@@ -7,8 +7,6 @@ package main
 import (
 	"fmt"
 
-	"example.com/semanticidentity/consumer"
-	"example.com/semanticidentity/forward"
 	"example.com/semanticidentity/owner"
 )
 
@@ -18,8 +16,8 @@ func main() {
 	if !owner.PointerTypesDiffer() {
 		panic("non-nil and optional pointers have the same compile-time type")
 	}
-	fmt.Println("forward", forward.Pair[*int, optionalIntPointer]())
-	fmt.Println("reverse", consumer.Reverse())
-	fmt.Println("shared", consumer.Shared())
-	fmt.Println("named", forward.Pair[owner.FirstID, owner.SecondID]())
+	fmt.Println("forward", [2]string{owner.Kind[*int](), owner.Kind[optionalIntPointer]()})
+	fmt.Println("reverse", [2]string{owner.Kind[optionalIntPointer](), owner.Kind[*int]()})
+	fmt.Println("shared", [2]string{owner.Kind[*int](), owner.Kind[optionalIntPointer]()})
+	fmt.Println("named", [2]string{owner.Kind[owner.FirstID](), owner.Kind[owner.SecondID]()})
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,19 @@ func TestCompileComptimeSemanticIdentity(t *testing.T) {
 		run(t, dir, logosTool, "eject", "-o", outDir)
 		if got := run(t, outDir, testenv.GoToolPath(t), "run", "-p=1", "-buildvcs=false", "."); got != want {
 			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	})
+	t.Run("exported_forwarder", func(t *testing.T) {
+		t.Helper()
+		cmd := testenv.Command(t, logosTool, "build", "-p=1", "-buildvcs=false", "./...")
+		cmd.Dir = dir
+		cmd.Env = append(archDiffEnv(cmd, runtime.GOOS, runtime.GOARCH), "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if out, err := cmd.Output(); err == nil {
+			t.Fatalf("logos build ./... succeeded, want [comptime::exported_forwarder]\n%s", out)
+		} else if got := stderr.String(); !strings.Contains(got, "[comptime::exported_forwarder]") || !strings.Contains(got, "forward/forward.lgo") {
+			t.Fatalf("stderr = %q, want [comptime::exported_forwarder] for forward/forward.lgo", got)
 		}
 	})
 }

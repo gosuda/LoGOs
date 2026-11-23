@@ -21,9 +21,9 @@ func differentTypes[A, B any]() bool {
 	return false
 }
 
-func Pair[A, B any]() [2]string {
-	return [2]string{Kind[A](), Kind[B]()}
-}
+// Q3: an exported forwarding function in an importable package is a
+// compile-time error, so owner holds only the comptime generic Kind.
+// The exported forwarder lives in forward.Pair (negative case).
 
 func Kind[T any]() string {
 	const if comptime.TypeOf[T]() == comptime.TypeOf[*int]() {
