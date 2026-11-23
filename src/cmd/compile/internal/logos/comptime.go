@@ -434,7 +434,8 @@ func (fl *fileLower) cfRuntimeBody(fn *syntax.FuncDecl) bool {
 			*syntax.OptionType, *syntax.CoalesceExpr, *syntax.OptSelectExpr, *syntax.ConstType, *syntax.ConstFuncDecl,
 			*syntax.YieldStmt, *syntax.ScopeDeferStmt, *syntax.FieldDefault, *syntax.SpreadExpr, *syntax.InterpExpr,
 			*syntax.TupleType, *syntax.TupleLit, *syntax.LambdaExpr, *syntax.ConstIfStmt, *syntax.ConstSwitchStmt,
-			*syntax.ConstForStmt, *syntax.FieldProjExpr, *syntax.GroupStmt, *syntax.GroupChild, *syntax.CompositeLit:
+			*syntax.ConstForStmt, *syntax.FieldProjExpr, *syntax.GroupStmt, *syntax.GroupChild, *syntax.CompositeLit,
+			*syntax.FuncLit:
 			ok = false
 		case *syntax.Name:
 			if obj, isFunc := fl.pkg.tpkg.Scope().Lookup(n.Value).(*types2.Func); isFunc && fl.pkg.ctExp.byObj[obj] != nil {
@@ -450,6 +451,11 @@ func (fl *fileLower) cfRuntimeBody(fn *syntax.FuncDecl) bool {
 				ok = false
 			case pkg != types2.LogosComptimePackage():
 				paths = append(paths, pkg.Path())
+				if callee, isFunc := pkg.Scope().Lookup(n.Sel.Value).(*types2.Func); isFunc && fl.pkg.info.LogosCtImport != nil {
+					if _, comptime := fl.pkg.info.LogosCtImport(callee); comptime {
+						ok = false
+					}
+				}
 			default:
 				layout, isLayout := fl.cfLayoutCall(n, fn, parents)
 				calls = append(calls, layout)
