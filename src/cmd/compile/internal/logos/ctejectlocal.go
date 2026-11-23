@@ -163,6 +163,27 @@ func ctEjectMentions(t types2.Type, sites map[*types2.TypeName]ctEjectTypeSite, 
 	case *types2.Signature:
 		ctEjectMentions(t.Params(), sites, out, seen)
 		ctEjectMentions(t.Results(), sites, out, seen)
+	case *types2.Interface:
+		for i := range t.NumExplicitMethods() {
+			ctEjectMentions(t.ExplicitMethod(i).Type(), sites, out, seen)
+		}
+		for i := range t.NumEmbeddeds() {
+			ctEjectMentions(t.EmbeddedType(i), sites, out, seen)
+		}
+	case *types2.Union:
+		for i := range t.Len() {
+			ctEjectMentions(t.Term(i).Type(), sites, out, seen)
+		}
+	case *types2.Option:
+		ctEjectMentions(t.Elem, sites, out, seen)
+	case *types2.ConstView:
+		ctEjectMentions(t.Elem, sites, out, seen)
+	case *types2.ReadonlyDescendants:
+		ctEjectMentions(t.Elem, sites, out, seen)
+	case *types2.LogosTuple:
+		for i := range t.Len() {
+			ctEjectMentions(t.Elem(i), sites, out, seen)
+		}
 	}
 }
 
