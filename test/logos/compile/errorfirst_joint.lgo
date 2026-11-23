@@ -1468,3 +1468,85 @@ func efLoopFieldErrDeferred() {
 		_ = i
 	}
 }
+
+// Overwriting the error destination after the store breaks the pairing:
+// a later nil check tests the replacement, not the failed call.
+func efFieldErrOverwritten() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	h.err = nil
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats) // ERROR "result_before_error_check"
+	}()
+}
+
+// The same holds when the check is inside a deferred literal that also
+// checks an unrelated error: the stale pairing cannot discharge the read
+// even if a later store pairs with the checked error.
+func efFieldErrOverwrittenInClosure(cond bool) {
+	h := efHeld{}
+	var retryErr error
+	h.stats, h.err = efFetchHeld()
+	h.err = nil
+	if h.err == nil {
+		defer func() {
+			if retryErr == nil {
+				println(h.stats) // ERROR "result_before_error_check"
+			}
+		}()
+		if cond {
+			h.stats, retryErr = efFetchHeld()
+		}
+	}
+	_ = retryErr
+}
+
+// A nil check inside the deferred literal discharges a read when every
+// live store pairs the result with that same error.
+func efFieldErrCheckedInClosure() {
+	h := efHeld{}
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		if h.err == nil {
+			println(h.stats)
+		}
+	}()
+	_ = h.err
+}
+
+// A later conditional store with a different error breaks the agreement,
+// so the in-closure check cannot discharge the read.
+func efFieldErrInClosureMixed(cond bool) {
+	h := efHeld{}
+	var other error
+	h.stats, h.err = efFetchHeld()
+	defer func() {
+		if h.err == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	if cond {
+		h.stats, other = efFetchHeld()
+	}
+	_ = other
+}
+
+// Two unconditional stores agree on the latest pairing, and the nil check
+// proves it, so the deferred read stays accepted. A differently-paired
+// store in between would break the agreement instead.
+func efFieldErrObsoletePairing() {
+	h := efHeld{}
+	a := efHeld{}
+	h.stats, a.err = efFetchHeld()
+	h.stats, h.err = efFetchHeld()
+	if h.err != nil {
+		return
+	}
+	defer func() {
+		println(h.stats)
+	}()
+	_ = a
+}

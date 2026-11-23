@@ -742,6 +742,11 @@ type logosEFEntry struct {
 	err    *Var
 	name   string
 	proven bool
+	// errKey pairs a seeded entry with the error destination every live
+	// store of the result agrees on, so a nil check on that destination
+	// inside the literal can prove the read. The zero key pairs with
+	// nothing: blank-error and mixed stores never discharge a read.
+	errKey logosEFKey
 	// pos is the source position of the store that created the entry, so
 	// diagnostics that choose among entries stay deterministic.
 	pos syntax.Pos
@@ -772,6 +777,11 @@ type logosEFState struct {
 	// seeding a deferred capture, so ordinary reads (including blank
 	// discards like v, _ := f(); return v) are unaffected.
 	may map[logosEFKey]bool
+	// mayErr pairs each may-marked result with the error destination its
+	// latest store used. Unlike the body-wide inventory it follows the
+	// flow: overwriting either side drops the pairing, so a later nil
+	// check cannot prove the original call.
+	mayErr map[logosEFKey]logosEFKey
 }
 
 func (s *logosEFState) set(k logosEFKey, e logosEFEntry) *logosEFState {
@@ -780,10 +790,7 @@ func (s *logosEFState) set(k logosEFKey, e logosEFEntry) *logosEFState {
 		m = make(map[logosEFKey]logosEFEntry, 1)
 	}
 	m[k] = e
-	out := &logosEFState{m: m, may: s.may}
-	// A tracked store overwrites any untracked value: the earlier
-	// may-reach no longer holds on this path (branch joins re-add it
-	// when another path still reaches).
+	out := &logosEFState{m: m, may: s.may, mayErr: s.mayErr}
 	if s.may != nil && s.may[k] {
 		may := maps.Clone(s.may)
 		delete(may, k)
@@ -801,7 +808,22 @@ func (s *logosEFState) setMay(k logosEFKey) *logosEFState {
 		may = make(map[logosEFKey]bool, 1)
 	}
 	may[k] = true
-	return &logosEFState{m: s.m, may: may}
+	return &logosEFState{m: s.m, may: may, mayErr: s.mayErr}
+}
+
+// setMayErr records the error destination guarding may-marked k. The
+// pairing belongs to the latest store in flow order; overwriting either
+// side drops it through dropWriting.
+func (p *logosEFPass) setMayErr(st *logosEFState, k logosEFKey, errKey logosEFKey) *logosEFState {
+	if e, ok := st.mayErr[k]; ok && e == errKey {
+		return st
+	}
+	mayErr := maps.Clone(st.mayErr)
+	if mayErr == nil {
+		mayErr = make(map[logosEFKey]logosEFKey, 1)
+	}
+	mayErr[k] = errKey
+	return &logosEFState{m: st.m, may: st.may, mayErr: mayErr}
 }
 
 // setSeed adds a deferred-capture entry without killing may-reach: seeding
@@ -813,7 +835,7 @@ func (s *logosEFState) setSeed(k logosEFKey, e logosEFEntry) *logosEFState {
 		m = make(map[logosEFKey]logosEFEntry, 1)
 	}
 	m[k] = e
-	return &logosEFState{m: m, may: s.may}
+	return &logosEFState{m: m, may: s.may, mayErr: s.mayErr}
 }
 
 // dropWriting stops tracking a destination that a write to k can change:
@@ -845,7 +867,25 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 			delete(mayOut, v)
 		}
 	}
-	if out == nil && mayOut == nil {
+	// A write also drops pairings whose error destination it overlaps:
+	// the stored error no longer guards the paired result.
+	var errOut map[logosEFKey]logosEFKey
+	for v, ek := range s.mayErr {
+		if v.root != k.root && ek.root != k.root {
+			continue
+		}
+		overlapped := v.root == k.root && (logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path))
+		if !overlapped && ek.root == k.root {
+			overlapped = logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path)
+		}
+		if overlapped {
+			if errOut == nil {
+				errOut = maps.Clone(s.mayErr)
+			}
+			delete(errOut, v)
+		}
+	}
+	if out == nil && mayOut == nil && errOut == nil {
 		return s
 	}
 	m := s.m
@@ -856,7 +896,11 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 	if mayOut != nil {
 		may = mayOut
 	}
-	return &logosEFState{m: m, may: may}
+	mayErr := s.mayErr
+	if errOut != nil {
+		mayErr = errOut
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErr}
 }
 
 // logosEFPathUnder reports whether path denotes prefix or a destination
@@ -914,7 +958,7 @@ func (s *logosEFState) remap(f func(logosEFEntry) logosEFEntry) *logosEFState {
 	if out == nil {
 		return s
 	}
-	return &logosEFState{m: out, may: s.may}
+	return &logosEFState{m: out, may: s.may, mayErr: s.mayErr}
 }
 
 func (s *logosEFState) prove(errV *Var) *logosEFState {
@@ -925,14 +969,16 @@ func (s *logosEFState) prove(errV *Var) *logosEFState {
 }
 
 // dropMayFor stops marking the results guarded by errKey as may-reach:
-// the nil test proved the guarding call succeeded on this path.
-func (s *logosEFState) dropMayFor(errKey logosEFKey, paired map[logosEFKey]logosEFKey) *logosEFState {
-	if s.may == nil || len(paired) == 0 {
+// the nil test proved the guarding call succeeded on this path. It also
+// discharges seeded entries that every live store pairs with errKey, so a
+// nil check inside the deferred literal can prove its own read.
+func (s *logosEFState) dropMayFor(errKey logosEFKey) *logosEFState {
+	if (s.may == nil || len(s.mayErr) == 0) && len(s.m) == 0 {
 		return s
 	}
 	var out map[logosEFKey]bool
 	for v := range s.may {
-		if ek, ok := paired[v]; !ok || ek != errKey {
+		if ek, ok := s.mayErr[v]; !ok || ek != errKey {
 			continue
 		}
 		if out == nil {
@@ -940,13 +986,32 @@ func (s *logosEFState) dropMayFor(errKey logosEFKey, paired map[logosEFKey]logos
 		}
 		delete(out, v)
 	}
-	if out == nil {
+	var mout map[logosEFKey]logosEFEntry
+	for k, e := range s.m {
+		if e.proven || e.err != nil || e.errKey != errKey || s.mayErr[k] != errKey {
+			continue
+		}
+		if mout == nil {
+			mout = maps.Clone(s.m)
+		}
+		e.proven = true
+		mout[k] = e
+	}
+	if out == nil && mout == nil {
 		return s
 	}
-	if len(out) == 0 {
-		out = nil
+	m := s.m
+	if mout != nil {
+		m = mout
 	}
-	return &logosEFState{m: s.m, may: out}
+	may := s.may
+	if out != nil {
+		may = out
+		if len(may) == 0 {
+			may = nil
+		}
+	}
+	return &logosEFState{m: m, may: may, mayErr: s.mayErr}
 }
 
 func (s *logosEFState) detach(errV *Var) *logosEFState {
@@ -976,7 +1041,7 @@ func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 	if out == nil {
 		return st
 	}
-	return &logosEFState{m: out, may: st.may}
+	return &logosEFState{m: out, may: st.may, mayErr: st.mayErr}
 }
 
 // stable reports whether a destination's memory can no longer change
@@ -1029,6 +1094,9 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 			ea.err = nil
 		}
 		ea.proven = ea.proven && eb.proven
+		if ea.errKey != eb.errKey {
+			ea.errKey = logosEFKey{}
+		}
 		m[v] = ea
 	}
 	var may map[logosEFKey]bool
@@ -1044,14 +1112,33 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 			may = nil
 		}
 	}
-	return &logosEFState{m: m, may: may}
+	return &logosEFState{m: m, may: may, mayErr: mayErrJoin(a.mayErr, b.mayErr)}
+}
+
+// mayErrJoin keeps a pairing only when both branches agree on it: a check
+// on one branch must not prove a value the other branch paired elsewhere.
+func mayErrJoin(a, b map[logosEFKey]logosEFKey) map[logosEFKey]logosEFKey {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	var out map[logosEFKey]logosEFKey
+	for k, ea := range a {
+		if eb, ok := b[k]; !ok || eb != ea {
+			continue
+		}
+		if out == nil {
+			out = make(map[logosEFKey]logosEFKey, len(a))
+		}
+		out[k] = ea
+	}
+	return out
 }
 
 func logosEFSame(a, b *logosEFState) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return maps.Equal(a.m, b.m) && maps.Equal(a.may, b.may)
+	return maps.Equal(a.m, b.m) && maps.Equal(a.may, b.may) && maps.Equal(a.mayErr, b.mayErr)
 }
 
 type logosEFFrame struct {
@@ -1086,7 +1173,7 @@ type logosEFPass struct {
 	initialized   map[*Var]bool
 	tracked       map[logosEFKey]string
 	storeErr      map[logosEFKey][]*Var
-	errMay        map[logosEFKey]logosEFKey
+	storeErrKey   map[logosEFKey][]logosEFKey
 	sliced        map[logosEFKey]bool
 	storePos      map[logosEFKey][]syntax.Pos
 	inLoop        map[logosEFKey]bool
@@ -1386,7 +1473,7 @@ func (p *logosEFPass) collectAssigns() {
 	p.initialized = make(map[*Var]bool)
 	p.tracked = make(map[logosEFKey]string)
 	p.storeErr = make(map[logosEFKey][]*Var)
-	p.errMay = make(map[logosEFKey]logosEFKey)
+	p.storeErrKey = make(map[logosEFKey][]logosEFKey)
 	p.sliced = make(map[logosEFKey]bool)
 	p.storePos = make(map[logosEFKey][]syntax.Pos)
 	p.inLoop = make(map[logosEFKey]bool)
@@ -1405,10 +1492,9 @@ func (p *logosEFPass) collectAssigns() {
 			if p.errCallShape(lhs, rhs) {
 				errName := "its error"
 				var errKey logosEFKey
-				hasErrKey := false
 				if k, ok := p.destKey(lhs[len(lhs)-1]); ok {
 					errName = k.displayName()
-					errKey, hasErrKey = k, true
+					errKey = k
 				}
 				for _, e := range lhs[:len(lhs)-1] {
 					if k, ok := p.destKey(e); ok {
@@ -1417,21 +1503,7 @@ func (p *logosEFPass) collectAssigns() {
 						}
 						p.storePos[k] = append(p.storePos[k], e.Pos())
 						p.storeErr[k] = append(p.storeErr[k], nil)
-						// Record which error destination guards this
-						// may-reach result. A nil check on that key
-						// drops the mark. Stores that disagree on
-						// the key leave no record, so checking one
-						// error never proves a value another call
-						// may have failed on.
-						if hasErrKey {
-							if prev, ok := p.errMay[k]; ok {
-								if prev != errKey {
-									delete(p.errMay, k)
-								}
-							} else {
-								p.errMay[k] = errKey
-							}
-						}
+						p.storeErrKey[k] = append(p.storeErrKey[k], errKey)
 					}
 				}
 			}
@@ -1443,6 +1515,7 @@ func (p *logosEFPass) collectAssigns() {
 			}
 			p.storePos[k] = append(p.storePos[k], p.logosEFDestPos(lhs, k))
 			p.storeErr[k] = append(p.storeErr[k], errV)
+			p.storeErrKey[k] = append(p.storeErrKey[k], logosEFKey{})
 		}
 	}
 	note := func(lhs []syntax.Expr, rhs []syntax.Expr, plain bool) {
@@ -2201,7 +2274,19 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 			if k.path != "" && !p.trackable(k) {
 				continue
 			}
+			// A field-error store re-pairs the result: record the guard.
+			// Reset any entry a previous pairing left behind first, so
+			// a later check proves only the latest call. The reset runs
+			// before the marks because set drops may-reach on overwrite.
+			if _, ok := st.m[k]; ok {
+				e2 := st.m[k]
+				e2.err, e2.proven, e2.errKey = nil, false, logosEFKey{}
+				st = st.set(k, e2)
+			}
 			st = st.setMay(k)
+			if ek, ok := p.destKey(lhs[len(lhs)-1]); ok {
+				st = p.setMayErr(st, k, ek)
+			}
 		}
 		return st
 	}
@@ -2214,6 +2299,13 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 			continue
 		}
 		st = st.set(k, logosEFEntry{err: errV, name: errV.name, pos: p.logosEFDestPos(lhs, k)})
+		// A plain-error store supersedes any field pairing for the same
+		// result: the variable proof owns the value from here on.
+		if _, ok := st.mayErr[k]; ok {
+			mayErr := maps.Clone(st.mayErr)
+			delete(mayErr, k)
+			st = &logosEFState{m: st.m, may: st.may, mayErr: mayErr}
+		}
 		p.noteCreated(k, errV.name)
 	}
 	return st
@@ -2285,9 +2377,9 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 		// may-reach mark, so a later deferred read stays accepted.
 		if fk, ok := p.nilTestFieldKey(op); ok {
 			if isNeq {
-				return st, st.dropMayFor(fk, p.errMay)
+				return st, st.dropMayFor(fk)
 			}
-			return st.dropMayFor(fk, p.errMay), st
+			return st.dropMayFor(fk), st
 		}
 		return st, st
 	}
@@ -2349,7 +2441,7 @@ func (p *logosEFPass) carveAfter(rest []syntax.Stmt, st *logosEFState) (*logosEF
 	if st == nil || (len(st.m) == 0 && len(st.may) == 0) {
 		return nil, false
 	}
-	ks := &logosEFState{m: maps.Clone(st.m), may: maps.Clone(st.may)}
+	ks := &logosEFState{m: maps.Clone(st.m), may: maps.Clone(st.may), mayErr: maps.Clone(st.mayErr)}
 	i := 0
 	for i < len(rest) {
 		var cont bool
@@ -3122,10 +3214,22 @@ func (p *logosEFPass) seedEntry(k logosEFKey, lit syntax.Node) (logosEFEntry, bo
 		errV = ev
 		seen = true
 	}
+	first := true
 	for i, ev := range p.storeErr[k] {
 		if !p.storeLiveAfter(p.storePos[k][i], k, lit) {
 			continue
 		}
+		// Live stores agree on one field-error destination only when
+		// every one of them pairs with it. A plain-error store pairs
+		// with its variable instead, and a blank store pairs with
+		// nothing, so either breaks the agreement.
+		ek := p.storeErrKey[k][i]
+		if ek == (logosEFKey{}) || (!first && ek != e.errKey) {
+			e.errKey = logosEFKey{}
+		} else if first {
+			e.errKey = ek
+		}
+		first = false
 		consider(ev)
 		if errV == nil && !seen {
 			break
@@ -3270,7 +3374,13 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 			if n, ok := p.tracked[k]; ok {
 				name = n
 			}
-			return st.set(k, logosEFEntry{name: name, pos: lit.Pos()})
+			e = logosEFEntry{name: name, pos: lit.Pos()}
+			// A capture with no live stores sees only the flow state's
+			// pairing, which no later store can still rewrite past the
+			// literal. Record it so a nil check inside the literal can
+			// prove its own read.
+			e.errKey = st.mayErr[k]
+			return st.set(k, e)
 		}
 		if e.err == nil {
 			return st
@@ -3278,7 +3388,7 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 		e.err = nil
 		m := maps.Clone(st.m)
 		m[k] = e
-		return &logosEFState{m: m, may: st.may}
+		return &logosEFState{m: m, may: st.may, mayErr: st.mayErr}
 	}
 	syntax.Inspect(lit, func(n syntax.Node) bool {
 		switch n := n.(type) {
