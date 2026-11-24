@@ -19,9 +19,11 @@ LoGOs runs goroutines inside `go group` blocks. Shared state lives in `logos/syn
 3. Run `logos lint ./...` and `logos test -race ./...` first; with no package list both cover only the package in the current directory, not the module's subpackages. `-race` reports only exercised races and gives no universal data-race freedom. The run works under `[build] cgo = "forbid"`: it links only the race runtime and needs a C compiler or `zig` in PATH.
 4. Run the program under the monitor only when it is lint-clean and race-clean.
 5. Use `logos conc run` for a program and `logos conc test` for tests.
-6. Read each finding on standard output while the child still runs. Under `--json-diagnostics`, read the records on standard error.
-7. Repair the named position, then rerun without `conc` to confirm the behavior.
+6. Read each text finding on standard output while the child still runs. Each finding names a source position, a rule ID, and a fix hint. Under `--json-diagnostics`, read the records on standard error.
+7. Repair the named position, then rerun without `conc` to confirm the behavior. For a stalled child that waits on a plain channel receive, `--fix` can make the repair; see "Rewrite stalled receives".
 8. Retry a shake failure with the printed seed to shake the run again. The seed alone does not fix the yield counts: each hook mixes in the goroutine ID and hook count, so a rerun with the same seed is a retry, not an exact replay.
+
+Under a `forbid` cgo policy, whether set by key or by default, `-race` links the race runtime through `runtime/cgo` on targets that need cgo for it: every race target except darwin. Setting `CGO_ENABLED=0` makes it fail with an error that names `CGO_ENABLED=0`. On darwin, `-race` keeps cgo off because its race runtime needs no cgo.
 
 ## Group and lock forms
 
@@ -89,7 +91,7 @@ func opposite(ctx context.Context) error {
 
 ## Read conc::group_child_stalled
 
-A child did not return within the `-stall` duration after its group was cancelled. The group cannot join before the child returns. Repair by receiving from the `Done` channel of the context in a `select`. Or give the context to the call that blocks.
+A child did not return within the `-stall` duration after its group was cancelled. The group cannot join before the child returns. Repair by receiving from the `Done` channel of the context in a `select`. Or give the context to the call that blocks. For a plain receive statement, `--fix` writes that `select`; see "Rewrite stalled receives".
 
 ```lgo
 go group (ctx) {
@@ -172,15 +174,17 @@ Pass `-shake` with a decimal seed to yield at group and lock hook points from th
 
 Pin GOMAXPROCS=1 for the seeded runs: one thread stops cross-processor stealing from hiding the order fault. It does not fix the schedule: the run queue still picks among the children that can run, and the seed mixes in goroutine IDs and hook counts.
 
+A failure that appears only under `-shake` is a schedule-dependent fault, not a sixth finding kind. It has no monitor rule id.
+
 ```sh
 GOMAXPROCS=1 logos conc test -shake=1 -count=1 ./ord
 GOMAXPROCS=1 logos conc run -shake=1 ./ord
 logos conc test -shake -count=1 ./ord
 ```
 
-Expect exit 1 for the test: the order flips and the test fails. Expect exit 1 for the run: the program prints the flipped order and `logos run` reports `exit status 2`. Expect exit 0 or 1 for the bare seed: the drawn order decides. Every one prints its `shake seed` line on standard error.
+Expect exit 1 for the test: the order flips and the test fails. Expect exit 2 for the run: the program prints the flipped order and exits 2, and `conc run` exits with that status. Expect exit 0 or 1 for the bare seed: the drawn order decides. Every one prints its `shake seed` line on standard error.
 
-Pass `--json-diagnostics` to print each finding as one JSON object per line on standard error, in the `logos lint --json-diagnostics` schema. Expect the `note` field to hold the position lines and the fix line. Expect the tab-separated text form on standard output otherwise.
+Pass `--json-diagnostics` to print each finding as one JSON object per line on standard error, in the `logos lint --json-diagnostics` schema. The `note` field holds the position lines and the fix line. Without the flag, a text finding on standard output starts with `file:line: [rule] message`. Its position lines and its fix line follow, each indented with one tab.
 
 Pass `--fix` to rewrite a stalled child that waits on a plain receive in a function that takes a context: the line becomes a select on the receive and the context. Pass `--ai-patch` instead to print that edit as one JSON object per line on standard output without changing files. Repair every other finding by hand.
 
@@ -194,9 +198,47 @@ logos conc test -json ./opposite
 
 Expect exit 1 for each. Expect one JSON object on standard error for the first two. Expect the test2json stream on standard output for the last two; in the last one, the lines of the text finding arrive as its `output` events, and standard error stays empty.
 
+## Rewrite stalled receives
+
+Pass `--fix` to repair `conc::group_child_stalled` findings after the program exits. Pass `--ai-patch` to print the same edits and change no file. The two flags are exclusive: together they are a usage error, and no child runs.
+
+`--fix` looks only at the line of the first position of each finding. It rewrites that line only when all of these conditions are true:
+
+- The file is a `.lgo` file.
+- The line is a plain receive statement `<-x`, and `x` holds no space, tab, `;`, or `//`.
+- The nearest function header that encloses the line starts at most 21 lines above it, and its parameters and results fit on that one line.
+- That header names a `context.Context` parameter at the top level of its parameter list, and the name is not `_`.
+- The function has no result, or its only result is an `error`, named or not.
+
+The rewrite keeps the indentation of the receive and uses the name of the context parameter:
+
+```lgo
+select {
+case <-x:
+case <-ctx.Done():
+	return ctx.Err()
+}
+```
+
+The last case ends with `return` when the function has no result. After each rewrite, `--fix` prints `logos conc: fixed file:line` on standard error. It writes a temporary file and renames it over the source, so a failed write leaves the source as it was and prints `logos conc: cannot fix`. These lines stay plain text under `--json-diagnostics`. A finding that fails a condition keeps its hint, and `--fix` changes no file for it.
+
+Under `-overlay`, from the command line or from `GOFLAGS`, `--fix` reads and rewrites the replacement file that the overlay names. A file that the overlay deletes gets no rewrite. If the overlay file cannot be read or parsed, `--fix` changes no file.
+
+Review each rewritten line. On cancellation the function now returns before the statements after the wait. Keep the rewrite only when the group needs none of those statements.
+
+`--ai-patch` applies the same conditions and never changes a file. It prints one JSON object per edit on standard output, with the fields `file`, `line`, and `edit`. The `edit` field holds the replacement text. With `--json-diagnostics`, it wraps each object in a test2json record whose `Action` is `output`.
+
+```sh
+logos conc test -stall=200ms -count=1 --ai-patch ./stalled
+logos conc test -stall=200ms -count=1 --fix ./stalled
+logos conc test -stall=200ms -count=1 ./stalled
+```
+
+`./stalled` is the `fix/stalled` program in `logos_conc_fix_stalled.txt`. Expect exit 1 for the first two: each prints the finding, because the fix runs after the program. The first prints an edit with `"line":17` and changes no file. The second rewrites line 17 and prints `logos conc: fixed`. Expect exit 0 for the third: the child returns at cancellation and no finding prints.
+
 ## Read exit codes
 
-Expect the status of the `logos run` or `logos test` child when that is not zero. A program that exits N makes `logos run` print `exit status N` and exit 1, so `conc run` exits 1 for it. Expect 1 when the child exits zero but a finding was printed. Expect 0 when the child exits zero and no finding was printed. Treat a damaged finding line as a finding. Expect a usage error and no child run for a bad flag value.
+Expect the status of the child when that is not zero, also when a finding was printed. A program that exits N makes `logos run` print `exit status N` and exit 1; `conc run` reads that line and exits N. `conc test` exits with the status of `logos test`. If a signal kills the program, `conc run` exits with 128 plus the signal number. Expect 1 when the child exits zero but a finding was printed. Expect 0 when the child exits zero and no finding was printed. Treat a damaged finding line as a finding. Expect a usage error and no child run for a bad flag value.
 
 ```sh
 logos conc run ./oneorder fail
@@ -206,11 +248,11 @@ logos conc run -stall soon ./ignores
 logos conc test -shake=nope -count=1 ./ord
 ```
 
-Expect exit 1 for the first: `logos run` reports `exit status 3` and no finding prints. Expect exit 1 for the next two: each prints its finding. Expect exit 1 for both usage errors: each prints its message and runs no child. `logos conc test` without a `-count` on the command line or in `GOFLAGS` adds `-count=1` itself.
+Expect exit 3 for the first: the program exits 3 and no finding prints. Expect exit 1 for the next two: each prints its finding. Expect exit 1 for both usage errors: each prints its message and runs no child. `logos conc test` without a `-count` on the command line or in `GOFLAGS` adds `-count=1` itself.
 
 ## Know what conc does not find
 
-Do not use `conc` for data races; use `logos test -race`. Do not use `conc` for static violations; `logos lint` rejects them before the program runs. Do not expect a finding for one lock order, a bounded group, or a goroutine the program can still wake. Do not expect findings from a plain `logos run`; only a `conc` build carries the monitor. Run only on unix: the command transports findings over a named pipe.
+Do not use `conc` for data races; use `logos test -race`. Do not use `conc` for static violations; `logos lint` rejects them before the program runs. Do not expect a finding for one lock order, a bounded group, or a goroutine the program can still wake. Do not expect findings from a plain `logos run`; only a `conc` build carries the monitor. Run only on unix: the command transports findings over a named pipe. A quiet run proves only that this run produced none of the five findings.
 
 ## Diagnostics
 

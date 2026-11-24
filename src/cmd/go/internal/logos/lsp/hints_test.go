@@ -188,64 +188,6 @@ func TestProxyWithoutHintsHookServesGopls(t *testing.T) {
 	})
 }
 
-func TestProxyCodeActionsHook(t *testing.T) {
-	type call struct {
-		diags [][]byte
-		uri   string
-		src   []byte
-		rng   json.RawMessage
-	}
-	var mu sync.Mutex
-	var got []call
-	f := newFixture(t, map[string]string{"a/a.lgo": aLgo}, fixtureOptions{
-		Script: func(string) fakeScript {
-			return fakeScript{Responses: map[string]json.RawMessage{
-				"textDocument/codeAction": toJSON(t, []any{map[string]any{"title": "from gopls"}}),
-			}}
-		},
-		Tune: func(f *fixture, o *Options) {
-			o.CodeActions = func(diags [][]byte, uri string, src []byte, rng json.RawMessage) (json.RawMessage, error) {
-				mu.Lock()
-				defer mu.Unlock()
-				got = append(got, call{diags, uri, src, rng})
-				return json.RawMessage(`[{"title":"autofix","kind":"quickfix"}]`), nil
-			}
-		},
-	})
-	aPath := f.path("a/a.lgo")
-	f.comp.setDiagnostics(filepath.Dir(aPath),
-		compilerDiag(t, diagSpec{Path: aPath, Severity: "deny", Rule: "style::x", Message: "fixable", Start: [2]int{6, 2}, End: [2]int{6, 6}}),
-		compilerDiag(t, diagSpec{Path: filepath.Join(filepath.Dir(aPath), "other.lgo"), Severity: "deny", Message: "elsewhere", Start: [2]int{1, 1}, End: [2]int{1, 2}}),
-	)
-	f.open("a/a.lgo", 1)
-	rng := span(Position{Line: 5, Character: 1}, 4)
-	res := f.client.call("textDocument/codeAction", map[string]any{
-		"textDocument": map[string]any{"uri": f.uri("a/a.lgo")},
-		"range":        rng,
-		"context":      map[string]any{"diagnostics": []any{}},
-	})
-	sameJSON(t, "code actions", res, []any{
-		map[string]any{"title": "from gopls"},
-		map[string]any{"title": "autofix", "kind": "quickfix"},
-	})
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) != 1 {
-		t.Fatalf("the code action hook ran %d times, want once", len(got))
-	}
-	c := got[0]
-	if len(c.diags) != 1 {
-		t.Fatalf("hook got %d diagnostic lines, want the one of this file", len(c.diags))
-	}
-	if d, ok := parseDiagnostic(c.diags[0]); !ok || d.Message != "fixable" {
-		t.Errorf("hook got the line %s, want the compiler's JSON for the diagnostic", c.diags[0])
-	}
-	if c.uri != f.uri("a/a.lgo") || string(c.src) != aLgo {
-		t.Errorf("hook got uri %s and text %q, want the document's", c.uri, c.src)
-	}
-	sameJSON(t, "range given to the hook", c.rng, rng)
-}
-
 func TestProxyHintsCacheKeepsEmptyAnswer(t *testing.T) {
 	var mu sync.Mutex
 	runs := 0

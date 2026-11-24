@@ -1,0 +1,140 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# SPEC 2.5: a comptime instance is analysed in the scope of the package that
+# declares the generic. The generic may name unexported identifiers of that
+# package, and an importer may instantiate it.
+cd m
+logos build ./...
+logos run .
+stdout '^a \[x:int y:int\]$'
+stdout '^b \[x:int y:int\]$'
+stdout '^main \[x:int y:int\]$'
+stdout '^local \[title:string id:int raw:other\]$'
+stdout '^width 2 3$'
+
+# One instance exists per generic and type argument list in the linked
+# program: three packages and one plain generic instantiate Describe with
+# shared.Point, and two sites instantiate it with the local type. The plain
+# generic lives in package main, because an exported forwarding function
+# fails with [comptime::exported_forwarder] (SPEC 2.5).
+logos build -gcflags=all=-l -o $WORK/identity.exe .
+go tool nm $WORK/identity.exe
+stdout -count=2 ' T example\.com/identity/lib\.Describe\.logosct\.[0-9a-f]+$'
+
+# SPEC 2.5: logos eject prints each instance in the package that instantiates
+# it, and lib.Describe names the unexported type lib.entry, so eject refuses
+# the module.
+! logos eject -o out
+stderr '^(\./)?lib/lib\.lgo:[0-9]+:[0-9]+: \[comptime::unexported_in_exported\] a comptime instance ejected into package example\.com/identity/a names unexported entry of package example\.com/identity/lib$'
+! stderr 'internal compiler error'
+
+-- m/go.mod --
+module example.com/identity
+
+go 1.27
+
+-- m/shared/shared.lgo --
+package shared
+
+type Point struct {
+	X int
+	Y int
+}
+
+-- m/lib/lib.lgo --
+package lib
+
+import (
+	"comptime"
+	"strings"
+)
+
+type entry struct {
+	name string
+	kind string
+}
+
+func kindOf[F any]() string {
+	const switch F {
+	case int:
+		return "int"
+	case string:
+		return "string"
+	}
+	return "other"
+}
+
+func lower(s string) string {
+	return strings.ToLower(s)
+}
+
+func render(entries []entry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.name+":"+e.kind)
+	}
+	return out
+}
+
+func Describe[T any]() []string {
+	var entries []entry
+	const for _, f := range comptime.Fields[T]() {
+		entries = append(entries, entry{name: lower(f.Name), kind: kindOf[f.Type]()})
+	}
+	return render(entries)
+}
+
+-- m/a/a.lgo --
+package a
+
+import (
+	"example.com/identity/lib"
+	"example.com/identity/shared"
+)
+
+func Point() []string {
+	return lib.Describe[shared.Point]()
+}
+
+-- m/b/b.lgo --
+package b
+
+import (
+	"example.com/identity/lib"
+	"example.com/identity/shared"
+)
+
+func Point() []string {
+	return lib.Describe[shared.Point]()
+}
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/identity/a"
+	"example.com/identity/b"
+	"example.com/identity/lib"
+	"example.com/identity/shared"
+)
+
+type local struct {
+	Title string
+	ID    int
+	Raw   []byte
+}
+
+func width[T any]() int {
+	return len(lib.Describe[T]())
+}
+
+func main() {
+	fmt.Println("a", a.Point())
+	fmt.Println("b", b.Point())
+	fmt.Println("main", lib.Describe[shared.Point]())
+	fmt.Println("local", lib.Describe[local]())
+	fmt.Println("width", width[shared.Point](), width[local]())
+}

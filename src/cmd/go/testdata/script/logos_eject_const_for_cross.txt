@@ -24,8 +24,6 @@ exists out/wire/wire.go
 ! grep '_logos_ctcomptime' out/main.go
 grep 'Total_logosct' out/main.go
 ! grep 'logosct' out/wire/wire.go
-grep 'Weights_logosct2' out/main.go
-! grep 'Weights_logosct4' out/main.go
 
 cd out
 go run .

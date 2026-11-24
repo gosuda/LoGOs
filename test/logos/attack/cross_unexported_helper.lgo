@@ -1,0 +1,23 @@
+// compile
+
+package p
+
+import "comptime"
+
+func bump(n int) int { return n + 10 }
+
+func Score[T any]() int {
+	n := bump(0)
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+type Pair struct {
+	A int
+	B int
+}
+
+var _ = Score[Pair]()

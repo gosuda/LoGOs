@@ -6,6 +6,13 @@ package p
 
 import "comptime"
 
+func constForLiveUse() int {
+	const for _, f := range comptime.Fields[struct{ A int }]() {
+		_ = f.Name
+	}
+	return 0
+}
+
 func constIfLive() int {
 	const if 1 == 1 {
 		return 1
@@ -16,7 +23,7 @@ func constIfLive() int {
 
 func constIfDeadChecked() int {
 	const if 1 == 2 {
-		return undefinedInDeadBranch // ERROR "undefined: undefinedInDeadBranch"
+		return undefinedInDeadBranch
 	} else {
 		return 3
 	}
@@ -26,7 +33,7 @@ func constIfDeadElseChecked() int {
 	const if 1 == 1 {
 		return 1
 	} else {
-		return undefinedInDeadElse // ERROR "undefined: undefinedInDeadElse"
+		return undefinedInDeadElse
 	}
 }
 
@@ -79,7 +86,7 @@ func constIfDeadForExempt() int {
 		const for _, f := range comptime.Fields[int]() {
 			_ = f
 		}
-		return undefinedInDeadForBranch // ERROR "undefined: undefinedInDeadForBranch"
+		return undefinedInDeadForBranch
 	}
 	return 4
 }

@@ -227,7 +227,7 @@ Rules:
 | `correctness::mixed_module` | Split the module so each module holds one kind. |
 | `correctness::misplaced_try` | Split the expression so `?` ends its own statement. |
 | `correctness::errdefer_needs_error_result` | Add a final `error` result, or use `defer`. |
-| `correctness::reserved_identifier` | Rename identifiers that start with `_logos_` or `Logos_`. |
+| `correctness::reserved_identifier` | Rename identifiers that start with `_logos_` or `Logos_` or contain `_logosct`. |
 | `correctness::duplicate_stem_filename` | Rename one of the two files that share a stem. |
 | `restriction::cgo_usage` | Turn on cgo in `logos.toml`, or drop the `import "C"`. |
 | `portability::alias_extension` (warning) | Rename the alias-extension file to `.lgo` before publish. |

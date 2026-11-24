@@ -878,3 +878,189 @@ func (fc *funcLower) groupScopeArgs(s *syntax.ScopeDeferStmt, call *syntax.CallE
 	fc.hoistSubEmit(fc.hoistSubTake(mark))
 	return h
 }
+
+func (w ctWalker) groupForSyntax(s *syntax.ForStmt, top groupFrame) ([]syntax.Stmt, syntax.Stmt, bool) {
+	if rng, ok := s.Init.(*syntax.RangeClause); ok {
+		if _, channel := w.groupChannelRange(s); channel {
+			return nil, w.groupRangeSyntax(s, rng, top, nil), true
+		}
+		w.groupRangeTargets(s, rng)
+		return nil, nil, false
+	}
+	initSend, sendInit := s.Init.(*syntax.SendStmt)
+	_, sendPost := s.Post.(*syntax.SendStmt)
+	movePost := sendPost || groupNativeHasRecv(s.Post)
+	if !sendInit && !movePost {
+		return nil, nil, false
+	}
+	var pre []syntax.Stmt
+	if sendInit {
+		pre = append(pre, w.groupSendSyntax(initSend, top))
+		s.Init = nil
+	}
+	if !movePost {
+		return append(pre, w.forStmt(s)...), s, true
+	}
+	pre = append(pre, w.header(s, s.Init)...)
+	// The next iteration's loop variables exist before the post statement.
+	// Run the displaced post at the head, except on the first entry.
+	pos := s.Body.Pos()
+	first := w.fl.cswName("ctfirst")
+	pre = append(pre, defineOf(s.Pos(), []syntax.Expr{nameOf(s.Pos(), first)}, []syntax.Expr{w.fl.ctBuiltin(s.Pos(), "true")}))
+	post, next := w.stmt(s.Post)
+	if next != nil {
+		post = append(post, next)
+	}
+	s.Post = nil
+	clear := assignOf(pos, []syntax.Expr{nameOf(pos, first)}, []syntax.Expr{w.fl.ctBuiltin(pos, "false")})
+	start := []syntax.Stmt{ifElseOf(pos, nil, nameOf(pos, first), []syntax.Stmt{clear}, blockOf(pos, post))}
+	if s.Cond != nil {
+		cond, setup := w.expr(s.Cond)
+		stop := at(&syntax.Operation{Op: syntax.Not, X: cond}, cond.Pos())
+		leave := at(&syntax.BranchStmt{Tok: syntax.Break, Target: s}, stop.Pos())
+		start = append(append(start, setup...), ifOf(stop.Pos(), nil, stop, []syntax.Stmt{leave}))
+		s.Cond = nil
+	}
+	s.Body.List = w.scopeSyntaxList(s.Body, s.Body.List, w.stmts)
+	body := blockEndingAt(pos, s.Body.Rbrace, s.Body.List)
+	s.Body.List = append(start, body)
+	return append(w.scopeLoopSyntax(s), pre...), s, true
+}
+
+func (w ctWalker) groupRangeTargets(loop *syntax.ForStmt, rng *syntax.RangeClause) {
+	if rng.Def || !groupNativeHasRecv(rng.Lhs) {
+		return
+	}
+	targets := syntax.UnpackListExpr(rng.Lhs)
+	for _, target := range targets {
+		if w.ctPropValueTarget(target) {
+			return
+		}
+	}
+	pos := rng.Pos()
+	names := make([]syntax.Expr, len(targets))
+	for i := range names {
+		names[i] = nameOf(pos, w.fl.cswName("ctrange"))
+	}
+	assign := at(&syntax.AssignStmt{Lhs: rng.Lhs, Rhs: listOf(pos, nameExprs(pos, names))}, pos)
+	rng.Lhs, rng.Def = listOf(pos, names), true
+	loop.Body.List = append([]syntax.Stmt{assign}, loop.Body.List...)
+}
+
+func (w ctWalker) groupRangeLabels(s *syntax.ForStmt, label *syntax.LabeledStmt) (syntax.Stmt, *syntax.LabeledStmt) {
+	if label == nil {
+		return s, nil
+	}
+	old := label.Label.Value
+	inner := w.fl.cswName("ctrangeloop")
+	var useOuter, useInner bool
+	syntax.Inspect(w.body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr, *syntax.GroupChild:
+			return false
+		case *syntax.BranchStmt:
+			if n.Label == nil || n.Label.Value != old {
+				break
+			}
+			switch n.Tok {
+			case syntax.Goto:
+				useOuter = true
+			case syntax.Break, syntax.Continue:
+				n.Label = nameOf(n.Label.Pos(), inner)
+				useInner = true
+			}
+		}
+		return true
+	})
+	var loop syntax.Stmt = s
+	if useInner {
+		loop = at(&syntax.LabeledStmt{Label: nameOf(label.Label.Pos(), inner), Stmt: s}, label.Pos())
+	}
+	if !useOuter {
+		label = nil
+	}
+	return loop, label
+}
+
+func (w ctWalker) groupTerminates(list []syntax.Stmt) bool {
+	for i := len(list) - 1; i >= 0; i-- {
+		if _, empty := list[i].(*syntax.EmptyStmt); !empty {
+			return w.groupStmtTerminates(list[i], "")
+		}
+	}
+	return false
+}
+
+func (w ctWalker) groupStmtTerminates(s syntax.Stmt, label string) bool {
+	switch s := s.(type) {
+	case *syntax.ReturnStmt:
+		return true
+	case *syntax.BranchStmt:
+		return s.Tok == syntax.Goto || s.Tok == syntax.Fallthrough
+	case *syntax.ExprStmt:
+		call, ok := syntax.Unparen(s.X).(*syntax.CallExpr)
+		if !ok {
+			return false
+		}
+		name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
+		return ok && w.fl.pkg.info.ObjectOf(name) == types2.Universe.Lookup("panic")
+	case *syntax.BlockStmt:
+		return w.groupTerminates(s.List)
+	case *syntax.GroupStmt:
+		return w.groupTerminates(s.Body.List)
+	case *syntax.LabeledStmt:
+		return w.groupStmtTerminates(s.Stmt, s.Label.Value)
+	case *syntax.IfStmt:
+		return s.Else != nil && w.groupStmtTerminates(s.Then, "") && w.groupStmtTerminates(s.Else, "")
+	case *syntax.ForStmt:
+		_, rangeLoop := s.Init.(*syntax.RangeClause)
+		return !rangeLoop && s.Cond == nil && !groupHasBreak(s, label)
+	case *syntax.SwitchStmt:
+		hasDefault := false
+		for _, c := range s.Body {
+			hasDefault = hasDefault || c.Cases == nil
+			if !w.groupTerminates(c.Body) {
+				return false
+			}
+		}
+		return hasDefault && !groupHasBreak(s, label)
+	case *syntax.SelectStmt:
+		for _, c := range s.Body {
+			if !w.groupTerminates(c.Body) {
+				return false
+			}
+		}
+		return !groupHasBreak(s, label)
+	}
+	return false
+}
+
+func groupHasBreak(host syntax.Stmt, label string) bool {
+	found := false
+	var visit func(root syntax.Node, implicit bool)
+	visit = func(root syntax.Node, implicit bool) {
+		syntax.Inspect(root, func(n syntax.Node) bool {
+			if found {
+				return false
+			}
+			switch n := n.(type) {
+			case *syntax.FuncLit, *syntax.LambdaExpr, *syntax.GroupChild:
+				return false
+			case *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt:
+				if n != root {
+					if label != "" {
+						visit(n, false)
+					}
+					return false
+				}
+			case *syntax.BranchStmt:
+				if n.Tok == syntax.Break {
+					found = n.Label == nil && implicit || n.Label != nil && n.Label.Value == label
+				}
+			}
+			return !found
+		})
+	}
+	visit(host, true)
+	return found
+}

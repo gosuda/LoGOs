@@ -1,0 +1,14 @@
+// errorcheck
+
+package p
+
+func Pick[T any](v T) int {
+	const switch T {
+	case int:
+		var s string = v // ERROR "cannot use"
+		return len(s)
+	}
+	return 0
+}
+
+var _ = Pick[int](1)

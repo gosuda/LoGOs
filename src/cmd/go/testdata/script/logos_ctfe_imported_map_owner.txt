@@ -1,0 +1,90 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^const map shared ok$'
+cp stdout $WORK/native.txt
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $WORK/native.txt
+
+-- m/go.mod --
+module example.com/constmap
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/constmap/left"
+	"example.com/constmap/owner"
+	"example.com/constmap/right"
+)
+
+func main() {
+	owned := owner.DeclaredFromOwner()
+	fromLeft := left.Declared()
+	fromRight := right.Declared()
+	fromLeft[0] = 90
+	if (owned[0] ?? -1) != 90 || (fromRight[0] ?? -1) != 90 || owner.DeclaredValue(0) != 51 {
+		panic("package const map is not shared across instantiations")
+	}
+	fmt.Println("const map shared ok")
+}
+
+-- m/owner/owner.lgo --
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import "comptime"
+
+type Shared struct{ N int }
+type Distinct struct{ N int }
+
+const DeclaredTable = map[int]int{1: 61, 0: 51}
+
+func DeclaredFromOwner() map[int]int {
+	var materialized map[int]int = DeclaredTable
+	return materialized
+}
+
+func Declared[T any]() map[int]int {
+	const if comptime.IsStruct[T]() {
+		var materialized map[int]int = DeclaredTable
+		return materialized
+	}
+	return map[int]int{}
+}
+
+func DeclaredValue(key int) int { return DeclaredTable[key] ?? -1 }
+
+-- m/left/left.lgo --
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package left
+
+import "example.com/constmap/owner"
+
+func Declared() map[int]int { return owner.Declared[owner.Shared]() }
+
+-- m/right/right.lgo --
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package right
+
+import "example.com/constmap/owner"
+
+func Declared() map[int]int { return owner.Declared[owner.Distinct]() }

@@ -65,6 +65,9 @@ func autofixLine(t *testing.T, d fixDiag) json.RawMessage {
 }
 
 func TestProxyHintsEndToEnd(t *testing.T) {
+	goplsAction := map[string]any{"title": "from gopls", "command": "gopls.test", "arguments": []any{"argument"}}
+	const guideTitle = "use optional chaining with a ?? default"
+	const guideReplacement = `(u?.Greet() ?? "")`
 	narrowed := shift(findPos(t, wiringLgo, "u.Greet", 0), len("u.Greet"))
 	q := findPos(t, wiringLgo, "get()?", 0)
 	site := span(q, len("get()?"))
@@ -98,7 +101,7 @@ func TestProxyHintsEndToEnd(t *testing.T) {
 				"textDocument/hover": toJSON(t, map[string]any{
 					"contents": map[string]any{"kind": "markdown", "value": "gopls hover"},
 				}),
-				"textDocument/codeAction": toJSON(t, []any{map[string]any{"title": "from gopls"}}),
+				"textDocument/codeAction": toJSON(t, []any{goplsAction}),
 			}}
 		},
 		Tune: func(f *fixture, o *Options) {
@@ -114,7 +117,8 @@ func TestProxyHintsEndToEnd(t *testing.T) {
 	var diags []Diagnostic
 	for _, line := range []json.RawMessage{
 		autofixLine(t, fixDiag{Schema: "2.0", File: aPath, Start: greet, Len: len("u.Greet()"), Description: "from another schema", Replacement: "x"}),
-		autofixLine(t, fixDiag{Schema: "1.0", File: aPath, Start: greet, Len: len("u.Greet()"), Description: "use optional chaining with a ?? default", Replacement: `(u?.Greet() ?? "")`}),
+		autofixLine(t, fixDiag{Schema: "1.0", File: aPath, Start: greet, Len: len("u.Greet()"), Description: guideTitle, Replacement: guideReplacement}),
+		autofixLine(t, fixDiag{Schema: "1.0", File: f.path("a/other.lgo"), Start: greet, Len: len("u.Greet()"), Description: "from another file", Replacement: "x"}),
 	} {
 		d, ok := parseDiagnostic(line)
 		if !ok {
@@ -160,14 +164,32 @@ func TestProxyHintsEndToEnd(t *testing.T) {
 		"range":        span(greet, len("u.Greet()")),
 		"context":      map[string]any{"diagnostics": []any{}},
 	})
-	if !strings.Contains(string(actions), "from gopls") {
-		t.Errorf("codeAction lost the gopls action: %s", actions)
+	var received []json.RawMessage
+	if err := json.Unmarshal(actions, &received); err != nil || len(received) != 2 {
+		t.Fatalf("want the gopls action and guidance for one current LoGOs diagnostic, got %s (err: %v)", actions, err)
 	}
-	if !strings.Contains(string(actions), "use optional chaining with a ?? default") {
-		t.Errorf("codeAction lacks the autofix candidate: %s", actions)
+	sameJSON(t, "gopls action", received[0], goplsAction)
+	var guide struct {
+		Title       string                `json:"title"`
+		Diagnostics []hints.LSPDiagnostic `json:"diagnostics"`
+		Disabled    struct {
+			Reason string `json:"reason"`
+		} `json:"disabled"`
+		Edit    json.RawMessage `json:"edit"`
+		Command json.RawMessage `json:"command"`
+		Data    json.RawMessage `json:"data"`
 	}
-	if strings.Contains(string(actions), "from another schema") {
-		t.Errorf("codeAction offers the candidate of a diagnostic of another schema: %s", actions)
+	if err := json.Unmarshal(received[1], &guide); err != nil {
+		t.Fatal(err)
+	}
+	if guide.Edit != nil || guide.Command != nil || guide.Data != nil {
+		t.Errorf("unproved guidance can be applied or resolved: %s", received[1])
+	}
+	if guide.Title != guideTitle || !strings.Contains(guide.Disabled.Reason, guideReplacement) {
+		t.Errorf("guidance lacks a disabled explanation with the proposed replacement: %s", received[1])
+	}
+	if len(guide.Diagnostics) != 1 || guide.Diagnostics[0].Code != "correctness::nil_deref_unproven" {
+		t.Errorf("guidance lost its diagnostic: %s", received[1])
 	}
 }
 
@@ -180,47 +202,8 @@ func nameSpan(t *testing.T) (Position, json.RawMessage) {
 	return start, toJSON(t, span(start, len("u.Name")))
 }
 
-func titles(t *testing.T, raw json.RawMessage) []string {
-	t.Helper()
-	var acts []hints.CodeAction
-	if err := json.Unmarshal(raw, &acts); err != nil {
-		t.Fatalf("adapter result %s is not an array of code actions: %v", raw, err)
-	}
-	var out []string
-	for _, a := range acts {
-		out = append(out, a.Title)
-	}
-	return out
-}
-
-func TestCodeActionsAdapterAppliesAutofix(t *testing.T) {
-	start, rng := nameSpan(t)
-	line := autofixLine(t, fixDiag{Schema: "1.0", File: "/w/fixes.lgo", Start: start, Len: len("u.Name"), Description: "use optional chaining with a ?? default", Replacement: `(u?.Name ?? "")`})
-	raw, err := codeActionsAdapter([][]byte{line}, "file:///w/fixes.lgo", []byte(adapterSrc), rng)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var acts []hints.CodeAction
-	if err := json.Unmarshal(raw, &acts); err != nil || len(acts) != 1 {
-		t.Fatalf("adapter result = %s, err = %v, want one action", raw, err)
-	}
-	a := acts[0]
-	if a.Kind != "quickfix" || a.Title != "use optional chaining with a ?? default" {
-		t.Errorf("action = %s %q, want the quickfix of the candidate", a.Kind, a.Title)
-	}
-	edits := a.Edit.Changes["file:///w/fixes.lgo"]
-	want := hints.TextEdit{
-		Range:   hints.Range{Start: hints.Position(start), End: hints.Position(shift(start, len("u.Name")))},
-		NewText: `(u?.Name ?? "")`,
-	}
-	if len(edits) != 1 || edits[0] != want {
-		t.Errorf("edits = %+v, want %+v", edits, want)
-	}
-}
-
 func TestCodeActionsAdapterSkipsBadLines(t *testing.T) {
 	start, rng := nameSpan(t)
-	const uri = "file:///w/fixes.lgo"
 	line := func(schema, description string) []byte {
 		return autofixLine(t, fixDiag{Schema: schema, File: "/w/fixes.lgo", Start: start, Len: len("u.Name"), Description: description, Replacement: "x"})
 	}
@@ -232,16 +215,20 @@ func TestCodeActionsAdapterSkipsBadLines(t *testing.T) {
 		line("1.0", "second fix"),
 		nil,
 	}
-	raw, err := codeActionsAdapter(lines, uri, []byte(adapterSrc), rng)
+	actions, err := codeActionsAdapter(lines, []byte(adapterSrc), rng)
 	if err != nil {
 		t.Fatalf("a bad diagnostic line made the adapter fail: %v", err)
 	}
-	if got, want := titles(t, raw), []string{"first fix", "second fix"}; !slices.Equal(got, want) {
+	got := make([]string, 0, len(actions))
+	for _, action := range actions {
+		got = append(got, action.Title)
+	}
+	if want := []string{"first fix", "second fix"}; !slices.Equal(got, want) {
 		t.Errorf("titles = %q, want %q", got, want)
 	}
 }
 
-func TestCodeActionsAdapterEmptyIsArray(t *testing.T) {
+func TestCodeActionsAdapterNoGuidance(t *testing.T) {
 	start, rng := nameSpan(t)
 	good := autofixLine(t, fixDiag{Schema: "1.0", File: "/w/fixes.lgo", Start: start, Len: len("u.Name"), Description: "fix", Replacement: "x"})
 	elsewhere := toJSON(t, Range{Start: Position{Line: 0, Character: 0}, End: Position{Line: 0, Character: 3}})
@@ -254,19 +241,19 @@ func TestCodeActionsAdapterEmptyIsArray(t *testing.T) {
 		{"only unreadable lines", [][]byte{[]byte("not json"), toJSON(t, map[string]any{"schema_version": "2.0"})}, rng},
 		{"range off the diagnostic", [][]byte{good}, elsewhere},
 	} {
-		raw, err := codeActionsAdapter(tc.diags, "file:///w/fixes.lgo", []byte(adapterSrc), tc.rng)
+		actions, err := codeActionsAdapter(tc.diags, []byte(adapterSrc), tc.rng)
 		if err != nil {
 			t.Errorf("%s: %v", tc.name, err)
 			continue
 		}
-		if string(raw) != "[]" {
-			t.Errorf("%s: adapter result = %s, want []", tc.name, raw)
+		if len(actions) != 0 {
+			t.Errorf("%s: adapter result = %+v, want no guidance", tc.name, actions)
 		}
 	}
 }
 
 func TestCodeActionsAdapterRejectsBadRange(t *testing.T) {
-	if raw, err := codeActionsAdapter(nil, "file:///w/fixes.lgo", []byte(adapterSrc), json.RawMessage(`{"start":"here"}`)); err == nil {
-		t.Errorf("adapter result = %s, want an error for an unreadable range", raw)
+	if actions, err := codeActionsAdapter(nil, []byte(adapterSrc), json.RawMessage(`{"start":"here"}`)); err == nil {
+		t.Errorf("adapter result = %+v, want an error for an unreadable range", actions)
 	}
 }

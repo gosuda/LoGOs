@@ -1,0 +1,305 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+# Imported closed unions: member identity across the package boundary.
+# A LoGOs importer accepts only the concrete members the owner
+# declares. The member set includes an owner-private concrete member
+# that importers can obtain only through an exported factory and
+# cannot name, and instantiated generic member types with the same
+# underlying shape but distinct type arguments, which are distinct
+# members: a same-shape instantiation with a third type argument is
+# rejected. A method-compatible non-member is rejected in LoGOs
+# source. The Go-facing projection of an exported value union is
+# methods-only by design, so a Go client may still pass a non-member
+# that implements the method set; that hole is asserted here on
+# purpose and lives only in the Go module. A union with a nil-capable
+# member carries a present typed-nil payload: the union value is
+# non-nil, the switch matches the pointer member, and the option form
+# keeps presence separate from payload nil.
+#
+# The good module (w/own) and the two negative modules (negm, negs)
+# are separate modules so a bad fixture never blocks the good
+# ejection. Rejection is checked at the compile boundary of the
+# native build only: the ejected form is a methods-only interface,
+# which Go cannot distinguish members from method-compatible
+# non-members, so parity is asserted on the good module's run output.
+
+cd w/own
+logos build ./...
+logos build -o $WORK/bin/own$GOEXE .
+exec $WORK/bin/own$GOEXE
+stdout '^word:hi$'
+stdout '^tag:n$'
+stdout '^kind word tag$'
+stdout '^arm default: word:hi$'
+stdout '^present typed-nil: true word$'
+stdout '^none absent: true$'
+stdout '^boxed present: true$'
+stdout '^boxed kind word$'
+stdout '^slot int member: true false$'
+stdout '^slot string member: true false$'
+stdout '^slot label slot$'
+cp stdout $WORK/native.txt
+cd ../..
+
+cd w/goq
+logos build -o $WORK/bin/goq$GOEXE .
+exec $WORK/bin/goq$GOEXE
+stdout '^N$'
+stdout '^word:go$'
+cd ../..
+
+# Imported union rejects a concrete non-member that implements the
+# method set.
+cd negm
+! logos build ./...
+stderr 'cannot use'
+cd ..
+
+# Imported union rejects a same-shape instantiation whose type
+# argument is not in the member set.
+cd negs
+! logos build ./...
+stderr 'cannot use'
+cd ..
+
+# The good module ejects and the ejected output builds and runs with
+# the upstream toolchain, byte-identical to the native run.
+cd w/own
+logos eject -o $WORK/out
+cd $WORK/out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native.txt
+
+-- w/own/go.mod --
+module example.com/own
+
+go 1.27
+
+-- w/own/own/own.lgo --
+package own
+
+// word is the owner-private concrete member of Token. Importers
+// obtain word values only through the exported factories below and
+// cannot name the type, so the exhaustive switch over every member
+// runs here.
+type word struct {
+	s string
+}
+
+func (w word) Label() string {
+	return "word:" + w.s
+}
+
+// Tag is the exported member of Token.
+type Tag struct {
+	Name string
+}
+
+func (t Tag) Label() string {
+	return "tag:" + t.Name
+}
+
+// Token is a closed value union exported to importers. *word is a
+// nil-capable member, so Token? carries explicit presence: a present
+// typed-nil payload stays distinct from none.
+type Token interface {
+	*word | Tag
+	Label() string
+}
+
+// Word returns the private member through an exported factory.
+func Word(s string) Token {
+	w := word{s: s}
+	return &w
+}
+
+// Box carries a Token field across the boundary. The typed nil is
+// stored by field assignment; returning the typed nil itself as a
+// union result is the compile error correctness::typed_nil_return.
+type Box struct {
+	T Token
+}
+
+// FillNil stores the private member as a typed nil payload in the
+// field, the form the JSON wire fixtures prove. The union value in
+// the field is present; its payload is a nil *word.
+func FillNil(b *Box) {
+	b.T = (*word)(nil)
+}
+
+// Kind switches over every member and nil. Only the owner can name
+// all of them.
+func Kind(t Token) string {
+	switch t.(type) {
+	case *word:
+		return "word"
+	case Tag:
+		return "tag"
+	case nil:
+		return "nil"
+	}
+	return "unreachable"
+}
+
+func Who(t Token) string {
+	return t.Label()
+}
+
+// Slot is one generic type; the members below are two pointer
+// instantiations of it with distinct type arguments and the same
+// underlying shape.
+type Slot[T any] struct {
+	V T
+}
+
+func (s Slot[T]) Label() string {
+	return "slot"
+}
+
+// SlotPair is a closed union over *Slot[int] and *Slot[string]. They
+// are distinct members: *Slot[float64] is a non-member.
+type SlotPair interface {
+	*Slot[int] | *Slot[string]
+	Label() string
+}
+
+func NumSlot(n int) SlotPair {
+	return &Slot[int]{V: n}
+}
+
+func TextSlot(s string) SlotPair {
+	return &Slot[string]{V: s}
+}
+
+-- w/own/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/own/own"
+)
+
+func main() {
+	w := own.Word("hi")
+	fmt.Println(own.Who(w))
+	fmt.Println(own.Who(own.Tag{Name: "n"}))
+	fmt.Println("kind", own.Kind(w), own.Kind(own.Tag{Name: "n"}))
+
+	switch v := w.(type) {
+	case own.Tag:
+		fmt.Println("arm tag:", v.Name)
+	case nil:
+		fmt.Println("arm nil")
+	default:
+		fmt.Println("arm default:", w.Label())
+	}
+
+	var nb own.Box
+	own.FillNil(&nb)
+	nilw := nb.T
+	fmt.Println("present typed-nil:", nilw != nil, own.Kind(nilw))
+
+	var none own.Token?
+	fmt.Println("none absent:", none == nil)
+
+	var boxed own.Token? = nilw
+	fmt.Println("boxed present:", boxed != nil)
+	if boxed != nil {
+		fmt.Println("boxed kind", own.Kind(boxed))
+	}
+
+	n := own.NumSlot(5)
+	s := own.TextSlot("s")
+	_, okInt := n.(*own.Slot[int])
+	_, okWrongArg := n.(*own.Slot[string])
+	fmt.Println("slot int member:", okInt, okWrongArg)
+	_, okStr := s.(*own.Slot[string])
+	_, okWrongArg2 := s.(*own.Slot[int])
+	fmt.Println("slot string member:", okStr, okWrongArg2)
+	fmt.Println("slot label", n.Label())
+}
+
+-- w/goq/go.mod --
+module example.com/goq
+
+go 1.27
+
+require example.com/own v0.0.0
+
+replace example.com/own => ../own
+
+-- w/goq/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/own/own"
+)
+
+// N implements the method set of own.Token without being a member.
+// The Go-facing projection of an exported value union is methods-only
+// by design, so this call compiles and runs; the LoGOs importer of
+// the same union rejects the same assignment (see negm).
+type N struct{}
+
+func (n N) Label() string { return "N" }
+
+func main() {
+	fmt.Println(own.Who(N{}))
+	fmt.Println(own.Who(own.Word("go")))
+}
+
+-- negm/go.mod --
+module example.com/negm
+
+go 1.27
+
+require example.com/own v0.0.0
+
+replace example.com/own => ../w/own
+
+-- negm/negm.lgo --
+package negm
+
+import (
+	"example.com/own/own"
+)
+
+// C implements the method set of own.Token but is not a member. A
+// LoGOs importer must reject the assignment at compile time.
+type C struct {
+	Z int
+}
+
+func (c C) Label() string {
+	return "C"
+}
+
+var _ own.Token = C{Z: 1}
+
+-- negs/go.mod --
+module example.com/negs
+
+go 1.27
+
+require example.com/own v0.0.0
+
+replace example.com/own => ../w/own
+
+-- negs/negs.lgo --
+package negs
+
+import (
+	"example.com/own/own"
+)
+
+// *Slot[float64] has the same underlying shape as the members of
+// own.SlotPair but a distinct type argument, so it is not a member.
+// A LoGOs importer must reject the assignment at compile time.
+var _ own.SlotPair = &own.Slot[float64]{V: 1.5}

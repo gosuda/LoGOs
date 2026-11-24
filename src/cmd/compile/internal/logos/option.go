@@ -25,6 +25,214 @@ const (
 
 var exprType = reflect.TypeFor[syntax.Expr]()
 
+func infoHasInferredOption(pkg *types2.Package, info *types2.Info, files []*syntax.File) bool {
+	if info == nil {
+		return false
+	}
+	scan := inferredOptionScan{pkg: pkg, seen: make(map[types2.Type]struct{})}
+	return scan.hasObjects(info.Defs) || scan.hasObjects(info.Uses) ||
+		scan.hasInfo(info) || scan.hasFiles(files)
+}
+
+type inferredOptionScan struct {
+	pkg  *types2.Package
+	seen map[types2.Type]struct{}
+}
+
+func (s *inferredOptionScan) hasObjects(objects map[*syntax.Name]types2.Object) bool {
+	for _, obj := range objects {
+		if obj != nil && s.hasOption(obj.Type()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasInfo(info *types2.Info) bool {
+	for _, obj := range info.Implicits {
+		if obj != nil && s.hasOption(obj.Type()) {
+			return true
+		}
+	}
+	for _, tv := range info.Types {
+		if s.hasOption(tv.Type) {
+			return true
+		}
+	}
+	for _, inst := range info.Instances {
+		if s.hasOption(inst.Type) || s.hasTypeArgs(inst.TypeArgs) {
+			return true
+		}
+	}
+	for _, sel := range info.Selections {
+		if sel != nil && (s.hasOption(sel.Recv()) || s.hasOption(sel.Obj().Type())) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasFiles(files []*syntax.File) bool {
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		found := false
+		syntax.Inspect(file, func(n syntax.Node) bool {
+			if found {
+				return false
+			}
+			if expr, ok := n.(syntax.Expr); ok {
+				found = s.hasOption(expr.GetTypeInfo().Type)
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasOption(t types2.Type) bool {
+	if t == nil {
+		return false
+	}
+	if _, seen := s.seen[t]; seen {
+		return false
+	}
+	s.seen[t] = struct{}{}
+	switch t := t.(type) {
+	case *types2.Option:
+		return true
+	case *types2.Named:
+		return s.hasNamed(t)
+	case *types2.Alias:
+		return s.hasTypeArgs(t.TypeArgs()) ||
+			(t.Obj().Pkg() == s.pkg && s.hasTypeParams(t.TypeParams())) ||
+			s.hasOption(t.Rhs())
+	case *types2.TypeParam:
+		return s.hasOption(t.Constraint())
+	case *types2.ConstView:
+		return s.hasOption(t.Elem)
+	case *types2.ReadonlyDescendants:
+		return s.hasOption(t.Elem)
+	default:
+		return s.hasComposite(t)
+	}
+}
+
+func (s *inferredOptionScan) hasNamed(t *types2.Named) bool {
+	if s.hasTypeArgs(t.TypeArgs()) {
+		return true
+	}
+	if t.Obj().Pkg() != s.pkg {
+		return false
+	}
+	if origin := t.Origin(); origin != t {
+		return s.hasOption(origin)
+	}
+	return s.hasTypeParams(t.TypeParams()) || s.hasOption(t.Underlying())
+}
+
+func (s *inferredOptionScan) hasComposite(t types2.Type) bool {
+	switch t := t.(type) {
+	case *types2.Map:
+		return s.hasOption(t.Key()) || s.hasOption(t.Elem())
+	case interface{ Elem() types2.Type }:
+		return s.hasOption(t.Elem())
+	case *types2.Tuple:
+		return s.hasTuple(t)
+	case *types2.LogosTuple:
+		return s.hasLogosTuple(t)
+	case *types2.Signature:
+		return s.hasSignature(t)
+	case *types2.Struct:
+		return s.hasStruct(t)
+	case *types2.Interface:
+		return s.hasInterface(t)
+	case *types2.Union:
+		return s.hasUnion(t)
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasTuple(t *types2.Tuple) bool {
+	for i := range t.Len() {
+		if v := t.At(i); v != nil && s.hasOption(v.Type()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasLogosTuple(t *types2.LogosTuple) bool {
+	for i := range t.Len() {
+		if s.hasOption(t.Elem(i)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasSignature(t *types2.Signature) bool {
+	if recv := t.Recv(); recv != nil && s.hasOption(recv.Type()) {
+		return true
+	}
+	return s.hasOption(t.Params()) || s.hasOption(t.Results()) ||
+		s.hasTypeParams(t.RecvTypeParams()) || s.hasTypeParams(t.TypeParams())
+}
+
+func (s *inferredOptionScan) hasStruct(t *types2.Struct) bool {
+	for i := range t.NumFields() {
+		if field := t.Field(i); field != nil && s.hasOption(field.Type()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasInterface(t *types2.Interface) bool {
+	for i := range t.NumExplicitMethods() {
+		if method := t.ExplicitMethod(i); method != nil && s.hasOption(method.Type()) {
+			return true
+		}
+	}
+	for i := range t.NumEmbeddeds() {
+		if s.hasOption(t.EmbeddedType(i)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasUnion(t *types2.Union) bool {
+	for i := range t.Len() {
+		if term := t.Term(i); term != nil && s.hasOption(term.Type()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasTypeArgs(args *types2.TypeList) bool {
+	for i := range args.Len() {
+		if s.hasOption(args.At(i)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *inferredOptionScan) hasTypeParams(params *types2.TypeParamList) bool {
+	for i := range params.Len() {
+		if s.hasOption(params.At(i)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (fl *fileLower) lowerOptions() {
 	fl.optMemo = make(map[*syntax.OptionType]syntax.Expr)
 	fl.narrowDone = make(map[*syntax.Name]bool)
@@ -544,73 +752,97 @@ func (fl *fileLower) selectAccess(e *syntax.OptSelectExpr, native syntax.Expr, s
 	return native, suffix
 }
 
+type typeSpelling uint8
+
+const (
+	loweredTypeSpelling typeSpelling = iota
+	copyTypeSpelling
+)
+
 func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
-	if o := fl.asOption(t); o != nil {
-		if n, ok := types2.Unalias(t).(*types2.Named); ok {
-			if args := n.TypeArgs(); args != nil && args.Len() > 0 {
-				if s, ok := fl.spellLoweredApplied(n.Obj(), args); ok {
-					return s, true
-				}
-			}
-			return fl.spellType(t)
-		}
-		if types2.LogosOptionIsBare(o.Elem) {
-			return fl.spellLowered(o.Elem)
-		}
-		inner, ok := fl.spellLowered(o.Elem)
-		if !ok {
-			return "", false
-		}
-		fl.needRT = true
-		return rtAlias + ".Option[" + inner + "]", true
-	}
+	return fl.spellTypeAs(t, loweredTypeSpelling)
+}
+
+func (fl *fileLower) spellTypeAs(t types2.Type, spelling typeSpelling) (string, bool) {
 	if t == nil {
 		return "", false
 	}
-	switch c := types2.Unalias(t).(type) {
+	shape := t
+	if spelling == loweredTypeSpelling {
+		shape = types2.Unalias(t)
+		_, named := shape.(*types2.Named)
+		if o := fl.asOption(t); o != nil && !named {
+			if types2.LogosOptionIsBare(o.Elem) {
+				return fl.spellLowered(o.Elem)
+			}
+			inner, ok := fl.spellLowered(o.Elem)
+			if !ok {
+				return "", false
+			}
+			fl.needRT = true
+			return rtAlias + ".Option[" + inner + "]", true
+		}
+	}
+	switch c := shape.(type) {
+	case *types2.Option:
+		inner, ok := fl.spellTypeAs(c.Elem, spelling)
+		if !ok {
+			return "", false
+		}
+		return "((" + inner + ")?)", true
 	case *types2.ConstView:
-		return fl.spellLowered(c.Elem)
+		inner, ok := fl.spellTypeAs(c.Elem, spelling)
+		if !ok || spelling == loweredTypeSpelling {
+			return inner, ok
+		}
+		return "(const " + inner + ")", true
 	case *types2.ReadonlyDescendants:
-		return fl.spellLowered(c.Elem)
+		return fl.spellTypeAs(c.Elem, spelling)
 	case *types2.Named:
-		if args := c.TypeArgs(); args != nil && args.Len() > 0 {
-			if s, ok := fl.spellLoweredApplied(c.Obj(), args); ok {
-				return s, true
+		if c.TypeArgs().Len() != 0 {
+			s, ok := fl.spellInstance(c.Obj(), c.TypeArgs(), spelling)
+			if ok || spelling == copyTypeSpelling {
+				return s, ok
 			}
 		}
 		return fl.spellType(t)
-	case *types2.Alias, *types2.Basic, *types2.TypeParam:
+	case *types2.Alias:
+		if c.TypeArgs().Len() != 0 {
+			return fl.spellInstance(c.Obj(), c.TypeArgs(), spelling)
+		}
+		return fl.spellType(t)
+	case *types2.Basic, *types2.TypeParam:
 		return fl.spellType(t)
 	case *types2.Pointer:
-		e, ok := fl.spellLowered(c.Elem())
+		e, ok := fl.spellTypeAs(c.Elem(), spelling)
 		if !ok {
 			return "", false
 		}
 		return "*" + e, true
 	case *types2.Slice:
-		e, ok := fl.spellLowered(c.Elem())
+		e, ok := fl.spellTypeAs(c.Elem(), spelling)
 		if !ok {
 			return "", false
 		}
 		return "[]" + e, true
 	case *types2.Array:
-		e, ok := fl.spellLowered(c.Elem())
+		e, ok := fl.spellTypeAs(c.Elem(), spelling)
 		if !ok {
 			return "", false
 		}
 		return fmt.Sprintf("[%d]", c.Len()) + e, true
 	case *types2.Map:
-		k, ok := fl.spellLowered(c.Key())
+		k, ok := fl.spellTypeAs(c.Key(), spelling)
 		if !ok {
 			return "", false
 		}
-		v, ok := fl.spellLowered(c.Elem())
+		v, ok := fl.spellTypeAs(c.Elem(), spelling)
 		if !ok {
 			return "", false
 		}
 		return "map[" + k + "]" + v, true
 	case *types2.Chan:
-		e, ok := fl.spellLowered(c.Elem())
+		e, ok := fl.spellTypeAs(c.Elem(), spelling)
 		if !ok {
 			return "", false
 		}
@@ -620,81 +852,106 @@ func (fl *fileLower) spellLowered(t types2.Type) (string, bool) {
 		case types2.RecvOnly:
 			return "<-chan " + e, true
 		default:
-			if rc, ok := types2.Unalias(c.Elem()).(*types2.Chan); ok && rc.Dir() == types2.RecvOnly {
+			if elem, ok := types2.Unalias(c.Elem()).(*types2.Chan); ok && elem.Dir() == types2.RecvOnly {
 				return "chan (" + e + ")", true
 			}
 			return "chan " + e, true
 		}
 	case *types2.Signature:
-		return fl.spellLoweredSig(c)
+		return fl.spellSignature(c, spelling)
 	case *types2.LogosTuple:
+		if spelling == copyTypeSpelling {
+			return fl.spellCopyTuple(c)
+		}
 		if st, ok := c.Underlying().(*types2.Struct); ok {
-			return fl.spellLoweredStruct(st)
+			return fl.spellStruct(st, spelling)
 		}
 		return "", false
 	case *types2.Struct:
-		return fl.spellLoweredStruct(c)
+		return fl.spellStruct(c, spelling)
 	case *types2.Interface:
-		return fl.spellLoweredInterface(c)
+		return fl.spellInterface(c, spelling)
 	default:
 		return "", false
 	}
 }
 
-func (fl *fileLower) spellLoweredApplied(obj *types2.TypeName, args *types2.TypeList) (string, bool) {
-	if obj == nil || args == nil || args.Len() == 0 {
+func (fl *fileLower) spellInstance(name *types2.TypeName, args *types2.TypeList, spelling typeSpelling) (string, bool) {
+	if !spellableObject(name, fl.pkg.tpkg) {
 		return "", false
 	}
-	lowered := make([]string, args.Len())
-	for i := range args.Len() {
-		s, ok := fl.spellLowered(args.At(i))
-		if !ok {
-			return "", false
-		}
-		lowered[i] = s
-	}
-	pkg := obj.Pkg()
-	var base string
-	if pkg == nil || pkg == fl.pkg.tpkg {
-		base = obj.Name()
-	} else {
-		if !obj.Exported() {
-			return "", false
-		}
-		base = fl.synthQualifier(pkg) + "." + obj.Name()
-	}
-	return base + "[" + strings.Join(lowered, ", ") + "]", true
-}
-
-func (fl *fileLower) spellLoweredSig(sig *types2.Signature) (string, bool) {
 	var b strings.Builder
-	b.WriteString("func(")
-	last := -1
-	if sig.Variadic() {
-		last = sig.Params().Len() - 1
+	if pkg := name.Pkg(); pkg != nil && pkg != fl.pkg.tpkg {
+		b.WriteString(fl.synthQualifier(pkg))
+		b.WriteByte('.')
 	}
-	for i := range sig.Params().Len() {
+	b.WriteString(name.Name())
+	b.WriteByte('[')
+	for i := range args.Len() {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		pt := sig.Params().At(i).Type()
+		arg, ok := fl.spellTypeAs(args.At(i), spelling)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(arg)
+	}
+	b.WriteByte(']')
+	return b.String(), true
+}
+
+func (fl *fileLower) spellCopyTuple(tuple *types2.LogosTuple) (string, bool) {
+	var b strings.Builder
+	b.WriteByte('(')
+	for i := range tuple.Len() {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		if name := tuple.Name(i); name != "" {
+			b.WriteString(name)
+			b.WriteByte(' ')
+		}
+		elem, ok := fl.spellTypeAs(tuple.Elem(i), copyTypeSpelling)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(elem)
+	}
+	b.WriteByte(')')
+	return b.String(), true
+}
+
+func (fl *fileLower) spellSignature(sig *types2.Signature, spelling typeSpelling) (string, bool) {
+	var b strings.Builder
+	b.WriteString("func(")
+	params := sig.Params()
+	last := -1
+	if sig.Variadic() {
+		last = params.Len() - 1
+	}
+	for i := range params.Len() {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		pt := params.At(i).Type()
 		if i == last {
 			if s, ok := types2.Unalias(pt).(*types2.Slice); ok {
-				e, ok := fl.spellLowered(s.Elem())
+				e, ok := fl.spellTypeAs(s.Elem(), spelling)
 				if !ok {
 					return "", false
 				}
 				b.WriteString("..." + e)
 				continue
 			}
-			p, ok := fl.spellLowered(pt)
+			p, ok := fl.spellTypeAs(pt, spelling)
 			if !ok {
 				return "", false
 			}
 			b.WriteString(p + "...")
 			continue
 		}
-		p, ok := fl.spellLowered(pt)
+		p, ok := fl.spellTypeAs(pt, spelling)
 		if !ok {
 			return "", false
 		}
@@ -704,7 +961,7 @@ func (fl *fileLower) spellLoweredSig(sig *types2.Signature) (string, bool) {
 	switch n := sig.Results().Len(); n {
 	case 0:
 	case 1:
-		r, ok := fl.spellLowered(sig.Results().At(0).Type())
+		r, ok := fl.spellTypeAs(sig.Results().At(0).Type(), spelling)
 		if !ok {
 			return "", false
 		}
@@ -716,7 +973,7 @@ func (fl *fileLower) spellLoweredSig(sig *types2.Signature) (string, bool) {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			r, ok := fl.spellLowered(sig.Results().At(i).Type())
+			r, ok := fl.spellTypeAs(sig.Results().At(i).Type(), spelling)
 			if !ok {
 				return "", false
 			}
@@ -727,7 +984,7 @@ func (fl *fileLower) spellLoweredSig(sig *types2.Signature) (string, bool) {
 	return b.String(), true
 }
 
-func (fl *fileLower) spellLoweredStruct(st *types2.Struct) (string, bool) {
+func (fl *fileLower) spellStruct(st *types2.Struct, spelling typeSpelling) (string, bool) {
 	var b strings.Builder
 	b.WriteString("struct{ ")
 	for i := range st.NumFields() {
@@ -738,21 +995,15 @@ func (fl *fileLower) spellLoweredStruct(st *types2.Struct) (string, bool) {
 		if !f.Exported() && f.Pkg() != fl.pkg.tpkg {
 			return "", false
 		}
-		if f.Embedded() {
-			t, ok := fl.spellLowered(f.Type())
-			if !ok {
-				return "", false
-			}
-			b.WriteString(t)
-		} else {
-			t, ok := fl.spellLowered(f.Type())
-			if !ok {
-				return "", false
-			}
+		t, ok := fl.spellTypeAs(f.Type(), spelling)
+		if !ok {
+			return "", false
+		}
+		if !f.Embedded() {
 			b.WriteString(f.Name())
 			b.WriteByte(' ')
-			b.WriteString(t)
 		}
+		b.WriteString(t)
 		if tag := st.Tag(i); tag != "" {
 			b.WriteByte(' ')
 			b.WriteString(strconv.Quote(tag))
@@ -762,7 +1013,7 @@ func (fl *fileLower) spellLoweredStruct(st *types2.Struct) (string, bool) {
 	return b.String(), true
 }
 
-func (fl *fileLower) spellLoweredInterface(it *types2.Interface) (string, bool) {
+func (fl *fileLower) spellInterface(it *types2.Interface, spelling typeSpelling) (string, bool) {
 	if it.NumExplicitMethods() == 0 && it.NumEmbeddeds() == 0 {
 		return fl.spellType(it)
 	}
@@ -780,7 +1031,7 @@ func (fl *fileLower) spellLoweredInterface(it *types2.Interface) (string, bool) 
 		if !ok {
 			return "", false
 		}
-		s, ok := fl.spellLoweredSig(sig)
+		s, ok := fl.spellSignature(sig, spelling)
 		if !ok {
 			return "", false
 		}
@@ -790,7 +1041,7 @@ func (fl *fileLower) spellLoweredInterface(it *types2.Interface) (string, bool) 
 		sep = "; "
 	}
 	for i := range it.NumEmbeddeds() {
-		e, ok := fl.spellLowered(it.EmbeddedType(i))
+		e, ok := fl.spellTypeAs(it.EmbeddedType(i), spelling)
 		if !ok {
 			return "", false
 		}
@@ -869,7 +1120,7 @@ func (fl *fileLower) needsWrap(v syntax.Expr, rec, target types2.Type) (wrap, ze
 	if tOpt == nil {
 		return false, false
 	}
-	if isNilName(v) {
+	if fl.isOptionNil(v) {
 		return !types2.LogosOptionIsBare(tOpt.Elem), !types2.LogosOptionIsBare(tOpt.Elem)
 	}
 	if rec == nil || types2.Identical(rec, target) {
@@ -2106,8 +2357,8 @@ func (fl *fileLower) lowerNilCompare(e *syntax.Operation) (syntax.Expr, bool) {
 		return nil, false
 	}
 	lx, rx := syntax.Unparen(e.X), syntax.Unparen(e.Y)
-	lnil := isNilName(lx)
-	rnil := isNilName(rx)
+	lnil := fl.isOptionNil(lx)
+	rnil := fl.isOptionNil(rx)
 	if lnil == rnil {
 		return nil, false
 	}
@@ -2867,4 +3118,633 @@ func (fl *fileLower) exprEndThrough(from, through int) int {
 
 func (fl *fileLower) fatArrowAt(t tok) bool {
 	return t.kind == token.ASSIGN && t.end < len(fl.src) && fl.src[t.end] == '>'
+}
+
+func (w ctWalker) ctOptionTarget(parent syntax.Node, child syntax.Expr, index int) types2.Type {
+	info := w.fl.pkg.info
+	switch p := parent.(type) {
+	case *syntax.AssignStmt:
+		if p.Op != 0 && p.Op != syntax.Def {
+			return nil
+		}
+		lhs := syntax.UnpackListExpr(p.Lhs)
+		if index >= len(lhs) {
+			return nil
+		}
+		root := lhs[index]
+		l := syntax.Unparen(root)
+		if name, ok := l.(*syntax.Name); ok {
+			if v, ok := info.ObjectOf(name).(*types2.Var); ok {
+				return v.Type()
+			}
+		}
+		if t := info.TypeOf(root); t != nil {
+			return t
+		}
+		if ix, ok := l.(*syntax.IndexExpr); ok {
+			if m := w.ctOptionMap(ix.X); m != nil {
+				return m.Elem()
+			}
+		}
+	case *syntax.ReturnStmt:
+		if t := w.fl.armResult[p]; t != nil {
+			return t
+		}
+		if index < len(w.specs) {
+			return w.specs[index].typ
+		}
+	case *syntax.VarDecl:
+		if index < len(p.NameList) {
+			if obj := info.Defs[p.NameList[index]]; obj != nil {
+				return obj.Type()
+			}
+		}
+	case *syntax.ConstDecl:
+		if p.Type != nil {
+			return info.TypeOf(p.Type)
+		}
+	case *syntax.CallExpr:
+		sig := w.fl.instCallSig(p.Fun)
+		if sig == nil {
+			if t := info.TypeOf(p.Fun); t != nil {
+				sig, _ = t.Underlying().(*types2.Signature)
+			}
+		}
+		if sig == nil {
+			return nil
+		}
+		if w.fl.methodExprCallee(p.Fun) != nil && sig.Recv() != nil {
+			if index == 0 {
+				return sig.Recv().Type()
+			}
+			index--
+		}
+		return w.fl.paramTarget(sig.Params(), sig.Variadic(), p.HasDots, len(p.ArgList), index)
+	case *syntax.CompositeLit:
+		t := info.TypeOf(p)
+		if t == nil {
+			return nil
+		}
+		if ptr, ok := t.Underlying().(*types2.Pointer); ok {
+			t = ptr.Elem()
+		}
+		switch u := optElemBase(t).Underlying().(type) {
+		case *types2.Struct:
+			if kv, ok := syntax.Unparen(child).(*syntax.KeyValueExpr); ok {
+				return structFieldType(u, kv.Key)
+			}
+			if index < u.NumFields() {
+				return u.Field(index).Type()
+			}
+		case *types2.Map:
+			return u.Elem()
+		case *types2.Slice:
+			return u.Elem()
+		case *types2.Array:
+			return u.Elem()
+		}
+	case *syntax.IndexExpr:
+		return w.ctOptionIndexKey(p)
+	case *syntax.SendStmt:
+		if t := info.TypeOf(p.Chan); t != nil {
+			if ch, ok := types2.CoreType(t).(*types2.Chan); ok {
+				return ch.Elem()
+			}
+		}
+	}
+	return nil
+}
+
+func (w ctWalker) ctOptionLiteralKey(p *syntax.CompositeLit) types2.Type {
+	if m := w.ctOptionMap(p); m != nil {
+		return m.Key()
+	}
+	return nil
+}
+
+func (w ctWalker) ctOptionIndexKey(e *syntax.IndexExpr) types2.Type {
+	if m := w.ctOptionMap(e.X); m != nil {
+		return m.Key()
+	}
+	return nil
+}
+
+func (w ctWalker) ctOptionMap(e syntax.Expr) *types2.Map {
+	if t := w.fl.optType(e); t != nil {
+		if p, ok := t.Underlying().(*types2.Pointer); ok {
+			t = p.Elem()
+		}
+		m, _ := types2.CoreType(optElemBase(t)).(*types2.Map)
+		return m
+	}
+	return nil
+}
+
+func (fl *fileLower) isOptionNil(e syntax.Expr) bool {
+	if fl.pkg.info.Types[e].IsNil() {
+		return true
+	}
+	if n, ok := syntax.Unparen(e).(*syntax.Name); ok {
+		return fl.pkg.info.Uses[n] == types2.Universe.Lookup("nil")
+	}
+	return false
+}
+
+func (w ctWalker) ctOptionValue(original, lowered syntax.Expr, target types2.Type) syntax.Expr {
+	if original == nil || lowered == nil || w.fl.asOption(target) == nil {
+		return lowered
+	}
+	if w.fl.isOptionNil(original) {
+		return w.ctOptionNone(original.Pos(), target)
+	}
+	return w.ctOptionValueFrom(lowered, w.fl.optType(original), target)
+}
+
+func (w ctWalker) ctOptionValueFrom(value syntax.Expr, source, target types2.Type) syntax.Expr {
+	opt := w.fl.asOption(target)
+	if opt == nil || source == nil || types2.Identical(source, target) {
+		return value
+	}
+	if _, multi := source.(*types2.Tuple); multi {
+		return value
+	}
+	pos := value.Pos()
+	if !types2.Identical(source, opt.Elem) {
+		if src := w.fl.asOption(source); src != nil && types2.Identical(src, opt) {
+			return callOf(pos, w.fl.ctTypeExpr(pos, target), []syntax.Expr{value})
+		}
+		value = w.ctOptionValueFrom(value, source, opt.Elem)
+	}
+	if types2.LogosOptionIsBare(opt.Elem) {
+		if _, named := types2.Unalias(target).(*types2.Named); named {
+			return callOf(pos, w.fl.ctTypeExpr(pos, target), []syntax.Expr{value})
+		}
+		return value
+	}
+	return at(&syntax.CompositeLit{
+		Type: w.fl.ctTypeExpr(pos, target),
+		ElemList: []syntax.Expr{
+			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Value"), Value: value}, pos),
+			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Present"), Value: w.fl.ctBuiltin(pos, "true")}, pos),
+		},
+		NKeys:  2,
+		Rbrace: pos,
+	}, pos)
+}
+
+func (w ctWalker) ctOptionMulti(parent syntax.Node, original, lowered syntax.Expr) ([]syntax.Expr, []syntax.Stmt, bool) {
+	return w.ctOptionMultiTargets(original, lowered, func(i int) types2.Type {
+		return w.ctOptionTarget(parent, original, i)
+	})
+}
+
+func (w ctWalker) ctOptionMultiTargets(original, lowered syntax.Expr, target func(int) types2.Type) ([]syntax.Expr, []syntax.Stmt, bool) {
+	tuple, ok := w.fl.optType(original).(*types2.Tuple)
+	if !ok || tuple.Len() < 2 {
+		return nil, nil, false
+	}
+	for i := range tuple.Len() {
+		source := tuple.At(i).Type()
+		t := target(i)
+		opt := w.fl.asOption(t)
+		if opt == nil || types2.Identical(source, t) {
+			continue
+		}
+		if types2.LogosOptionIsBare(opt.Elem) {
+			_, named := types2.Unalias(t).(*types2.Named)
+			_, sourceOption := types2.Unalias(source).(*types2.Named)
+			if !named && !(sourceOption && w.fl.asOption(source) != nil) {
+				continue
+			}
+		}
+		pos := original.Pos()
+		names := make([]syntax.Expr, tuple.Len())
+		values := make([]syntax.Expr, tuple.Len())
+		for j := range names {
+			name := w.nextArg()
+			names[j] = nameOf(pos, name)
+			values[j] = w.ctOptionValueFrom(nameOf(pos, name), tuple.At(j).Type(), target(j))
+		}
+		return values, []syntax.Stmt{defineOf(pos, names, []syntax.Expr{lowered})}, true
+	}
+	return nil, nil, false
+}
+
+func (w ctWalker) ctOptionNone(pos syntax.Pos, t types2.Type) syntax.Expr {
+	if w.fl.bareResult(t) {
+		return w.fl.ctBuiltin(pos, "nil")
+	}
+	return at(&syntax.CompositeLit{Type: w.fl.ctTypeExpr(pos, t), Rbrace: pos}, pos)
+}
+
+func (w ctWalker) ctOptionPresent(pos syntax.Pos, e syntax.Expr, opt *types2.Option) syntax.Expr {
+	if types2.LogosOptionIsBare(opt.Elem) {
+		return at(&syntax.Operation{Op: syntax.Neq, X: e, Y: w.fl.ctBuiltin(pos, "nil")}, pos)
+	}
+	return selOf(pos, e, "Present")
+}
+
+func (w ctWalker) ctOptionPayload(pos syntax.Pos, e syntax.Expr, t types2.Type, opt *types2.Option) syntax.Expr {
+	if !types2.LogosOptionIsBare(opt.Elem) {
+		return selOf(pos, e, "Value")
+	}
+	if _, named := types2.Unalias(t).(*types2.Named); named {
+		return callOf(pos, w.fl.ctTypeExpr(pos, opt.Elem), []syntax.Expr{e})
+	}
+	return e
+}
+
+func (w ctWalker) ctOptionReceiver(e syntax.Expr) (syntax.Expr, []syntax.Stmt, types2.Type, *types2.Option) {
+	if n, ok := syntax.Unparen(e).(*syntax.Name); ok {
+		if obj, ok := w.fl.pkg.info.Uses[n].(*types2.Var); ok {
+			if opt := w.fl.asOption(obj.Type()); opt != nil {
+				return e, nil, obj.Type(), opt
+			}
+		}
+	}
+	t := w.fl.optType(e)
+	opt := w.fl.asOptionThroughConst(t)
+	out, pre := w.expr(e)
+	return out, pre, t, opt
+}
+
+func (w ctWalker) ctOptionExpr(e syntax.Expr) (syntax.Expr, []syntax.Stmt, bool) {
+	info := w.fl.pkg.info
+	switch e := e.(type) {
+	case *syntax.OptionType:
+		if t := info.TypeOf(e); t != nil {
+			return w.fl.ctTypeExpr(e.Pos(), t), nil, true
+		}
+		w.reject(e, "missing checked option type")
+		return e, nil, true
+	case *syntax.Name:
+		if opt := w.fl.narrowTarget(e); opt != nil {
+			t := info.Uses[e].Type()
+			return w.ctOptionPayload(e.Pos(), e, t, opt), nil, true
+		}
+	case *syntax.Operation:
+		return w.ctOptionNilComparison(e)
+	case *syntax.IndexExpr:
+		if w.fl.isMapRead(e) {
+			if m := w.ctOptionMap(e.X); m != nil {
+				next, pre := w.ctOptionIndex(e, m)
+				return next, pre, true
+			}
+		}
+	case *syntax.CoalesceExpr:
+		out, pre := w.ctOptionCoalesce(e)
+		return out, pre, true
+	case *syntax.OptSelectExpr:
+		out, pre := w.ctOptionSelect(e)
+		return out, pre, true
+	case *syntax.CallExpr:
+		if sel, ok := syntax.Unparen(e.Fun).(*syntax.OptSelectExpr); ok {
+			out, pre := w.ctOptionCall(e, sel)
+			return out, pre, true
+		}
+		if len(e.ArgList) == 1 && w.fl.isTypeExpr(e.Fun) && w.fl.isOptionNil(e.ArgList[0]) {
+			if t := info.TypeOf(e); w.fl.asOption(t) != nil {
+				return w.ctOptionNone(e.Pos(), t), nil, true
+			}
+		}
+	}
+	return nil, nil, false
+}
+
+func (w ctWalker) ctOptionNilComparison(e *syntax.Operation) (syntax.Expr, []syntax.Stmt, bool) {
+	if e.Y == nil || e.Op != syntax.Eql && e.Op != syntax.Neq {
+		return nil, nil, false
+	}
+	operand := e.X
+	if !w.fl.isOptionNil(e.Y) {
+		if !w.fl.isOptionNil(e.X) {
+			return nil, nil, false
+		}
+		operand = e.Y
+	}
+	opt := w.fl.asOption(optElemBase(w.fl.optType(operand)))
+	if opt == nil {
+		return nil, nil, false
+	}
+	next, pre := w.expr(operand)
+	pos := e.Pos()
+	cond := w.ctOptionPresent(pos, next, opt)
+	if e.Op == syntax.Eql {
+		cond = at(&syntax.Operation{Op: syntax.Not, X: cond}, pos)
+	}
+	return cond, pre, true
+}
+
+func (w ctWalker) ctOptionIndexArgs(e *syntax.IndexExpr, m *types2.Map) []syntax.Stmt {
+	return w.walkExprs(2, func(i int) *syntax.Expr {
+		if i == 0 {
+			return &e.X
+		}
+		return &e.Index
+	}, func(i int, _ syntax.Expr) types2.Type {
+		if i == 1 {
+			return m.Key()
+		}
+		return nil
+	})
+}
+
+func (w ctWalker) ctOptionIndex(e *syntax.IndexExpr, m *types2.Map) (syntax.Expr, []syntax.Stmt) {
+	t := w.fl.optType(e)
+	mapType := w.fl.optType(e.X)
+	pre := w.ctOptionIndexArgs(e, m)
+	opt := w.fl.asOption(t)
+	// The checker records the map element itself for a comma-ok read.
+	if opt == nil || types2.Identical(t, m.Elem()) || types2.LogosOptionIsBare(opt.Elem) {
+		return e, pre
+	}
+	pos := e.Pos()
+	args := at(&syntax.ListExpr{ElemList: []syntax.Expr{
+		w.fl.ctTypeExpr(pos, mapType),
+		w.fl.ctTypeExpr(pos, m.Key()),
+		w.fl.ctTypeExpr(pos, m.Elem()),
+	}}, pos)
+	lookup := at(&syntax.IndexExpr{X: w.fl.ctPkgSelector(pos, rtImportPath, "Lookup"), Index: args}, pos)
+	return callOf(pos, lookup, []syntax.Expr{e.X, e.Index}), pre
+}
+
+func (w ctWalker) ctOptionCoalesce(e *syntax.CoalesceExpr) (syntax.Expr, []syntax.Stmt) {
+	pos := e.Pos()
+	var value, cond syntax.Expr
+	var pre []syntax.Stmt
+	ix, _ := syntax.Unparen(e.X).(*syntax.IndexExpr)
+	var m *types2.Map
+	if ix != nil && w.fl.isMapRead(ix) {
+		m = w.ctOptionMap(ix.X)
+	}
+	if m != nil {
+		var read syntax.Expr = ix
+		if g, ok := w.ctMapUse(ix.X); ok && g.valid() {
+			var key syntax.Expr
+			key, pre = w.optionOperand(ix.Index, m.Key())
+			read = callOf(ix.Pos(), w.ctMapHelper(ix.Pos(), g, types2.LogosCtMapLookup), []syntax.Expr{key})
+		} else {
+			pre = w.ctOptionIndexArgs(ix, m)
+		}
+		v, ok := w.nextArg(), w.nextArg()
+		pre = append(pre, defineOf(pos, []syntax.Expr{nameOf(pos, v), nameOf(pos, ok)}, []syntax.Expr{read}))
+		value, cond = nameOf(pos, v), nameOf(pos, ok)
+	} else {
+		x, head, t, opt := w.ctOptionReceiver(e.X)
+		if opt == nil {
+			w.reject(e, "missing checked coalesce receiver type")
+			return e, head
+		}
+		tmp := w.nextArg()
+		pre = append(head, defineOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{x}))
+		value = w.ctOptionPayload(pos, nameOf(pos, tmp), t, opt)
+		cond = w.ctOptionPresent(pos, nameOf(pos, tmp), opt)
+	}
+	t := w.fl.optType(e)
+	if t == nil {
+		w.reject(e, "missing checked coalesce result type")
+		return e, pre
+	}
+	result := w.nextArg()
+	pre = append(pre, typedVarDecl(pos, nameOf(pos, result), w.fl.ctTypeExpr(pos, t)))
+	branch := ifOf(pos, nil, cond, []syntax.Stmt{
+		assignOf(pos, []syntax.Expr{nameOf(pos, result)}, []syntax.Expr{value}),
+	})
+	rhs, fallback := w.expr(e.Y)
+	rhs = w.ctOptionValue(e.Y, rhs, t)
+	fallback = append(fallback, assignOf(pos, []syntax.Expr{nameOf(pos, result)}, []syntax.Expr{rhs}))
+	branch.Else = blockOf(e.Y.Pos(), fallback)
+	return nameOf(pos, result), append(pre, branch)
+}
+
+func (w ctWalker) ctOptionAccess(e *syntax.OptSelectExpr) (syntax.Expr, syntax.Expr, []syntax.Stmt, types2.Object) {
+	pos := e.Pos()
+	recv, pre, t, opt := w.ctOptionReceiver(e.X)
+	if opt == nil {
+		w.reject(e, "missing checked optional selector receiver type")
+		return nil, nil, pre, nil
+	}
+	base := optElemBase(opt.Elem)
+	name := tupleSelectionName(base, e.Sel.Value)
+	obj, _, _ := types2.LookupFieldOrMethod(base, true, w.fl.pkg.tpkg, e.Sel.Value)
+	if obj == nil {
+		obj, _, _ = types2.LookupFieldOrMethod(base.Underlying(), true, w.fl.pkg.tpkg, name)
+	}
+	tmp := w.nextArg()
+	pre = append(pre, defineOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{recv}))
+	value := w.ctOptionPayload(pos, nameOf(pos, tmp), t, opt)
+	cond := w.ctOptionPresent(pos, nameOf(pos, tmp), opt)
+	return selOf(pos, value, name), cond, pre, obj
+}
+
+func (w ctWalker) ctOptionSelect(e *syntax.OptSelectExpr) (syntax.Expr, []syntax.Stmt) {
+	access, cond, pre, obj := w.ctOptionAccess(e)
+	t := w.fl.optType(e)
+	opt := w.fl.asOption(t)
+	if access == nil || opt == nil {
+		w.reject(e, "missing checked optional selector result type")
+		return e, pre
+	}
+	if obj == nil || w.fl.asOption(obj.Type()) == nil {
+		access = w.ctOptionValueFrom(access, opt.Elem, t)
+	}
+	pos := e.Pos()
+	result := w.nextArg()
+	pre = append(pre, typedVarDecl(pos, nameOf(pos, result), w.fl.ctTypeExpr(pos, t)))
+	set := assignOf(pos, []syntax.Expr{nameOf(pos, result)}, []syntax.Expr{access})
+	return nameOf(pos, result), append(pre, ifOf(pos, nil, cond, []syntax.Stmt{set}))
+}
+
+func (w ctWalker) ctOptionGuardCall(e *syntax.CallExpr, sel *syntax.OptSelectExpr, body func(*syntax.CallExpr, *types2.Signature) []syntax.Stmt) []syntax.Stmt {
+	fun, cond, pre, obj := w.ctOptionAccess(sel)
+	opt := w.fl.asOption(w.fl.optType(sel))
+	if fun == nil || opt == nil {
+		w.reject(sel, "missing checked optional callee type")
+		return pre
+	}
+	sig, _ := opt.Elem.Underlying().(*types2.Signature)
+	if sig == nil {
+		w.reject(sel, "missing checked optional callee signature")
+		return pre
+	}
+	pos := sel.Pos()
+	if obj != nil {
+		t := obj.Type()
+		if field := w.fl.asOption(t); field != nil {
+			tmp := w.nextArg()
+			init := defineOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{fun})
+			fun = w.ctOptionPayload(pos, nameOf(pos, tmp), t, field)
+			test := w.ctOptionPresent(pos, nameOf(pos, tmp), field)
+			guarded := w.ctOptionInvoke(e, sel, fun, sig, body)
+			return append(pre, ifOf(pos, nil, cond, []syntax.Stmt{ifOf(pos, init, test, guarded)}))
+		}
+	}
+	return append(pre, ifOf(pos, nil, cond, w.ctOptionInvoke(e, sel, fun, sig, body)))
+}
+
+func (w ctWalker) ctOptionInvoke(e *syntax.CallExpr, sel *syntax.OptSelectExpr, fun syntax.Expr, sig *types2.Signature, body func(*syntax.CallExpr, *types2.Signature) []syntax.Stmt) []syntax.Stmt {
+	callee := w.fl.pkg.info.Types[sel]
+	callee.Type = sig
+	w.fl.pkg.info.Types[fun] = callee
+	call := at(&syntax.CallExpr{Fun: fun, ArgList: e.ArgList, HasDots: e.HasDots}, e.Pos())
+	w.fl.pkg.info.Types[call] = w.fl.pkg.info.Types[e]
+	return body(call, sig)
+}
+
+func (w ctWalker) ctOptionCallArgs(call *syntax.CallExpr) []syntax.Stmt {
+	var multi []syntax.Expr
+	pre := w.watchExprs(1+len(call.ArgList), func(i int) *syntax.Expr {
+		if i == 0 {
+			return &call.Fun
+		}
+		return &call.ArgList[i-1]
+	}, func(i int, old syntax.Expr) (syntax.Expr, []syntax.Stmt) {
+		if i == 0 {
+			return w.expr(old)
+		}
+		value, head := w.checkedOperand(old, w.ctOptionTarget(call, old, i-1))
+		if len(call.ArgList) == 1 {
+			if values, split, ok := w.ctOptionMulti(call, old, value); ok {
+				multi = values
+				head = append(head, split...)
+			}
+		}
+		return value, head
+	})
+	if multi != nil {
+		call.ArgList = multi
+	}
+	return pre
+}
+
+func (w ctWalker) ctOptionCall(e *syntax.CallExpr, sel *syntax.OptSelectExpr) (syntax.Expr, []syntax.Stmt) {
+	pos := e.Pos()
+	t := w.fl.optType(e)
+	var targets []types2.Type
+	if tuple, ok := t.(*types2.Tuple); ok {
+		targets = tupleTypes(tuple)
+	} else if w.fl.asOption(t) != nil {
+		targets = []types2.Type{t}
+	}
+	if len(targets) == 0 {
+		w.reject(e, "optional call without a result requires a call statement")
+		return e, nil
+	}
+	results := make([]string, len(targets))
+	pre := make([]syntax.Stmt, 0, len(targets)+1)
+	for i, target := range targets {
+		results[i] = w.nextArg()
+		pre = append(pre, typedVarDecl(pos, nameOf(pos, results[i]), w.fl.ctTypeExpr(pos, target)))
+	}
+	pre = append(pre, w.ctOptionGuardCall(e, sel, func(call *syntax.CallExpr, sig *types2.Signature) []syntax.Stmt {
+		list := w.ctOptionCallArgs(call)
+		if len(results) == 1 {
+			some := w.ctOptionValueFrom(call, sig.Results().At(0).Type(), targets[0])
+			return append(list, assignOf(pos, []syntax.Expr{nameOf(pos, results[0])}, []syntax.Expr{some}))
+		}
+		names := make([]syntax.Expr, len(results))
+		lhs := make([]syntax.Expr, len(results))
+		rhs := make([]syntax.Expr, len(results))
+		for i := range results {
+			tmp := w.nextArg()
+			names[i] = nameOf(pos, tmp)
+			lhs[i] = nameOf(pos, results[i])
+			rhs[i] = w.ctOptionValueFrom(nameOf(pos, tmp), sig.Results().At(i).Type(), targets[i])
+		}
+		return append(list, defineOf(pos, names, []syntax.Expr{call}), assignOf(pos, lhs, rhs))
+	})...)
+	if len(results) == 1 {
+		return nameOf(pos, results[0]), pre
+	}
+	fields := make([]*syntax.Field, len(results))
+	values := make([]syntax.Expr, len(results))
+	for i, target := range targets {
+		fields[i] = at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, target)}, pos)
+		values[i] = nameOf(pos, results[i])
+	}
+	sig := at(&syntax.FuncType{ResultList: fields}, pos)
+	lit := at(&syntax.FuncLit{Type: sig, Body: blockOf(pos, []syntax.Stmt{returnOf(pos, values)})}, pos)
+	return callOf(pos, lit, nil), pre
+}
+
+func (w ctWalker) ctOptionSwitch(s *syntax.SwitchStmt) ([]syntax.Stmt, bool) {
+	opt := w.fl.asOption(optElemBase(w.fl.optType(s.Tag)))
+	if opt == nil || types2.LogosOptionIsBare(opt.Elem) {
+		return nil, false
+	}
+	n := 0
+	for _, clause := range s.Body {
+		if clause.Cases == nil {
+			continue
+		}
+		for _, value := range syntax.UnpackListExpr(clause.Cases) {
+			if !w.fl.isOptionNil(value) {
+				w.reject(value, "boxed option switch case is not nil")
+				return nil, true
+			}
+		}
+		n++
+	}
+	var pre []syntax.Stmt
+	var absent string
+	if n > 1 {
+		// Unlike a constant, a nil case may appear in more than one clause.
+		absent = w.nextArg()
+		pos := s.Pos()
+		pre = append(pre, typedVarDecl(pos, nameOf(pos, absent), w.fl.ctBuiltin(pos, "bool")))
+	}
+	for _, clause := range s.Body {
+		if clause.Cases != nil {
+			pos := clause.Cases.Pos()
+			if absent == "" {
+				clause.Cases = w.fl.ctBuiltin(pos, "false")
+			} else {
+				clause.Cases = nameOf(pos, absent)
+			}
+		}
+	}
+	s.Tag = selOf(s.Tag.Pos(), s.Tag, "Present")
+	return append(pre, w.switchStmt(s)...), true
+}
+
+func (w ctWalker) ctOptionCleanup(e *syntax.CallExpr, lowerCall func(*syntax.CallExpr) []syntax.Stmt) ([]syntax.Stmt, bool) {
+	sel, ok := syntax.Unparen(e.Fun).(*syntax.OptSelectExpr)
+	if !ok {
+		return nil, false
+	}
+	return w.ctOptionGuardCall(e, sel, func(call *syntax.CallExpr, _ *types2.Signature) []syntax.Stmt {
+		return lowerCall(call)
+	}), true
+}
+
+func (w ctWalker) ctOptionStmt(s syntax.Stmt) ([]syntax.Stmt, syntax.Stmt, bool) {
+	var x syntax.Expr
+	switch s := s.(type) {
+	case *syntax.ExprStmt:
+		x = s.X
+	case *syntax.CallStmt:
+		x = s.Call
+	default:
+		return nil, nil, false
+	}
+	e, ok := syntax.Unparen(x).(*syntax.CallExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	sel, ok := syntax.Unparen(e.Fun).(*syntax.OptSelectExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	list := w.ctOptionGuardCall(e, sel, func(call *syntax.CallExpr, _ *types2.Signature) []syntax.Stmt {
+		pre := w.ctOptionCallArgs(call)
+		switch s := s.(type) {
+		case *syntax.CallStmt:
+			s.Call = call
+			pre = append(pre, w.expressions(&s.DeferAt)...)
+		case *syntax.ExprStmt:
+			s.X = call
+		}
+		return append(pre, s)
+	})
+	return list, nil, true
 }

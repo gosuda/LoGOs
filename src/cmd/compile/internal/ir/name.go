@@ -232,6 +232,10 @@ func (n *Name) SetLibfuzzer8BitCounter(b bool)     { n.flags.set(nameLibfuzzer8B
 func (n *Name) SetCoverageAuxVar(b bool)           { n.flags.set(nameCoverageAuxVar, b) }
 func (n *Name) SetNonMergeable(b bool)             { n.flags.set(nameNonMergeable, b) }
 
+// LogosCtGlobal reports whether this compilation emits n as a comptime helper global.
+func (n *Name) LogosCtGlobal() bool     { return n.miniExpr.flags&miniExprLogosCtGlobal != 0 }
+func (n *Name) SetLogosCtGlobal(b bool) { n.miniExpr.flags.set(miniExprLogosCtGlobal, b) }
+
 // OnStack reports whether variable n may reside on the stack.
 func (n *Name) OnStack() bool {
 	if n.Op() == ONAME {

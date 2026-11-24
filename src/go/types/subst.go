@@ -224,26 +224,20 @@ func (subst *subster) typ(typ Type) Type {
 						subst.check.mono.recordCanon(ftp, tp)
 					}
 				}
-				// Now that we have the updated substitution map, use it to
-				// compute the constraints for the fresh type parameters.
+				// Substitute the constraints while retaining the local rebind map.
+				copy := *subst
+				copy.smap = smap
 				for i, tp := range tparams.list() {
-					fresh[i].bound = subst.check.subst(subst.pos, tp.bound, smap, subst.expanding, subst.ctxt)
+					fresh[i].bound = copy.typ(tp.bound)
 				}
-				// Continue with the fresh type parameters and updated map.
 				tparams = &TypeParamList{tparams: fresh}
-				s = &subster{
-					pos:       subst.pos,
-					smap:      smap,
-					check:     subst.check,
-					expanding: subst.expanding,
-					ctxt:      subst.ctxt,
-				}
+				s = &copy
 			}
 		}
 
 		params := s.tuple(t.params)
 		results := s.tuple(t.results)
-		if params != t.params || results != t.results || tparams != t.tparams {
+		if recv != t.recv || params != t.params || results != t.results || tparams != t.tparams {
 			return &Signature{
 				rparams: t.rparams,
 				tparams: tparams,

@@ -162,6 +162,9 @@ func rootName(e syntax.Expr) *syntax.Name {
 // the statements below.
 func (r *recursion) always(list []syntax.Stmt) bool {
 	for _, s := range list {
+		if r.deadNode(s) {
+			continue
+		}
 		if r.stmtCalls(s) {
 			return true
 		}
@@ -253,6 +256,9 @@ func (r *recursion) forCalls(s *syntax.ForStmt) bool {
 // through continues to the statements below. Any other statement covers
 // no leaving path.
 func (r *recursion) exitsCovered(s syntax.Stmt) bool {
+	if r.deadNode(s) {
+		return true
+	}
 	switch s := s.(type) {
 	case *syntax.IfStmt:
 		if s.Init != nil {
@@ -445,10 +451,18 @@ func (r *recursion) methodIsFn(sel *syntax.SelectorExpr) bool {
 func (r *recursion) mayLeave(s syntax.Stmt) bool {
 	found := false
 	syntax.Inspect(s, func(n syntax.Node) bool {
+		if r.deadNode(n) {
+			return false
+		}
 		found = found || r.leavesSequence(n)
 		return !found && !isFunctionBody(n)
 	})
 	return found
+}
+
+func (r *recursion) deadNode(n syntax.Node) bool {
+	s, ok := n.(syntax.Stmt)
+	return ok && r.pass.Info != nil && r.pass.Info.LogosConstIfDead[s]
 }
 
 // isFunctionBody reports whether n starts a function of its own.

@@ -28,18 +28,12 @@ func (check *Checker) logosUnwrapConstFunc(decl syntax.Decl) syntax.Decl {
 	bodies, consts := check.logosConstFuncBodies()
 	if cfd, ok := decl.(*syntax.ConstFuncDecl); ok {
 		consts[cfd.Func] = true
-		if cfd.Func.Recv == nil && cfd.Func.Name != nil {
-			if _, dup := bodies[cfd.Func.Name.Value]; !dup {
-				bodies[cfd.Func.Name.Value] = cfd.Func
-			}
-		}
-		return cfd.Func
+		decl = cfd.Func
 	}
-	if fd, ok := decl.(*syntax.FuncDecl); ok {
-		if fd.Recv == nil && fd.Name != nil {
-			if _, dup := bodies[fd.Name.Value]; !dup {
-				bodies[fd.Name.Value] = fd
-			}
+	if fd, ok := decl.(*syntax.FuncDecl); ok && fd.Recv == nil && fd.Name != nil {
+		key := logosConstFnKey(check.pkg.path, fd.Name.Value)
+		if _, dup := bodies[key]; !dup {
+			bodies[key] = fd
 		}
 	}
 	return decl

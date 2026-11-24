@@ -14,6 +14,9 @@ import (
 // If s is labeled, label is the label name; otherwise s
 // is "".
 func (check *Checker) isTerminating(s syntax.Stmt, label string) bool {
+	if check.logosDead(s) {
+		return false
+	}
 	switch s := s.(type) {
 	default:
 		panic("unreachable")
@@ -98,13 +101,13 @@ func (check *Checker) isTerminating(s syntax.Stmt, label string) bool {
 }
 
 func (check *Checker) isTerminatingList(list []syntax.Stmt, label string) bool {
-	// trailing empty statements are permitted - skip them
+	// Trailing empty statements and dead comptime statements are invisible.
 	for i := len(list) - 1; i >= 0; i-- {
-		if _, ok := list[i].(*syntax.EmptyStmt); !ok {
+		if _, ok := list[i].(*syntax.EmptyStmt); !ok && !check.logosDead(list[i]) {
 			return check.isTerminating(list[i], label)
 		}
 	}
-	return false // all statements are empty
+	return false
 }
 
 func (check *Checker) isTerminatingSwitch(body []*syntax.CaseClause, label string) bool {
@@ -128,6 +131,9 @@ func (check *Checker) isTerminatingSwitch(body []*syntax.CaseClause, label strin
 // referring to the label-ed statement or implicit-ly the
 // closest outer breakable statement.
 func (check *Checker) hasBreak(s syntax.Stmt, label string, implicit bool) bool {
+	if check.logosDead(s) {
+		return false
+	}
 	switch s := s.(type) {
 	default:
 		panic("unreachable")

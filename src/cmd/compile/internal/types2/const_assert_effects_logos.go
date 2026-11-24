@@ -846,6 +846,12 @@ func logosContainsTypeParam(t Type, seen map[Type]bool) bool {
 				}
 			}
 		}
+	case *LogosTuple:
+		for i := range u.Len() {
+			if logosContainsTypeParam(u.Elem(i), seen) {
+				return true
+			}
+		}
 	case *Option:
 		return logosContainsTypeParam(u.Elem, seen)
 	case *ReadonlyDescendants:
@@ -863,6 +869,19 @@ func logosContainsTypeParam(t Type, seen map[Type]bool) bool {
 	case *Signature:
 		return logosTupleHasParam(u.params, seen) || logosTupleHasParam(u.results, seen)
 	case *Named:
+		if _, captures, explicit := LogosCtLocalNamed(u); len(captures)+len(explicit) != 0 {
+			for _, arg := range captures {
+				if logosContainsTypeParam(arg, seen) {
+					return true
+				}
+			}
+			for _, arg := range explicit {
+				if logosContainsTypeParam(arg, seen) {
+					return true
+				}
+			}
+			return false
+		}
 		if args := u.TypeArgs(); args != nil {
 			for i := range args.Len() {
 				if logosContainsTypeParam(args.At(i), seen) {

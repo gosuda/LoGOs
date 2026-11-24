@@ -23,7 +23,7 @@ Rule IDs the compiler reports:
 - `logos build ./...`: build. Done when it exits 0.
 - `logos test ./...`: test. Done when it exits 0.
 - `logos lint ./...`: lint code and reports findings.
-- `logos next`: preview Go to LoGOs migration diff; `--fix` applies it.
+- `logos next`: preview Go to LoGOs migration diff; `--fix` prints a patch to apply with `git apply` and changes no file.
 - `logos context <pkg>#<symbol>`: print symbol signatures without bodies.
 - `logos lsp`: start the language server proxy for editor integration. It serves over stdio through `gopls`, keeps lowered sources in memory, and merges compiler diagnostics.
 - `logos eject -o DIR`: plain-Go copy in DIR; then `go build ./...` and `go test ./...` in DIR.

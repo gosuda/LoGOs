@@ -1,0 +1,29 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+const key = "json"
+
+func Kept[T any]() string {
+	name := ""
+	const for _, f := range comptime.Fields[T]() {
+		const if f.Tag.Get(key) == "keep" {
+			name = f.Name
+		}
+	}
+	return name
+}
+
+type Row struct {
+	A int `json:"keep"`
+	B int `json:"drop"`
+}
+
+func main() {
+	fmt.Println(Kept[Row]())
+}

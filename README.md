@@ -108,12 +108,13 @@ Use `logos` on a LoGOs module the way you use `go` on a Go module: `logos mod in
 
 LoGOs adds these commands:
 
-- `logos conc run` and `logos conc test` report concurrency faults while a program or its tests run.
+- `logos conc run|test [conc flags]` runs a program or its tests under a monitor that reports lock order inversions, stalled group children, goroutine leaks, long lock holds, and unbounded groups.
+
 - `logos context <pkg>#<symbol>` prints one declaration and one level of signatures without function bodies.
 - `logos eject -o DIR` writes a standard Go copy of the main module.
 - `logos lint [build flags] [--pedantic] [--json-diagnostics] [packages]` runs compiler lints without writing binaries.
 - `logos lsp` serves the language server protocol over standard input and output through `gopls`.
-- `logos next [--fix | --ai-patch]` converts a Go module toward `.lgo` source; without a flag it prints only a diff.
+- `logos next [--fix | --ai-patch]` previews the conversion of a Go module to `.lgo` source as a diff; `--fix` prints a patch for you to apply, and no form of the command changes a source file.
 
 Module rules:
 

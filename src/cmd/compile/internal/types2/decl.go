@@ -364,6 +364,7 @@ func (check *Checker) varDecl(obj *Var, lhs []*Var, typ, init syntax.Expr) {
 	// determine type, if any
 	if typ != nil {
 		obj.typ = check.varType(typ)
+		check.logosCtKeepDeclaredType(obj, typ)
 		// We cannot spread the type to all lhs variables if there
 		// are more than one since that would mark them as checked
 		// (see Checker.objDecl) and the assignment of init exprs,
@@ -393,7 +394,7 @@ func (check *Checker) varDecl(obj *Var, lhs []*Var, typ, init syntax.Expr) {
 		}
 		var x operand
 		check.expr(newTarget(obj.typ, obj.name), &x, init)
-		check.initVar(obj, &x, "variable declaration")
+		check.initVar(obj, &x, "variable declaration", resultSlot{})
 		return
 	}
 
@@ -411,6 +412,7 @@ func (check *Checker) varDecl(obj *Var, lhs []*Var, typ, init syntax.Expr) {
 	if typ != nil {
 		for _, lhs := range lhs {
 			lhs.typ = obj.typ
+			check.logosCtKeepType(lhs, check.logosCtAbstract[obj])
 		}
 	}
 
@@ -481,6 +483,7 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *syntax.TypeDecl) {
 		rhs = check.declaredType(tdecl.Type, obj)
 		assert(rhs != nil)
 		alias.fromRHS = rhs
+		check.logosCtKeepDeclaredType(obj, tdecl.Type)
 
 		// spec: In an alias declaration the given type cannot be a type parameter declared in the same declaration."
 		// (see also go.dev/issue/75884, go.dev/issue/#75885)
@@ -498,6 +501,7 @@ func (check *Checker) typeDecl(obj *TypeName, tdecl *syntax.TypeDecl) {
 	}
 
 	named := check.newNamed(obj, nil, nil)
+	check.logosCtRecordLocal(named, tdecl.Name)
 	if tdecl.TParamList != nil {
 		check.openScope(tdecl, "type parameters")
 		defer check.closeScope()

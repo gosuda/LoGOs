@@ -1,0 +1,49 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos run .
+stdout '^quoted 1$'
+stdout '^closer 1$'
+cp stdout $WORK/native.txt
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $WORK/native.txt
+cd ..
+
+-- w/go.mod --
+module example.com/sliceone56
+
+go 1.27
+
+-- w/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Count[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+func quoted() int {
+	return Count[struct{ N [len([1]string{$"{ "(" }"})]byte }]()
+}
+
+func closer() int {
+	return Count[struct{ N [len([1]string{$"{ ")" }"})]byte }]()
+}
+
+func main() {
+	fmt.Println("quoted", quoted())
+	fmt.Println("closer", closer())
+}

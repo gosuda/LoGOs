@@ -1,0 +1,21 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import "comptime"
+
+// Scale reads constants of types declared in its body. Package owner
+// cannot name shared.Item, so logos eject prints Scale[shared.Item] in
+// the package that calls it.
+func Scale[T any](n int) int {
+	const if !comptime.IsStruct[T]() {
+		comptime.Error("Scale requires a struct type argument")
+	}
+	type Local int
+	type Point struct{ X, Y Local }
+	const pair = [2]Local{3, 7}
+	const origin = Point{X: 1, Y: 2}
+	return int(pair[n]) + int(origin.Y)
+}

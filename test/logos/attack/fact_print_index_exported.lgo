@@ -1,0 +1,23 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Show[T any]() {
+	const for _, f := range comptime.Fields[T]() {
+		fmt.Println(f.Name, f.Index, f.Exported)
+	}
+}
+
+type Row struct {
+	A int
+	b string
+}
+
+func main() {
+	Show[Row]()
+}

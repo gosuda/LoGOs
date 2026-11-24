@@ -1,0 +1,56 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+[!exec:patch] skip 'patch unavailable'
+
+cd m
+go run .
+cp stdout $WORK/go-output
+cp main.go $WORK/main.orig
+
+# --fix emits the patch alone on stdout and leaves the tree untouched.
+logos next --fix
+cp stdout $WORK/fix.patch
+! grep '^logos next' $WORK/fix.patch
+grep '^\+\+\+ .*main\.lgo' $WORK/fix.patch
+! exists main.lgo
+! exists next_tasks.json
+cmp main.go $WORK/main.orig
+
+# Each call is convertible on its own, and together they are the file's
+# only fmt uses, so the fixer must not produce a patch that orphans the
+# fmt import. Whatever safe mix it chooses (rewrite some and keep a use,
+# or keep every call and report it), the applied result must build and
+# behave exactly like the original program.
+exec patch --batch --fuzz=0 -p1 -i $WORK/fix.patch
+! exists main.go
+exists main.lgo
+logos build ./...
+logos run .
+cmp stdout $WORK/go-output
+
+-- m/go.mod --
+module example.com/nextmultifmt
+
+go 1.27
+-- m/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func status(ok bool) string {
+	return fmt.Sprintf("ready=%t", ok)
+}
+
+func summary(n int, name string) string {
+	return fmt.Sprintf("count=%d item=%s", n, name)
+}
+
+func main() {
+	if _, err := os.Stdout.WriteString(status(true) + "\n" + summary(3, "bolt") + "\n"); err != nil {
+		panic(err)
+	}
+}
