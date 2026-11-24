@@ -225,8 +225,8 @@ func foldIntoCover(list *[]splice, sp splice) bool {
 // which the inner pass cannot see, so such spans are refused instead.
 func nestSplice(cover, inner splice) (splice, bool) {
 	r := otext{s: inner.text, chunks: inner.chunks}
-	os, ok1 := mapSourcePos(cover.chunks, inner.start)
-	oe, ok2 := mapSourcePos(cover.chunks, inner.end)
+	os, ok1 := mapStart(cover.chunks, inner.start)
+	oe, ok2 := mapEnd(cover.chunks, inner.end)
 	if !ok1 || !ok2 {
 		return splice{}, false
 	}
@@ -300,13 +300,13 @@ func fullyCovered(chunks []chunk, os, oe int) bool {
 	return pos >= oe
 }
 
-// mapSourcePos maps one source offset through chunks to an output offset.
-// An interior position maps inside its chunk; an edge shared by two
-// contiguous chunks maps to their shared boundary. A position with no
-// single mapping, such as a gap or an edge against generated text, is
-// refused.
-func mapSourcePos(chunks []chunk, p int) (int, bool) {
-	found := -1
+// mapStart maps p to the output offset of the chunk that holds p on its
+// inside for a range start: an interior position maps inside its chunk;
+// an edge maps to the chunk that starts at p, so generated text inserted
+// at the edge stays before the replacement. When several chunks start at
+// p, the latest output wins, preserving the recorded order of inserts at
+// the same source position.
+func mapStart(chunks []chunk, p int) (int, bool) {
 	for _, c := range chunks {
 		if c.n <= 0 {
 			continue
@@ -314,21 +314,78 @@ func mapSourcePos(chunks []chunk, p int) (int, bool) {
 		if c.orig < p && p < c.orig+c.n {
 			return c.out + (p - c.orig), true
 		}
-		if p == c.orig || p == c.orig+c.n {
-			v := c.out
-			if p == c.orig+c.n {
-				v = c.out + c.n
-			}
-			if found != -1 && found != v {
-				return -1, false
-			}
-			found = v
+	}
+	best := -1
+	found := false
+	for _, c := range chunks {
+		if c.n <= 0 || p != c.orig {
+			continue
+		}
+		if !found || c.out > best {
+			best = c.out
+			found = true
 		}
 	}
-	if found == -1 {
+	if found {
+		return best, true
+	}
+	for _, c := range chunks {
+		if c.n <= 0 || p != c.orig+c.n {
+			continue
+		}
+		if !found || c.out+c.n > best {
+			best = c.out + c.n
+			found = true
+		}
+	}
+	if !found {
 		return -1, false
 	}
-	return found, true
+	return best, true
+}
+
+// mapEnd maps p to the output offset of the chunk that holds p on its
+// inside for a range end: an interior position maps inside its chunk;
+// an edge maps to the chunk that ends at p, so generated text inserted at
+// the edge stays after the replacement. When several chunks end at p, the
+// earliest output wins, keeping the replacement before every adjacent
+// generated fragment.
+func mapEnd(chunks []chunk, p int) (int, bool) {
+	for _, c := range chunks {
+		if c.n <= 0 {
+			continue
+		}
+		if c.orig < p && p < c.orig+c.n {
+			return c.out + (p - c.orig), true
+		}
+	}
+	best := -1
+	found := false
+	for _, c := range chunks {
+		if c.n <= 0 || p != c.orig+c.n {
+			continue
+		}
+		if !found || c.out+c.n < best {
+			best = c.out + c.n
+			found = true
+		}
+	}
+	if found {
+		return best, true
+	}
+	for _, c := range chunks {
+		if c.n <= 0 || p != c.orig {
+			continue
+		}
+		if !found || c.out < best {
+			best = c.out
+			found = true
+		}
+	}
+	if !found {
+		return -1, false
+	}
+	return best, true
 }
 
 // insertChunks returns the chunks of cover with the n output bytes that
