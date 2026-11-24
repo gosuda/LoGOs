@@ -31,7 +31,7 @@ type groupedMoveState struct {
 	fileTails  map[*syntax.Group]syntax.Decl
 	blockTails map[*syntax.DeclStmt]syntax.Stmt
 	inserted   map[syntax.Node]bool
-	frozen     map[*syntax.ConstDecl]bool
+	frozen     map[*syntax.ConstDecl]syntax.Expr
 }
 
 func (fl *fileLower) lowerCTFE() {
@@ -45,7 +45,7 @@ func (fl *fileLower) lowerCTFE() {
 		fileTails:  map[*syntax.Group]syntax.Decl{},
 		blockTails: map[*syntax.DeclStmt]syntax.Stmt{},
 		inserted:   map[syntax.Node]bool{},
-		frozen:     map[*syntax.ConstDecl]bool{},
+		frozen:     map[*syntax.ConstDecl]syntax.Expr{},
 	}
 	fl.lowerCTFEFileList(gst)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -104,7 +104,11 @@ func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 	fl.freezeCompositeConstGroups(*list, gst)
 	for i := 0; i < len(*list); i++ {
 		cd, ok := (*list)[i].(*syntax.ConstDecl)
-		if !ok || gst.frozen[cd] {
+		if !ok {
+			continue
+		}
+		if values := gst.frozen[cd]; values != nil {
+			cd.Values = values
 			continue
 		}
 		r, ok := fl.ctfeLookup(cd)
@@ -170,7 +174,11 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 		fl.freezeCompositeConstGroups(ds.DeclList, gst)
 		for j := 0; j < len(ds.DeclList); j++ {
 			cd, ok := ds.DeclList[j].(*syntax.ConstDecl)
-			if !ok || gst.frozen[cd] {
+			if !ok {
+				continue
+			}
+			if values := gst.frozen[cd]; values != nil {
+				cd.Values = values
 				continue
 			}
 			r, ok := fl.ctfeLookup(cd)
@@ -237,44 +245,61 @@ func (fl *fileLower) freezeCompositeConstGroups(list []syntax.Decl, gst *grouped
 		if !slices.ContainsFunc(group, composite) {
 			continue
 		}
+		var inits []syntax.Expr
 		for _, d := range group {
+			spec := d.(*syntax.ConstDecl)
+			if values := syntax.UnpackListExpr(spec.Values); len(values) != 0 {
+				inits = values
+			}
 			if !composite(d) {
-				spec := d.(*syntax.ConstDecl)
-				gst.frozen[spec] = fl.freezeConstSpec(spec)
+				gst.frozen[spec] = fl.freezeConstSpec(spec, inits)
 			}
 		}
 	}
 }
 
-func (fl *fileLower) freezeConstSpec(cd *syntax.ConstDecl) bool {
+func (fl *fileLower) freezeConstSpec(cd *syntax.ConstDecl, inits []syntax.Expr) syntax.Expr {
 	values := make([]syntax.Expr, len(cd.NameList))
+	var ejectValues []syntax.Expr
 	for i, name := range cd.NameList {
 		obj, ok := fl.pkg.info.Defs[name].(*types2.Const)
 		if !ok || obj.Val() == nil || obj.Val().Kind() == constant.Unknown {
-			return false
+			return nil
 		}
 		e := constExactExpr(name.Pos(), obj.Val())
 		b, _ := obj.Type().Underlying().(*types2.Basic)
 		if b == nil {
-			return false
+			return nil
 		}
 		switch {
 		case b.Kind() == types2.UntypedRune:
 			e = at(&syntax.Operation{Op: syntax.Add, X: litOf(name.Pos(), "'\\x00'", syntax.RuneLit), Y: e}, name.Pos())
 		case b.Info()&types2.IsUntyped == 0 && cd.Type == nil:
 			text, ok := fl.spellLowered(obj.Type())
+			if ok {
+				typ, ok := typeExprAt(text, name.Pos())
+				if !ok {
+					base.Errorf("%s: cannot write type %s of grouped constant %s", name.Pos().String(), obj.Type(), name.Value)
+					return nil
+				}
+				e = callOf(name.Pos(), typ, []syntax.Expr{e})
+				break
+			}
+			native, eject, ok := fl.ownedScalarBridge(obj, inits[i], e, name.Pos())
 			if !ok {
 				base.Errorf("%s: cannot preserve type %s of grouped constant %s", name.Pos().String(), obj.Type(), name.Value)
-				return false
+				return nil
 			}
-			typ, ok := typeExprAt(text, name.Pos())
-			if !ok {
-				base.Errorf("%s: cannot write type %s of grouped constant %s", name.Pos().String(), obj.Type(), name.Value)
-				return false
+			if ejectValues == nil {
+				ejectValues = slices.Clone(values)
 			}
-			e = callOf(name.Pos(), typ, []syntax.Expr{e})
+			ejectValues[i] = eject
+			e = native
 		}
 		values[i] = e
+		if ejectValues != nil && ejectValues[i] == nil {
+			ejectValues[i] = e
+		}
 	}
 	var start, end int
 	prefix := ""
@@ -287,9 +312,11 @@ func (fl *fileLower) freezeConstSpec(cd *syntax.ConstDecl) bool {
 		end = start
 		prefix = " = "
 	}
-	cd.Values = listOf(cd.Pos(), values)
-	fl.add(start, end, prefix+renderExpr(cd.Values))
-	return true
+	if ejectValues == nil {
+		ejectValues = values
+	}
+	fl.add(start, end, prefix+renderExpr(listOf(cd.Pos(), ejectValues)))
+	return listOf(cd.Pos(), values)
 }
 
 func constExactExpr(pos syntax.Pos, v constant.Value) syntax.Expr {
