@@ -125,21 +125,28 @@ func classifyFactMember(holderPkg *types2.Package, member string, codeQual func(
 }
 
 func memberPackageFor(holderPkg *types2.Package, path string) *types2.Package {
-	if holderPkg != nil {
-		for _, imp := range holderPkg.Imports() {
-			if imp.Path() == path {
-				return imp
-			}
-		}
-		if holderPkg.Path() == path {
-			return nil
-		}
+	if imp := unionMemberImport(holderPkg, path); imp != nil {
+		return imp
+	}
+	if holderPkg != nil && holderPkg.Path() == path {
+		return nil
 	}
 	_, name, ok := strings.CutLast(path, "/")
 	if !ok {
 		name = path
 	}
 	return types2.NewPackage(path, name)
+}
+
+func unionMemberImport(holderPkg *types2.Package, path string) *types2.Package {
+	if holderPkg != nil {
+		for _, imp := range holderPkg.Imports() {
+			if imp.Path() == path {
+				return imp
+			}
+		}
+	}
+	return nil
 }
 
 func foreignUnionKeysByPath(pkgPath, typ string) ([]string, bool, bool) {
@@ -215,17 +222,23 @@ func classifyOneMember(holderPkg *types2.Package, staticJSON map[*types2.Named]b
 	memberPkg := named.Obj().Pkg()
 	samePkg := holderPkg != nil && memberPkg != nil && holderPkg.Path() == memberPkg.Path()
 	concreteArgs := named.TypeArgs() != nil && named.TypeArgs().Len() > 0
-	hasJSON := hasUnmarshalMethods(m)
-	decodable := hasUnmarshalJSON(m)
 	var keys []string
-	var eligible bool
+	var eligible, factDecoder bool
 	if samePkg || concreteArgs {
 		keys, eligible = localUnionKeys(staticJSON, named)
 	} else {
-		var factDecoder bool
-		keys, eligible, factDecoder = foreignUnionKeys(memberPkg, bare, hasUnmarshalJSON(m))
-		hasJSON = factDecoder || hasJSON
-		decodable = factDecoder || decodable
+		keys, eligible, factDecoder = foreignUnionKeysByPath(memberPkg.Path(), bare)
+	}
+	hasJSON, decodable := factDecoder, factDecoder
+	spellingPkg := memberPkg
+	if alias, ok := m.(*types2.Alias); ok {
+		spellingPkg = alias.Obj().Pkg()
+	} else if alias, ok := elem.(*types2.Alias); ok {
+		spellingPkg = alias.Obj().Pkg()
+	}
+	if spellingPkg != nil && ((holderPkg != nil && spellingPkg.Path() == holderPkg.Path()) || unionMemberImport(holderPkg, spellingPkg.Path()) != nil) {
+		hasJSON = hasJSON || hasUnmarshalMethods(m)
+		decodable = decodable || hasUnmarshalJSON(m)
 	}
 	keyFunc := keyFuncFor(bare, memberPkg, holderPkg)
 	foreign := !samePkg
@@ -264,24 +277,6 @@ func structKeys(st *types2.Struct) []string {
 		}
 	}
 	return keys
-}
-
-func foreignUnionKeys(memberPkg *types2.Package, bare string, baseJSON bool) ([]string, bool, bool) {
-	rec, ok := facts.Lookup(memberPkg.Path())
-	if !ok || rec == nil {
-		return nil, false, baseJSON
-	}
-	hasJSON := baseJSON
-	eligible := false
-	if meta := jsonMetaFor(rec, bare); meta != nil {
-		hasJSON = meta.HasDecoder
-		eligible = meta.Eligible
-	}
-	keys := jsonKeysFor(rec, bare)
-	if !eligible || len(keys) == 0 {
-		return nil, false, hasJSON
-	}
-	return keys, true, true
 }
 
 func keyFuncFor(bare string, memberPkg, holderPkg *types2.Package) string {
