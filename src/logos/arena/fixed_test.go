@@ -230,6 +230,16 @@ func TestFixedAppendAdjacentInput(t *testing.T) {
 	}
 }
 
+func TestFixedAppendAliasedFreshPrefix(t *testing.T) {
+	buf := []byte{7, 8, 0, 0, 0}
+	r := arena.OpenFixed(buf)
+	s := []byte{1}
+	got := arena.Append(r, s, buf[:2]...)
+	if want := []byte{1, 7, 8}; !slices.Equal(got, want) {
+		t.Fatalf("Append with v aliasing the fresh prefix = %v, want %v", got, want)
+	}
+}
+
 func TestFixedHeapParity(t *testing.T) {
 	r := arena.Open()
 	p := arena.New[int](r)

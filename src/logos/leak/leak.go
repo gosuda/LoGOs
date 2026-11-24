@@ -11,7 +11,7 @@
 // Use it as the first line of a test:
 //
 //	func TestTopicDrops(t *testing.T) {
-//		defer leak.Check(t)
+//		defer leak.Check(t)()
 //	}
 //
 // Check samples the three counts when it runs, and the deferred call

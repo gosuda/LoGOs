@@ -165,6 +165,20 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 	if at > len(st.buf) || want > len(st.buf)-at {
 		panic(fixedExhausted(want, len(st.buf)-st.used))
 	}
+	// Preserve v when it aliases the fresh segment: the s copy below
+	// would otherwise overwrite v before it is copied. Each copy is
+	// memmove, so only the second source needs a temporary.
+	if len(s) > 0 {
+		dst := base + uintptr(at)
+		sBytes := uintptr(len(s)) * uintptr(size)
+		vPtr := uintptr(unsafe.Pointer(unsafe.SliceData(v)))
+		vBytes := uintptr(len(v)) * uintptr(size)
+		if vPtr < dst+sBytes && dst < vPtr+vBytes {
+			tmp := make([]T, len(v))
+			copy(tmp, v)
+			v = tmp
+		}
+	}
 	st.used = at + want
 	out := unsafe.Slice((*T)(unsafe.Pointer(&st.buf[at])), total)
 	copy(out, s)
