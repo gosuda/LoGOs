@@ -146,6 +146,14 @@ func DecNonStruct[T any](buf []byte, order Order, off *int, v *T) error {
 			*off += 4
 		}
 	case any:
+		if p, ok := any(v).(*any); ok {
+			n, err := stdbinary.Decode(buf[*off:], order, *p)
+			if err != nil {
+				return err
+			}
+			*off += n
+			return nil
+		}
 		n, err := stdbinary.Decode(buf[*off:], order, v)
 		if err != nil {
 			return err
@@ -159,7 +167,9 @@ func DecNonStruct[T any](buf []byte, order Order, off *int, v *T) error {
 func DecStruct[T any](buf []byte, order Order, off *int, v *T) error {
 	const for _, f := range comptime.Fields[T]() {
 		if !f.Exported {
-			panic("logos/binary: cannot decode unexported field " + f.Name)
+			if FixedSizeOf[f.Type]() != 0 {
+				panic("logos/binary: cannot decode unexported field " + f.Name)
+			}
 		}
 		err := DecValue[f.Type](buf, order, off, &v.[f])
 		if err != nil {

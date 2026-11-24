@@ -1,0 +1,34 @@
+package binary
+
+import (
+	"bytes"
+	stdbinary "encoding/binary"
+	"testing"
+)
+
+func TestTwinDecodeOverlappingBytes(t *testing.T) {
+	twin := []byte{1, 2, 3, 4}
+	original := []byte{1, 2, 3, 4}
+	dst := twin[1:]
+	n, err := Decode(twin[:3], LittleEndian, &dst)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	want, err := stdbinary.Decode(original[:3], LittleEndian, original[1:])
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if n != want || !bytes.Equal(twin, original) {
+		t.Fatalf("overlap: got %x (%d bytes), want %x (%d bytes)", twin, n, original, want)
+	}
+	_, err = Decode([]byte{9, 9}, LittleEndian, &dst)
+	if err == nil || err.Error() != ErrTooSmall.Error() {
+		t.Fatalf("short overlapping-byte destination: got %v, want %q", err, ErrTooSmall.Error())
+		return
+	}
+	if !bytes.Equal(twin, original) {
+		t.Fatalf("short decode modified the destination: %x", twin)
+	}
+}

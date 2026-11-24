@@ -23,11 +23,10 @@
 // Mechanism: layout is derived at compile time. A comptime generic
 // walks comptime.Fields[T]() in declaration order and dispatches each
 // field with const switch over its type: the fixed-size scalars encode
-// through ByteOrder append helpers, a nested struct recurses, a blank
-// (_) field writes zero bytes and skips on read. There is no reflect,
-// no unsafe and no per-type plan: every instantiation lowers to plain
-// field code, so Size folds to a constant and a warmed call is a
-// straight-line field walk.
+// through ByteOrder append helpers and a nested struct recurses.
+// There is no reflect, no unsafe and no per-type plan: every
+// instantiation lowers to plain field code, so Size folds to a constant
+// and a warmed call is a straight-line field walk.
 //
 // Fixed-size scalars, the enumerated array shapes, and structs of
 // those encode through comptime dispatch with no reflect, no unsafe

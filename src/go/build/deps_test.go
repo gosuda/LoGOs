@@ -900,7 +900,7 @@ var depsRules = `
 	sync, sync/atomic, unsafe, weak, logos/internal/conc
 	< logos/sync;
 
-	encoding/binary, errors, io, math, sync
+	encoding/binary, errors, io, math, slices, sync
 	< logos/binary;
 `
 

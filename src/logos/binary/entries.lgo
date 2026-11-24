@@ -4,6 +4,7 @@ import (
 	"comptime"
 	stdbinary "encoding/binary"
 	"io"
+	"slices"
 	"sync"
 )
 
@@ -41,7 +42,10 @@ func StageBytes(r io.Reader, n int) ([]byte, func(), error) {
 
 func Size[T any](v T) int {
 	const if comptime.IsStruct[T]() {
-		return StructSizeOf[T]()
+		if n := StructSizeOf[T](); n >= 0 {
+			return n
+		}
+		return stdbinary.Size(v)
 	}
 	if n := FixedSizeNonStruct[T](); n >= 0 {
 		return n
@@ -72,6 +76,9 @@ func ReadInto[T any](r io.Reader, order Order, data *T) error {
 	}
 	n := FixedSizeNonStruct[T]()
 	if n < 0 {
+		if p, ok := any(data).(*any); ok {
+			return stdbinary.Read(r, order, *p)
+		}
 		return stdbinary.Read(r, order, data)
 	}
 	if n == 0 {
@@ -168,6 +175,12 @@ func Decode[T any](buf []byte, order Order, data *T) (int, error) {
 	}
 	n := FixedSizeNonStruct[T]()
 	if n < 0 {
+		if p, ok := any(data).(*any); ok {
+			return stdbinary.Decode(buf, order, *p)
+		}
+		if p, ok := any(data).(*[]byte); ok {
+			return stdbinary.Decode(buf, order, *p)
+		}
 		return stdbinary.Decode(buf, order, data)
 	}
 	if len(buf) < n {
@@ -188,12 +201,7 @@ func Append[T any](buf []byte, order Order, data T) ([]byte, error) {
 			return stdbinary.Append(buf, order, data)
 		}
 		l := len(buf)
-		if cap(buf)-l < n {
-			tmp := make([]byte, l+n)
-			copy(tmp, buf)
-			buf = tmp
-		}
-		buf = buf[:l+n]
+		buf = slices.Grow(buf, n)[:l+n]
 		off := l
 		err := EncStruct[T](buf, &off, order, data)
 		if err != nil {
@@ -206,12 +214,7 @@ func Append[T any](buf []byte, order Order, data T) ([]byte, error) {
 		return stdbinary.Append(buf, order, data)
 	}
 	l := len(buf)
-	if cap(buf)-l < n {
-		tmp := make([]byte, l+n)
-		copy(tmp, buf)
-		buf = tmp
-	}
-	buf = buf[:l+n]
+	buf = slices.Grow(buf, n)[:l+n]
 	off := l
 	err := EncNonStruct[T](buf, &off, order, data)
 	if err != nil {
