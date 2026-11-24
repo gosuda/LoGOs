@@ -169,16 +169,3 @@ RED/GREEN/PROBE proof and publication boundary; the candidate's
 [PR #54 checks](https://github.com/gosuda/LoGOs/pull/54/checks) determine full
 upstream acceptance. All three frozen attack hashes still match the table
 above; no speed claim follows from these correctness results.
-
-## Reproduction and merge gate
-
-After `src/make.bash` rebuilds and installs the fork, put its `bin` first on
-`PATH` and run from `src`:
-
-```sh
-go test -count=1 -short cmd/compile/internal/ssa
-go vet cmd/compile/internal/ssa
-go test -count=1 -race -timeout=40m -v cmd/go \
-  -run '^TestScript$/^(README|logos_simd_(zero_dominance|feature_gate|gate_avx512|gate_branch)|logos_eject_simd_slice)$'
-GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
-```
