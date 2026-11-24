@@ -24,6 +24,9 @@ func writeOpts(pkg *types2.Package, f *Facts) {
 	eachExportedNamed(pkg, func(name string, named *types2.Named) {
 		walkNamedQuals(name, named, emit, nil)
 	})
+	eachExportedVar(pkg, func(object string, v *types2.Var) {
+		walkQualType(v.Type(), []string{"V"}, object, emit, nil, make(map[types2.Type]bool))
+	})
 }
 
 func walkSigQuals(sig *types2.Signature, object string, emitOpt, emitConst func(string, string)) {
