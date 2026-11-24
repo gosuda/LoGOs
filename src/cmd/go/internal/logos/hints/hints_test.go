@@ -389,63 +389,43 @@ func diagnostics(t *testing.T, f fixture) []Diagnostic {
 	return out
 }
 
-func applyEdits(t *testing.T, src []byte, edits []TextEdit) string {
-	t.Helper()
-	offset := func(p Position) int {
-		off := 0
-		for range p.Line {
-			off += bytes.IndexByte(src[off:], '\n') + 1
-		}
-		return off + p.Character
-	}
-	slices.SortFunc(edits, func(a, b TextEdit) int { return offset(b.Range.Start) - offset(a.Range.Start) })
-	text := string(src)
-	for _, e := range edits {
-		text = text[:offset(e.Range.Start)] + e.NewText + text[offset(e.Range.End):]
-	}
-	return text
-}
-
-func TestCodeActionsApplyAutofix(t *testing.T) {
-	const uri = "file:///w/fixes.lgo"
+func TestCodeActionsSuggestOptionalHandling(t *testing.T) {
 	f := localFixture(t, "fixes.lgo")
 	diags := diagnostics(t, f)
 	if len(diags) != 1 || len(diags[0].AutofixCandidates) != 2 {
 		t.Fatalf("diagnostics %+v", diags)
 	}
 	line := Range{Start: startOf(t, f.src, "\treturn u.Name"), End: endOf(t, f.src, "\treturn u.Name")}
-	actions := CodeActions(diags, uri, f.src, line)
+	actions := CodeActions(diags, f.src, line)
 	want := map[string]string{
-		"use optional chaining with a ?? default": "package p\n\ntype User struct{ Name string }\n\nfunc name(u *User?) string {\n\treturn (u?.Name ?? \"\")\n}\n",
-		"return early when u is nil":              "package p\n\ntype User struct{ Name string }\n\nfunc name(u *User?) string {\n\tif u == nil {\n\t\treturn \"\"\n\t}\n\treturn u.Name\n}\n",
+		"use optional chaining with a ?? default": `(u?.Name ?? "")`,
+		"return early when u is nil":              "if u == nil {\n\t\treturn \"\"\n\t}",
 	}
 	if len(actions) != len(want) {
 		t.Fatalf("%d actions, want %d: %+v", len(actions), len(want), actions)
 	}
 	for _, a := range actions {
-		wantText, ok := want[a.Title]
+		preview, ok := want[a.Title]
 		if !ok || a.Kind != "quickfix" || len(a.Diagnostics) != 1 || a.Diagnostics[0].Code != "correctness::nil_deref_unproven" {
 			t.Errorf("action %+v", a)
 			continue
 		}
-		if got := applyEdits(t, f.src, a.Edit.Changes[uri]); got != wantText {
-			t.Errorf("%s:\n got %q\nwant %q", a.Title, got, wantText)
+		if !strings.Contains(a.Disabled.Reason, preview) {
+			t.Errorf("%s: guidance %q does not show %q", a.Title, a.Disabled.Reason, preview)
 		}
 	}
 }
 
-func TestCodeActionsAddTry(t *testing.T) {
-	const uri = "file:///w/discard.lgo"
+func TestCodeActionsSuggestErrorPropagation(t *testing.T) {
 	f := localFixture(t, "discard.lgo")
 	diags := diagnostics(t, f)
 	cursor := startOf(t, f.src, "f()\n\treturn nil")
-	actions := CodeActions(diags, uri, f.src, Range{Start: cursor, End: cursor})
+	actions := CodeActions(diags, f.src, Range{Start: cursor, End: cursor})
 	if len(actions) != 1 || actions[0].Title != "add ? to propagate the error" {
 		t.Fatalf("actions %+v", actions)
 	}
-	want := "package p\n\nimport \"errors\"\n\nvar errDiscard = errors.New(\"discard\")\n\nvar failDiscard = false\n\nfunc f() error {\n\tif failDiscard {\n\t\treturn errDiscard\n\t}\n\treturn nil\n}\n\nfunc g() error {\n\tf()?\n\treturn nil\n}\n"
-	if got := applyEdits(t, f.src, actions[0].Edit.Changes[uri]); got != want {
-		t.Errorf("got %q\nwant %q", got, want)
+	if reason := actions[0].Disabled.Reason; !strings.Contains(reason, "f()?") {
+		t.Errorf("guidance %q does not show f()?", reason)
 	}
 }
 
@@ -453,7 +433,7 @@ func TestCodeActionsOutsideRange(t *testing.T) {
 	f := localFixture(t, "discard.lgo")
 	diags := diagnostics(t, f)
 	top := Range{Start: Position{}, End: Position{Line: 1}}
-	if actions := CodeActions(diags, "file:///w/discard.lgo", f.src, top); len(actions) != 0 {
+	if actions := CodeActions(diags, f.src, top); len(actions) != 0 {
 		t.Errorf("actions away from the diagnostic: %+v", actions)
 	}
 }
@@ -466,14 +446,13 @@ func TestCodeActionsUTF16(t *testing.T) {
 		Span:              Span{StartLine: 1, StartCol: at + 1, EndLine: 1, EndCol: at + 4},
 		AutofixCandidates: []Fix{{Description: "add ? to propagate the error", Replacement: "f()?"}},
 	}
-	const uri = "file:///w/u.lgo"
-	actions := CodeActions([]Diagnostic{d}, uri, src, wholeFile)
-	if len(actions) != 1 {
+	actions := CodeActions([]Diagnostic{d}, src, wholeFile)
+	if len(actions) != 1 || len(actions[0].Diagnostics) != 1 {
 		t.Fatalf("actions %+v", actions)
 	}
-	edit := actions[0].Edit.Changes[uri][0]
+	got := actions[0].Diagnostics[0].Range
 	want := Range{Start: startOf(t, src, "f()"), End: endOf(t, src, "f()")}
-	if edit.Range != want || want.Start.Character != 13 {
-		t.Errorf("edit range %+v, want %+v (character 13)", edit.Range, want)
+	if got != want || want.Start.Character != 13 {
+		t.Errorf("diagnostic range %+v, want %+v (character 13)", got, want)
 	}
 }

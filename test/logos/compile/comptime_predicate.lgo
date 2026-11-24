@@ -28,23 +28,26 @@ func liveNonStruct() {
 	}
 }
 
+// f.Name, f.Index and f.Exported are constants of each field iteration,
+// so the next three conditions fold. The index variable stays a run-time
+// value (fieldVarCondition).
 func fieldCondition() {
 	const for _, f := range comptime.Fields[Pair]() {
-		const if f.Name == "X" { // ERROR "comptime::not_constant"
+		const if f.Name == "X" {
 		}
 	}
 }
 
 func fieldIndexCondition() {
 	const for _, f := range comptime.Fields[Pair]() {
-		const if f.Index == 0 { // ERROR "comptime::not_constant"
+		const if f.Index == 0 {
 		}
 	}
 }
 
 func fieldExportedCondition() {
 	const for _, f := range comptime.Fields[Pair]() {
-		const if f.Exported { // ERROR "comptime::not_constant"
+		const if f.Exported {
 		}
 	}
 }

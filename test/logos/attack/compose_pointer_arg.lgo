@@ -1,0 +1,29 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"unsafe"
+)
+
+func Width[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return comptime.SizeOf[T]()
+	}
+	return comptime.SizeOf[T]()
+}
+
+func Wrap[T any]() int { return Width[*T]() }
+
+type Triple struct {
+	A int
+	B int
+	C int
+}
+
+func main() {
+	p := &Triple{A: 1, B: 2, C: 3}
+	fmt.Println(Wrap[Triple]() == int(unsafe.Sizeof(p)))
+}

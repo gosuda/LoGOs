@@ -1,0 +1,34 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"reflect"
+)
+
+func Touch[T any]() int {
+	const if comptime.TypeOf[T]() == comptime.TypeOf[int]() {
+		return 1
+	}
+	return 0
+}
+
+type Pair struct {
+	A int
+	B int
+}
+
+func siteA() uintptr { return reflect.ValueOf(Touch[int]).Pointer() }
+
+func siteB() uintptr { return reflect.ValueOf(Touch[int]).Pointer() }
+
+func sitePairA() uintptr { return reflect.ValueOf(Touch[Pair]).Pointer() }
+
+func sitePairB() uintptr { return reflect.ValueOf(Touch[Pair]).Pointer() }
+
+func main() {
+	fmt.Println(siteA() == siteB())
+	fmt.Println(sitePairA() == sitePairB())
+}

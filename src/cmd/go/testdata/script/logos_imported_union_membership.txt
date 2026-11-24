@@ -1,0 +1,224 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+# Imported closed unions: a LoGOs importer accepts only the concrete
+# members named in the union, rejects a non-member even when it
+# implements the union's method set, and rejects a non-member of a
+# basic (method-less) union. The Go-facing projection of an exported
+# value union is methods-only by design, so a Go client may still pass
+# a non-member that implements the method set; that hole is asserted
+# here on purpose and lives only in the Go module.
+#
+# The good module (w/impw) and the two negative modules (negm, negb)
+# are separate modules so a bad fixture never blocks the good
+# ejection. Rejection is checked at the compile boundary of the
+# native build only: the ejected form is a methods-only interface,
+# which Go cannot distinguish members from method-compatible
+# non-members, so parity is asserted on the good module's run output.
+
+cd w/impw
+logos build ./...
+logos build -o $WORK/bin/impw$GOEXE .
+exec $WORK/bin/impw$GOEXE
+stdout '^A:5/switch B$'
+stdout '^B:s$'
+stdout '^A:1$'
+cp stdout $WORK/native.txt
+
+cd ../goq
+logos build -o $WORK/bin/goq$GOEXE .
+exec $WORK/bin/goq$GOEXE
+stdout '^N$'
+stdout '^A:7$'
+cd ../..
+
+# Imported union rejects a concrete non-member that implements the
+# method set.
+cd negm
+! logos build ./...
+stderr 'cannot use'
+cd ..
+
+# Imported basic union rejects a concrete non-member value.
+cd negb
+! logos build ./...
+stderr 'cannot use'
+cd ..
+
+# The good module ejects and the ejected output builds and runs with
+# the upstream toolchain, byte-identical to the native run.
+cd w/impw
+logos eject -o $WORK/out
+cd $WORK/out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native.txt
+
+-- w/impw/go.mod --
+module example.com/impw
+
+go 1.27
+
+-- w/impw/lib/lib.lgo --
+package lib
+
+import "fmt"
+
+type A struct {
+	X int
+}
+
+func (a A) M() string {
+	return fmt.Sprintf("A:%d", a.X)
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) M() string {
+	return "B:" + b.Y
+}
+
+// U is a closed value union exported to importers.
+type U interface {
+	A | B
+	M() string
+}
+
+// Basic is a closed basic union with no method set.
+type Basic interface {
+	int | string
+}
+
+func Who(x U) string {
+	return x.M()
+}
+
+func Pick(n int) U {
+	if n == 0 {
+		return A{X: 1}
+	}
+	return B{Y: "two"}
+}
+
+-- w/impw/use/use.lgo --
+package use
+
+import (
+	"example.com/impw/lib"
+)
+
+// Describe switches over the imported union. The default branch keeps
+// this fixture inside the assigned scope: membership checking of
+// assignments, not switch exhaustiveness.
+func Describe(x lib.U) string {
+	return switch x.(type) {
+	case lib.A => "switch A"
+	case lib.B => "switch B"
+	case nil => "switch nil"
+	default => "unexpected"
+	}
+}
+
+func Show() string {
+	var u lib.U = lib.A{X: 5}
+	return lib.Who(u) + "/" + Describe(lib.Pick(1))
+}
+
+-- w/impw/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/impw/lib"
+	"example.com/impw/use"
+)
+
+func main() {
+	fmt.Println(use.Show())
+	fmt.Println(lib.Who(lib.B{Y: "s"}))
+	fmt.Println(lib.Pick(0).M())
+}
+
+-- w/goq/go.mod --
+module example.com/goq
+
+go 1.27
+
+require example.com/impw v0.0.0
+
+replace example.com/impw => ../impw
+
+-- w/goq/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/impw/lib"
+)
+
+// N implements the method set of lib.U without being a member. The
+// Go-facing projection of an exported value union is methods-only by
+// design, so this call compiles and runs; the LoGOs importer of the
+// same union rejects the same assignment (see negm).
+type N struct{}
+
+func (n N) M() string { return "N" }
+
+func main() {
+	fmt.Println(lib.Who(N{}))
+	fmt.Println(lib.Who(lib.A{X: 7}))
+}
+
+-- negm/go.mod --
+module example.com/negm
+
+go 1.27
+
+require example.com/impw v0.0.0
+
+replace example.com/impw => ../w/impw
+
+-- negm/negm.lgo --
+package negm
+
+import (
+	"example.com/impw/lib"
+)
+
+// C implements the method set of lib.U but is not a member. A LoGOs
+// importer must reject the assignment at compile time.
+type C struct {
+	Z int
+}
+
+func (c C) M() string {
+	return "C"
+}
+
+var _ lib.U = C{Z: 1}
+
+-- negb/go.mod --
+module example.com/negb
+
+go 1.27
+
+require example.com/impw v0.0.0
+
+replace example.com/impw => ../w/impw
+
+-- negb/negb.lgo --
+package negb
+
+import (
+	"example.com/impw/lib"
+)
+
+// bool is not a member of the basic union int | string. A LoGOs
+// importer must reject the assignment at compile time.
+var _ lib.Basic = true

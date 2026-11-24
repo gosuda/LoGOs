@@ -1,0 +1,79 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"reflect"
+)
+
+type First struct{}
+type Second struct{}
+
+type reading struct {
+	marker, key, constant, materialized, current any
+}
+
+func probe[T any](index, replacement int) (reading, reading, int) {
+	const if !comptime.IsStruct[T]() {
+		comptime.Error("probe requires a struct type argument")
+	}
+
+	type Local int
+	const keys = []Local{3, 7}
+	const table = map[Local]Local{3: 19, 7: 23}
+	const independent = map[Local]Local{3: 19, 7: 23}
+	key := keys[index]
+	var writable map[Local]Local = table
+	if replacement > 0 {
+		writable[key] = Local(replacement)
+	}
+	var shared map[Local]Local = table
+	var separate map[Local]Local = independent
+	outer := reading{Local(0), key, table[key] ?? Local(-1), shared, shared[key] ?? Local(-1)}
+	separateValue := int(separate[key] ?? Local(-1))
+
+	{
+		type Local int
+		const keys = []Local{3, 7}
+		const table = map[Local]Local{3: 29, 7: 31}
+		key := keys[index]
+		var materialized map[Local]Local = table
+		inner := reading{Local(0), key, table[key] ?? Local(-1), materialized, materialized[key] ?? Local(-1)}
+		return outer, inner, separateValue
+	}
+}
+
+func report(label string, o reading) reflect.Type {
+	local := reflect.TypeOf(o.marker)
+	exact := local.Kind() == reflect.Int && local != reflect.TypeOf(0) &&
+		reflect.TypeOf(o.key) == local &&
+		reflect.TypeOf(o.constant) == local &&
+		reflect.TypeOf(o.materialized) == reflect.MapOf(local, local) &&
+		reflect.TypeOf(o.current) == local
+	fmt.Println(label, o.key, o.constant, o.current, exact)
+	return local
+}
+
+func main() {
+	outer, inner, separate := probe[First](0, 101)
+	firstOuter := report("first outer", outer)
+	firstInner := report("first inner", inner)
+	fmt.Println("first separate", separate)
+
+	outer, inner, separate = probe[Second](0, 0)
+	secondOuter := report("second outer", outer)
+	secondInner := report("second inner", inner)
+	fmt.Println("second separate", separate)
+
+	outer, inner, separate = probe[First](0, 0)
+	againOuter := report("first again outer", outer)
+	againInner := report("first again inner", inner)
+	fmt.Println("first again separate", separate)
+
+	declarations := map[reflect.Type]bool{firstOuter: true, firstInner: true, secondOuter: true, secondInner: true}
+	fmt.Println("identity", len(declarations), firstOuter == againOuter, firstInner == againInner)
+}

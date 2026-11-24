@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"internal/buildcfg"
 	"internal/types/errors"
+	"maps"
 	"regexp"
 	"sort"
 
 	"cmd/compile/internal/base"
+	"cmd/compile/internal/importer"
 	"cmd/compile/internal/logos"
 	"cmd/compile/internal/midway"
 	"cmd/compile/internal/rangefunc"
@@ -52,6 +54,7 @@ func checkFiles(m posMap, noders []*noder) (*types2.Package, *types2.Info, map[*
 	didLogos := false
 	var logosProvenCarry map[string]bool // logos: invocation-local proof carry.
 	var logosDerivedCarry []string       // logos M3-S5 hook: derived-var names survive the recheck's package rebuild.
+	var logosCtCarry types2.Info
 
 recheck:
 	provenForThisCheck := logosProvenCarry
@@ -72,20 +75,55 @@ recheck:
 		Logos:               allLogos(noders) && !didLogos,
 		LogosUnions:         allLogos(noders), // logos M2-S1 hook: unions stay legal in the recheck.
 		LogosProvenReadonly: provenForThisCheck,
+		LogosCtEject:        base.LogosEject != "",
 	}
 	if base.Flag.ErrorURL {
 		conf.ErrorURL = " [go.dev/e/%s]"
 	}
+	pkg := types2.NewPackage(base.Ctxt.Pkgpath, "")
 	info := &types2.Info{
-		StoreTypesInSyntax: true,
-		Defs:               make(map[*syntax.Name]types2.Object),
-		Uses:               make(map[*syntax.Name]types2.Object),
-		Selections:         make(map[*syntax.SelectorExpr]*types2.Selection),
-		Implicits:          make(map[syntax.Node]types2.Object),
-		Scopes:             make(map[syntax.Node]*types2.Scope),
-		Instances:          make(map[*syntax.Name]types2.Instance),
-		FileVersions:       make(map[*syntax.PosBase]string),
+		StoreTypesInSyntax:         true,
+		Defs:                       make(map[*syntax.Name]types2.Object),
+		Uses:                       make(map[*syntax.Name]types2.Object),
+		Selections:                 make(map[*syntax.SelectorExpr]*types2.Selection),
+		Implicits:                  make(map[syntax.Node]types2.Object),
+		Scopes:                     make(map[syntax.Node]*types2.Scope),
+		Instances:                  make(map[*syntax.Name]types2.Instance),
+		FileVersions:               make(map[*syntax.PosBase]string),
+		LogosCtPrepared:            logosCtCarry.LogosCtPrepared,
+		LogosCtGenerics:            logosCtCarry.LogosCtGenerics,
+		LogosCtImports:             logosCtCarry.LogosCtImports,
+		LogosCtGraph:               logosCtCarry.LogosCtGraph,
+		LogosCtSiteKeys:            logosCtCarry.LogosCtSiteKeys,
+		LogosCtFinish:              logosCtCarry.LogosCtFinish,
+		LogosCtExportNamedDefaults: logosCtCarry.LogosCtExportNamedDefaults,
+		LogosCtExportConstMaps:     logosCtCarry.LogosCtExportConstMaps,
+		LogosCtConstMapUses:        logosCtCarry.LogosCtConstMapUses,
+		LogosUnionTypes:            logosCtCarry.LogosUnionTypes,
 		// expand as needed
+	}
+	if base.Logos {
+		previous := logosCtCarry.LogosCtImport
+		info.LogosCtImport = func(fn *types2.Func) (types2.LogosCtGeneric, bool) {
+			generic, ok := logosImportCtGeneric(&importer, fn)
+			if !ok && previous != nil {
+				return previous(fn)
+			}
+			return generic, ok
+		}
+		info.LogosCtImportConstMap = func(path, name string) (types2.LogosCtConstMap, bool) {
+			if path == pkg.Path() {
+				return logosCtLocalConstMap(pkg, info.LogosCtExportConstMaps[name])
+			}
+			if maps := logosCtConstMapPackageFor(&importer, path); maps != nil {
+				return maps.lookup(importer.packages[path], name)
+			}
+			return types2.LogosCtConstMap{}, false
+		}
+		conf.LogosCtImportConstMap = info.LogosCtImportConstMap
+		if !didLogos {
+			info.LogosCtImportNamedDefaults = logosCtNamedDefaultImporter(&importer)
+		}
 	}
 	logosConfigureComptime(&conf, info) // logos M5-S2 hook: configure comptime step and node limits.
 	logosConfigureCgoEject(&conf, files)
@@ -123,21 +161,33 @@ recheck:
 		base.ErrorfAt(m.makeXPos(terr.Pos), terr.Code, "%s", msg)
 	}
 
-	pkg, err := conf.Check(base.Ctxt.Pkgpath, files, info)
+	if didLogos && len(info.LogosCtConstMapUses) != 0 {
+		importer.logosCtBindOrdinaryConstMaps(&conf, info, files, &m)
+		base.ExitIfErrors()
+	}
+	check := types2.NewChecker(&conf, pkg, info)
+	err := check.Files(files)
 	logosFlushSoftWarns(&m, files, err)
 	logosFlushMisplacedTry(&m, files, info, logosMisplaced)
 	base.ExitIfErrors()
 	if err != nil {
 		base.FatalfAt(src.NoXPos, "conf.Check error: %v", err)
 	}
+	info.LogosCtRecordGlobalRefs(conf.LogosCtUses)
 
+	// The first LoGOs check leaves dead comptime syntax untyped.
+	// The recheck validates the surviving syntax, including emitted copies.
 	// Check for anonymous interface cycles (#56103).
 	// TODO(gri) move this code into the type checkers (types2 and go/types)
 	var f cycleFinder
 	for _, file := range files {
 		syntax.Inspect(file, func(n syntax.Node) bool {
 			if n, ok := n.(*syntax.InterfaceType); ok {
-				if f.hasCycle(types2.Unalias(n.GetTypeInfo().Type).(*types2.Interface)) {
+				typ := n.GetTypeInfo().Type
+				if typ == nil && conf.Logos {
+					return true
+				}
+				if f.hasCycle(types2.Unalias(typ).(*types2.Interface)) {
 					base.ErrorfAt(m.makeXPos(n.Pos()), errors.InvalidTypeCycle, "invalid recursive type: anonymous interface refers to itself (see https://go.dev/issue/56103)")
 
 					for typ := range f.cyclic {
@@ -185,7 +235,11 @@ recheck:
 				if n, ok := n.(*syntax.TypeDecl); ok {
 					switch n := n.Type.(type) {
 					case *syntax.MapType:
-						typ := n.GetTypeInfo().Type.Underlying().(*types2.Map)
+						t := n.GetTypeInfo().Type
+						if t == nil && conf.Logos {
+							return true
+						}
+						typ := t.Underlying().(*types2.Map)
 						if isNotInHeap(typ.Key()) {
 							base.ErrorfAt(m.makeXPos(n.Pos()), 0, "incomplete (or unallocatable) map key not allowed")
 						}
@@ -193,7 +247,11 @@ recheck:
 							base.ErrorfAt(m.makeXPos(n.Pos()), 0, "incomplete (or unallocatable) map value not allowed")
 						}
 					case *syntax.ChanType:
-						typ := n.GetTypeInfo().Type.Underlying().(*types2.Chan)
+						t := n.GetTypeInfo().Type
+						if t == nil && conf.Logos {
+							return true
+						}
+						typ := t.Underlying().(*types2.Chan)
 						if isNotInHeap(typ.Elem()) {
 							base.ErrorfAt(m.makeXPos(n.Pos()), 0, "chan of incomplete (or unallocatable) type not allowed")
 						}
@@ -216,7 +274,26 @@ recheck:
 		// midway (SIMD) rebuild loses the derived marks the same way a
 		// logos recheck does.
 		logosDerivedCarry = types2.LogosDerivedVarNames(pkg)
-		if logosRecheckHook(&conf, pkg, info, files) {
+		if conf.Logos {
+			info.LogosUnionTypes = logosCaptureUnionTypes(info, files)
+			logosCtFreezeTemplates(info)
+			info.LogosCtExportNamedDefaults = logosCtCaptureNamedTypeProvenance(pkg, info)
+		}
+		changed := logosRecheckHook(&conf, pkg, info, files)
+		logosCtCarry = types2.Info{
+			LogosCtPrepared:            info.LogosCtPrepared,
+			LogosCtGenerics:            info.LogosCtGenerics,
+			LogosCtImport:              info.LogosCtImport,
+			LogosCtImports:             info.LogosCtImports,
+			LogosCtGraph:               info.LogosCtGraph,
+			LogosCtSiteKeys:            info.LogosCtSiteKeys,
+			LogosCtFinish:              info.LogosCtFinish,
+			LogosCtExportNamedDefaults: info.LogosCtExportNamedDefaults,
+			LogosCtExportConstMaps:     info.LogosCtExportConstMaps,
+			LogosCtConstMapUses:        info.LogosCtConstMapUses,
+			LogosUnionTypes:            info.LogosUnionTypes,
+		}
+		if changed {
 			logosProvenCarry = conf.LogosProvenReadonly
 			goto recheck
 		}
@@ -247,7 +324,22 @@ recheck:
 	if len(base.Debug.AstDump) > 0 {
 		dumpSyntax(pkg, info, files, "midway after recheck")
 	}
+	if info.LogosCtFinish != nil {
+		info.LogosCtFinish(pkg, info, &conf)
+		base.ExitIfErrors()
+		logosCtInterfaceCycles(m, info)
+		if err := check.LogosCtInitOrder(); err != nil {
+			base.ExitIfErrors()
+			base.FatalfAt(src.NoXPos, "comptime package initialization: %v", err)
+		}
+		logosEjectCtInstances(pkg, info, files)
+	}
 	logos.LogosClearErasedAnonReadonly()
+	for _, path := range info.LogosCtImports {
+		if _, err := importer.Import(path); err != nil {
+			base.FatalfAt(src.NoXPos, "comptime instance runtime import %s: %v", path, err)
+		}
+	}
 
 	// Rewrite range over function to explicit function calls
 	// with the loop bodies converted into new implicit closures.
@@ -257,6 +349,10 @@ recheck:
 	// then the new implicit closure will not have a unified IR inline body,
 	// and bodyReaderFor will fail.
 	rangeInfo := rangefunc.Rewrite(pkg, info, files)
+	for _, inst := range info.LogosCtPrepared {
+		file := &syntax.File{DeclList: append([]syntax.Decl{inst.Decl}, inst.Helpers...)}
+		maps.Copy(rangeInfo, rangefunc.Rewrite(inst.Pkg, inst.Info, []*syntax.File{file}))
+	}
 
 	if len(base.Debug.AstDump) > 0 {
 		dumpSyntax(pkg, info, files, "rangefunc")
@@ -267,6 +363,154 @@ recheck:
 	logosWriteCheckedFacts(pkg, info, files)
 
 	return pkg, info, rangeInfo
+}
+
+func logosCtCaptureNamedTypeProvenance(pkg *types2.Package, info *types2.Info) types2.LogosCtNamedDefaults {
+	rows := logosCtCaptureNamedDefaults(pkg, info)
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		obj, ok := scope.Lookup(name).(*types2.TypeName)
+		if !ok || obj.IsAlias() {
+			continue
+		}
+		named := obj.Type().(*types2.Named)
+		rhs := types2.Unalias(types2.LogosCtNamedRHS(named))
+		if _, ok := rhs.(*types2.Named); !ok {
+			continue
+		}
+		if _, ok := named.Underlying().(*types2.Struct); !ok {
+			continue
+		}
+		if rows == nil {
+			rows = make(types2.LogosCtNamedDefaults)
+		}
+		row := rows[name]
+		row.RHS = rhs
+		rows[name] = row
+	}
+	return rows
+}
+
+func logosCtNamedDefaultImporter(m *gcimports) func(*types2.Named) types2.LogosCtNamedTypeDefaults {
+	rows := make(map[*types2.Named]types2.LogosCtNamedTypeDefaults)
+	readers := make(map[*pkgReader]*importer.LogosCtNamedTypeReader)
+	return func(origin *types2.Named) types2.LogosCtNamedTypeDefaults {
+		if row, ok := rows[origin]; ok {
+			return row
+		}
+		obj := origin.Obj()
+		if obj.Pkg() == nil {
+			return types2.LogosCtNamedTypeDefaults{}
+		}
+		path := obj.Pkg().Path()
+		pkg := m.packages[path]
+		if pkg == nil || pkg.Scope().Lookup(obj.Name()) != obj {
+			return types2.LogosCtNamedTypeDefaults{}
+		}
+		index, ok := objReader[types.NewPkg(path, "").Lookup(obj.Name())]
+		if !ok {
+			return types2.LogosCtNamedTypeDefaults{}
+		}
+		r := readers[index.pr]
+		if r == nil {
+			r = importer.NewLogosCtNamedTypeReader(index.pr.PkgDecoder, m.ctxt, m.packages)
+			readers[index.pr] = r
+		}
+		row := r.Read(index.idx, origin)
+		rows[origin] = row
+		return row
+	}
+}
+
+type logosCtConstMapPackage struct {
+	wire    *importer.LogosCtNamedTypeReader
+	indices map[string]index
+	rows    map[string]types2.LogosCtConstMap
+}
+
+func logosCtConstMapPackageFor(m *gcimports, path string) *logosCtConstMapPackage {
+	state := &m.logos.ct
+	if maps := state.constMapPackages[path]; maps != nil {
+		return maps
+	}
+	archive := state.constMaps[path]
+	if archive.pr == nil {
+		return nil
+	}
+	wire := importer.NewLogosCtNamedTypeReader(archive.pr.PkgDecoder, m.ctxt, m.packages)
+	indices := wire.ConstMapIndex(archive.idx)
+	maps := &logosCtConstMapPackage{
+		wire:    wire,
+		indices: indices,
+		rows:    make(map[string]types2.LogosCtConstMap, len(indices)),
+	}
+	if state.constMapPackages == nil {
+		state.constMapPackages = make(map[string]*logosCtConstMapPackage)
+	}
+	state.constMapPackages[path] = maps
+	return maps
+}
+
+func (m *logosCtConstMapPackage) lookup(pkg *types2.Package, name string) (types2.LogosCtConstMap, bool) {
+	if row, ok := m.rows[name]; ok {
+		return row, true
+	}
+	idx, ok := m.indices[name]
+	if !ok || pkg == nil {
+		return types2.LogosCtConstMap{}, false
+	}
+	row := m.wire.ConstMap(idx, pkg, name)
+	m.rows[name] = row
+	return row, true
+}
+
+func logosCtLocalConstMap(pkg *types2.Package, record types2.LogosCtConstMapExport) (types2.LogosCtConstMap, bool) {
+	if record.Type == nil {
+		return types2.LogosCtConstMap{}, false
+	}
+	scope := pkg.Scope()
+	lookup, _ := scope.Lookup(record.Lookup).(*types2.Func)
+	materialize, _ := scope.Lookup(record.Materialize).(*types2.Func)
+	iterate, _ := scope.Lookup(record.Iterate).(*types2.Func)
+	if lookup == nil || materialize == nil || iterate == nil {
+		return types2.LogosCtConstMap{}, false
+	}
+	return types2.LogosCtConstMap{
+		Type: record.Type, Count: record.Count, Bearing: record.Bearing,
+		Lookup: lookup, Materialize: materialize, Iterate: iterate,
+	}, true
+}
+
+func (m *gcimports) logosCtBindOrdinaryConstMaps(conf *types2.Config, info *types2.Info, files []*syntax.File, positions *posMap) {
+	for _, file := range files {
+		syntax.Inspect(file, func(n syntax.Node) bool {
+			id, ok := n.(*syntax.Name)
+			if !ok {
+				return true
+			}
+			ref, ok := info.LogosCtConstMapUses[id]
+			if !ok {
+				return true
+			}
+			if owner := m.packages[ref.Path]; owner == nil || !owner.Complete() {
+				if _, err := m.Import(ref.Path); err != nil {
+					base.ErrorfAt(positions.makeXPos(id.Pos()), 0, "logos: importing owner of const map %s.%s: %v", ref.Path, ref.Name, err)
+					return false
+				}
+			}
+			row, ok := conf.LogosCtImportConstMap(ref.Path, ref.Name)
+			fn := row.Helper(ref.Role)
+			if !ok || fn == nil || fn.Pkg() != m.packages[ref.Path] {
+				base.ErrorfAt(positions.makeXPos(id.Pos()), 0, "logos: missing native owner helper (%d) for const map %s.%s", ref.Role, ref.Path, ref.Name)
+				return false
+			}
+			if conf.LogosCtUses == nil {
+				conf.LogosCtUses = make(map[*syntax.Name]types2.Object)
+			}
+			conf.LogosCtUses[id] = fn
+			return false
+		})
+	}
 }
 
 func dumpSyntax(pkg *types2.Package, info *types2.Info, files []*syntax.File, phase string) {

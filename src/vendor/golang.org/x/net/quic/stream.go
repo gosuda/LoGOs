@@ -39,6 +39,12 @@ type Stream struct {
 	inctx  context.Context
 	outctx context.Context
 
+	// Never acquire a stream gate while holding peerCancelMu.
+	peerCancelMu   sync.Mutex
+	peerCancelCh   chan struct{}
+	peerCanceled   bool
+	peerCancelCode StreamErrorCode // published by closing peerCancelCh
+
 	// ingate's lock guards receive-related state.
 	//
 	// The gate condition is set if a read from the stream will not block,
@@ -50,7 +56,8 @@ type Stream struct {
 	inmaxbuf    int64           // maximum amount of data we will buffer
 	insize      int64           // stream final size; -1 before this is known
 	inset       rangeset[int64] // received ranges
-	inclosed    sentVal         // set by CloseRead
+	inclosed    sentVal         // set when reads are closed locally
+	instopcode  uint64          // application error code to send in STOP_SENDING
 	inresetcode int64           // RESET_STREAM code received from the peer; -1 if not reset
 
 	// outgate's lock guards send-related state.
@@ -72,6 +79,9 @@ type Stream struct {
 	outreset     sentVal         // set by Reset
 	outresetcode uint64          // reset code to send in RESET_STREAM
 	outdone      chan struct{}   // closed when all data sent
+
+	outackchange  chan struct{} // closed when the acknowledged prefix advances
+	outconnclosed bool
 
 	// Buffers used for fast path; mutex-guarded, but uncontended in normal operations.
 	inbufmu  sync.Mutex
@@ -198,6 +208,37 @@ func newStream(c *Conn, id streamID) *Stream {
 // the stream number.
 func (s *Stream) ID() int64 {
 	return int64(s.id)
+}
+
+// PeerCanceled returns a channel that closes when the peer resets the receive
+// side with RESET_STREAM or cancels the send side with STOP_SENDING.
+// A clean FIN, local close or reset, and connection closure do not close it.
+//
+// All calls return the same channel. It is safe to call PeerCanceled
+// concurrently with any stream operation.
+func (s *Stream) PeerCanceled() <-chan struct{} {
+	s.peerCancelMu.Lock()
+	defer s.peerCancelMu.Unlock()
+	if s.peerCancelCh == nil {
+		s.peerCancelCh = make(chan struct{})
+		if s.peerCanceled {
+			close(s.peerCancelCh)
+		}
+	}
+	return s.peerCancelCh
+}
+
+func (s *Stream) notifyPeerCanceled(code uint64) {
+	s.peerCancelMu.Lock()
+	defer s.peerCancelMu.Unlock()
+	if s.peerCanceled {
+		return
+	}
+	s.peerCanceled = true
+	s.peerCancelCode = StreamErrorCode(code)
+	if s.peerCancelCh != nil {
+		close(s.peerCancelCh)
+	}
 }
 
 // SetReadContext sets the context used for reads from the stream.
@@ -503,7 +544,7 @@ func (s *Stream) flushFastOutputBuffer() {
 
 // Flush flushes data written to the stream.
 // It does not wait for the peer to acknowledge receipt of the data.
-// Use Close to wait for the peer's acknowledgement.
+// Use [Stream.WaitFlushed] to wait for the peer's acknowledgement without closing the stream.
 func (s *Stream) Flush() error {
 	if s.IsReadOnly() {
 		return errors.New("flush of read-only stream")
@@ -515,6 +556,72 @@ func (s *Stream) Flush() error {
 	}
 	s.flushLocked()
 	return nil
+}
+
+// WaitFlushed waits for the peer to acknowledge all bytes already flushed
+// when the call begins. It does not flush pending writes or close the stream.
+//
+// If the wait is canceled, WaitFlushed returns the context error. A stream
+// reset or connection closure also ends a pending wait with an error.
+// It is safe to call WaitFlushed concurrently with other stream operations.
+func (s *Stream) WaitFlushed(ctx context.Context) error {
+	if s.IsReadOnly() {
+		return errors.New("wait for flush of read-only stream")
+	}
+	target := int64(-1)
+	var peerCanceled <-chan struct{}
+	done := ctx.Done()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		canWrite := false
+		select {
+		case <-done:
+			return ctx.Err()
+		case <-s.outgate.set:
+			canWrite = true
+		case <-s.outgate.unset:
+		}
+		if target == -1 {
+			target = s.outflushed
+		}
+		changed, err := s.flushACKChangedLocked(target)
+		s.outgate.unlock(canWrite)
+		if changed == nil {
+			return err
+		}
+		if peerCanceled == nil && !s.IsWriteOnly() {
+			peerCanceled = s.PeerCanceled()
+		}
+		select {
+		case <-done:
+			return ctx.Err()
+		case <-changed:
+		case <-s.outdone:
+		case <-peerCanceled:
+			return s.peerCancelCode
+		}
+	}
+}
+
+func (s *Stream) flushACKChangedLocked(target int64) (<-chan struct{}, error) {
+	if s.outacked.rangeContaining(0).end >= target {
+		return nil, nil
+	}
+	if s.outconnclosed {
+		if err := s.conn.finalError(); err != nil {
+			return nil, err
+		}
+		return nil, errConnClosed
+	}
+	if s.outreset.isSet() {
+		return nil, StreamErrorCode(s.outresetcode)
+	}
+	if s.outackchange == nil {
+		s.outackchange = make(chan struct{})
+	}
+	return s.outackchange, nil
 }
 
 // writeErrorLocked returns the error (if any) which should be returned by write operations
@@ -572,10 +679,19 @@ func (s *Stream) Close() error {
 // CloseRead aborts reads on the stream.
 // Any blocked reads will be unblocked and return errors.
 //
-// CloseRead notifies the peer that the stream has been closed for reading.
+// CloseRead notifies the peer that the stream has been closed for reading
+// with an application protocol error code of zero.
 // It does not wait for the peer to acknowledge the closure.
 // Use Close to wait for the peer's acknowledgement.
 func (s *Stream) CloseRead() {
+	s.AbortRead(0)
+}
+
+// AbortRead aborts reads on the stream like [Stream.CloseRead], but uses the
+// given application protocol error code when notifying the peer.
+// Codes greater than 2^62-1 are clamped to that value.
+// The first read close determines the code sent to the peer.
+func (s *Stream) AbortRead(code uint64) {
 	if s.IsWriteOnly() {
 		return
 	}
@@ -585,8 +701,9 @@ func (s *Stream) CloseRead() {
 		// so there's no need to send STOP_SENDING.
 		// This is the same as saying we sent one and they got it.
 		s.inclosed.setReceived()
-	} else {
-		s.inclosed.set()
+	} else if !s.inclosed.isSet() {
+		s.instopcode = min(code, quicwire.MaxVarint)
+		s.inclosed.setUnsent()
 	}
 	discarded := s.in.end - s.in.start
 	s.in.discardBefore(s.in.end)
@@ -639,6 +756,8 @@ func (s *Stream) resetInternal(code uint64, userClosed bool) {
 	if userClosed {
 		// Mark that the user closed the stream.
 		s.outclosed.set()
+	} else {
+		defer s.notifyPeerCanceled(code)
 	}
 	if s.outreset.isSet() {
 		return
@@ -678,6 +797,7 @@ func (s *Stream) connHasClosed() {
 	s.inUnlock()
 
 	s.outgate.lock()
+	s.outconnclosed = true
 	if localClose {
 		s.outclosed.set()
 		s.outreset.set()
@@ -852,6 +972,7 @@ func (s *Stream) handleReset(code uint64, finalSize int64) error {
 	s.in.discardBefore(s.in.end)
 	s.inresetcode = int64(code)
 	s.insize = finalSize
+	s.notifyPeerCanceled(code)
 	return nil
 }
 
@@ -966,6 +1087,10 @@ func (s *Stream) ackOrLossData(pnum packetNumber, start, end int64, fin bool, fa
 		// If this ack is for data at the start of the send buffer, we can now discard it.
 		if s.outacked.contains(s.out.start) {
 			s.out.discardBefore(s.outacked[0].end)
+			if s.outackchange != nil {
+				close(s.outackchange)
+				s.outackchange = nil
+			}
 		}
 	case packetLost:
 		// Mark everything lost, but not previously acked, as needing retransmission.
@@ -985,15 +1110,11 @@ func (s *Stream) ackOrLossData(pnum packetNumber, start, end int64, fin bool, fa
 // false if not everything fit in the current packet.
 func (s *Stream) appendInFramesLocked(w *packetWriter, pnum packetNumber, pto bool) bool {
 	if s.inclosed.shouldSendPTO(pto) {
-		// We don't currently have an API for setting the error code.
-		// Just send zero.
-		code := uint64(0)
-		if !w.appendStopSendingFrame(s.id, code) {
+		if !w.appendStopSendingFrame(s.id, s.instopcode) {
 			return false
 		}
 		s.inclosed.setSent(pnum)
 	}
-	// TODO: STOP_SENDING
 	if s.insendmax.shouldSendPTO(pto) {
 		// MAX_STREAM_DATA
 		maxStreamData := s.in.start + s.inmaxbuf

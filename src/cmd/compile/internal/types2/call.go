@@ -146,7 +146,10 @@ func (check *Checker) instantiateSignature(pos syntax.Pos, expr syntax.Expr, typ
 	// count is correct at this point (see assertion above); hence the type assertion
 	// to *Signature will always succeed.
 	inst := check.instance(pos, typ, targs, nil, check.context()).(*Signature)
-	assert(inst.TypeParams().Len() == 0) // signature is not generic anymore
+	assert(inst.TypeParams().Len() == 0)                                             // signature is not generic anymore
+	if res := check.logosCtAnalyze(pos, expr, xlist, typ, targs, inst); res != nil { // logos comptime instantiation hook.
+		inst = res
+	}
 	check.recordInstance(expr, targs, inst)
 	assert(len(xlist) <= len(targs))
 
@@ -377,6 +380,9 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 		x.typ_ = sig.results
 	}
 	x.expr = call
+	if check.logosTagGetFold(x, call, sig, args) {
+		return statement
+	}
 	check.hasCallOrRecv = true
 
 	// if type inference failed, a parameterized result must be invalidated
@@ -757,7 +763,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 	// can only appear in qualified identifiers which are mapped to
 	// selector expressions.
 	if ident, ok := e.X.(*syntax.Name); ok {
-		obj := check.lookup(ident.Value)
+		_, obj := check.logosCtLookupScope(ident)
 		if pname, _ := obj.(*PkgName); pname != nil {
 			assert(pname.pkg == check.pkg)
 			check.recordUse(ident, pname)
@@ -897,7 +903,9 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 		return
 	}
 
-	check.logosFieldVarSelMark(x, e) // logos M7-S2 hook: selections on const-for field variables.
+	if check.logosFieldVarSelMark(x, e) { // logos M7-S2 hook: selections on const-for field variables.
+		return
+	}
 	if check.logosReadonlySelect(x, e, sel) {
 		return
 	}
@@ -1019,7 +1027,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 			}
 			check.recordSelection(e, MethodVal, x.typ(), obj, index, indirect)
 
-			x.mode_ = value
+			x.mode_, x.val = value, nil
 
 			// remove/stash receiver
 			sig := *obj.typ.(*Signature)

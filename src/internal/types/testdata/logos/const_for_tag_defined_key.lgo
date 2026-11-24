@@ -1,0 +1,20 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+import "comptime"
+
+type Key string
+
+const k Key = "key"
+
+func lookup() {
+	const for _, f := range comptime.Fields[struct {
+		Field int `key:"value"`
+	}]() {
+		_ = f.Tag.Get(string(k))
+		_ = f.Tag.Get(k /* ERROR "as string value in argument to f.Tag.Get" */)
+	}
+}

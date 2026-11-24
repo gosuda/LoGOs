@@ -1,0 +1,28 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Exported[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const if f.Exported {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
+type Row struct {
+	A int
+	b string
+	C bool
+}
+
+func main() {
+	fmt.Println(Exported[Row]())
+}

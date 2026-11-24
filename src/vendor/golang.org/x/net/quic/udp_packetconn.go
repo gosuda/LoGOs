@@ -11,8 +11,8 @@ import (
 
 // netPacketConn is a packetConn implementation wrapping a net.PacketConn.
 //
-// This is mostly useful for tests, since PacketConn doesn't provide access to
-// important features such as identifying the local address packets were received on.
+// PacketConn does not report the destination address of packets received on a
+// wildcard socket.
 type netPacketConn struct {
 	c         net.PacketConn
 	localAddr netip.AddrPort
@@ -37,17 +37,24 @@ func (c *netPacketConn) LocalAddr() netip.AddrPort {
 	return c.localAddr
 }
 
-func (c *netPacketConn) Read(f func(*datagram)) {
+func (c *netPacketConn) Read(f func(*datagram)) error {
+	localAddr := c.localAddr
+	if localAddr.Addr().Unmap().IsUnspecified() {
+		localAddr = netip.AddrPortFrom(netip.Addr{}, localAddr.Port())
+	}
 	for {
 		dgram := newDatagram()
 		n, peerAddr, err := c.c.ReadFrom(dgram.b)
 		if err != nil {
-			return
+			dgram.recycle()
+			return err
 		}
 		dgram.peerAddr, err = addrPortFromAddr(peerAddr)
 		if err != nil {
+			dgram.recycle()
 			continue
 		}
+		dgram.localAddr = localAddr
 		dgram.b = dgram.b[:n]
 		f(dgram)
 	}

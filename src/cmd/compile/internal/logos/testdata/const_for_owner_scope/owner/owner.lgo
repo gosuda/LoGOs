@@ -1,0 +1,20 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import "comptime"
+
+type scoreSeed [3]int
+
+func nextScore(n int) int { return 2*n + 1 }
+
+func Score[T any]() int {
+	var seed scoreSeed
+	n := len(seed)
+	const for _, f := range comptime.Fields[T]() {
+		n = nextScore(n + f.Index)
+	}
+	return n
+}

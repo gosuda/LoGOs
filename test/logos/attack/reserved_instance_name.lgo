@@ -1,0 +1,32 @@
+// errorcheck
+
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// logos eject names comptime instances <f>_logosct<N> and <f>_logosct_<h>,
+// so a declaration that contains _logosct could collide with an ejected
+// instance and is reserved.
+
+package p
+
+import "comptime"
+
+type Box struct{ N int }
+
+func Probe[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+var _ = Probe[Box]()
+
+func Probe_logosct0() int { return 0 } // ERROR "correctness::reserved_identifier\] identifier Probe_logosct0 is reserved"
+
+func Probe_logosct_0123456789ab() int { return 0 } // ERROR "correctness::reserved_identifier\] identifier Probe_logosct_0123456789ab is reserved"
+
+type probe_logosct1 struct{} // ERROR "correctness::reserved_identifier\] identifier probe_logosct1 is reserved"

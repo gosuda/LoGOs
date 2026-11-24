@@ -1,0 +1,42 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import (
+	"comptime"
+	"strconv"
+)
+
+type Cell struct{ raw string }
+
+func NewCell(raw string) *Cell { return &Cell{raw: raw} }
+
+func (c *Cell) Read(note func(string), name string) string {
+	note($"read:{name}")
+	return c.raw
+}
+
+func Sum[T any](row T, note func(string)) (int, error) {
+	scope defer note("return")
+	fallback := func(name string) string {
+		note($"default:{name}")
+		return "5"
+	}
+	total := 0
+	const for _, f := range comptime.Fields[T]() {
+		name := f.Name
+		note($"enter:{name}")
+		scope defer note($"leave:{name}")
+		raw := row.[f]?.Read(note, name) ?? fallback(name)
+		n := strconv.Atoi(raw)?
+		scaled := []int{n, n + 1}.map(v => {
+			note($"map:{name}:{v}")
+			return v * 2
+		}).sum()
+		note($"value:{name}:{scaled}")
+		total += scaled
+	}
+	return total, nil
+}

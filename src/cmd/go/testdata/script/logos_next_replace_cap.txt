@@ -1,0 +1,142 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# logos next --fix saves each filesystem replace target in memory. A target
+# with more than 20000 files or more than 64 MiB of file bytes is refused
+# before the files past the cap are read, and nothing is changed.
+cd gen
+go build -o $WORK/mktree$GOEXE .
+cd ../m
+cp go.mod $WORK/go.mod.orig
+cp a.go $WORK/a.orig
+
+# 2 module files plus 19999 generated files: one file over the cap.
+mkdir ../many
+cp ../depmod/go.mod ../many/go.mod
+cp ../depmod/dep.go ../many/dep.go
+exec $WORK/mktree$GOEXE ../many files 19999
+cp ../extra/go.mod.many go.mod
+! logos next --fix
+! stdout '.'
+stderr 'local replacement example.com/nextcap/dep: \.\./many: too large to freeze: more than 20000 files'
+cmp a.go $WORK/a.orig
+! exists a.lgo
+! exists next_tasks.json
+
+# Two sparse files of 32 MiB + 1 and 32 MiB: each is under the cap, their
+# sum is one byte over it. The second file is unreadable, so a refusal that
+# names the byte cap shows that it was refused before it was opened.
+mkdir ../big
+cp ../depmod/go.mod ../big/go.mod
+cp ../depmod/dep.go ../big/dep.go
+exec $WORK/mktree$GOEXE ../big sparse 33554433 33554432
+cp ../extra/go.mod.big go.mod
+! logos next --fix
+! stdout '.'
+stderr 'local replacement example.com/nextcap/dep: \.\./big: too large to freeze: more than 67108864 bytes'
+[!root] ! stderr 'permission denied'
+cmp a.go $WORK/a.orig
+! exists a.lgo
+! exists next_tasks.json
+
+# Under both caps the same target converts.
+rm ../big/a.bin ../big/b.bin
+logos next --fix
+stdout '^\+\+\+ b/a\.lgo$'
+cmp go.mod ../extra/go.mod.big
+cmp a.go $WORK/a.orig
+! exists a.lgo
+
+-- gen/go.mod --
+module example.com/mktree
+
+go 1.27
+-- gen/main.go --
+// mktree makes a replace target past one snapshot cap: "files N" writes N
+// empty files, "sparse A B" writes a sparse file a.bin of A bytes and an
+// unreadable sparse file b.bin of B bytes.
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"strconv"
+)
+
+func main() {
+	dir := os.Args[1]
+	switch os.Args[2] {
+	case "files":
+		n, err := strconv.Atoi(os.Args[3])
+		if err != nil {
+			log.Fatal(err)
+		}
+		for i := range n {
+			if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%05d.txt", i)), nil, 0o644); err != nil {
+				log.Fatal(err)
+			}
+		}
+	case "sparse":
+		for i, name := range []string{"a.bin", "b.bin"} {
+			size, err := strconv.ParseInt(os.Args[3+i], 10, 64)
+			if err != nil {
+				log.Fatal(err)
+			}
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, nil, 0o644); err != nil {
+				log.Fatal(err)
+			}
+			if err := os.Truncate(path, size); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if err := os.Chmod(filepath.Join(dir, "b.bin"), 0); err != nil {
+			log.Fatal(err)
+		}
+	default:
+		log.Fatalf("unknown mode %q", os.Args[2])
+	}
+}
+-- m/go.mod --
+module example.com/nextcap
+
+go 1.27
+-- m/a.go --
+package sample
+
+import (
+	"fmt"
+
+	"example.com/nextcap/dep"
+)
+
+func Label(n int) string {
+	dep.Ping()
+	return fmt.Sprintf("n=%d", n)
+}
+-- extra/go.mod.many --
+module example.com/nextcap
+
+go 1.27
+
+require example.com/nextcap/dep v0.0.0
+
+replace example.com/nextcap/dep => ../many
+-- extra/go.mod.big --
+module example.com/nextcap
+
+go 1.27
+
+require example.com/nextcap/dep v0.0.0
+
+replace example.com/nextcap/dep => ../big
+-- depmod/go.mod --
+module example.com/nextcap/dep
+
+go 1.27
+-- depmod/dep.go --
+package dep
+
+func Ping() {}

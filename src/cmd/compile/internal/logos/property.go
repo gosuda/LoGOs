@@ -1401,3 +1401,842 @@ func (fl *fileLower) lowerPropSend(s *syntax.SendStmt) []syntax.Stmt {
 	subs := fl.propSubstitutions(c.needles)
 	return fl.finishPropReplace(c, sp, []syntax.Stmt{s}, []otext{propSubstText(main, subs)})
 }
+
+type ctPropSite struct {
+	sel      *syntax.SelectorExpr
+	property types2.LogosProp
+	recv     types2.Type
+	getter   *types2.Func
+	setter   *types2.Func
+	promoted bool
+}
+
+func (w ctWalker) ctPropSite(e syntax.Expr) (ctPropSite, bool) {
+	sel, ok := syntax.Unparen(e).(*syntax.SelectorExpr)
+	if !ok || sel.Sel == nil {
+		return ctPropSite{}, false
+	}
+	info := w.fl.pkg.info
+	recv := info.TypeOf(sel.X)
+	if recv == nil {
+		return ctPropSite{}, false
+	}
+	pkg := w.fl.pkg.tpkg
+	if checked, ok := info.LogosCtProperties[sel]; ok {
+		_, promoted, _ := types2.LogosPropertySelection(pkg, recv, checked.Prop.Name)
+		return ctPropSite{
+			sel: sel, property: checked.Prop, recv: recv,
+			getter: checked.Getter, setter: checked.Setter, promoted: promoted,
+		}, true
+	}
+	if info.Selections[sel] != nil || info.Uses[sel.Sel] != nil {
+		return ctPropSite{}, false
+	}
+	pr, promoted, ok := types2.LogosPropertySelection(pkg, recv, sel.Sel.Value)
+	if !ok {
+		return ctPropSite{}, false
+	}
+	get, _, _ := types2.LookupFieldOrMethod(recv, true, pkg, "Logos_Get"+pr.Name)
+	getter, _ := get.(*types2.Func)
+	var setter *types2.Func
+	if !pr.ReadOnly {
+		set, _, _ := types2.LookupFieldOrMethod(recv, true, pkg, "Logos_Set"+pr.Name)
+		setter, _ = set.(*types2.Func)
+	}
+	return ctPropSite{sel: sel, property: pr, recv: recv, getter: getter, setter: setter, promoted: promoted}, true
+}
+
+func (p ctPropSite) accessor(base syntax.Expr, method *types2.Func) *syntax.SelectorExpr {
+	return at(&syntax.SelectorExpr{
+		X: base, Sel: nameOf(p.sel.Sel.Pos(), method.Name()),
+	}, p.sel.Pos())
+}
+
+func (w ctWalker) ctPropertyExpr(sel *syntax.SelectorExpr) (syntax.Expr, []syntax.Stmt, bool) {
+	p, ok := w.ctPropSite(sel)
+	if !ok {
+		return nil, nil, false
+	}
+	if p.getter == nil {
+		w.reject(sel, "missing checked property getter")
+		return sel, nil, true
+	}
+	recv, pre := w.expr(sel.X)
+	return callOf(sel.Pos(), p.accessor(recv, p.getter), nil), pre, true
+}
+
+func (w ctWalker) ctPropertyInterface(n *syntax.InterfaceType) (syntax.Expr, bool) {
+	for _, field := range n.MethodList {
+		if _, ok := field.Type.(*syntax.PropertyType); ok {
+			typ := w.fl.pkg.info.TypeOf(n)
+			if typ == nil {
+				w.reject(n, "missing checked property interface")
+				return n, true
+			}
+			return w.fl.ctTypeExpr(n.Pos(), typ), true
+		}
+	}
+	return nil, false
+}
+
+func (w ctWalker) ctPropPin(pre *[]syntax.Stmt, x syntax.Expr) *syntax.Name {
+	pos := x.Pos()
+	id := w.nextArg()
+	*pre = append(*pre, defineOf(pos, []syntax.Expr{nameOf(pos, id)}, []syntax.Expr{x}))
+	return nameOf(pos, id)
+}
+
+// Capture the interface carrying a promoted property, not the containing struct:
+// another assignment or the RHS can replace an embedded interface or pointer.
+func (w ctWalker) ctPropReceiver(p ctPropSite, pre *[]syntax.Stmt) *syntax.Name {
+	recv, steps := w.expr(p.sel.X)
+	*pre = append(*pre, steps...)
+	if p.promoted {
+		_, index, _ := types2.LookupFieldOrMethod(p.recv, true, w.fl.pkg.tpkg, p.getter.Name())
+		if len(index) <= 1 {
+			w.reject(p.sel, "missing checked promoted property path")
+		} else {
+			recv = w.ctPropProject(recv, p.recv, index[:len(index)-1], p.sel.Pos())
+		}
+	}
+	return w.ctPropPin(pre, recv)
+}
+
+func (w ctWalker) ctPropProject(x syntax.Expr, typ types2.Type, path []int, pos syntax.Pos) syntax.Expr {
+	for _, ix := range path {
+		if ptr, ok := compositeUnderlying(typ).(*types2.Pointer); ok {
+			typ = ptr.Elem()
+		}
+		st, ok := compositeUnderlying(typ).(*types2.Struct)
+		if !ok || ix >= st.NumFields() {
+			w.reject(x, "invalid checked embedded field path")
+			return x
+		}
+		field := st.Field(ix)
+		sel := selOf(pos, x, field.Name())
+		if !field.Exported() && field.Pkg() != w.fl.pkg.tpkg {
+			w.fl.ct.bindOwnedSelector(sel)
+		}
+		x, typ = sel, field.Type()
+	}
+	return x
+}
+
+func (p ctPropSite) setFrom(base *syntax.Name) *syntax.SelectorExpr {
+	return p.accessor(nameOf(base.Pos(), base.Value), p.setter)
+}
+
+type ctPropTarget struct {
+	dst    syntax.Expr
+	typ    types2.Type
+	setter bool
+	nested *ctPropNested
+}
+
+type ctPropTargets struct {
+	w       ctWalker
+	pos     syntax.Pos
+	pre     []syntax.Stmt
+	list    []ctPropTarget
+	results *types2.Tuple
+}
+
+func (w ctWalker) ctPropertyTargets(s *syntax.AssignStmt) (ctPropTargets, bool) {
+	if s.Op != 0 {
+		return ctPropTargets{}, false
+	}
+	for _, x := range syntax.UnpackListExpr(s.Lhs) {
+		if w.ctPropValueTarget(x) {
+			return w.ctPinAssignmentTargets(s), true
+		}
+	}
+	return ctPropTargets{}, false
+}
+
+func (w ctWalker) ctPinAssignmentTargets(s *syntax.AssignStmt) ctPropTargets {
+	lhs := syntax.UnpackListExpr(s.Lhs)
+	out := ctPropTargets{w: w, pos: s.Pos(), list: make([]ctPropTarget, len(lhs))}
+	source := s.Rhs
+	if _, call, try := tryAssignOf(s); try {
+		source = call
+	}
+	info := w.fl.pkg.info
+	out.results, _ = info.TypeOf(source).(*types2.Tuple)
+	for i, x := range lhs {
+		p, property := w.ctPropSite(x)
+		if !property {
+			typ := w.ctOptionTarget(s, x, i)
+			if w.ctPropValueTarget(x) {
+				out.list[i] = ctPropTarget{dst: x, typ: typ, nested: w.ctPropNestedTarget(x, &out.pre)}
+				continue
+			}
+			out.list[i] = ctPropTarget{dst: w.ctPropLvalue(x, &out.pre), typ: typ}
+			continue
+		}
+		if p.property.ReadOnly {
+			w.reject(x, "cannot assign to a read-only property")
+			out.list[i] = ctPropTarget{dst: x}
+			continue
+		}
+		if p.getter == nil || p.setter == nil {
+			w.reject(x, "missing checked property accessor")
+			out.list[i] = ctPropTarget{dst: x}
+			continue
+		}
+		base := w.ctPropReceiver(p, &out.pre)
+		out.list[i] = ctPropTarget{dst: p.setFrom(base), typ: p.property.Typ, setter: true}
+	}
+	return out
+}
+
+func (w ctWalker) ctPropValueTarget(e syntax.Expr) bool {
+	info := w.fl.pkg.info
+	for {
+		switch n := syntax.Unparen(e).(type) {
+		case *syntax.SelectorExpr:
+			if _, property := w.ctPropSite(n); property {
+				return true
+			}
+			typ := info.TypeOf(n.X)
+			if typ == nil {
+				return false
+			}
+			if _, ptr := compositeUnderlying(typ).(*types2.Pointer); ptr {
+				return false
+			}
+			if sel := info.Selections[n]; sel != nil && sel.Indirect() {
+				return false
+			}
+			e = n.X
+		case *syntax.IndexExpr:
+			if _, array := compositeUnderlying(info.TypeOf(n.X)).(*types2.Array); !array {
+				return false
+			}
+			e = n.X
+		default:
+			return false
+		}
+	}
+}
+
+type ctPropPart struct {
+	pos   syntax.Pos
+	field string
+	index *syntax.Name
+}
+
+type ctPropNested struct {
+	pos    syntax.Pos
+	root   string
+	getter syntax.Expr
+	setter syntax.Expr
+	path   []ctPropPart
+}
+
+func (w ctWalker) ctPropNestedTarget(x syntax.Expr, pre *[]syntax.Stmt) *ctPropNested {
+	switch n := syntax.Unparen(x).(type) {
+	case *syntax.SelectorExpr:
+		if p, ok := w.ctPropSite(n); ok {
+			if p.getter == nil || p.setter == nil {
+				w.reject(n, "missing checked writable property accessor")
+				return nil
+			}
+			base := w.ctPropReceiver(p, pre)
+			return &ctPropNested{pos: n.Pos(), root: w.nextArg(),
+				getter: p.accessor(base, p.getter), setter: p.setFrom(base)}
+		}
+		if target := w.ctPropNestedTarget(n.X, pre); target != nil {
+			field := tupleSelectionName(w.fl.pkg.info.TypeOf(n.X), n.Sel.Value)
+			target.path = append(target.path, ctPropPart{pos: n.Pos(), field: field})
+			return target
+		}
+	case *syntax.IndexExpr:
+		if target := w.ctPropNestedTarget(n.X, pre); target != nil {
+			index, steps := w.expr(n.Index)
+			*pre = append(*pre, steps...)
+			pos := index.Pos()
+			if w.fl.pkg.info.Types[n.Index].Value != nil {
+				index = callOf(pos, w.fl.ctBuiltin(pos, "int"), []syntax.Expr{index})
+			}
+			id := w.ctPropPin(pre, index)
+			target.path = append(target.path, ctPropPart{pos: n.Pos(), index: id})
+			return target
+		}
+	}
+	return nil
+}
+
+func (n *ctPropNested) initialize() syntax.Stmt {
+	return defineOf(n.pos, []syntax.Expr{nameOf(n.pos, n.root)}, []syntax.Expr{callOf(n.pos, n.getter, nil)})
+}
+
+func (n *ctPropNested) place() syntax.Expr {
+	var x syntax.Expr = nameOf(n.pos, n.root)
+	for _, part := range n.path {
+		if part.index != nil {
+			index := nameOf(part.index.Pos(), part.index.Value)
+			x = at(&syntax.IndexExpr{X: x, Index: index}, part.pos)
+		} else {
+			x = selOf(part.pos, x, part.field)
+		}
+	}
+	return x
+}
+
+func (n *ctPropNested) store(value syntax.Expr) []syntax.Stmt {
+	lhs := n.place()
+	return []syntax.Stmt{
+		assignOf(lhs.Pos(), []syntax.Expr{lhs}, []syntax.Expr{value}),
+		exprStmtOf(n.pos, callOf(n.pos, n.setter, []syntax.Expr{nameOf(n.pos, n.root)})),
+	}
+}
+
+// Split an ordinary target at its reference operands, keeping the final
+// dereference, bounds check, or map store in the assignment phase.
+func (w ctWalker) ctPropLvalue(e syntax.Expr, pre *[]syntax.Stmt) syntax.Expr {
+	info := w.fl.pkg.info
+	switch n := syntax.Unparen(e).(type) {
+	case *syntax.Name:
+		return n
+	case *syntax.IndexExpr:
+		typ := compositeUnderlying(info.TypeOf(n.X))
+		if _, array := typ.(*types2.Array); array {
+			n.X = w.ctPropLvalue(n.X, pre)
+		} else {
+			n.X = w.ctPropCapture(n.X, pre)
+		}
+		if m, ok := typ.(*types2.Map); ok {
+			key, steps := w.expr(n.Index)
+			key = w.ctOptionValue(n.Index, key, m.Key())
+			*pre = append(*pre, steps...)
+			pos := key.Pos()
+			id := w.nextArg()
+			decl := at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, id)},
+				Type: w.fl.ctTypeExpr(pos, m.Key()), Values: key}, pos)
+			*pre = append(*pre, at(&syntax.DeclStmt{DeclList: []syntax.Decl{decl}}, pos))
+			n.Index = nameOf(pos, id)
+		} else if info.Types[n.Index].Value == nil {
+			n.Index = w.ctPropCapture(n.Index, pre)
+		} else {
+			idx, steps := w.expr(n.Index)
+			*pre = append(*pre, steps...)
+			n.Index = idx
+		}
+		return n
+	case *syntax.SelectorExpr:
+		return w.ctPropFieldLvalue(n, pre)
+	case *syntax.Operation:
+		if n.Op == syntax.Mul && n.Y == nil {
+			n.X = w.ctPropCapture(n.X, pre)
+			return n
+		}
+	}
+	w.reject(e, "unsupported mixed property assignment target")
+	return e
+}
+
+func (w ctWalker) ctPropFieldLvalue(n *syntax.SelectorExpr, pre *[]syntax.Stmt) syntax.Expr {
+	info := w.fl.pkg.info
+	typ := info.TypeOf(n.X)
+	if typ == nil {
+		return n
+	}
+	if selection := info.Selections[n]; selection != nil && len(selection.Index()) > 1 {
+		if x, ok := w.ctPropPromotedField(n, typ, selection.Index(), pre); ok {
+			return x
+		}
+	}
+	n.Sel.Value = tupleSelectionName(typ, n.Sel.Value)
+	if _, pointer := compositeUnderlying(typ).(*types2.Pointer); pointer {
+		n.X = w.ctPropCapture(n.X, pre)
+	} else {
+		n.X = w.ctPropLvalue(n.X, pre)
+	}
+	return n
+}
+
+func (w ctWalker) ctPropPromotedField(n *syntax.SelectorExpr, typ types2.Type, path []int, pre *[]syntax.Stmt) (syntax.Expr, bool) {
+	prefix := path[:len(path)-1]
+	pointerAt := -1
+	for i, ix := range prefix {
+		if p, ok := compositeUnderlying(typ).(*types2.Pointer); ok {
+			typ = p.Elem()
+		}
+		st, ok := compositeUnderlying(typ).(*types2.Struct)
+		if !ok {
+			return nil, false
+		}
+		typ = st.Field(ix).Type()
+		if _, ptr := compositeUnderlying(typ).(*types2.Pointer); ptr {
+			pointerAt = i
+		}
+	}
+	if pointerAt < 0 {
+		return nil, false
+	}
+	rootType := w.fl.pkg.info.TypeOf(n.X)
+	pos := n.Pos()
+	root, steps := w.expr(n.X)
+	*pre = append(*pre, steps...)
+	base := w.ctPropProject(root, rootType, prefix[:pointerAt+1], pos)
+	ref := w.ctPropPin(pre, base)
+	return at(&syntax.SelectorExpr{X: ref, Sel: n.Sel}, pos), true
+}
+
+func (w ctWalker) ctPropCapture(x syntax.Expr, pre *[]syntax.Stmt) syntax.Expr {
+	e, steps := w.expr(x)
+	*pre = append(*pre, steps...)
+	return w.ctPropPin(pre, e)
+}
+
+func (t ctPropTargets) assign(rhs syntax.Expr, errName *syntax.Name) []syntax.Stmt {
+	pos := t.pos
+	if errName == nil && len(t.list) == 1 && t.list[0].setter {
+		return []syntax.Stmt{t.list[0].commit(rhs)}
+	}
+	vals := make([]syntax.Expr, 0, len(t.list)+1)
+	decls := make([]syntax.Decl, 0, len(t.list))
+	commits := make([]syntax.Stmt, 0, len(t.list))
+	_, rhsList := rhs.(*syntax.ListExpr)
+	for i, slot := range t.list {
+		if id, ok := slot.dst.(*syntax.Name); ok && id.Value == "_" {
+			vals = append(vals, id)
+			continue
+		}
+		if slot.typ == nil {
+			t.w.reject(slot.dst, "missing checked mixed property assignment target type")
+			return nil
+		}
+		atPos := slot.dst.Pos()
+		id := t.w.nextArg()
+		typ := slot.typ
+		if !rhsList && t.results != nil && i < t.results.Len() && t.w.fl.asOption(typ) != nil {
+			typ = t.results.At(i).Type()
+		}
+		vals = append(vals, nameOf(atPos, id))
+		decls = append(decls, at(&syntax.VarDecl{
+			NameList: []*syntax.Name{nameOf(atPos, id)},
+			Type:     t.w.fl.ctTypeExpr(atPos, typ),
+		}, atPos))
+		value := t.w.ctOptionValueFrom(nameOf(atPos, id), typ, slot.typ)
+		commits = append(commits, slot.commit(value))
+	}
+	if errName != nil {
+		vals = append(vals, errName)
+	}
+	out := make([]syntax.Stmt, 0, 2+len(commits))
+	out = append(out, at(&syntax.DeclStmt{DeclList: decls}, pos),
+		at(&syntax.AssignStmt{Lhs: listOf(pos, vals), Rhs: rhs}, pos))
+	return append(out, commits...)
+}
+
+func (w ctWalker) ctPropertyAssign(s *syntax.AssignStmt) ([]syntax.Stmt, bool) {
+	if _, _, try := tryAssignOf(s); try || s.Op == syntax.Def {
+		return nil, false
+	}
+	var list []syntax.Stmt
+	if s.Op == 0 {
+		targets, ok := w.ctPropertyTargets(s)
+		if !ok {
+			return nil, false
+		}
+		list = w.ctPropAssignmentValues(s, targets)
+	} else {
+		if p, ok := w.ctPropSite(s.Lhs); ok {
+			list = w.ctPropCompound(s, p)
+		} else if w.ctPropValueTarget(s.Lhs) {
+			list = w.ctPropNestedCompound(s)
+		} else {
+			return nil, false
+		}
+	}
+	if len(list) > 1 {
+		list = []syntax.Stmt{blockEndingAt(syntax.StartPos(s), syntax.EndPos(s), list)}
+	}
+	return list, true
+}
+
+func (w ctWalker) ctPropAssignmentValues(s *syntax.AssignStmt, targets ctPropTargets) []syntax.Stmt {
+	if len(targets.list) == 2 {
+		if value, pre, receive := w.groupReceive(s.Rhs, 2); receive {
+			values := syntax.UnpackListExpr(value)
+			if targets.results != nil && targets.results.Len() == len(values) {
+				for i, item := range values {
+					values[i] = w.ctOptionValueFrom(item, targets.results.At(i).Type(), targets.list[i].typ)
+				}
+			}
+			return append(append(targets.pre, pre...), targets.assign(listOf(s.Pos(), values), nil)...)
+		}
+	}
+	if tuple, ok := syntax.Unparen(s.Rhs).(*syntax.TupleLit); ok && len(targets.list) > 1 && len(tuple.Elems) == len(targets.list) {
+		s.Rhs = listOf(tuple.Pos(), tuple.Elems)
+	}
+	if len(targets.list) > 1 {
+		if shape := w.ctTupleShapeOf(s.Rhs); shape != nil && shape.NumFields() == len(targets.list) {
+			rhs, pre := w.expr(s.Rhs)
+			pre = append(pre, w.ctTupleUnpack(s, &rhs, shape)...)
+			targets.results = nil
+			return append(append(targets.pre, pre...), targets.assign(rhs, nil)...)
+		}
+	}
+	if len(targets.list) == 1 && targets.results != nil && targets.results.Len() > 1 {
+		if shape := ctTupleShape(targets.list[0].typ); shape != nil && shape.NumFields() == targets.results.Len() {
+			value, pre := w.expr(s.Rhs)
+			rhs := w.ctTuplePack(value, targets.results, shape)
+			return append(append(targets.pre, pre...), targets.assign(rhs, nil)...)
+		}
+	}
+	pre := append(targets.pre, w.optionValues(s, &s.Rhs)...)
+	return append(pre, targets.assign(s.Rhs, nil)...)
+}
+
+func (w ctWalker) ctPropCompound(s *syntax.AssignStmt, p ctPropSite) []syntax.Stmt {
+	if p.property.ReadOnly {
+		w.reject(p.sel, "cannot assign to a read-only property")
+		return nil
+	}
+	if p.getter == nil || p.setter == nil {
+		w.reject(p.sel, "missing checked property accessor")
+		return nil
+	}
+	var pre []syntax.Stmt
+	base := w.ctPropReceiver(p, &pre)
+	set := p.setFrom(base)
+	pos := s.Pos()
+	var left syntax.Expr = callOf(p.sel.Pos(), p.accessor(base, p.getter), nil)
+	var right syntax.Expr = litOf(pos, "1", syntax.IntLit)
+	if s.Rhs != nil {
+		var steps []syntax.Stmt
+		right, steps = w.checkedOperand(s.Rhs, nil)
+		if len(steps) != 0 {
+			left = w.ctPropPin(&pre, left)
+			pre = append(pre, steps...)
+		}
+	}
+	value := at(&syntax.Operation{Op: s.Op, X: left, Y: right}, pos)
+	return append(pre, exprStmtOf(pos, callOf(pos, set, []syntax.Expr{value})))
+}
+
+func (w ctWalker) ctPropNestedCompound(s *syntax.AssignStmt) []syntax.Stmt {
+	var pre []syntax.Stmt
+	n := w.ctPropNestedTarget(s.Lhs, &pre)
+	if n == nil {
+		return pre
+	}
+	pre = append(pre, n.initialize())
+	pos := s.Pos()
+	left := n.place()
+	var right syntax.Expr = litOf(pos, "1", syntax.IntLit)
+	reload := false
+	if s.Rhs != nil {
+		var steps []syntax.Stmt
+		right, steps = w.checkedOperand(s.Rhs, nil)
+		reload = len(steps) != 0 || (w.fl.pkg.info.Types[s.Rhs].Value == nil && ctPropReenters(right))
+		if reload {
+			left = w.ctPropPin(&pre, left)
+			pre = append(pre, steps...)
+		}
+	}
+	var result syntax.Expr = at(&syntax.Operation{Op: s.Op, X: left, Y: right}, pos)
+	if reload {
+		// RHS can update siblings of the destination; store into current storage.
+		result = w.ctPropPin(&pre, result)
+		pre = append(pre, assignOf(n.pos, []syntax.Expr{nameOf(n.pos, n.root)},
+			[]syntax.Expr{callOf(n.pos, n.getter, nil)}))
+	}
+	return append(pre, n.store(result)...)
+}
+
+func ctPropReenters(e syntax.Expr) bool {
+	reenters := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if !reenters {
+			switch x := n.(type) {
+			case *syntax.CallExpr:
+				reenters = true
+			case *syntax.Operation:
+				reenters = x.Op == syntax.Recv
+			case *syntax.FuncLit:
+				return false
+			}
+		}
+		return !reenters
+	})
+	return reenters
+}
+
+func (w ctWalker) ctPropPointerMethod(call *syntax.CallExpr) (*syntax.SelectorExpr, ctPropSite, *types2.Selection) {
+	sel, _, ok := propCallSel(call.Fun)
+	if !ok {
+		return nil, ctPropSite{}, nil
+	}
+	p, ok := w.ctPropSite(sel.X)
+	if !ok {
+		return nil, ctPropSite{}, nil
+	}
+	selection := w.fl.pkg.info.Selections[sel]
+	if selection == nil || selection.Kind() != types2.MethodVal {
+		return nil, ctPropSite{}, nil
+	}
+	method, ok := selection.Obj().(*types2.Func)
+	if !ok || !isPointerRecv(method) {
+		return nil, ctPropSite{}, nil
+	}
+	return sel, p, selection
+}
+
+func (w ctWalker) ctPropertyCallStmt(s *syntax.CallStmt) ([]syntax.Stmt, bool) {
+	call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
+	if !ok {
+		return nil, false
+	}
+	sel, p, selection := w.ctPropPointerMethod(call)
+	if selection == nil {
+		return nil, false
+	}
+	if _, pointer := compositeUnderlying(p.property.Typ).(*types2.Pointer); !pointer {
+		return nil, false
+	}
+	if p.getter == nil {
+		w.reject(sel, "missing checked property getter")
+		return nil, true
+	}
+	recv, pre := w.expr(p.sel.X)
+	value := w.ctPropPin(&pre, callOf(p.sel.Pos(), p.accessor(recv, p.getter), nil))
+	invoke, _ := w.ctPropBindMethod(call, sel, selection, value, &pre)
+	if invoke != nil {
+		// A Go method-value wrapper is recover-transparent; an ordinary
+		// write-back closure would stop the method from recovering directly.
+		call.Fun = invoke
+	}
+	return pre, true
+}
+
+func (w ctWalker) ctPropertyCall(call *syntax.CallExpr) (syntax.Expr, []syntax.Stmt, bool) {
+	sel, p, selection := w.ctPropPointerMethod(call)
+	if selection == nil {
+		return nil, nil, false
+	}
+	if p.getter == nil || (!p.property.ReadOnly && p.setter == nil) {
+		w.reject(sel, "missing checked property accessor")
+		return call, nil, true
+	}
+	var pre []syntax.Stmt
+	var set syntax.Expr
+	var get syntax.Expr
+	if p.property.ReadOnly {
+		recv, steps := w.expr(p.sel.X)
+		pre = steps
+		get = p.accessor(recv, p.getter)
+	} else {
+		base := w.ctPropReceiver(p, &pre)
+		set = p.setFrom(base)
+		get = p.accessor(base, p.getter)
+	}
+	value := w.ctPropPin(&pre, callOf(p.sel.Pos(), get, nil))
+	invoke, sig := w.ctPropBindMethod(call, sel, selection, value, &pre)
+	if invoke == nil {
+		return call, nil, true
+	}
+	if set == nil {
+		call.Fun = invoke
+		return call, pre, true
+	}
+	if sig == nil {
+		w.reject(sel, "missing checked property method signature")
+		return call, pre, true
+	}
+	return w.ctPropWriteBackCall(call, sig, invoke, value, set), pre, true
+}
+
+func (w ctWalker) ctPropBindMethod(call *syntax.CallExpr, sel *syntax.SelectorExpr, selection *types2.Selection, value *syntax.Name, pre *[]syntax.Stmt) (*syntax.Name, *types2.Signature) {
+	var bound syntax.Expr = at(&syntax.SelectorExpr{
+		X: nameOf(value.Pos(), value.Value), Sel: sel.Sel,
+	}, sel.Pos())
+	sig, _ := selection.Type().(*types2.Signature)
+	if inst, ok := w.fl.pkg.info.Instances[sel.Sel]; ok && inst.TypeArgs.Len() != 0 {
+		sig, _ = inst.Type.(*types2.Signature)
+		args := make([]syntax.Expr, inst.TypeArgs.Len())
+		for i := range args {
+			args[i] = w.fl.ctTypeExpr(sel.Pos(), inst.TypeArgs.At(i))
+		}
+		bound = at(&syntax.IndexExpr{X: bound, Index: listOf(sel.Pos(), args)}, sel.Pos())
+	} else if _, indexed := syntax.Unparen(call.Fun).(*syntax.IndexExpr); indexed {
+		w.reject(sel, "missing checked property method instantiation")
+		return nil, nil
+	}
+	invoke := w.ctPropPin(pre, bound)
+	*pre = append(*pre, w.walkExprs(len(call.ArgList), func(i int) *syntax.Expr {
+		return &call.ArgList[i]
+	}, func(i int, old syntax.Expr) types2.Type {
+		return w.ctOptionTarget(call, old, i)
+	})...)
+	return invoke, sig
+}
+
+func (w ctWalker) ctPropertySelect(clause *syntax.CommClause) bool {
+	as, ok := clause.Comm.(*syntax.AssignStmt)
+	if !ok {
+		return false
+	}
+	targets, ok := w.ctPropertyTargets(as)
+	if !ok {
+		return false
+	}
+	pos := as.Pos()
+	if len(targets.list) > 2 {
+		shape := w.ctTupleShapeOf(as.Rhs)
+		if shape == nil || shape.NumFields() != len(targets.list) {
+			w.reject(as, "missing checked shape of tuple received into properties")
+			return true
+		}
+		id := w.nextArg()
+		clause.Comm = defineOf(pos, []syntax.Expr{nameOf(pos, id)}, []syntax.Expr{as.Rhs})
+		pre := targets.pre
+		for i, slot := range targets.list {
+			if slot.blank() {
+				continue
+			}
+			field := shape.Field(i)
+			value := selOf(pos, nameOf(pos, id), field.Name())
+			pre = append(pre, slot.commit(w.ctOptionValueFrom(value, field.Type(), slot.typ)))
+		}
+		clause.Body = append(pre, clause.Body...)
+		return true
+	}
+	var types [2]types2.Type
+	if sources := targets.results; sources != nil {
+		for i := range min(len(targets.list), sources.Len()) {
+			types[i] = sources.At(i).Type()
+		}
+	} else {
+		types[0] = w.fl.pkg.info.TypeOf(as.Rhs)
+		if len(targets.list) == 2 {
+			types[1] = types2.Typ[types2.Bool]
+		}
+	}
+	lhs, pre := targets.iteration(types[:])
+	clause.Comm = at(&syntax.AssignStmt{Op: syntax.Def, Lhs: lhs, Rhs: as.Rhs}, pos)
+	clause.Body = append(pre, clause.Body...)
+	return true
+}
+
+func (w ctWalker) ctPropertyRange(rng *syntax.RangeClause, body *syntax.BlockStmt) {
+	if rng.Def || rng.Lhs == nil {
+		return
+	}
+	as := at(&syntax.AssignStmt{Lhs: rng.Lhs}, rng.Pos())
+	targets, ok := w.ctPropertyTargets(as)
+	if !ok {
+		return
+	}
+	typ := w.fl.pkg.info.TypeOf(rng.X)
+stripViews:
+	for {
+		switch t := types2.Unalias(typ).(type) {
+		case *types2.ConstView:
+			typ = t.Elem
+		case *types2.ReadonlyDescendants:
+			typ = t.Elem
+		default:
+			break stripViews
+		}
+	}
+	if typ == nil {
+		w.reject(rng, "missing checked range operand type")
+		return
+	}
+	key, value := types2.RangeKeyVal(typ)
+	if u, ok := compositeUnderlying(typ).(*types2.Basic); ok &&
+		u.Info()&types2.IsInteger != 0 && !types2.Identical(key, types2.Typ[types2.Int]) {
+		if tv := w.fl.pkg.info.Types[rng.X]; tv.Value != nil && types2.Identical(key, types2.Default(key)) {
+			pos := rng.X.Pos()
+			rng.X = callOf(pos, w.fl.ctTypeExpr(pos, key), []syntax.Expr{rng.X})
+		}
+	}
+	var pre []syntax.Stmt
+	rng.Lhs, pre = targets.iteration([]types2.Type{types2.Default(key), value})
+	rng.Def = true
+	body.List = append(pre, body.List...)
+}
+
+func (t ctPropTargets) iteration(sources []types2.Type) (syntax.Expr, []syntax.Stmt) {
+	names := make([]syntax.Expr, len(t.list))
+	pre := t.pre
+	for i, slot := range t.list {
+		pos := slot.dst.Pos()
+		if slot.blank() {
+			names[i] = nameOf(pos, "_")
+			continue
+		}
+		id := t.w.nextArg()
+		names[i] = nameOf(pos, id)
+		value := t.w.ctOptionValueFrom(nameOf(pos, id), sources[i], slot.typ)
+		pre = append(pre, slot.commit(value))
+	}
+	return listOf(t.pos, names), pre
+}
+
+func (t ctPropTarget) blank() bool {
+	id, ok := t.dst.(*syntax.Name)
+	return ok && id.Value == "_"
+}
+
+func (t ctPropTarget) commit(value syntax.Expr) syntax.Stmt {
+	pos := t.dst.Pos()
+	if t.setter {
+		return exprStmtOf(pos, callOf(pos, t.dst, []syntax.Expr{value}))
+	}
+	if t.nested != nil {
+		return blockOf(pos, append([]syntax.Stmt{t.nested.initialize()}, t.nested.store(value)...))
+	}
+	return assignOf(pos, []syntax.Expr{t.dst}, []syntax.Expr{value})
+}
+
+// The wrapper's arguments are evaluated at the original call site, including
+// for deferred calls. Write-back runs only after the method returns.
+func (w ctWalker) ctPropWriteBackCall(call *syntax.CallExpr, sig *types2.Signature, invoke, value *syntax.Name, set syntax.Expr) *syntax.CallExpr {
+	pos := call.Pos()
+	params := make([]*syntax.Field, sig.Params().Len())
+	args := make([]syntax.Expr, len(params))
+	for i := range params {
+		typ := sig.Params().At(i).Type()
+		var what syntax.Expr
+		if sig.Variadic() && i == len(params)-1 {
+			slice, _ := types2.CoreType(typ).(*types2.Slice)
+			what = at(&syntax.DotsType{Elem: w.fl.ctTypeExpr(pos, slice.Elem())}, pos)
+		} else {
+			what = w.fl.ctTypeExpr(pos, typ)
+		}
+		id := w.nextArg()
+		args[i] = nameOf(pos, id)
+		params[i] = at(&syntax.Field{Name: nameOf(pos, id), Type: what}, pos)
+	}
+	results := make([]*syntax.Field, sig.Results().Len())
+	resultDefs := make([]syntax.Expr, len(results))
+	resultUses := make([]syntax.Expr, len(results))
+	for i := range results {
+		typ := sig.Results().At(i).Type()
+		results[i] = at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, typ)}, pos)
+		id := w.nextArg()
+		resultDefs[i] = nameOf(pos, id)
+		resultUses[i] = nameOf(pos, id)
+	}
+	actual := callOf(pos, invoke, args)
+	actual.HasDots = sig.Variadic()
+	var body []syntax.Stmt
+	if len(results) == 0 {
+		body = append(body, exprStmtOf(pos, actual))
+	} else {
+		body = append(body, defineOf(pos, resultDefs, []syntax.Expr{actual}))
+	}
+	body = append(body, exprStmtOf(pos, callOf(pos, set, []syntax.Expr{value})))
+	if len(results) != 0 {
+		body = append(body, returnOf(pos, resultUses))
+	}
+	call.Fun = at(&syntax.FuncLit{
+		Type: at(&syntax.FuncType{ParamList: params, ResultList: results}, pos),
+		Body: blockOf(pos, body),
+	}, pos)
+	return call
+}

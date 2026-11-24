@@ -1,0 +1,18 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+type state string
+
+const readyState state = "ready"
+
+func (s state) ready() bool { return s == "ready" }
+
+func methodReceiver() {
+	const if readyState /* ERROR "[comptime::not_constant] const if condition is not constant" */ .ready != nil {
+	}
+	const if readyState /* ERROR "[comptime::not_constant] const if condition is not constant" */ .ready() {
+	}
+}

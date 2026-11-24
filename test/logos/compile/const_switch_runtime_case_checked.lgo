@@ -1,0 +1,17 @@
+// errorcheck
+
+package p
+
+func pick[F any]() string {
+	const switch F {
+	case string:
+		var n int = "runtime case" // ERROR "cannot use"
+		_ = n
+		return "string"
+	case int:
+		return "int"
+	}
+	return "other"
+}
+
+var _ = pick[int]()

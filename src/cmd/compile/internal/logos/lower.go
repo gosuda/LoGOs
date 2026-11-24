@@ -60,14 +60,24 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	f := facts.Write(pkg, info, files, src)
 	f.BareUnions = bareUnions(pkg)
 	f.DualUse = dualUseUnionNames(pkg, info, files)
+	f.CheckedUnionTypes = true
 	facts.SetCurrent(f)
 	shared := &packageLower{info: info, tpkg: pkg, files: files, src: src, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
 	shared.importedDone = map[string]bool{}
 	shared.composites, shared.compositeSeq = collectComposites(files, info)
 	shared.importedComposites = map[*types2.Var]*importedComposite{}
-	base.ClearLogosCtClones(pkg.Path())
-	shared.ctExp = newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
+	newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
+	ctEjectBlanked = nil
+	var prepared *ctPreparedPackage
+	if info.LogosCtImport != nil && len(info.LogosCtInst) != 0 {
+		var err error
+		prepared, err = stageCtPreparedPackage(pkg, info)
+		if err != nil {
+			base.Fatalf("%v", err)
+		}
+	}
+	var traceFile *syntax.File
 	edits := make(map[*syntax.File][]Edit)
 	tupleFiles := make(map[string]int)
 	changed := false
@@ -75,6 +85,9 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 		data, ok := src[file]
 		if !ok {
 			continue
+		}
+		if traceFile == nil {
+			traceFile = file
 		}
 		buf := slices.Clone(data)
 		fl := &fileLower{
@@ -101,16 +114,35 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			edits[file] = editsOf(data, fl.base, fl.splices)
 		}
 	}
+	if prepared != nil {
+		if len(prepared.sites.decls) != 0 {
+			if traceFile == nil {
+				base.Fatalf("logos: no consumer source file for comptime trace sites")
+			}
+			prepared.sites.appendDecls(traceFile)
+		}
+		// Hoisted const-for-local declarations were moved to package
+		// level after staging; link them to their original
+		// iteration-local types so the finish pass rebinds instance
+		// type references to the package-level declarations.
+		if len(shared.ctLocalHoists) != 0 {
+			if prepared.localDefs == nil {
+				prepared.localDefs = make(map[*syntax.Name]*types2.TypeName)
+			}
+			for name, old := range shared.ctLocalHoists {
+				prepared.localDefs[name] = old
+			}
+		}
+		info.LogosCtFinish = prepared.finish
+		changed = true
+	}
 	clear(interpKinds) // Kinds of originals a const for replaced are never consumed; drop them with the rest.
 	if !changed {
-		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) // pure-info consts (rt.Freeze results) need a plain recheck.
+		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) || infoHasInferredOption(pkg, info, files)
 	}
 	base.ExitIfErrors()
 	for _, file := range files {
 		rejectSurvivors(file)
-	}
-	for _, name := range shared.ctExp.memo {
-		base.RegisterLogosCtClone(pkg.Path(), name)
 	}
 	return changed, edits
 }
@@ -147,6 +179,8 @@ type packageLower struct {
 	info               *types2.Info
 	tpkg               *types2.Package
 	siteSeq            int
+	ejectNames         map[string]string
+	ejectOwners        map[string]*types2.Package
 	constMaps          map[*types2.Const]*constMapGen
 	importedMaps       map[*types2.Var]*constMapGen
 	importedSeq        int
@@ -176,6 +210,11 @@ type packageLower struct {
 	src        map[*syntax.File][]byte
 	typeDecls  map[*types2.TypeName]*syntax.TypeDecl
 	declSrc    map[*syntax.TypeDecl][]byte
+	// ctLocalHoists maps hoisted const-for-local type declarations
+	// (fresh nodes) to the original iteration-local types they were
+	// copied from, so the finish pass can rebind instance type
+	// references to the package-level declarations.
+	ctLocalHoists map[*syntax.Name]*types2.TypeName
 }
 
 // declOf maps a package-level TypeName back to its TypeDecl and the file's
@@ -206,6 +245,7 @@ func (pl *packageLower) declOf(tn *types2.TypeName) (*syntax.TypeDecl, []byte) {
 // fileLower carries the state of lowering one file.
 type fileLower struct {
 	pkg           *packageLower
+	ct            *ctLowerContext
 	file          *syntax.File
 	src           []byte
 	keywords      facts.KeywordIndex
@@ -221,7 +261,9 @@ type fileLower struct {
 	moves         []*chainMove
 	changed       bool
 	needRT        bool
+	needRTText    bool // text-only rt need: eject output references rt, checked AST does not.
 	rtDeclEmitted bool // the import flush actually emitted the rt ImportDecl; needRT alone can outlive the reference that raised it.
+	ejectRetired  []*syntax.FuncDecl
 	needSimd      bool
 	needSimdMath  bool
 	needJSON      bool
@@ -233,9 +275,13 @@ type fileLower struct {
 	// this file, as parsed nodes and as eject text.
 	constDecls                 []syntax.Decl
 	constText                  string
+	constMapMarks              map[string]constMapTextRef
 	names                      map[*types2.Package]string
 	genImps                    *genImports
 	importsPendingGeneratedUse []*syntax.ImportDecl
+	genImportsPendingNativeUse []*syntax.ImportDecl
+	ejectSites                 map[syntax.Node]bool
+	ctRuntimeUnsafe            bool // the ejected text imports unsafe for a comptime run-time body
 	// Option lowering state: optMemo pins one lowering per shared
 	// `T?` type node, narrowDone pins rewritten narrowed reads,
 	// wrapSpan remembers original spans of synthetic wrapper tops for
@@ -304,6 +350,7 @@ type fileLower struct {
 	groupClosures      *groupClosureRegistry
 	groupJoins         map[syntax.Stmt]bool
 	funcs              map[*syntax.BlockStmt]*funcLower
+	unwindFlags        map[*syntax.BlockStmt]string // armed deferred literal body -> return flag of its errdefer frame.
 	compositeDone      map[syntax.Expr]bool
 }
 
@@ -885,10 +932,11 @@ func (fl *fileLower) newSite(pos syntax.Pos, line uint) string {
 // lowerFile lowers every function body of one file.
 func (fl *fileLower) lowerFile() {
 	fl.collectInterpKinds() // interpolation operand kinds before any rewrite.
-	fl.lowerComptime()      // comptime generic copies, then const for unrolling, before any rewrite.
+	fl.lowerComptime()      // comptime generic retirement, then const for unrolling, before any rewrite.
 	fl.lowerStructDefaults()
 	fl.scanRodataMarkers() // hand-written //logos:rodata lines.
 	fl.lowerZeroCopy()     // zero-copy string/bytes conversions.
+	fl.enrollLoweredConstMaps()
 	fl.lowerCTFE()
 	fl.lowerConstMapRanges()
 	fl.eraseConstViews()  // erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
@@ -918,7 +966,7 @@ func (fl *fileLower) lowerFile() {
 
 	fl.lowerStaticJSON() // generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
 	fl.flushTypeImports()
-	if fl.needRT || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needJSONText || fl.needReflect || fl.needBinary {
+	if fl.needRT || fl.needRTText || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needJSONText || fl.needReflect || fl.needBinary {
 		var imps []syntax.Decl
 		pos := fl.file.Pos()
 		for _, spec := range fl.logosImportSpecs() {
@@ -947,6 +995,7 @@ func (fl *fileLower) lowerFile() {
 	fl.resolveChainMoves() // copies of moved chain operands, after every edit inside them.
 	fl.finalizeConstFor()
 	fl.remapRegions()
+	fl.finishConstMapEjectText()
 }
 
 // genImports tracks synthesized and reused imports for one file being lowered.
@@ -965,32 +1014,37 @@ type logosImportSpec struct {
 }
 
 // rtReferenced reports whether the file's emitted text or mutated tree still
-// references the rt alias. Passes set needRT eagerly when they record a
-// reference, but a later removal — a dead const-if branch, a dropped case —
-// can erase every splice that carried it, and the bare flag would then emit
-// an unused import the build rejects.
-func (fl *fileLower) rtReferenced() bool {
+// references the rt alias, leaving out the declarations in retired and the
+// splices inside their text. Passes set needRT eagerly when they record a
+// reference, but a later removal — a dead const-if branch, a dropped case,
+// a comptime generic that eject deletes — can erase every splice that
+// carried it, and the bare flag would then emit an unused import the build
+// rejects.
+func (fl *fileLower) rtReferenced(retired []*syntax.FuncDecl) bool {
 	needle := rtAlias + "."
 	if strings.Contains(fl.constText, needle) {
 		return true
 	}
-	for _, sp := range fl.splices {
-		if strings.Contains(sp.text, needle) {
+	dropped := make([]span, len(retired))
+	for i, fn := range retired {
+		dropped[i] = fl.cfDeclSpan(fn)
+	}
+	names := func(list []splice) bool {
+		return slices.ContainsFunc(list, func(sp splice) bool {
+			return strings.Contains(sp.text, needle) && !slices.ContainsFunc(dropped, func(s span) bool { return spanInside(sp, s) })
+		})
+	}
+	if names(fl.splices) {
+		return true
+	}
+	for _, r := range fl.regions {
+		if names(r.splices) {
 			return true
 		}
 	}
-	for _, r := range fl.regions {
-		for _, sp := range r.splices {
-			if strings.Contains(sp.text, needle) {
-				return true
-			}
-		}
-	}
 	for _, m := range fl.moves {
-		for _, sp := range m.inner {
-			if strings.Contains(sp.text, needle) {
-				return true
-			}
+		if names(m.inner) {
+			return true
 		}
 	}
 	found := false
@@ -998,8 +1052,11 @@ func (fl *fileLower) rtReferenced() bool {
 		if found {
 			return false
 		}
-		if sel, ok := n.(*syntax.SelectorExpr); ok {
-			if nm, ok := sel.X.(*syntax.Name); ok && nm.Value == rtAlias {
+		switch n := n.(type) {
+		case *syntax.FuncDecl:
+			return !slices.Contains(retired, n)
+		case *syntax.SelectorExpr:
+			if nm, ok := n.X.(*syntax.Name); ok && nm.Value == rtAlias {
 				found = true
 				return false
 			}
@@ -1018,7 +1075,7 @@ func (fl *fileLower) rtReferenced() bool {
 
 func (fl *fileLower) logosImportSpecs() []logosImportSpec {
 	specs := []logosImportSpec{
-		{fl.needRT && fl.rtReferenced(), rtAlias, rtImportPath, rtImport},
+		{fl.needRT && fl.rtReferenced(nil), rtAlias, rtImportPath, rtImport},
 		{fl.needJSON, jsonAlias, jsonImportPath, jsonImport},
 		{fl.needJSONText, jsontextAlias, jsontextImportPath, jsontextImport},
 		{fl.needReflect, reflectAlias, "reflect", reflectImport},
@@ -1080,7 +1137,14 @@ func (fl *fileLower) addHeaderSplice() {
 		ins = off
 	}
 	for _, spec := range fl.logosImportSpecs() {
-		if spec.need {
+		need := spec.need
+		if spec.path == rtImportPath {
+			need = fl.needRTText || need && (len(fl.ejectRetired) == 0 || fl.rtReferenced(fl.ejectRetired))
+			if spec.need && !need {
+				fl.ejectHideImport(spec.path)
+			}
+		}
+		if need {
 			fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 		}
 	}
@@ -1168,11 +1232,13 @@ type funcLower struct {
 	ft               *syntax.FuncType
 	body             *syntax.BlockStmt
 	specs            []resultSpec
+	ctYield          *ctYieldFrame
 	errName          string
 	hasDeferTry      bool
 	hasErrdefer      bool
 	hasScopeDefer    bool
 	okName           string
+	unwindFlag       string // return flag of the errdefer frame that defers this literal; see armDeferredLiterals.
 	errSeq           int
 	funSeq           int
 	argSeq           int
@@ -1245,10 +1311,14 @@ func (fc *funcLower) lower() {
 	}
 	if fc.hasErrdefer {
 		fc.armOkFlag()
+		fc.armDeferredLiterals()
 	}
 	fc.lowerScopeDefers()
 	fc.lowerConstIf()
+	fc.unwindFlag = fc.fl.unwindFlags[fc.body]
+	exits := endsInReturn(fc.body.List)
 	fc.body.List = fc.lowerList(fc.body.List)
+	fc.armUnwindText(exits)
 }
 
 // detectCleanups records whether the body holds a defer? or an errdefer

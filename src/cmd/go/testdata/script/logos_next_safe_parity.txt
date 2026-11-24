@@ -1,0 +1,257 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+[!exec:patch] skip 'patch unavailable'
+
+cd m
+go run .
+cp stdout $WORK/go-output
+cp main.go $WORK/main.orig
+logos next
+cp stderr $WORK/preview-stderr
+! exists main.lgo
+! exists next_tasks.json
+cmp main.go $WORK/main.orig
+grep 'review only.*loop-chain' $WORK/preview-stderr
+grep 'review only.*err-return' $WORK/preview-stderr
+
+# --fix emits a patch on stdout and must not touch a single file: sources,
+# tests and the plan stay byte-identical and no .lgo file appears. Tool
+# diagnostics stay off stdout, so the captured output is the patch alone.
+logos next --fix
+cp stdout $WORK/fix.patch
+! grep '^logos next' $WORK/fix.patch
+! exists main.lgo
+! exists noexec_test.lgo
+! exists sub/nextparity/noexec_test.lgo
+! exists next_tasks.json
+cmp main.go $WORK/main.orig
+
+# Two runs over the same tree must emit the same patch bytes.
+logos next --fix
+cp stdout $WORK/fix2.patch
+cmp $WORK/fix.patch $WORK/fix2.patch
+
+# The patch must describe the source conversion and the required plan
+# change, not just one of them.
+grep '^\+\+\+ .*main\.lgo' $WORK/fix.patch
+grep '^\+\+\+ .*next_tasks\.json' $WORK/fix.patch
+
+# Applying the captured stdout must complete the conversion: every checked
+# .go file becomes .lgo, including the test files, and the plan lands
+# beside them. patch(1) is the non-Git consumer: it applies the emitted
+# git-style encodings, including the unchanged-file rename.
+exec patch --batch --fuzz=0 -p1 -i $WORK/fix.patch
+! exists main.go
+! exists noexec_test.go
+! exists sub/nextparity/noexec_test.go
+exists main.lgo
+exists noexec_test.lgo
+exists sub/nextparity/noexec_test.lgo
+exists next_tasks.json
+grep 'n, err := work\(fail\)' main.lgo
+grep '\$"order \{step\(1\)\} \{flag\(\)\} \{step\(2\)\}"' main.lgo
+grep 'Sprintf\("custom %t", customFlag\(true\)\)' main.lgo
+grep 'Sprintf\("stringer %t", stringFlag\(true\)\)' main.lgo
+grep 'Sprintf\("bytes %s", \[\]byte\("raw"\)\)' main.lgo
+grep 'err-return' next_tasks.json
+grep 'loop-chain' next_tasks.json
+! grep '"replacement"' next_tasks.json
+logos run .
+cmp stdout $WORK/go-output
+
+# A file whose only fmt use is the rewritten call keeps the call and gets
+# guidance instead of an edit that would leave the import unused.
+cd ../m2
+go run .
+cp stderr $WORK/m2-go-stderr
+cp main.go $WORK/m2-main.orig
+logos next
+! stdout '^\+\+\+'
+stderr 'review only: sprintf-interp'
+! exists main.lgo
+cmp main.go $WORK/m2-main.orig
+
+# An existing plan file must come through --fix untouched, and the patch
+# must carry its merge instead of replacing it wholesale.
+cp ../seed/next_tasks.json next_tasks.json
+cp next_tasks.json $WORK/m2-plan.orig
+
+logos next --fix
+cp stdout $WORK/m2-fix.patch
+! grep '^logos next' $WORK/m2-fix.patch
+! exists main.lgo
+cmp main.go $WORK/m2-main.orig
+cmp next_tasks.json $WORK/m2-plan.orig
+
+logos next --fix
+cp stdout $WORK/m2-fix2.patch
+cmp $WORK/m2-fix.patch $WORK/m2-fix2.patch
+
+exec patch --batch --fuzz=0 -p1 -i $WORK/m2-fix.patch
+! exists main.go
+exists main.lgo
+exists next_tasks.json
+grep 'seed task kept from a previous run' next_tasks.json
+grep 'sprintf-interp' next_tasks.json
+grep 'fmt\.Sprintf' main.lgo
+logos build ./...
+logos test ./...
+
+-- m/go.mod --
+module example.com/nextparity
+
+go 1.27
+-- m/main.go --
+package main
+
+import (
+	"errors"
+	"fmt"
+
+	"logos/rt"
+)
+
+var failure = errors.New("sample failure")
+var recorded error
+var order int
+
+func work(fail bool) (int, error) {
+	order = order*10 + 9
+	if fail {
+		return 27, failure
+	}
+	return 42, nil
+}
+
+const zero = 0x0
+
+func typedZero(fail bool) (int, error) {
+	n, err := work(fail)
+	if err != nil {
+		return zero, err
+	}
+	return n, nil
+}
+
+func boxed(fail bool) (any, error) {
+	n, err := work(fail)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func visibleAssignment() error {
+	_, recorded = work(true)
+	if recorded != nil {
+		return recorded
+	}
+	return nil
+}
+
+func mapped(xs []int) []int {
+	var ys []int
+	for _, x := range xs {
+		ys = append(ys, x*2)
+	}
+	return ys
+}
+
+func step(n int) int {
+	order = order*10 + n
+	return order
+}
+
+func flag() bool {
+	return step(3) == 13
+}
+
+type customFlag bool
+
+func (customFlag) Format(s fmt.State, verb rune) {
+	if _, err := fmt.Fprint(s, "custom"); err != nil {
+		panic(err)
+	}
+}
+
+type stringFlag bool
+
+func (stringFlag) String() string { return "stringer" }
+
+func report(value any, err error) {
+	fmt.Printf("%T:%v %t\n", value, value, err == failure)
+}
+
+func main() {
+	for _, fail := range []bool{false, true} {
+		report(typedZero(fail))
+		report(boxed(fail))
+	}
+	fmt.Println(visibleAssignment() == failure, recorded == failure)
+	fmt.Println("trace sites:", len(rt.ErrorTrace()))
+	for _, values := range [][]int{nil, {}, {1}, {1, 2, 3}, {1, 2, 3, 4, 5}} {
+		mappedValues := mapped(values)
+		fmt.Println(mappedValues, mappedValues == nil, cap(mappedValues))
+	}
+	order = 0
+	fmt.Println(fmt.Sprintf("order %d %t %d", step(1), flag(), step(2)), order)
+	fmt.Println(fmt.Sprintf("custom %t", customFlag(true)))
+	fmt.Println(fmt.Sprintf("stringer %t", stringFlag(true)))
+	fmt.Println(fmt.Sprintf("bytes %s", []byte("raw")))
+}
+-- m/noexec_test.go --
+package main
+
+import "testing"
+
+func TestNextMustNotRunProjectTests(t *testing.T) {
+	t.Fatal("next executed a project test")
+}
+-- m/sub/nextparity/noexec_test.go --
+package nextparity
+
+import "testing"
+
+func TestNextMustNotRunSubpackageTests(t *testing.T) {
+	t.Fatal("next executed another package's tests")
+}
+
+-- m2/go.mod --
+module example.com/nextlastuse
+
+go 1.27
+
+-- m2/main.go --
+package main
+
+import "fmt"
+
+func flag() bool { return true }
+
+func label() string {
+	return fmt.Sprintf("%t", flag())
+}
+
+func main() {
+	println(label())
+}
+-- seed/next_tasks.json --
+{
+  "version": "logos-next-1",
+  "tasks": [
+    {
+      "id": "seed-001",
+      "category": "ai-patch",
+      "file": "main.lgo",
+      "span": {
+        "start_line": 3,
+        "end_line": 4
+      },
+      "rule": "err-return",
+      "function_signature": "label()",
+      "ai_instruction": "seed task kept from a previous run",
+      "verification_cmd": "logos build ./..."
+    }
+  ]
+}

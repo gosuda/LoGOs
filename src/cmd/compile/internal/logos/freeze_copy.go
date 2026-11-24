@@ -39,8 +39,8 @@ type freezeSite struct {
 	fl    *fileLower
 	pos   syntax.Pos
 	local []freezeEntry
-	vars  []string
-	defs  []string
+	vars  []syntax.Stmt
+	defs  []syntax.Stmt
 }
 
 func (fl *fileLower) lowerFreezes() {
@@ -53,15 +53,11 @@ func (fl *fileLower) lowerFreezes() {
 }
 
 func (fl *fileLower) lowerFreezeCall(call *syntax.CallExpr) {
-	name := freezeCallee(call.Fun)
-	if name == nil || len(call.ArgList) != 1 || call.HasDots || !fl.isRTFreeze(name) {
+	t, name := fl.freezeType(call)
+	if t == nil {
 		return
 	}
-	inst, ok := fl.pkg.info.Instances[name]
-	if !ok || inst.TypeArgs.Len() != 1 {
-		return
-	}
-	cp, ok := fl.freezeCopier(inst.TypeArgs.At(0), syntax.StartPos(call))
+	cp, ok := fl.freezeCopier(t, syntax.StartPos(call))
 	if !ok {
 		return
 	}
@@ -70,6 +66,43 @@ func (fl *fileLower) lowerFreezeCall(call *syntax.CallExpr) {
 	name.Value = "FreezeRoot"
 	fl.addAfterExpression(fl.exprEndOf(call.ArgList[0]), ", "+cp.text)
 	call.ArgList = append(call.ArgList, cp.expr)
+}
+
+func (w ctWalker) ctFreezeCall(call *syntax.CallExpr) (syntax.Expr, []syntax.Stmt, bool) {
+	t, _ := w.fl.freezeType(call)
+	if t == nil {
+		return nil, nil, false
+	}
+	pos := syntax.StartPos(call)
+	site := &freezeSite{fl: w.fl, pos: pos}
+	copier, ok := site.root(t)
+	if !ok {
+		return nil, nil, false
+	}
+	arg, pre := w.optionSink(call, call.ArgList[0], 0, false)
+	fun := at(&syntax.IndexExpr{X: site.rt("FreezeRoot"), Index: site.typeExpr(t)}, pos)
+	if len(site.defs) == 0 {
+		return callOf(call.Pos(), fun, []syntax.Expr{arg, copier}), pre, true
+	}
+	src := "_logos_freeze_source"
+	root := callOf(pos, fun, []syntax.Expr{nameOf(pos, src), copier})
+	ft := at(&syntax.FuncType{
+		ParamList:  []*syntax.Field{site.param(src, site.deref(site.typeExpr(t)))},
+		ResultList: []*syntax.Field{site.param("", site.deref(site.typeExpr(t)))},
+	}, pos)
+	return callOf(call.Pos(), site.literal(ft, root), []syntax.Expr{arg}), pre, true
+}
+
+func (fl *fileLower) freezeType(call *syntax.CallExpr) (types2.Type, *syntax.Name) {
+	name := freezeCallee(call.Fun)
+	if name == nil || len(call.ArgList) != 1 || call.HasDots || !fl.isRTFreeze(name) {
+		return nil, nil
+	}
+	inst, ok := fl.pkg.info.Instances[name]
+	if !ok || inst.TypeArgs.Len() != 1 {
+		return nil, nil
+	}
+	return inst.TypeArgs.At(0), name
 }
 
 func freezeCallee(fun syntax.Expr) *syntax.Name {
@@ -92,23 +125,34 @@ func (fl *fileLower) isRTFreeze(name *syntax.Name) bool {
 }
 
 func (fl *fileLower) freezeCopier(t types2.Type, pos syntax.Pos) (freezeCopy, bool) {
-	switch fl.freezeKind(t) {
-	case freezePlain:
-		return freezeCopy{text: "nil", expr: nilOf(pos)}, true
-	case freezeDynamic:
-		return freezeCopy{}, false
-	}
-	if _, known := freezeLookup(fl.pkg.freezeCopiers, t); !known && !fl.freezeSpellable(t) {
-		return freezeCopy{}, false
-	}
 	site := &freezeSite{fl: fl, pos: pos}
-	name := site.ensure(t)
-	if len(site.defs) == 0 {
-		return freezeCopy{text: name, expr: nameOf(pos, name)}, true
+	expr, ok := site.root(t)
+	if !ok {
+		return freezeCopy{}, false
 	}
-	text := site.closure(name, site.spell(t))
-	decl := parseGeneratedDecls("var _ = "+text, pos)[0].(*syntax.VarDecl)
-	return freezeCopy{text: text, expr: decl.Values}, true
+	if len(site.defs) != 0 {
+		sig := site.signature(t, "", "", "")
+		ft := at(&syntax.FuncType{ResultList: []*syntax.Field{site.param("", sig)}}, pos)
+		expr = callOf(pos, site.literal(ft, expr), nil)
+	}
+	return freezeCopy{text: renderExpr(expr), expr: expr}, true
+}
+
+func (s *freezeSite) root(t types2.Type) (syntax.Expr, bool) {
+	switch s.fl.freezeKind(t) {
+	case freezePlain:
+		if s.fl.ct != nil && !s.spellable(t) {
+			return nil, false
+		}
+		return s.nilExpr(), true
+	case freezeDynamic:
+		return nil, false
+	}
+	_, known := freezeLookup(s.fl.pkg.freezeCopiers, t)
+	if (!known || s.fl.ct != nil) && !s.spellable(t) {
+		return nil, false
+	}
+	return nameOf(s.pos, s.ensure(t)), true
 }
 
 func (fl *fileLower) freezeCore(t types2.Type) types2.Type {
@@ -213,12 +257,21 @@ func (fl *fileLower) freezeLeafName(t types2.Type) string {
 	return "unsafe.Pointer"
 }
 
-func (fl *fileLower) freezeSpellable(t types2.Type) bool {
-	_, ok := fl.spellLowered(t)
-	return ok
+func (s *freezeSite) spellable(t types2.Type) bool {
+	if s.fl.ct == nil {
+		_, ok := s.fl.spellLowered(t)
+		return ok
+	}
+	if freezeContains(t, func(t types2.Type) bool {
+		_, ok := t.(*types2.TypeParam)
+		return ok
+	}) {
+		return false
+	}
+	return spellableType(s.fl.freezeCore(t), s.fl.pkg.tpkg)
 }
 
-func freezeScoped(t types2.Type) bool {
+func freezeContains(t types2.Type, match func(types2.Type) bool) bool {
 	seen := make(map[types2.Type]bool)
 	var walk func(types2.Type) bool
 	walk = func(t types2.Type) bool {
@@ -226,7 +279,7 @@ func freezeScoped(t types2.Type) bool {
 			return false
 		}
 		seen[t] = true
-		return freezeLocal(t) || slices.ContainsFunc(freezeParts(t), walk)
+		return match(t) || slices.ContainsFunc(freezeParts(t), walk)
 	}
 	return walk(t)
 }
@@ -314,7 +367,7 @@ func freezeLookup(reg []freezeEntry, t types2.Type) (string, bool) {
 }
 
 func (s *freezeSite) ensure(t types2.Type) string {
-	hoist := !freezeScoped(t)
+	hoist := s.fl.ct == nil && !freezeContains(t, freezeLocal)
 	reg := &s.local
 	if hoist {
 		reg = &s.fl.pkg.freezeCopiers
@@ -325,121 +378,190 @@ func (s *freezeSite) ensure(t types2.Type) string {
 	s.fl.pkg.freezeSeq++
 	name := fmt.Sprintf("_logos_fz%d", s.fl.pkg.freezeSeq)
 	*reg = append(*reg, freezeEntry{typ: t, name: name})
-	spell := s.spell(t)
-	params := "(_logos_fr *" + rtAlias + ".Freezer, _logos_d, _logos_s *" + spell + ")"
-	body := s.body(t)
-	s.fl.needRT = true
+	ft := s.signature(t, "_logos_fr", "_logos_d", "_logos_s")
+	body := blockOf(s.pos, s.body(t))
 	if hoist {
-		text := "func " + name + params + " {\n" + body + "}\n"
-		s.fl.constDecls = append(s.fl.constDecls, parseGeneratedDecls(text, s.pos)...)
-		s.fl.constText += "\n" + text
+		decl := at(&syntax.FuncDecl{Name: nameOf(s.pos, name), Type: ft, Body: body}, s.pos)
+		var out strings.Builder
+		_, _ = syntax.Fprint(&out, decl, 0)
+		s.fl.constDecls = append(s.fl.constDecls, decl)
+		s.fl.constText += "\n" + out.String() + "\n"
 		return name
 	}
-	s.vars = append(s.vars, "var "+name+" func(*"+rtAlias+".Freezer, *"+spell+", *"+spell+")")
-	s.defs = append(s.defs, name+" = func"+params+" {\n"+body+"}")
+	s.vars = append(s.vars, s.variable(name, s.signature(t, "", "", "")))
+	lit := at(&syntax.FuncLit{Type: ft, Body: body}, s.pos)
+	s.defs = append(s.defs, s.assign(nameOf(s.pos, name), lit))
 	return name
 }
 
-func (s *freezeSite) closure(root, spell string) string {
-	sig := "func(*" + rtAlias + ".Freezer, *" + spell + ", *" + spell + ")"
-	return "func() " + sig + " {\n" + strings.Join(s.vars, "\n") + "\n" + strings.Join(s.defs, "\n") + "\nreturn " + root + "\n}()"
+func (s *freezeSite) literal(ft *syntax.FuncType, result syntax.Expr) *syntax.FuncLit {
+	body := append(s.vars, s.defs...)
+	body = append(body, returnOf(s.pos, []syntax.Expr{result}))
+	return at(&syntax.FuncLit{Type: ft, Body: blockOf(s.pos, body)}, s.pos)
 }
 
-func (s *freezeSite) spell(t types2.Type) string {
-	text, ok := s.fl.spellLowered(t)
-	if !ok {
-		base.Fatalf("logos: cannot spell frozen type %s at %s", t, s.pos.String())
+func (s *freezeSite) signature(typ types2.Type, fr, dst, src string) *syntax.FuncType {
+	list := []*syntax.Field{
+		s.param(fr, s.deref(s.rt("Freezer"))),
+		s.param(dst, s.deref(s.typeExpr(typ))),
+		s.param(src, s.deref(s.typeExpr(typ))),
 	}
-	return text
+	return at(&syntax.FuncType{ParamList: list}, s.pos)
 }
 
-func (s *freezeSite) body(t types2.Type) string {
+func (s *freezeSite) param(name string, typ syntax.Expr) *syntax.Field {
+	f := at(&syntax.Field{Type: typ}, s.pos)
+	if name != "" {
+		f.Name = nameOf(s.pos, name)
+	}
+	return f
+}
+
+func (s *freezeSite) rt(name string) syntax.Expr {
+	if s.fl.ct != nil {
+		return s.fl.ctPkgSelector(s.pos, rtImportPath, name)
+	}
+	s.fl.needRT = true
+	return rtSel(s.pos, name)
+}
+
+func (s *freezeSite) nilExpr() syntax.Expr {
+	if s.fl.ct != nil {
+		return s.fl.ctBuiltin(s.pos, "nil")
+	}
+	return nilOf(s.pos)
+}
+
+func (s *freezeSite) typeExpr(t types2.Type) syntax.Expr {
+	if s.fl.ct != nil {
+		return s.fl.ctTypeExpr(s.pos, t)
+	}
+	text, ok := s.fl.spellLowered(t)
+	if ok {
+		if typ, ok := typeExprAt(text, s.pos); ok {
+			return typ
+		}
+	}
+	base.Fatalf("logos: cannot spell frozen type %s at %s", t, s.pos.String())
+	return nil
+}
+
+func (s *freezeSite) variable(name string, typ syntax.Expr) *syntax.DeclStmt {
+	decl := at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(s.pos, name)}, Type: typ}, s.pos)
+	return at(&syntax.DeclStmt{DeclList: []syntax.Decl{decl}}, s.pos)
+}
+
+func (s *freezeSite) deref(x syntax.Expr) *syntax.Operation {
+	return at(&syntax.Operation{Op: syntax.Mul, X: x}, s.pos)
+}
+
+func (s *freezeSite) assign(dst, src syntax.Expr) *syntax.AssignStmt {
+	return assignOf(s.pos, []syntax.Expr{dst}, []syntax.Expr{src})
+}
+
+func (s *freezeSite) body(t types2.Type) []syntax.Stmt {
+	pos := s.pos
+	dst := func() syntax.Expr { return s.deref(nameOf(pos, "_logos_d")) }
+	src := func() syntax.Expr { return s.deref(nameOf(pos, "_logos_s")) }
 	switch u := s.fl.freezeUnder(t).(type) {
 	case *types2.Struct:
-		return s.structBody(u)
-	case *types2.Array:
-		return "*_logos_d = *_logos_s\nfor _logos_i := range _logos_s {\n" + s.stmt(u.Elem(), "_logos_d[_logos_i]", "_logos_s[_logos_i]") + "}\n"
-	case *types2.Option:
-		return "*_logos_d = *_logos_s\n" + s.stmt(u.Elem, "_logos_d.Value", "_logos_s.Value")
-	case *types2.Interface:
-		return s.unionBody(t, u)
-	}
-	return s.stmt(t, "*_logos_d", "*_logos_s")
-}
-
-func (s *freezeSite) structBody(st *types2.Struct) string {
-	var b strings.Builder
-	b.WriteString("*_logos_d = *_logos_s\n")
-	for i := range st.NumFields() {
-		name := st.Field(i).Name()
-		b.WriteString(s.stmt(st.Field(i).Type(), "_logos_d."+name, "_logos_s."+name))
-	}
-	return b.String()
-}
-
-func (s *freezeSite) unionBody(t types2.Type, iface *types2.Interface) string {
-	members, _ := types2.LogosUnionTerms(s.fl.freezeCore(t))
-	plain := []string{"nil"}
-	var cases strings.Builder
-	for _, m := range members {
-		spell, ok := s.fl.spellLowered(m)
-		if !ok {
-			continue
+		body := []syntax.Stmt{s.assign(dst(), src())}
+		for i := range u.NumFields() {
+			f := u.Field(i)
+			body = s.copyInto(body, f.Type(), selOf(pos, nameOf(pos, "_logos_d"), f.Name()), selOf(pos, nameOf(pos, "_logos_s"), f.Name()))
 		}
-		if !types2.Implements(m, iface) {
+		return body
+	case *types2.Array:
+		body := []syntax.Stmt{s.assign(dst(), src())}
+		index := func(name string) syntax.Expr {
+			return at(&syntax.IndexExpr{X: nameOf(pos, name), Index: nameOf(pos, "_logos_i")}, pos)
+		}
+		rng := at(&syntax.RangeClause{Lhs: nameOf(pos, "_logos_i"), Def: true, X: nameOf(pos, "_logos_s")}, pos)
+		fill := s.copyInto(nil, u.Elem(), index("_logos_d"), index("_logos_s"))
+		return append(body, at(&syntax.ForStmt{Init: rng, Body: blockOf(pos, fill)}, pos))
+	case *types2.Option:
+		body := []syntax.Stmt{s.assign(dst(), src())}
+		return s.copyInto(body, u.Elem, selOf(pos, nameOf(pos, "_logos_d"), "Value"), selOf(pos, nameOf(pos, "_logos_s"), "Value"))
+	case *types2.Interface:
+		return []syntax.Stmt{s.unionBody(t, u)}
+	default:
+		return s.copyInto(nil, t, dst(), src())
+	}
+}
+
+func (s *freezeSite) unionBody(t types2.Type, iface *types2.Interface) *syntax.SwitchStmt {
+	pos := s.pos
+	members, _ := types2.LogosUnionTerms(s.fl.freezeCore(t))
+	plain := []syntax.Expr{s.nilExpr()}
+	clause := func(cases syntax.Expr, body []syntax.Stmt) *syntax.CaseClause {
+		return at(&syntax.CaseClause{Cases: cases, Body: body, Colon: pos}, pos)
+	}
+	var cases []*syntax.CaseClause
+	for _, m := range members {
+		if !s.spellable(m) || !types2.Implements(m, iface) {
 			continue
 		}
 		if s.fl.freezeKind(m) == freezePlain {
-			plain = append(plain, spell)
+			plain = append(plain, s.typeExpr(m))
 			continue
 		}
-		cases.WriteString("case " + spell + ":\nvar _logos_c " + spell + "\n" + s.stmt(m, "_logos_c", "_logos_v") + "*_logos_d = _logos_c\n")
+		body := []syntax.Stmt{s.variable("_logos_c", s.typeExpr(m))}
+		body = s.copyInto(body, m, nameOf(pos, "_logos_c"), nameOf(pos, "_logos_v"))
+		body = append(body, s.assign(s.deref(nameOf(pos, "_logos_d")), nameOf(pos, "_logos_c")))
+		cases = append(cases, clause(s.typeExpr(m), body))
 	}
-	guard := "switch (*_logos_s).(type) {\n"
-	if cases.Len() > 0 {
-		guard = "switch _logos_v := (*_logos_s).(type) {\n"
+	plainCopy := s.assign(s.deref(nameOf(pos, "_logos_d")), s.deref(nameOf(pos, "_logos_s")))
+	guard := at(&syntax.TypeSwitchGuard{X: at(&syntax.ParenExpr{X: s.deref(nameOf(pos, "_logos_s"))}, pos)}, pos)
+	if len(cases) != 0 {
+		guard.Lhs = nameOf(pos, "_logos_v")
 	}
-	return guard + "case " + strings.Join(plain, ", ") + ":\n*_logos_d = *_logos_s\n" + cases.String() + "default:\n" + rtAlias + ".FreezeDynamic(_logos_fr, _logos_d, _logos_s)\n}\n"
+	body := append([]*syntax.CaseClause{clause(listOf(pos, plain), []syntax.Stmt{plainCopy})}, cases...)
+	dynamic := callOf(pos, s.rt("FreezeDynamic"), []syntax.Expr{nameOf(pos, "_logos_fr"), nameOf(pos, "_logos_d"), nameOf(pos, "_logos_s")})
+	body = append(body, clause(nil, []syntax.Stmt{exprStmtOf(pos, dynamic)}))
+	return at(&syntax.SwitchStmt{Tag: guard, Body: body, Rbrace: pos}, pos)
 }
 
-func (s *freezeSite) stmt(t types2.Type, dst, src string) string {
-	switch kind := s.fl.freezeKind(t); {
-	case kind == freezePlain:
-		return ""
-	case kind == freezeLeaf:
-		return "if " + src + " != nil {\n" + rtAlias + ".FreezeReject(" + strconv.Quote(s.fl.freezeLeafName(t)) + ")\n}\n"
-	case kind == freezeRef:
-		return dst + " = " + s.refCall(t, src) + "\n"
-	case kind == freezeDynamic || !s.fl.freezeSpellable(t):
-		return rtAlias + ".FreezeDynamic(_logos_fr, &" + dst + ", &" + src + ")\n"
+func (s *freezeSite) copyInto(body []syntax.Stmt, t types2.Type, dst, src syntax.Expr) []syntax.Stmt {
+	pos := s.pos
+	switch s.fl.freezeKind(t) {
+	case freezePlain:
+		return body
+	case freezeLeaf:
+		detail := litOf(pos, strconv.Quote(s.fl.freezeLeafName(t)), syntax.StringLit)
+		reject := callOf(pos, s.rt("FreezeReject"), []syntax.Expr{detail})
+		cond := at(&syntax.Operation{Op: syntax.Neq, X: src, Y: s.nilExpr()}, pos)
+		return append(body, ifOf(pos, nil, cond, []syntax.Stmt{exprStmtOf(pos, reject)}))
+	case freezeRef:
+		return append(body, s.assign(dst, s.refCall(t, src)))
+	default:
+		args := []syntax.Expr{nameOf(pos, "_logos_fr"), addrOf(pos, dst), addrOf(pos, src)}
+		return append(body, exprStmtOf(pos, callOf(pos, s.copier(t), args)))
 	}
-	return s.ensure(t) + "(_logos_fr, &" + dst + ", &" + src + ")\n"
 }
 
-func (s *freezeSite) refCall(t types2.Type, src string) string {
-	var fn string
-	var elems []types2.Type
+func (s *freezeSite) refCall(t types2.Type, src syntax.Expr) syntax.Expr {
+	pos := s.pos
+	args := []syntax.Expr{nameOf(pos, "_logos_fr"), src}
 	switch u := s.fl.freezeUnder(t).(type) {
 	case *types2.Pointer:
-		fn, elems = "FreezePointer", []types2.Type{u.Elem()}
+		return callOf(pos, s.rt("FreezePointer"), append(args, s.copier(u.Elem())))
 	case *types2.Slice:
-		fn, elems = "FreezeSlice", []types2.Type{u.Elem()}
+		return callOf(pos, s.rt("FreezeSlice"), append(args, s.copier(u.Elem())))
 	case *types2.Map:
-		fn, elems = "FreezeMap", []types2.Type{u.Key(), u.Elem()}
+		return callOf(pos, s.rt("FreezeMap"), append(args, s.copier(u.Key()), s.copier(u.Elem())))
+	default:
+		base.Fatalf("logos: invalid frozen reference type %s at %s", t, pos.String())
+		return nil
 	}
-	call := rtAlias + "." + fn + "(_logos_fr, " + src
-	for _, e := range elems {
-		call += ", " + s.copier(e)
-	}
-	return call + ")"
 }
 
-func (s *freezeSite) copier(t types2.Type) string {
+func (s *freezeSite) copier(t types2.Type) syntax.Expr {
 	switch kind := s.fl.freezeKind(t); {
 	case kind == freezePlain:
-		return "nil"
-	case kind == freezeDynamic || !s.fl.freezeSpellable(t):
-		return rtAlias + ".FreezeDynamic"
+		return s.nilExpr()
+	case kind == freezeDynamic || !s.spellable(t):
+		return s.rt("FreezeDynamic")
+	default:
+		return nameOf(s.pos, s.ensure(t))
 	}
-	return s.ensure(t)
 }

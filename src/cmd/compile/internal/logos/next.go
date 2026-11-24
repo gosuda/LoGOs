@@ -7,15 +7,18 @@ package logos
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"go/constant"
 	"strings"
 
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
 
-const NextVersion = "logos-next-1"
+const NextVersion = "logos-next-scan-2"
 
 type NextEdit struct {
+	Rule        string `json:"rule"`
+	FuncSig     string `json:"function_signature,omitempty"`
 	StartLine   int    `json:"start_line"`
 	StartCol    int    `json:"start_col"`
 	EndLine     int    `json:"end_line"`
@@ -33,10 +36,11 @@ type NextTask struct {
 }
 
 type NextFileReport struct {
-	File  string     `json:"file"`
-	Sum   string     `json:"sha256"`
-	Edits []NextEdit `json:"edits"`
-	Tasks []NextTask `json:"tasks"`
+	File        string     `json:"file"`
+	Sum         string     `json:"sha256"`
+	Edits       []NextEdit `json:"edits"`
+	Tasks       []NextTask `json:"tasks"`
+	RenameIssue *NextTask  `json:"rename_issue,omitempty"`
 }
 
 type NextPackageReport struct {
@@ -63,10 +67,7 @@ func ScanNext(info *types2.Info, files []*syntax.File, src map[*syntax.File][]by
 		if data == nil {
 			continue
 		}
-		rep := s.scanFile(f, data, names[f])
-		if len(rep.Edits) > 0 || len(rep.Tasks) > 0 {
-			out = append(out, rep)
-		}
+		out = append(out, s.scanFile(f, data, names[f]))
 	}
 	return out
 }
@@ -111,9 +112,50 @@ func (s *nextScan) scanFile(f *syntax.File, data []byte, name string) NextFileRe
 		s.closures(fn, ctx)
 	}
 	s.sprintfFile(f)
+	rep.RenameIssue = s.checkRename(f)
 	rep.Edits = s.edits
 	rep.Tasks = s.tasks
 	return rep
+}
+
+func (s *nextScan) checkRename(f *syntax.File) *NextTask {
+	allowed := make(map[*syntax.IndexExpr]bool)
+	var issue *NextTask
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.AssignStmt:
+			lhs, many := n.Lhs.(*syntax.ListExpr)
+			if many {
+				for _, e := range lhs.ElemList {
+					nextAllowIndex(allowed, e)
+				}
+				if len(lhs.ElemList) == 2 {
+					nextAllowIndex(allowed, n.Rhs)
+				}
+			} else {
+				nextAllowIndex(allowed, n.Lhs)
+			}
+		case *syntax.IndexExpr:
+			if issue == nil && n.GetTypeInfo().HasOk() && !allowed[n] {
+				line := int(n.Pos().Line())
+				issue = &NextTask{
+					Category:    "ai-patch",
+					Rule:        "map-index-option",
+					StartLine:   line,
+					EndLine:     line,
+					Instruction: "single-result map access changes to an option in LoGOs; preserve the Go zero on a missing key before converting",
+				}
+			}
+		}
+		return issue == nil
+	})
+	return issue
+}
+
+func nextAllowIndex(allowed map[*syntax.IndexExpr]bool, e syntax.Expr) {
+	if index, ok := unwrapParen(e).(*syntax.IndexExpr); ok {
+		allowed[index] = true
+	}
 }
 
 func (s *nextScan) closures(fn *syntax.FuncDecl, ctx nextCtx) {
@@ -231,19 +273,10 @@ func (s *nextScan) children(stmt syntax.Stmt, ctx nextCtx) {
 }
 
 type nextErrMatch struct {
-	lhs   []*syntax.Name
 	call  *syntax.CallExpr
-	op    syntax.Operator
 	check *syntax.IfStmt
 	last  *syntax.Name
 	cond  *syntax.Name
-}
-
-type nextErrSpan struct {
-	callSrc  string
-	start    int
-	ifEnd    int
-	trailing string
 }
 
 func nextErrAssignShape(list []syntax.Stmt, i int) (nextErrMatch, bool) {
@@ -258,7 +291,7 @@ func nextErrAssignShape(list []syntax.Stmt, i int) (nextErrMatch, bool) {
 	if !ok || check.Init != nil {
 		return nextErrMatch{}, false
 	}
-	lhs, call, op, ok := assignCall(assign)
+	lhs, call, ok := assignCall(assign)
 	if !ok {
 		return nextErrMatch{}, false
 	}
@@ -267,7 +300,7 @@ func nextErrAssignShape(list []syntax.Stmt, i int) (nextErrMatch, bool) {
 	if !ok {
 		return nextErrMatch{}, false
 	}
-	return nextErrMatch{lhs: lhs, call: call, op: op, check: check, last: last, cond: cond}, true
+	return nextErrMatch{call: call, check: check, last: last, cond: cond}, true
 }
 
 func (s *nextScan) nextErrInitShape(stmt syntax.Stmt) (nextErrMatch, bool) {
@@ -279,7 +312,7 @@ func (s *nextScan) nextErrInitShape(stmt syntax.Stmt) (nextErrMatch, bool) {
 	if !ok {
 		return nextErrMatch{}, false
 	}
-	lhs, call, op, ok := assignCall(assign)
+	lhs, call, ok := assignCall(assign)
 	if !ok {
 		return nextErrMatch{}, false
 	}
@@ -294,7 +327,7 @@ func (s *nextScan) nextErrInitShape(stmt syntax.Stmt) (nextErrMatch, bool) {
 	if n, ok := s.callResults(call); !ok || n != len(lhs) {
 		return nextErrMatch{}, false
 	}
-	return nextErrMatch{lhs: lhs, call: call, op: op, check: check, last: last, cond: cond}, true
+	return nextErrMatch{call: call, check: check, last: last, cond: cond}, true
 }
 
 func (s *nextScan) nextErrEligible(call *syntax.CallExpr, ctx nextCtx) bool {
@@ -314,7 +347,7 @@ func (s *nextScan) nextErrBodyRets(check *syntax.IfStmt, last *syntax.Name, ctx 
 		s.task(check, ctx, nextRuleErrReturn, why)
 		return nil, true
 	}
-	if !s.returnsFit(rets, last) {
+	if !s.returnsFit(rets, last, ctx) {
 		s.children(check, ctx)
 		s.task(check, ctx, nextRuleErrReturn, "the check returns a different error or non-zero values, so ? cannot replace it")
 		return nil, true
@@ -326,6 +359,10 @@ func (s *nextScan) nextErrLaterResolve(m nextErrMatch, rets []syntax.Expr, ctx n
 	obj := s.nameObj(m.last)
 	if obj == nil {
 		return true, false
+	}
+	if isPackageVar(obj) {
+		s.task(m.check, ctx, nextRuleErrReturn, "the error is stored outside this function")
+		return false, true
 	}
 	allowed := map[*syntax.Name]bool{m.last: true, m.cond: true}
 	for _, r := range rets {
@@ -339,39 +376,6 @@ func (s *nextScan) nextErrLaterResolve(m nextErrMatch, rets []syntax.Expr, ctx n
 		return false, true
 	}
 	return false, false
-}
-
-func (s *nextScan) nextErrRewriteSpan(m nextErrMatch, startPos syntax.Pos, ctx nextCtx) (nextErrSpan, bool, bool) {
-	callSrc, ok := s.callText(m.call)
-	if !ok {
-		return nextErrSpan{}, false, false
-	}
-	start, callEnd, ifEnd, ok := s.errSpan(startPos, m.call, m.check)
-	if !ok {
-		return nextErrSpan{}, false, false
-	}
-	trailing, blocked := scanComments(s.src, start, callEnd, ifEnd)
-	if blocked {
-		s.children(m.check, ctx)
-		s.task(m.check, ctx, nextRuleErrReturn, "a comment sits inside the rewrite span, so the check needs a manual rewrite")
-		return nextErrSpan{}, false, true
-	}
-	return nextErrSpan{callSrc: callSrc, start: start, ifEnd: ifEnd, trailing: trailing}, true, false
-}
-
-func (s *nextScan) nextErrAssignBuild(m nextErrMatch, callSrc string) string {
-	if len(m.lhs) == 1 {
-		return callSrc + "?"
-	}
-	names := make([]string, 0, len(m.lhs)-1)
-	for _, n := range m.lhs[:len(m.lhs)-1] {
-		names = append(names, n.Value)
-	}
-	joined := strings.Join(names, ", ")
-	if m.op == syntax.Def && s.hasNew(m.lhs[:len(m.lhs)-1]) {
-		return joined + " := " + callSrc + "?"
-	}
-	return joined + " = " + callSrc + "?"
 }
 
 func (s *nextScan) errAssign(list []syntax.Stmt, i int, ctx nextCtx) int {
@@ -393,14 +397,7 @@ func (s *nextScan) errAssign(list []syntax.Stmt, i int, ctx nextCtx) int {
 	if tasked {
 		return 2
 	}
-	span, ok, tasked := s.nextErrRewriteSpan(m, m.lhs[0].Pos(), ctx)
-	if tasked {
-		return 2
-	}
-	if !ok {
-		return 0
-	}
-	s.emit(span.start, span.ifEnd, s.nextErrAssignBuild(m, span.callSrc)+span.trailing)
+	s.task(m.check, ctx, nextRuleErrReturn, "keep explicit error propagation unless the caller permits new logos/rt trace entries")
 	return 2
 }
 
@@ -423,24 +420,17 @@ func (s *nextScan) errInit(stmt syntax.Stmt, ctx nextCtx) bool {
 	if tasked {
 		return true
 	}
-	span, ok, tasked := s.nextErrRewriteSpan(m, m.check.Pos(), ctx)
-	if tasked {
-		return true
-	}
-	if !ok {
-		return false
-	}
-	s.emit(span.start, span.ifEnd, span.callSrc+"?"+span.trailing)
+	s.task(m.check, ctx, nextRuleErrReturn, "keep explicit error propagation unless the caller permits new logos/rt trace entries")
 	return true
 }
 
-func assignCall(a *syntax.AssignStmt) ([]*syntax.Name, *syntax.CallExpr, syntax.Operator, bool) {
+func assignCall(a *syntax.AssignStmt) ([]*syntax.Name, *syntax.CallExpr, bool) {
 	if a.Op != 0 && a.Op != syntax.Def {
-		return nil, nil, 0, false
+		return nil, nil, false
 	}
 	call, ok := unwrapParen(a.Rhs).(*syntax.CallExpr)
 	if !ok {
-		return nil, nil, 0, false
+		return nil, nil, false
 	}
 	var lhs []*syntax.Name
 	switch l := a.Lhs.(type) {
@@ -450,17 +440,17 @@ func assignCall(a *syntax.AssignStmt) ([]*syntax.Name, *syntax.CallExpr, syntax.
 		for _, e := range l.ElemList {
 			n, ok := e.(*syntax.Name)
 			if !ok {
-				return nil, nil, 0, false
+				return nil, nil, false
 			}
 			lhs = append(lhs, n)
 		}
 	default:
-		return nil, nil, 0, false
+		return nil, nil, false
 	}
 	if len(lhs) == 0 {
-		return nil, nil, 0, false
+		return nil, nil, false
 	}
-	return lhs, call, a.Op, true
+	return lhs, call, true
 }
 
 func nextErrCondSide(x syntax.Expr, y syntax.Expr, err string) (*syntax.Name, bool) {
@@ -529,7 +519,7 @@ func (s *nextScan) errInitValueTask(stmt syntax.Stmt, ctx nextCtx) bool {
 	if !ok {
 		return false
 	}
-	lhs, call, _, ok := assignCall(assign)
+	lhs, call, ok := assignCall(assign)
 	if !ok || len(lhs) != 2 {
 		return false
 	}
@@ -553,69 +543,44 @@ func (s *nextScan) errInitValueTask(stmt syntax.Stmt, ctx nextCtx) bool {
 	return true
 }
 
-func (s *nextScan) returnsFit(rets []syntax.Expr, last *syntax.Name) bool {
-	if len(rets) == 0 {
+func (s *nextScan) returnsFit(rets []syntax.Expr, last *syntax.Name, ctx nextCtx) bool {
+	fn, ok := s.info.Defs[ctx.fn.Name].(*types2.Func)
+	if !ok {
 		return false
 	}
-	for _, r := range rets[:len(rets)-1] {
-		if !s.isZeroExpr(r) {
+	results := fn.Type().(*types2.Signature).Results()
+	if len(rets) != results.Len() || len(rets) == 0 {
+		return false
+	}
+	for i, r := range rets[:len(rets)-1] {
+		if !s.isResultZero(r, results.At(i).Type()) {
 			return false
 		}
 	}
 	return s.sameErr(rets[len(rets)-1], last)
 }
 
-func (s *nextScan) isZeroExpr(e syntax.Expr) bool {
-	switch n := unwrapParen(e).(type) {
-	case *syntax.BasicLit:
-		switch n.Kind {
-		case syntax.IntLit:
-			return n.Value == "0"
-		case syntax.FloatLit:
-			return n.Value == "0.0" || n.Value == "0."
-		case syntax.StringLit:
-			return n.Value == `""`
-		}
-	case *syntax.Name:
-		switch n.Value {
-		case "false":
-			return s.nameObj(n) == types2.Universe.Lookup("false")
-		case "nil":
-			return s.nameObj(n) == types2.Universe.Lookup("nil")
-		}
+func (s *nextScan) isResultZero(e syntax.Expr, result types2.Type) bool {
+	e = unwrapParen(e)
+	if n, ok := e.(*syntax.Name); ok && s.nameObj(n) == types2.Universe.Lookup("nil") {
+		return true
+	}
+	if _, ok := result.Underlying().(*types2.Interface); ok {
+		return false
+	}
+	v := e.GetTypeInfo().Value
+	if v == nil {
+		return false
+	}
+	switch v.Kind() {
+	case constant.Int, constant.Float, constant.Complex:
+		return constant.Sign(v) == 0
+	case constant.String:
+		return constant.StringVal(v) == ""
+	case constant.Bool:
+		return !constant.BoolVal(v)
 	}
 	return false
-}
-
-func (s *nextScan) hasNew(lhs []*syntax.Name) bool {
-	for _, n := range lhs {
-		if n.Value == "_" {
-			continue
-		}
-		if _, ok := s.info.Defs[n]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *nextScan) errSpan(startPos syntax.Pos, call *syntax.CallExpr, check *syntax.IfStmt) (int, int, int, bool) {
-	start, err := offsetOf(s.starts, len(s.src), startPos)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-	callEnd, ok := s.endOf(call)
-	if !ok {
-		return 0, 0, 0, false
-	}
-	if check.Then == nil {
-		return 0, 0, 0, false
-	}
-	rbrace, err := offsetOf(s.starts, len(s.src), check.Then.Rbrace)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-	return start, callEnd, rbrace + 1, true
 }
 
 func (s *nextScan) task(n syntax.Node, ctx nextCtx, rule, instruction string) {
@@ -692,10 +657,11 @@ func lastFunc(lo, hi int, src []byte) int {
 	return found
 }
 
-func (s *nextScan) emit(start, end int, replacement string) {
+func (s *nextScan) emitInterpolation(start, end int, replacement string) {
 	sl, sc := s.lineCol(start)
 	el, ec := s.lineCol(end)
 	s.edits = append(s.edits, NextEdit{
+		Rule:        nextRuleSprintf,
 		StartLine:   sl,
 		StartCol:    sc,
 		EndLine:     el,

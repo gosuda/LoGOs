@@ -4,44 +4,36 @@
 
 package ld
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+var testLogosCtID = strings.Repeat("0123456789abcdef", 4)
 
 func TestLogosCloneBaseName(t *testing.T) {
+	id := testLogosCtID
 	checks := []struct {
 		label string
 		input string
 		want  string
 	}{
-		{label: "comptimeOne", input: "main.Autowire·logosct7", want: "main.Autowire"},
-		{label: "comptimeLongNumber", input: "main.Autowire·logosct4096", want: "main.Autowire"},
-		{label: "comptimeZero", input: "main.Autowire·logosct0", want: "main.Autowire"},
-		{label: "comptimePackagePath", input: "example.com/p.Autowire·logosct123", want: "example.com/p.Autowire"},
-		{label: "pointerReceiver", input: "example.com/p.(*T).Method·logosct2", want: "example.com/p.(*T).Method"},
-		{label: "valueReceiver", input: "example.com/p.T.Method·logosct12", want: "example.com/p.T.Method"},
-		{label: "genericComptime", input: "example.com/p.Foo[go.shape.string]·logosct10", want: "example.com/p.Foo[go.shape.string]"},
-		{label: "comptimeASCIISuffix", input: "example.com/p.Foo_logosct1", want: "example.com/p.Foo"},
-		{label: "comptimeASCIIPackagePath", input: "example.com/p.Autowire_logosct123", want: "example.com/p.Autowire"},
-		{label: "comptimeASCIIReceiver", input: "example.com/p.T.Method_logosct12", want: "example.com/p.T.Method"},
-		{label: "comptimeASCIIGeneric", input: "example.com/p.Foo[go.shape.string]_logosct10", want: "example.com/p.Foo[go.shape.string]"},
-		{label: "comptimeASCIINumberMissing", input: "example.com/p.Foo_logosct", want: "example.com/p.Foo_logosct"},
-		{label: "comptimeASCIINoBase", input: "_logosct1", want: "_logosct1"},
-		{label: "comptimeASCIILetterNumber", input: "example.com/p.Foo_logosctX", want: "example.com/p.Foo_logosctX"},
-		{label: "comptimeASCIILetterAfterNumber", input: "example.com/p.Foo_logosct1x", want: "example.com/p.Foo_logosct1x"},
-		{label: "comptimeASCIIDigitsAfterOtherText", input: "example.com/p.Foo_logosct2extra3", want: "example.com/p.Foo_logosct2extra3"},
+		{label: "instance", input: "main.autowire.logosct." + id, want: "main.autowire"},
+		{label: "packagePath", input: "example.com/p.Autowire.logosct." + id, want: "example.com/p.Autowire"},
+		{label: "closure", input: "example.com/p.Autowire.logosct." + id + ".func1", want: "example.com/p.Autowire.func1"},
+		{label: "abiWrapper", input: "example.com/p.Autowire.logosct." + id + ".abi0", want: "example.com/p.Autowire.abi0"},
+		{label: "nestedInstances", input: "p.F.logosct." + id + ".G.logosct." + id, want: "p.F.G"},
+		{label: "shortID", input: "p.F.logosct." + id[:63], want: "p.F.logosct." + id[:63]},
+		{label: "longID", input: "p.F.logosct." + id + "0", want: "p.F.logosct." + id + "0"},
+		{label: "upperHex", input: "p.F.logosct." + strings.ToUpper(id), want: "p.F.logosct." + strings.ToUpper(id)},
+		{label: "letterAfterID", input: "p.F.logosct." + id + "x", want: "p.F.logosct." + id + "x"},
+		{label: "underscoreAfterID", input: "p.F.logosct." + id + "_x", want: "p.F.logosct." + id + "_x"},
+		{label: "noBase", input: ".logosct." + id, want: ".logosct." + id},
+		{label: "noID", input: "p.F.logosct.", want: "p.F.logosct."},
+		{label: "methodNamedLogosct", input: "p.T.logosct.func1", want: "p.T.logosct.func1"},
 		{label: "ordinaryFunction", input: "main.main", want: "main.main"},
-		{label: "abiWrapper", input: "runtime.cgocall.abi0", want: "runtime.cgocall.abi0"},
-		{label: "ordinaryMethodName", input: "main.Autowire", want: "main.Autowire"},
-		{label: "asciiPeriod", input: "example.com/p.Foo.logosct1", want: "example.com/p.Foo.logosct1"},
-		{label: "numberMissing", input: "example.com/p.Foo·logosct", want: "example.com/p.Foo·logosct"},
-		{label: "letterNumber", input: "example.com/p.Foo·logosctX", want: "example.com/p.Foo·logosctX"},
-		{label: "hexLikeNumber", input: "example.com/p.Foo·logosct0x1", want: "example.com/p.Foo·logosct0x1"},
-		{label: "signedNumber", input: "example.com/p.Foo·logosct-1", want: "example.com/p.Foo·logosct-1"},
-		{label: "noBaseComptime", input: "·logosct1", want: "·logosct1"},
-		{label: "letterAfterNumber", input: "example.com/p.Foo·logosct1x", want: "example.com/p.Foo·logosct1x"},
-		{label: "underscoreAfterNumber", input: "example.com/p.Foo·logosct1_extra", want: "example.com/p.Foo·logosct1_extra"},
-		{label: "middleDotTextAfterNumber", input: "example.com/p.Foo·logosct1·extra", want: "example.com/p.Foo·logosct1·extra"},
-		{label: "digitsAfterOtherText", input: "example.com/p.Foo·logosct2extra3", want: "example.com/p.Foo·logosct2extra3"},
-		{label: "dotAfterNumber", input: "example.com/p.Foo·logosct1.2", want: "example.com/p.Foo·logosct1.2"},
+		{label: "runtimeWrapper", input: "runtime.cgocall.abi0", want: "runtime.cgocall.abi0"},
+		{label: "sourceSuffix", input: "example.com/p.Foo_logosct1", want: "example.com/p.Foo_logosct1"},
 	}
 
 	for _, tc := range checks {

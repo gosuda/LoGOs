@@ -8,6 +8,8 @@ import (
 	"internal/buildcfg"
 	"internal/pkgbits"
 	"io"
+	"maps"
+	"slices"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -42,6 +44,14 @@ type linker struct {
 	pkgs   map[string]index
 	decls  map[*types.Sym]index
 	bodies map[*types.Sym]index
+
+	logosCtReaders   map[*pkgReader]bool
+	logosCtDecls     map[*types.Sym]bool
+	logosCtHelpers   map[index]bool
+	logosCtExact     map[string]index
+	logosCtGraph     map[string][]string
+	logosCtMapFuncs  map[index]bool
+	logosCtConstMaps index
 }
 
 // relocAll ensures that all elements specified by pr and relocs are
@@ -89,8 +99,97 @@ func (l *linker) relocIdx(pr *pkgReader, k pkgbits.SectionKind, idx index) index
 	}
 
 	pr.newindex[absIdx] = ^newidx
+	if k == pkgbits.SectionBody {
+		l.relocLogosCtTargets(pr)
+	}
 
 	return newidx
+}
+
+func (l *linker) relocLogosCtTargets(pr *pkgReader) {
+	if l.logosCtReaders[pr] {
+		return
+	}
+	if len(pr.logosCtExact) == 0 && len(pr.logosCtGraph) == 0 && len(pr.logosCtHelpers) == 0 && len(pr.logosCtMapFuncs) == 0 {
+		return
+	}
+	if l.logosCtReaders == nil {
+		l.logosCtReaders = make(map[*pkgReader]bool)
+	}
+	if l.logosCtExact == nil && len(pr.logosCtExact) != 0 {
+		l.logosCtExact = make(map[string]index)
+	}
+	if l.logosCtGraph == nil && len(pr.logosCtGraph) != 0 {
+		l.logosCtGraph = make(map[string][]string)
+	}
+	l.logosCtReaders[pr] = true
+
+	for _, id := range slices.Sorted(maps.Keys(pr.logosCtExact)) {
+		idx := l.relocIdx(pr, pkgbits.SectionObj, pr.logosCtExact[id])
+		if prev, ok := l.logosCtExact[id]; ok && prev != idx {
+			base.Fatalf("conflicting comptime definitions for %q", id)
+		}
+		l.logosCtExact[id] = idx
+	}
+	for id, children := range pr.logosCtGraph {
+		if prev, ok := l.logosCtGraph[id]; ok && !slices.Equal(prev, children) {
+			base.Fatalf("conflicting comptime edges for %q", id)
+		}
+		l.logosCtGraph[id] = children
+	}
+	if len(pr.logosCtHelpers) != 0 && l.logosCtHelpers == nil {
+		l.logosCtHelpers = make(map[index]bool)
+	}
+	for _, root := range slices.Sorted(maps.Keys(pr.logosCtHelpers)) {
+		idx := l.relocIdx(pr, pkgbits.SectionObj, root)
+		readonly := pr.logosCtHelpers[root]
+		if prev, ok := l.logosCtHelpers[idx]; ok && prev != readonly {
+			base.Fatalf("conflicting readonly flags for comptime helper %d", idx)
+		}
+		l.logosCtHelpers[idx] = readonly
+	}
+	if len(pr.logosCtMapFuncs) != 0 && l.logosCtMapFuncs == nil {
+		l.logosCtMapFuncs = make(map[index]bool)
+	}
+	for _, root := range slices.Sorted(maps.Keys(pr.logosCtMapFuncs)) {
+		idx := l.relocIdx(pr, pkgbits.SectionObj, root)
+		l.logosCtMapFuncs[idx] = true
+	}
+	if pr == localPkgReader && pr.logosCtConstMaps != 0 {
+		l.logosCtConstMaps = l.relocIdx(pr, pkgbits.SectionMeta, pr.logosCtConstMaps)
+	}
+}
+
+func (l *linker) writeLogosCtTargets(w *pkgbits.Encoder) {
+	if len(l.logosCtExact) == 0 && len(l.logosCtGraph) == 0 && len(l.logosCtHelpers) == 0 && len(l.logosCtMapFuncs) == 0 {
+		return
+	}
+	w.Len(len(l.logosCtExact))
+	for _, id := range slices.Sorted(maps.Keys(l.logosCtExact)) {
+		w.String(id)
+		w.Reloc(pkgbits.SectionObj, l.logosCtExact[id])
+	}
+	w.Len(len(l.logosCtGraph))
+	for _, id := range slices.Sorted(maps.Keys(l.logosCtGraph)) {
+		w.String(id)
+		w.Strings(l.logosCtGraph[id])
+	}
+	if len(l.logosCtHelpers) != 0 || len(l.logosCtMapFuncs) != 0 {
+		w.Len(len(l.logosCtHelpers))
+		for _, idx := range slices.Sorted(maps.Keys(l.logosCtHelpers)) {
+			w.Reloc(pkgbits.SectionObj, idx)
+			w.Bool(l.logosCtHelpers[idx])
+		}
+	}
+	if len(l.logosCtMapFuncs) != 0 {
+		w.Len(len(l.logosCtMapFuncs))
+		for _, idx := range slices.Sorted(maps.Keys(l.logosCtMapFuncs)) {
+			w.Reloc(pkgbits.SectionObj, idx)
+		}
+		if l.logosCtConstMaps != 0 {
+			w.Reloc(pkgbits.SectionMeta, l.logosCtConstMaps)
+		}
+	}
 }
 
 // relocString copies the specified string from pr into the output
@@ -156,6 +255,13 @@ func (l *linker) relocObj(pr *pkgReader, idx index) index {
 		sym2 := types.NewPkg(path2, "").Lookup(name2)
 		assert(sym == sym2)
 		assert(tag2 != pkgbits.ObjStub)
+		tag = tag2
+	} else if pr != localPkgReader && pr.logosCtDefinitions[idx] {
+		if pri := objReader[sym]; pri.pr != nil && pri.pr == localPkgReader {
+			pr, idx = pri.pr, pri.idx
+			_, _, localTag := pr.PeekObj(idx)
+			assert(tag == localTag && pr.logosCtDefinitions[idx])
+		}
 	}
 
 	w := l.pw.NewEncoderRaw(pkgbits.SectionObj)
@@ -176,8 +282,34 @@ func (l *linker) relocObj(pr *pkgReader, idx index) index {
 	// objects may not either.
 	obj, _ := sym.Def.(*ir.Name)
 	local := sym.Pkg == types.LocalPkg
+	prepared := pr.logosCtDefinitions[idx]
+	private := prepared || pr.logosCtMapFuncs[idx]
+	compiledHere := local
+	if private {
+		if l.logosCtDecls == nil {
+			l.logosCtDecls = make(map[*types.Sym]bool)
+		}
+		l.logosCtDecls[sym] = true
+	}
+	if prepared {
+		compiledHere = pr == localPkgReader
+	}
+	if prepared && compiledHere {
+		assert(obj != nil)
+		switch tag {
+		case pkgbits.ObjFunc:
+			assert(obj.Func != nil && obj.Defn == obj.Func && obj.Func.Dupok())
+			body, ok := bodyReader[obj.Func]
+			assert(ok && body.pr == pr && body.dict != nil && body.dict.logosCtBody)
+		case pkgbits.ObjVar:
+			readonly, ok := pr.logosCtHelpers[idx]
+			assert(ok && obj.LogosCtGlobal() && obj.Readonly() == readonly)
+		default:
+			base.Fatalf("unexpected comptime object %v", obj)
+		}
+	}
 
-	if local && obj != nil {
+	if compiledHere && obj != nil {
 		wext.Sync(pkgbits.SyncObject1)
 		switch tag {
 		case pkgbits.ObjFunc:
@@ -194,9 +326,13 @@ func (l *linker) relocObj(pr *pkgReader, idx index) index {
 
 	// Check if we need to export the inline bodies for functions and
 	// methods.
-	if obj != nil {
+	if private && !compiledHere && tag == pkgbits.ObjFunc {
+		if body, ok := importBodyReader[sym]; ok {
+			l.bodies[sym] = l.relocIdx(body.pr, pkgbits.SectionBody, body.idx)
+		}
+	} else if obj != nil {
 		if obj.Op() == ir.ONAME && obj.Class == ir.PFUNC {
-			l.exportBody(obj, local)
+			l.exportBody(obj, compiledHere)
 		}
 
 		if obj.Op() == ir.OTYPE && !obj.Alias() {
@@ -206,6 +342,9 @@ func (l *linker) relocObj(pr *pkgReader, idx index) index {
 				}
 			}
 		}
+	}
+	if private {
+		l.relocLogosCtTargets(pr)
 	}
 
 	return w.Idx

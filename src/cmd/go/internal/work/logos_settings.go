@@ -79,7 +79,7 @@ func requireRaceRuntimeCompiler() {
 // like runList, that decide after loading packages whether the command
 // will run build actions.
 func CheckRaceRuntimeCompiler() {
-	if cfg.BuildN {
+	if !settings.Current().Cgo.RaceRuntimeOnly || cfg.BuildN {
 		return
 	}
 	checkRaceRuntimeCompiler()

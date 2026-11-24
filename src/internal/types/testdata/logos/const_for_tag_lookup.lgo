@@ -1,0 +1,39 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+import "comptime"
+
+func tagLookup() {
+	const for _, f := range comptime.Fields[struct {
+		Field int `json:"keep"`
+	}]() {
+		const if f.Tag.Get("json") == "keep" {
+			comptime.Error("plain tag matched" /* ERROR "plain tag matched" */)
+		} else {
+			comptime.Error("plain tag mismatch")
+		}
+	}
+
+	const for _, f := range comptime.Fields[struct {
+		Field int `query:"display name" wire:"second"`
+	}]() {
+		const if f.Tag.Get("wire") == "second" && f.Tag.Get("query") == "display name" {
+			comptime.Error("both tag keys matched" /* ERROR "both tag keys matched" */)
+		} else {
+			comptime.Error("multi-key tag mismatch")
+		}
+	}
+
+	const for _, f := range comptime.Fields[struct {
+		Field int `wire:"root\\leaf\"tail"`
+	}]() {
+		const if f.Tag.Get("wire") == "root\\leaf\"tail" {
+			comptime.Error("escaped tag matched" /* ERROR "escaped tag matched" */)
+		} else {
+			comptime.Error("escaped tag mismatch")
+		}
+	}
+}

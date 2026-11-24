@@ -593,7 +593,7 @@ func (check *Checker) comparison(x, y *operand, op syntax.Operator, switchCase b
 		// The operands are never materialized; no need to update
 		// their types.
 	} else {
-		x.mode_ = value
+		x.mode_, x.val = value, nil
 		// The operands have now their final types, which at run-
 		// time will be materialized. Update the expression trees.
 		// If the current types are untyped, the materialized type

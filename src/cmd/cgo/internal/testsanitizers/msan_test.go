@@ -60,6 +60,7 @@ func TestMSAN(t *testing.T) {
 		{src: "msan_eq.go"},
 		{src: "msan_eq_fail.go", wantErr: true, msanError: "use-of-uninitialized-value"},
 		{src: "msan_fail.go", wantErr: true},
+		{src: "msan_eq_fail.go", wantErr: true},
 	}
 	for _, tc := range cases {
 		name := strings.TrimSuffix(tc.src, ".go")

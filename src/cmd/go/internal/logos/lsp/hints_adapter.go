@@ -10,7 +10,7 @@ import (
 	"cmd/go/internal/logos/hints"
 )
 
-func codeActionsAdapter(diags [][]byte, uri string, src []byte, rng json.RawMessage) (json.RawMessage, error) {
+func codeActionsAdapter(diags [][]byte, src []byte, rng json.RawMessage) ([]hints.CodeAction, error) {
 	var r hints.Range
 	if err := json.Unmarshal(rng, &r); err != nil {
 		return nil, err
@@ -23,9 +23,5 @@ func codeActionsAdapter(diags [][]byte, uri string, src []byte, rng json.RawMess
 		}
 		ds = append(ds, d)
 	}
-	acts := hints.CodeActions(ds, uri, src, r)
-	if acts == nil {
-		acts = []hints.CodeAction{}
-	}
-	return json.Marshal(acts)
+	return hints.CodeActions(ds, src, r), nil
 }
