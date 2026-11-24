@@ -1,10 +1,6 @@
-# M18-S7 unit D, REDTEAM #194: eject lowers the four logos/arena calls
-# to plain Go while keeping the evaluation order. A call whose region
-# argument is a side-effecting index expression goes through the closure
-# form, so the increment survives in the ejected program; a locally
-# opened region loses its only use and needs the blank use after its
-# declaration. A Go package of a second module keeps importing
-# logos/arena, so the support module must vendor it.
+# Ejection keeps the portable arena calls, including calls with region
+# operands that run code. The support module serves both the ejected main
+# package and a Go package from a second module.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
@@ -29,18 +25,13 @@ exists out/_logos_deps/example.com/arenadep@v0.0.0/heap/heap.go
 exists out/_logos_deps/rt/go.mod
 exists out/_logos_deps/rt/arena/arena.go
 
-# The ejected main drops every arena call: no arena call survives, the
-# opened region reads _logos_rt.Region{}, and the side-effecting region
-# arguments evaluate inside the closure form.
-! grep 'arena\.New\|arena\.Make\|arena\.Append\|arena\.Open' out/main.go
-grep 'return new\(node\)' out/main.go
-grep 'return make\(\[\]node' out/main.go
-grep -count=1 '_ = r' out/main.go
-grep '_logos_rt\.Region{}' out/main.go
-grep -count=3 'func\(_ _logos_rt\.Region' out/main.go
+grep 'arena\.Open\(\)' out/main.go
+grep 'arena\.New\[node\]\(regs\[bump\(\)\]\)' out/main.go
+grep 'arena\.Make\[node\]\(regs\[bump\(\)\], 3\)' out/main.go
+grep 'arena\.Append\[node\]\(regs\[bump\(\)\], extra, others\.\.\.\)' out/main.go
+! grep '_logos_rt\.Region\{' out/main.go
 grep -count=3 'regs\[bump\(\)\]' out/main.go
-grep -count=1 '_logos_e1 \.\.\.node' out/main.go
-grep -count=1 'append\(_logos_e0, _logos_e1\.\.\.\)' out/main.go
+grep -count=1 'gosuda/loGos/rt/arena' out/main.go
 
 # The copied Go package keeps its logos/arena import remapped, and the
 # support module serves it.

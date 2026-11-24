@@ -221,7 +221,6 @@ type fileLower struct {
 	moves         []*chainMove
 	changed       bool
 	needRT        bool
-	needRTText    bool // text-only rt need: eject output references rt, checked AST does not.
 	rtDeclEmitted bool // the import flush actually emitted the rt ImportDecl; needRT alone can outlive the reference that raised it.
 	needSimd      bool
 	needSimdMath  bool
@@ -889,8 +888,7 @@ func (fl *fileLower) lowerFile() {
 	fl.lowerComptime()      // comptime generic copies, then const for unrolling, before any rewrite.
 	fl.lowerStructDefaults()
 	fl.scanRodataMarkers() // hand-written //logos:rodata lines.
-	fl.lowerArenaEject()
-	fl.lowerZeroCopy() // zero-copy string/bytes conversions.
+	fl.lowerZeroCopy()     // zero-copy string/bytes conversions.
 	fl.lowerCTFE()
 	fl.lowerConstMapRanges()
 	fl.eraseConstViews()  // erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
@@ -920,7 +918,7 @@ func (fl *fileLower) lowerFile() {
 
 	fl.lowerStaticJSON() // generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
 	fl.flushTypeImports()
-	if fl.needRT || fl.needRTText || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needJSONText || fl.needReflect || fl.needBinary {
+	if fl.needRT || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needJSONText || fl.needReflect || fl.needBinary {
 		var imps []syntax.Decl
 		pos := fl.file.Pos()
 		for _, spec := range fl.logosImportSpecs() {
@@ -1082,7 +1080,7 @@ func (fl *fileLower) addHeaderSplice() {
 		ins = off
 	}
 	for _, spec := range fl.logosImportSpecs() {
-		if spec.need || (spec.path == rtImportPath && fl.needRTText) {
+		if spec.need {
 			fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 		}
 	}

@@ -1488,10 +1488,9 @@ This return restriction includes bare returns of named results containing a `Reg
 In a Go package, passing an `r` to a callee is allowed. With `GOEXPERIMENT=logosarena` placement through that region follows the same escape rule as in a LoGOs package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap; a use that would fail with `correctness::region_escape` in a LoGOs package falls back to the heap instead. Under `logos lint` that fallback is reported as `perf::arena_fallback`, naming the call and the escaping flow; `logos build` and plain `go` report no rule ID. Without the experiment every `logos/arena` call behaves as its heap equivalent. [T-301.2][R-U1]
 A `go group` child MAY read a parent-region object through a const view. [T-301.2]
 A non-const capture MUST count as an escape of that object. [T-301.2]
-`logos eject` MUST lower `arena.Open()` to `_logos_rt.Region{}`, `arena.New[T](r)` to `new(T)`, `arena.Make[T](r, n)` to `make([]T, n)`, and `arena.Append[T](r, s, v...)` to `append(s, v...)`. [T-301.2]
+`logos eject` MUST retain the arena API calls and use the portable implementation in the support module. Ordinary lifetime regions MUST use heap storage in that implementation, and calls MUST preserve the region operand and evaluate all arguments in Go order. [T-301.2]
 `logos/rt` MUST provide `type Region = arena.Region`. [T-301.2]
 The shared support module MUST carry the `arena` package. [T-301.2]
-The eject MUST append `_ = r` after each local Region declaration. [T-301.2]
 The toolchain MUST NOT ship the upstream `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
 
 Comptime and escape analysis:
