@@ -267,6 +267,11 @@ func (fl *fileLower) ejectBlankImport(imp *syntax.ImportDecl) {
 		return
 	}
 	fl.cfBlankImportText(imp)
+	fl.ejectHideImport(path)
+	fl.changed = true
+}
+
+func (fl *fileLower) ejectHideImport(path string) {
 	if ctEjectBlanked == nil {
 		ctEjectBlanked = make(map[*syntax.File]map[string]bool)
 	}
@@ -274,7 +279,6 @@ func (fl *fileLower) ejectBlankImport(imp *syntax.ImportDecl) {
 		ctEjectBlanked[fl.file] = make(map[string]bool)
 	}
 	ctEjectBlanked[fl.file][path] = true
-	fl.changed = true
 }
 
 // EjectCtInstances appends to edits the ejected source of every checked
@@ -710,6 +714,9 @@ func (p *ctEjectPrinter) nameText(n *syntax.Name, facts *types2.Info, renames ma
 		obj = facts.Defs[n]
 	}
 	if obj == nil {
+		if n.Value == rtAlias {
+			return p.alias(types2.NewPackage(rtImportPath, "rt")), nil
+		}
 		return n.Value, nil
 	}
 	if v, ok := obj.(*types2.Var); ok && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && p.sites[v.Name()] != nil {

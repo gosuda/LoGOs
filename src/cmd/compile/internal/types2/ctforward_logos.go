@@ -103,7 +103,7 @@ func (check *Checker) logosCtFirstForward(body *syntax.BlockStmt, forwards map[*
 			return true
 		}
 		for _, targ := range inst.TypeArgs.list() {
-			if param := logosCtForwardedParam(targ); param != nil {
+			if param := LogosCtForwardedParam(targ); param != nil {
 				out = logosCtForward{site: name, param: param, target: origin, forward: forward}
 				return false
 			}
@@ -128,31 +128,75 @@ func (check *Checker) logosCtComptimeTarget(fn *Func) bool {
 	return check.logosIsComptimeGeneric(fn)
 }
 
-// logosCtForwardedParam returns the first type parameter that t holds as
-// itself or through a pointer, slice, array, map, channel, or the type
-// arguments of a named type.
-func logosCtForwardedParam(t Type) *TypeParam {
+// LogosCtForwardedParam returns the first type parameter that t holds,
+// reading t in source order: t itself, or any element, key, field,
+// parameter, result, method, embedded type or type argument of a pointer,
+// slice, array, map, channel, option, const view, tuple, struct, function,
+// interface, alias or instantiated named type. An instantiation of a comptime
+// generic or of a forwarding function forwards when one of its type
+// arguments holds a type parameter (SPEC 2.5, T-205); the checker and the
+// lowering classify forwarding functions with this one rule.
+func LogosCtForwardedParam(t Type) *TypeParam {
 	switch t := t.(type) {
 	case *TypeParam:
 		return t
+	case *Alias:
+		return LogosCtForwardedParam(Unalias(t))
 	case *Pointer:
-		return logosCtForwardedParam(t.base)
+		return LogosCtForwardedParam(t.base)
 	case *Slice:
-		return logosCtForwardedParam(t.elem)
+		return LogosCtForwardedParam(t.elem)
 	case *Array:
-		return logosCtForwardedParam(t.elem)
-	case *Map:
-		if param := logosCtForwardedParam(t.key); param != nil {
-			return param
-		}
-		return logosCtForwardedParam(t.elem)
+		return LogosCtForwardedParam(t.elem)
 	case *Chan:
-		return logosCtForwardedParam(t.elem)
-	case *Named:
-		for _, targ := range t.TypeArgs().list() {
-			if param := logosCtForwardedParam(targ); param != nil {
+		return LogosCtForwardedParam(t.elem)
+	case *Option:
+		return LogosCtForwardedParam(t.Elem)
+	case *ConstView:
+		return LogosCtForwardedParam(t.Elem)
+	case *ReadonlyDescendants:
+		return LogosCtForwardedParam(t.Elem)
+	case *Map:
+		return logosCtFirstParam(t.key, t.elem)
+	case *LogosTuple:
+		return logosCtFirstParam(t.types...)
+	case *Struct:
+		return logosCtVarsParam(t.fields)
+	case *Signature:
+		if t.params != nil {
+			if param := logosCtVarsParam(t.params.vars); param != nil {
 				return param
 			}
+		}
+		if t.results != nil {
+			return logosCtVarsParam(t.results.vars)
+		}
+	case *Interface:
+		for _, m := range t.methods {
+			if param := LogosCtForwardedParam(m.typ); param != nil {
+				return param
+			}
+		}
+		return logosCtFirstParam(t.embeddeds...)
+	case *Named:
+		return logosCtFirstParam(t.TypeArgs().list()...)
+	}
+	return nil
+}
+
+func logosCtFirstParam(types ...Type) *TypeParam {
+	for _, t := range types {
+		if param := LogosCtForwardedParam(t); param != nil {
+			return param
+		}
+	}
+	return nil
+}
+
+func logosCtVarsParam(vars []*Var) *TypeParam {
+	for _, v := range vars {
+		if param := LogosCtForwardedParam(v.typ); param != nil {
+			return param
 		}
 	}
 	return nil

@@ -1280,7 +1280,7 @@ A comptime generic MUST be instantiated with concrete type arguments. [T-205]
 
 An instantiation of a comptime generic with a type parameter MUST occur in the body of a comptime generic or a package-level generic function. A package-level generic function that is not a comptime generic is a forwarding function when it contains such an instantiation, or an instantiation of a forwarding function of its package with a type parameter. [T-205]
 
-The type argument MAY be the type parameter or a pointer, slice, array, map, channel, or instantiated named type that contains it. [T-205]
+A type argument forwards a type parameter when it is the type parameter or a type that contains the type parameter at any depth. That type MAY be a pointer, slice, array, map, channel, option, const view, tuple, struct, function, interface, alias, or instantiated named type. The compiler MUST apply this rule to every forwarding function, exported or not, so that an option, tuple, struct, function, interface, or alias type argument cannot hide an exported forwarding function until run time. [T-205]
 
 The compiler MUST expand a forwarding function once for each list of concrete type arguments, in its defining package. `logos eject` MUST print each such expansion like a comptime instance. [T-205]
 

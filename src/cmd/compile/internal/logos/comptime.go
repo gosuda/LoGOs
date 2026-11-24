@@ -129,7 +129,9 @@ func (fl *fileLower) cfForwards(body *syntax.BlockStmt) bool {
 		}
 		inst, ok := fl.pkg.info.Instances[name]
 		obj, isFunc := fl.pkg.info.Uses[name].(*types2.Func)
-		found = ok && isFunc && fl.cfIsGeneric(obj) && slices.ContainsFunc(typeArgsOf(inst.TypeArgs), cfHasTypeParam)
+		found = ok && isFunc && fl.cfIsGeneric(obj) && slices.ContainsFunc(typeArgsOf(inst.TypeArgs), func(t types2.Type) bool {
+			return types2.LogosCtForwardedParam(t) != nil
+		})
 		return true
 	})
 	return found
@@ -386,7 +388,13 @@ func (fl *fileLower) cfRetireDef(def *cfGenericDef) {
 	}
 	switch {
 	case base.LogosEject != "" && (def.obj == nil || !def.obj.Exported()):
-		fl.add(fl.cfFuncStart(fl.off(syntax.StartPos(fn))), fl.off(syntax.EndPos(fn))+1, "")
+		s := fl.cfDeclSpan(fn)
+		fl.add(s.start, s.end, "")
+		fl.ejectRetired = append(fl.ejectRetired, fn)
+		if fl.ejectSites == nil {
+			fl.ejectSites = make(map[syntax.Node]bool)
+		}
+		fl.ejectSites[fn] = true
 	case runtime:
 	case base.LogosEject != "" || !def.forward:
 		fl.add(fl.off(syntax.StartPos(fn.Body)), fl.off(syntax.EndPos(fn.Body))+1, "{\n\t"+call+"\n}")
@@ -394,6 +402,12 @@ func (fl *fileLower) cfRetireDef(def *cfGenericDef) {
 		return
 	}
 	fl.changed = true
+}
+
+// cfDeclSpan is the source text of fn from its func keyword through its
+// closing brace.
+func (fl *fileLower) cfDeclSpan(fn *syntax.FuncDecl) span {
+	return span{fl.cfFuncStart(fl.off(syntax.StartPos(fn))), fl.off(syntax.EndPos(fn)) + 1}
 }
 
 // cfLayout is one comptime.SizeOf or comptime.AlignOf call of a comptime
@@ -560,26 +574,6 @@ func (fl *fileLower) cfLayoutCall(sel *syntax.SelectorExpr, fn *syntax.FuncDecl,
 		return cfLayout{}, false
 	}
 	return cfLayout{call: call, targ: targs[0], op: op, typ: name.Value}, true
-}
-
-func cfHasTypeParam(t types2.Type) bool {
-	switch t := t.(type) {
-	case *types2.TypeParam:
-		return true
-	case *types2.Pointer:
-		return cfHasTypeParam(t.Elem())
-	case *types2.Slice:
-		return cfHasTypeParam(t.Elem())
-	case *types2.Array:
-		return cfHasTypeParam(t.Elem())
-	case *types2.Map:
-		return cfHasTypeParam(t.Key()) || cfHasTypeParam(t.Elem())
-	case *types2.Chan:
-		return cfHasTypeParam(t.Elem())
-	case *types2.Named:
-		return slices.ContainsFunc(typeArgsOf(t.TypeArgs()), cfHasTypeParam)
-	}
-	return false
 }
 
 // reduceComptimeInstance removes the compile-time forms from a detached

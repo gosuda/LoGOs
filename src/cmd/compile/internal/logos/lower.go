@@ -263,6 +263,7 @@ type fileLower struct {
 	needRT        bool
 	needRTText    bool // text-only rt need: eject output references rt, checked AST does not.
 	rtDeclEmitted bool // the import flush actually emitted the rt ImportDecl; needRT alone can outlive the reference that raised it.
+	ejectRetired  []*syntax.FuncDecl
 	needSimd      bool
 	needSimdMath  bool
 	needJSON      bool
@@ -1014,32 +1015,37 @@ type logosImportSpec struct {
 }
 
 // rtReferenced reports whether the file's emitted text or mutated tree still
-// references the rt alias. Passes set needRT eagerly when they record a
-// reference, but a later removal — a dead const-if branch, a dropped case —
-// can erase every splice that carried it, and the bare flag would then emit
-// an unused import the build rejects.
-func (fl *fileLower) rtReferenced() bool {
+// references the rt alias, leaving out the declarations in retired and the
+// splices inside their text. Passes set needRT eagerly when they record a
+// reference, but a later removal — a dead const-if branch, a dropped case,
+// a comptime generic that eject deletes — can erase every splice that
+// carried it, and the bare flag would then emit an unused import the build
+// rejects.
+func (fl *fileLower) rtReferenced(retired []*syntax.FuncDecl) bool {
 	needle := rtAlias + "."
 	if strings.Contains(fl.constText, needle) {
 		return true
 	}
-	for _, sp := range fl.splices {
-		if strings.Contains(sp.text, needle) {
+	dropped := make([]span, len(retired))
+	for i, fn := range retired {
+		dropped[i] = fl.cfDeclSpan(fn)
+	}
+	names := func(list []splice) bool {
+		return slices.ContainsFunc(list, func(sp splice) bool {
+			return strings.Contains(sp.text, needle) && !slices.ContainsFunc(dropped, func(s span) bool { return spanInside(sp, s) })
+		})
+	}
+	if names(fl.splices) {
+		return true
+	}
+	for _, r := range fl.regions {
+		if names(r.splices) {
 			return true
 		}
 	}
-	for _, r := range fl.regions {
-		for _, sp := range r.splices {
-			if strings.Contains(sp.text, needle) {
-				return true
-			}
-		}
-	}
 	for _, m := range fl.moves {
-		for _, sp := range m.inner {
-			if strings.Contains(sp.text, needle) {
-				return true
-			}
+		if names(m.inner) {
+			return true
 		}
 	}
 	found := false
@@ -1047,8 +1053,11 @@ func (fl *fileLower) rtReferenced() bool {
 		if found {
 			return false
 		}
-		if sel, ok := n.(*syntax.SelectorExpr); ok {
-			if nm, ok := sel.X.(*syntax.Name); ok && nm.Value == rtAlias {
+		switch n := n.(type) {
+		case *syntax.FuncDecl:
+			return !slices.Contains(retired, n)
+		case *syntax.SelectorExpr:
+			if nm, ok := n.X.(*syntax.Name); ok && nm.Value == rtAlias {
 				found = true
 				return false
 			}
@@ -1067,7 +1076,7 @@ func (fl *fileLower) rtReferenced() bool {
 
 func (fl *fileLower) logosImportSpecs() []logosImportSpec {
 	specs := []logosImportSpec{
-		{fl.needRT && fl.rtReferenced(), rtAlias, rtImportPath, rtImport},
+		{fl.needRT && fl.rtReferenced(nil), rtAlias, rtImportPath, rtImport},
 		{fl.needJSON, jsonAlias, jsonImportPath, jsonImport},
 		{fl.needJSONText, jsontextAlias, jsontextImportPath, jsontextImport},
 		{fl.needReflect, reflectAlias, "reflect", reflectImport},
@@ -1129,7 +1138,14 @@ func (fl *fileLower) addHeaderSplice() {
 		ins = off
 	}
 	for _, spec := range fl.logosImportSpecs() {
-		if spec.need || (spec.path == rtImportPath && fl.needRTText) {
+		need := spec.need
+		if spec.path == rtImportPath {
+			need = fl.needRTText || need && (len(fl.ejectRetired) == 0 || fl.rtReferenced(fl.ejectRetired))
+			if spec.need && !need {
+				fl.ejectHideImport(spec.path)
+			}
+		}
+		if need {
 			fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 		}
 	}
