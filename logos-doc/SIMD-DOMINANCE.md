@@ -182,9 +182,3 @@ go test -count=1 -race -timeout=40m -v cmd/go \
   -run '^TestScript$/^(README|logos_simd_(zero_dominance|feature_gate|gate_avx512|gate_branch)|logos_eject_simd_slice)$'
 GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
 ```
-
-The source/ejection scripts use the repository's pinned upstream 1.27.2,
-1.27.3, and 1.27.4 toolchains as independent oracles. Changed Go files must
-also pass `gofmt`. The dedicated `simd-dominance.yml` workflow separates the
-focused checks from the full regression run. Queued or incomplete CI is not
-a pass and does not permit merging.
