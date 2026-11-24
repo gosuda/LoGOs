@@ -1112,11 +1112,9 @@ func stripLogosFields(f *ast.File, drop func(from, to token.Pos)) {
 				if fd.Doc != nil {
 					from = fd.Doc.Pos()
 				}
-				// A stripped last field takes the blank lines above it, so
-				// none is left before the closing brace.
-				if idx > 0 && idx == len(fl.List)-1 {
+				if idx == len(fl.List)-1 && len(kept) > 0 {
 					tf := fset.File(f.Pos())
-					from = tf.LineStart(tf.Line(fl.List[idx-1].End()) + 1)
+					from = tf.LineStart(tf.Line(kept[len(kept)-1].End()) + 1)
 				}
 				drop(from, fd.End())
 				del = append(del, idx)

@@ -30,7 +30,6 @@ type Scope struct {
 	pos, end token.Pos         // scope extent; may be invalid
 	comment  string            // for debugging only
 	isFunc   bool              // set if this is a function scope (internal use only)
-
 }
 
 // NewScope returns a new, empty scope contained in the given parent
