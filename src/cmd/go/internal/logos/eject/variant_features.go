@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/logos/settings"
 )
 
 func architectureFeatureTag(tag string) bool {
@@ -88,7 +89,17 @@ func variantBuildContext(vc variantCtx) (build.Context, bool) {
 	if err != nil {
 		return build.Context{}, false
 	}
-	experiments, err := buildcfg.ParseGOEXPERIMENT(vc.goos, vc.goarch, variantExperiment(vc))
+	// The helper recomputes module policy at startup: with arena policy it
+	// appends logosarena to the GOEXPERIMENT it receives. Resolve the
+	// candidate through the same policy before testing the constraint, so a
+	// candidate the helper cannot select is skipped instead of matching.
+	// The helper inherits this working directory, so the current policy is
+	// the helper policy.
+	experiment := variantExperiment(vc)
+	if settings.Current().Arena {
+		experiment = settings.WithArena(experiment)
+	}
+	experiments, err := buildcfg.ParseGOEXPERIMENT(vc.goos, vc.goarch, experiment)
 	if err != nil {
 		return build.Context{}, false
 	}

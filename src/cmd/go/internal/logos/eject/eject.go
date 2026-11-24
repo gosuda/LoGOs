@@ -18,6 +18,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"internal/buildcfg"
 	"internal/logosfile"
 	"io/fs"
 	"os"
@@ -900,8 +901,18 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 	}
 	slices.Sort(customUniq)
 	slices.Sort(expMentioned)
+	// Synthesized GOEXPERIMENT values must parse. ParseGOEXPERIMENT rejects an
+	// unknown experiment in either polarity, so an unknown tag next to a real
+	// one would poison every candidate. Unknown tags stay fixed facts for the
+	// matcher, which reads an absent tag as false.
+	var expKnown []string
+	for _, name := range expMentioned {
+		if buildcfg.KnownExperiment(name) {
+			expKnown = append(expKnown, name)
+		}
+	}
 	search := func(goosCands, goarchCands []string) (variantCtx, bool) {
-		for _, experiment := range experimentCombinations(expMentioned) {
+		for _, experiment := range experimentCombinations(expKnown) {
 			if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, experiment, customUniq, uniqMention); ok {
 				return vc, true
 			}

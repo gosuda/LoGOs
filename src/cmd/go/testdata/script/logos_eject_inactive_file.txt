@@ -1,6 +1,9 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env CGO_ENABLED=0
+# Pin the default experiment set: the harness passes ambient GOEXPERIMENT
+# through, so an inherited nojsonv2 would fail the default run below.
+env GOEXPERIMENT=
 
 cd variants
 
