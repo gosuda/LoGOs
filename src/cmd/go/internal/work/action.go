@@ -1218,6 +1218,7 @@ func (b *Builder) linkSharedAction(s *modload.Loader, mode, depMode BuildMode, s
 		b.addTransitiveLinkDeps(s, a, a1, shlib)
 		return a
 	})
+	logosSnapshotLinkPolicy(s)
 
 	// Install result.
 	if (mode == ModeInstall || mode == ModeBuggyInstall) && a.Actor != nil {
