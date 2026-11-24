@@ -9,17 +9,19 @@ cd app
 
 logos conc run . ok
 ! stderr .
+! stdout 'conc::'
 
 exec sh ../status.sh 7 logos conc run . exit7
 stderr '^exit status 7$'
 ! stderr 'conc::'
+! stdout 'conc::'
 
 exec sh ../status.sh 7 logos conc run . finding exit7
-stderr '\[conc::lock_order_inversion\]'
+stdout '\[conc::lock_order_inversion\]'
 stderr '^exit status 7$'
 
 exec sh ../status.sh 1 logos conc run . finding ok
-stderr '\[conc::lock_order_inversion\]'
+stdout '\[conc::lock_order_inversion\]'
 ! stderr '^exit status'
 
 exec sh ../status.sh 137 logos conc run . signal
