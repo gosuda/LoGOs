@@ -1,0 +1,52 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos eject -o ../control
+exists ../control/p/p_test.go
+! exists ../control/p/extra_test.go
+
+cp ../extra_test.lgo p/extra_test.lgo
+logos test -count=1 -tags=eject_extra ./p
+logos eject -o ../variant
+exists ../variant/p/p_test.go
+exists ../variant/p/extra_test.go
+cd ../variant
+exec env -u GOROOT $UPROOT1272/bin/go test -count=1 -tags=eject_extra -v ./p
+stdout '^--- PASS: TestValue '
+
+-- m/go.mod --
+module example.com/ejectrepro
+
+go 1.27
+
+-- m/p/p.lgo --
+package p
+
+const Value = 1
+
+-- m/helper/helper.lgo --
+package helper
+
+const Value = 1
+
+-- m/p/p_test.lgo --
+package p_test
+
+import (
+	"testing"
+
+	"example.com/ejectrepro/helper"
+	"example.com/ejectrepro/p"
+)
+
+func TestValue(t *testing.T) {
+	if got := p.Value; got != helper.Value {
+		t.Fatalf("Value = %d, want %d", got, helper.Value)
+	}
+}
+
+-- extra_test.lgo --
+//go:build eject_extra
+
+package p_test

@@ -207,6 +207,7 @@ func ejectToDir(ctx context.Context, out string) {
 	if isEjectVariant() {
 		if packages := os.Getenv("LOGOSEJECT_PACKAGES"); packages != "" {
 			patterns = strings.Split(packages, "\n")
+			opts.ModResolveTests = true
 		}
 	}
 	pkgs := load.PackagesAndErrors(moduleLoader, ctx, opts, patterns)
