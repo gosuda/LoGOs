@@ -1,0 +1,51 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+const (
+	fileScalarK = 1
+	fileScalarN, fileScalarNPeer = iota, iota
+	fileScalarM, fileScalarMPeer
+)
+
+const (
+	fileCompositeK = []int{1}
+	fileCompositeN, fileCompositeNPeer = iota, iota
+	fileCompositeM, fileCompositeMPeer
+)
+
+func printLocalGroups[T any]() {
+	const if comptime.IsStruct[T]() {
+		{
+			const (
+				K = 1
+				N = iota
+				M
+			)
+			fmt.Println(K, N, M)
+		}
+
+		const (
+			K = []int{1}
+			N = iota
+			M
+		)
+		const if N != 1 || M != 2 {
+			comptime.Error("semantic group indices changed")
+		}
+		fmt.Println(K[0], N, M)
+	}
+}
+
+func main() {
+	printLocalGroups[struct{}]()
+	fmt.Println(fileScalarK, fileScalarN, fileScalarM, fileScalarNPeer, fileScalarMPeer)
+	fmt.Println(fileCompositeK[0], fileCompositeN, fileCompositeM, fileCompositeNPeer, fileCompositeMPeer)
+}

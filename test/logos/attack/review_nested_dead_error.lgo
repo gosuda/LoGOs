@@ -1,0 +1,38 @@
+// run
+
+package main
+
+import "comptime"
+
+type left struct {
+	Count int
+	Label string
+}
+
+type right struct {
+	Ready bool
+}
+
+type outer struct {
+	Left  left
+	Right right
+}
+
+func fieldPaths[T any]() string {
+	paths := ""
+	const for _, field := range comptime.Fields[T]() {
+		const for _, child := range comptime.Fields[field.Type]() {
+			const if comptime.IsStruct[child.Type]() {
+				comptime.Error("nested struct field must stay silent")
+			}
+			paths += field.Name + "." + child.Name + ";"
+		}
+	}
+	return paths
+}
+
+func main() {
+	if got := fieldPaths[outer](); got != "Left.Count;Left.Label;Right.Ready;" {
+		panic("nested field paths: got " + got)
+	}
+}

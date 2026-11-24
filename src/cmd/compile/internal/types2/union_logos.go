@@ -86,6 +86,13 @@ func logosMemberOf(t Type, tset *_TypeSet) bool {
 	return false
 }
 
+func logosUnionAdmits(V Type, tset *_TypeSet) bool {
+	if iface, ok := V.Underlying().(*Interface); ok {
+		return iface.typeSet().subsetOf(tset)
+	}
+	return logosMemberOf(V, tset)
+}
+
 func (check *Checker) logosUnionsOK() bool {
 	return check.conf.Logos || check.conf.LogosUnions
 }

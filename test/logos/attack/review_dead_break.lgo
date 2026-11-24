@@ -1,0 +1,48 @@
+// run
+
+package main
+
+import "comptime"
+
+type noFields struct{}
+type scalarField struct{ Value int }
+type structField struct{ Value struct{} }
+
+func waitForField() int {
+	for {
+		const for _, field := range comptime.Fields[noFields]() {
+			_ = field.Name
+			break
+		}
+	}
+}
+
+func loopScore[T any]() int {
+	score := 0
+outer:
+	for pass := 1; pass <= 4; pass++ {
+		if pass == 4 {
+			break outer
+		}
+		score += 10 * pass
+		const for _, field := range comptime.Fields[T]() {
+			const if comptime.IsStruct[field.Type]() {
+				break outer
+			}
+		}
+		score += pass
+	}
+	return score + 100
+}
+
+func main() {
+	if loopScore[noFields]() != 166 {
+		panic("zero-iteration const-for changed outer loop execution")
+	}
+	if loopScore[scalarField]() != 166 {
+		panic("dead break changed outer loop execution")
+	}
+	if loopScore[structField]() != 110 {
+		panic("live break did not exit the outer loop")
+	}
+}

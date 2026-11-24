@@ -208,18 +208,6 @@ func (s *nextScan) endOfFunc(n *syntax.FuncLit) (int, bool) {
 	return s.after(n.Body.Rbrace, 1)
 }
 
-func (s *nextScan) callText(call *syntax.CallExpr) (string, bool) {
-	start, ok := s.startOf(call)
-	if !ok {
-		return "", false
-	}
-	end, ok := s.endOf(call)
-	if !ok || end < start {
-		return "", false
-	}
-	return string(s.src[start:end]), true
-}
-
 func (s *nextScan) startOf(e syntax.Expr) (int, bool) {
 	switch n := e.(type) {
 	case *syntax.CallExpr:

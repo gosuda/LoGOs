@@ -1,0 +1,50 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"fmt"
+	"reflect"
+	"runtime"
+	"strings"
+
+	"example.com/owneridentity/left"
+	"example.com/owneridentity/right"
+)
+
+func main() {
+	leftShared := left.Shared()
+	rightShared := right.Shared()
+	rightDistinct := right.Distinct()
+
+	leftPC := reflect.ValueOf(leftShared).Pointer()
+	rightPC := reflect.ValueOf(rightShared).Pointer()
+	distinctPC := reflect.ValueOf(rightDistinct).Pointer()
+	if leftPC != rightPC {
+		panic("same named argument has different entry points across importers")
+	}
+	if rightPC == distinctPC {
+		panic("different named arguments share an entry point")
+	}
+	for _, pc := range []uintptr{leftPC, distinctPC} {
+		fn := runtime.FuncForPC(pc)
+		if fn == nil {
+			panic("comptime instance has no native entry point")
+		}
+		if name := fn.Name(); !strings.HasPrefix(name, "example.com/owneridentity/owner.") {
+			panic(fmt.Sprintf("comptime entry point %q is outside its owner package", name))
+		}
+	}
+
+	if got := leftShared(10); got != 11 {
+		panic(fmt.Sprintf("left.Shared()(10) = %d, want 11", got))
+	}
+	if got := rightShared(20); got != 21 {
+		panic(fmt.Sprintf("right.Shared()(20) = %d, want 21", got))
+	}
+	if got := rightDistinct(10); got != 12 {
+		panic(fmt.Sprintf("right.Distinct()(10) = %d, want 12", got))
+	}
+}

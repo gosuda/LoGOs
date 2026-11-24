@@ -1,0 +1,11 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package left
+
+import "example.com/helperunit/owner"
+
+func Probe(key int) (map[int]int, map[int]int) { return owner.Probe[owner.Shared](key, 1) }
+
+func Declared() map[int]int { return owner.Declared[owner.Shared]() }

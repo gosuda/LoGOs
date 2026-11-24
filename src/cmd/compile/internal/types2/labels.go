@@ -114,6 +114,9 @@ func (check *Checker) blockBranches(all *Scope, parent *block, lstmt *syntax.Lab
 
 	var stmtBranches func(*syntax.LabeledStmt, syntax.Stmt)
 	stmtBranches = func(lstmt *syntax.LabeledStmt, s syntax.Stmt) {
+		if check.logosDead(s) {
+			return
+		}
 		switch s := s.(type) {
 		case *syntax.DeclStmt:
 			for _, d := range s.DeclList {

@@ -176,10 +176,7 @@ func collectInactiveGorootLogosFiles(plan *ejectPlan, staging string, active map
 				}
 				continue
 			}
-			if !entry.Type().IsRegular() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !logosfile.Is(name) || active[path] {
-				continue
-			}
-			if strings.HasSuffix(logosStem(name), "_test") {
+			if !entry.Type().IsRegular() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !isSupportLogosFile(name) || active[path] {
 				continue
 			}
 			p := loaded[dir]

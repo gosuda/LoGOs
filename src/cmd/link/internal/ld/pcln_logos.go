@@ -12,38 +12,39 @@ import (
 	"cmd/link/internal/loader"
 )
 
-var logosCloneInfixes = []string{
-	abi.LogosCtDisplayInfix,
-	abi.LogosCtASCIIInfix,
+func logosCloneBaseName(name string) string {
+	var base []byte
+	rest := name
+	for {
+		i := strings.Index(rest, abi.LogosCtInstanceInfix)
+		if i < 0 {
+			break
+		}
+		id := rest[i+len(abi.LogosCtInstanceInfix):]
+		if len(base)+i == 0 || !logosCtInstanceID(id) {
+			base = append(base, rest[:i+len(abi.LogosCtInstanceInfix)]...)
+			rest = id
+			continue
+		}
+		base = append(base, rest[:i]...)
+		rest = id[abi.LogosCtInstanceIDLen:]
+	}
+	if base == nil {
+		return name
+	}
+	return string(append(base, rest...))
 }
 
-func logosCloneBaseName(name string) string {
-	orig := name
-	for {
-		i := len(name)
-		for i > 0 && name[i-1] >= '0' && name[i-1] <= '9' {
-			i--
-		}
-		if i == len(name) {
-			return name
-		}
-		prefix := name[:i]
-		var base string
-		stripped := false
-		for _, infix := range logosCloneInfixes {
-			if b, ok := strings.CutSuffix(prefix, infix); ok {
-				base, stripped = b, true
-				break
-			}
-		}
-		if !stripped {
-			return name
-		}
-		if base == "" {
-			return orig
-		}
-		name = base
+func logosCtInstanceID(s string) bool {
+	if len(s) < abi.LogosCtInstanceIDLen {
+		return false
 	}
+	for _, c := range []byte(s[:abi.LogosCtInstanceIDLen]) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return len(s) == abi.LogosCtInstanceIDLen || s[abi.LogosCtInstanceIDLen] == '.'
 }
 
 func logosDisplayName(ldr *loader.Loader, s loader.Sym) string {

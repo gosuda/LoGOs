@@ -5,13 +5,102 @@
 package eject
 
 import (
+	"bytes"
+	"internal/testenv"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
 )
+
+func TestEjectIndependentTestGraphs(t *testing.T) {
+	const childOut = "LOGOS_TEST_EJECT_INDEPENDENT_GRAPHS_OUT"
+	if out := os.Getenv(childOut); out != "" {
+		cfg.Logos = true
+		cfg.BuildContext.ToolTags = append(cfg.BuildContext.ToolTags, "logos")
+		ejectToDir(t.Context(), out)
+		return
+	}
+
+	goTool := testenv.GoToolPath(t)
+	src, dst := t.TempDir(), t.TempDir()
+	for name, text := range map[string]string{
+		"go.mod":                "module example.com/eject\n\ngo 1.27\n",
+		"value/value.lgo":       "package value\n\nvar number = 1\n\nfunc Get() int { return number }\n",
+		"value/export_test.lgo": "package value\n\nfunc SetForTest(n int) { number = n }\n",
+		"value/value_test.lgo": `package value_test
+
+import (
+	"testing"
+
+	"example.com/eject/reader"
+	"example.com/eject/value"
+)
+
+func TestReaderUsesTestVariant(t *testing.T) {
+	value.SetForTest(7)
+	if got := reader.Read(); got != 7 {
+		t.Fatalf("reader.Read() = %d, want 7", got)
+	}
+}
+`,
+		"reader/reader.lgo": `package reader
+
+import "example.com/eject/value"
+
+func Read() int { return value.Get() }
+`,
+		"reader/reader_test.lgo": `package reader_test
+
+import (
+	"testing"
+
+	"example.com/eject/reader"
+)
+
+func TestReaderUsesOrdinaryPackage(t *testing.T) {
+	if got := reader.Read(); got != 1 {
+		t.Fatalf("reader.Read() = %d, want 1", got)
+	}
+}
+`,
+	} {
+		path := filepath.Join(src, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := []string{"GO111MODULE=on", "GOWORK=off", "GOENV=off", "GOFLAGS=", "GOPROXY=off",
+		"GOSUMDB=off", "GOTOOLCHAIN=local", "GOOS=" + runtime.GOOS, "GOARCH=" + runtime.GOARCH, "CGO_ENABLED=0"}
+	cmd := testenv.Command(t, testenv.Executable(t), "-test.run=^TestEjectIndependentTestGraphs$")
+	cmd.Dir = src
+	cmd.Env = append(cmd.Environ(), env...)
+	cmd.Env = append(cmd.Env, childOut+"="+dst)
+	cmd.Env = append(cmd.Env, "LOGOSEJECT_IN_VARIANT=")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("eject: %v\n%s", err, output)
+	}
+
+	cmd = testenv.Command(t, goTool, "test", "-v", "-count=1", "./...")
+	cmd.Dir = dst
+	cmd.Env = append(cmd.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("test ejected module: %v\n%s", err, output)
+	}
+	for _, name := range []string{"TestReaderUsesTestVariant", "TestReaderUsesOrdinaryPackage"} {
+		if !bytes.Contains(output, []byte("--- PASS: "+name+" ")) {
+			t.Errorf("ejected module did not run %s:\n%s", name, output)
+		}
+	}
+}
 
 func findVariantContextFromLinuxAMD64(pkgDir, name string, hostTags []string) (string, string, []string, bool) {
 	vc, ok := selectVariantContext(pkgDir, name, "linux", "amd64", hostTags)
@@ -135,5 +224,73 @@ func TestFindVariantContextPlatformLogosSyntax(t *testing.T) {
 	}
 	if goos, goarch, _, ok := findVariantContextFromLinuxAMD64(pkgDir, "plat_windows_arm64.lgo", nil); !ok || goos != "windows" || goarch != "arm64" {
 		t.Errorf("plat_windows_arm64.lgo context = %q/%q ok=%v, want windows/arm64", goos, goarch, ok)
+	}
+}
+
+func TestSupportRelPathMapping(t *testing.T) {
+	cases := map[string]string{
+		"logos/rt":              "",
+		"logos/rt/json":         "json",
+		"logos/json":            "logos/json",
+		"logos/arena":           "arena",
+		"logos/sync":            "sync",
+		"logos/ascii":           "logos/ascii",
+		"logos/enum":            "logos/enum",
+		"logos/proc":            "logos/proc",
+		"logos/leak":            "logos/leak",
+		"logos/io":              "logos/io",
+		"logos/log":             "logos/log",
+		"logos/strconv":         "logos/strconv",
+		"logos/net/uri":         "logos/net/uri",
+		"logos/encoding/base64": "logos/encoding/base64",
+	}
+	for path, want := range cases {
+		got, ok := supportRelPath(path)
+		if !ok {
+			t.Errorf("supportRelPath(%q) = not ok, want %q", path, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("supportRelPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+	for _, path := range []string{"fmt", "example.com/logos/rt", "logosrt", ""} {
+		if rel, ok := supportRelPath(path); ok {
+			t.Errorf("supportRelPath(%q) = %q, ok, want not ok", path, rel)
+		}
+	}
+}
+
+func TestSupportDestinationsDistinct(t *testing.T) {
+	dst, err := supportDestinations([]string{"logos/rt", "logos/rt/json", "logos/json", "logos/arena"})
+	if err != nil {
+		t.Fatalf("supportDestinations: %v", err)
+	}
+	want := map[string]string{"": "logos/rt", "json": "logos/rt/json", "logos/json": "logos/json", "arena": "logos/arena"}
+	if len(dst) != len(want) {
+		t.Fatalf("supportDestinations = %v, want %v", dst, want)
+	}
+	for rel, path := range want {
+		if dst[rel] != path {
+			t.Errorf("supportDestinations[%q] = %q, want %q", rel, dst[rel], path)
+		}
+	}
+}
+
+func TestSupportDestinationsCollision(t *testing.T) {
+	want := "support packages logos/json and logos/rt/logos/json map to the same path logos/json"
+	for _, paths := range [][]string{
+		{"logos/json", "logos/rt/logos/json"},
+		{"logos/rt/logos/json", "logos/json"},
+		{"logos/rt", "logos/json", "logos/rt/logos/json"},
+	} {
+		_, err := supportDestinations(paths)
+		if err == nil {
+			t.Errorf("supportDestinations(%v) = nil error, want collision", paths)
+			continue
+		}
+		if err.Error() != want {
+			t.Errorf("supportDestinations(%v) error = %q, want %q", paths, err.Error(), want)
+		}
 	}
 }

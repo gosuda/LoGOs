@@ -765,7 +765,10 @@ func (check *Checker) logosPropertySelector(x *operand, e *syntax.SelectorExpr, 
 	if !check.conf.Logos || x.typ() == nil {
 		return false
 	}
-	s := logosSelectProperty(check.pkg, x.typ(), sel)
+	s, checked := check.logosCtProperty(x, e, sel)
+	if !checked {
+		s = logosSelectProperty(check.pkg, x.typ(), sel)
+	}
 	if s.kind == logosSelectOrdinary || x.mode() == typexpr && s.kind != logosSelectInterface {
 		return false
 	}

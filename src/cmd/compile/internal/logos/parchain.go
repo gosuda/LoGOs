@@ -697,11 +697,12 @@ func (fl *fileLower) parReturn(s *syntax.ReturnStmt) {
 
 func parseStageFrag(fl *fileLower, text string, pos syntax.Pos) syntax.Expr {
 	text = fl.settleMarks(gen(text)).s
-	src := "package logoschain\nvar _ = " + text + "\n"
+	src, marks := fl.expandConstMapFragment("package logoschain\nvar _ = " + text + "\n")
 	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader(src), nil, nil, syntax.CheckBranches)
 	if err != nil || len(f.DeclList) != 1 {
 		base.Fatalf("logos: cannot parse chain fragment %q: %v", text, err)
 	}
+	fl.bindConstMapFragment(f, src, marks)
 	decl, ok := f.DeclList[0].(*syntax.VarDecl)
 	if !ok {
 		base.Fatalf("logos: cannot parse chain fragment %q", text)

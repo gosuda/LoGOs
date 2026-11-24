@@ -102,7 +102,7 @@ func (check *Checker) logosConstMapReadOnly(call *syntax.CallExpr, imported, kno
 		return false
 	}
 	bodies, consts := check.logosConstFuncBodies()
-	fd, ok := bodies[name.Value]
+	fd, ok := bodies[logosConstFnKey(fn.pkg.path, name.Value)]
 	return ok && consts[fd]
 }
 

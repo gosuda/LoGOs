@@ -5,6 +5,9 @@
 package ir
 
 import (
+	"internal/abi"
+	"strings"
+
 	"cmd/compile/internal/base"
 	"cmd/internal/obj"
 )
@@ -53,7 +56,7 @@ func setupTextLSym(f *Func, flag int) {
 	if f.IsPackageInit() {
 		flag |= obj.PKGINIT
 	}
-	if base.IsLogosCtClone(base.Ctxt.Pkgpath, f.Sym().Name) {
+	if strings.Contains(f.Sym().Name, abi.LogosCtInstanceInfix) {
 		flag |= obj.LOGOSCTCLONE
 	}
 

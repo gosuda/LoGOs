@@ -605,13 +605,17 @@ func logosImportedBareUnion(t Type) bool {
 	return logosImportedBareUnions.m[n.Obj().Pkg().Path()+"."+n.Obj().Name()]
 }
 
+// logosCheckUnionMemberJSON reports a union member that the holder cannot
+// decode. A member that another package keeps unexported is unreachable
+// whether the member list came from the import facts or from the union terms
+// that the importer restores, so the export check runs first.
 func (check *Checker) logosCheckUnionMemberJSON(fld *Var, m LogosUnionMember) {
-	if m.Type != nil {
-		check.logosCheckUnionTermJSON(fld, m.Type)
+	if m.Name != "" && !isExported(m.Name) && (check.pkg == nil || check.pkg.Path() != m.Pkg) {
+		check.errorf(fld, BadDecl, "%s union member %s.%s is not exported, so no UnmarshalJSON method of it is reachable here", logosNoUnionJSON, m.Pkg, m.Name)
 		return
 	}
-	if !isExported(m.Name) && (check.pkg == nil || check.pkg.Path() != m.Pkg) {
-		check.errorf(fld, BadDecl, "%s union member %s.%s is not exported, so no UnmarshalJSON method of it is reachable here", logosNoUnionJSON, m.Pkg, m.Name)
+	if m.Type != nil {
+		check.logosCheckUnionTermJSON(fld, m.Type)
 		return
 	}
 	mt, ok := check.logosForeignMemberType(m.Text())

@@ -18,9 +18,6 @@ func TestConstFnEncodeDecodeRoundTrip(t *testing.T) {
 	src := "package calc\n\nconst func F(x int) int {\n\treturn x\n}\n"
 	in := &facts.Facts{
 		Fingerprint: fp,
-		Comptimes: []facts.ComptimeFact{
-			{Object: "Gen", Source: []byte("func Gen() {}\n")},
-		},
 		ConstFuncs: []facts.ConstFuncFact{
 			{Object: "F", Source: []byte(src)},
 		},
@@ -28,9 +25,6 @@ func TestConstFnEncodeDecodeRoundTrip(t *testing.T) {
 	got := facts.Encode(fp, in)
 	want := "logos-facts 3\n" +
 		"fingerprint 0001020304050607\n" +
-		"comptime Gen 14\n" +
-		"func Gen() {}\n" +
-		"\n" +
 		"constfn F " + itoa(len(src)) + "\n" +
 		src + "\n"
 	if string(got) != want {
@@ -49,9 +43,6 @@ func TestConstFnEncodeDecodeRoundTrip(t *testing.T) {
 	cf := back.ConstFuncs[0]
 	if cf.Object != "F" || string(cf.Source) != src {
 		t.Fatalf("round trip mismatch: object %q source %q", cf.Object, cf.Source)
-	}
-	if len(back.Comptimes) != 1 || back.Comptimes[0].Object != "Gen" {
-		t.Fatalf("round trip lost comptime records: %+v", back.Comptimes)
 	}
 }
 
@@ -133,14 +124,13 @@ func TestConstFnMixedRecordsRoundTrip(t *testing.T) {
 		Fingerprint: fp,
 		Opts:        []facts.PathFact{{Object: "H", Path: "P0"}},
 		Fns:         []facts.FnFact{{Object: "F", Readonly: true}},
-		Comptimes:   []facts.ComptimeFact{{Object: "G", Source: []byte("func G() {}\n")}},
 		ConstFuncs:  []facts.ConstFuncFact{{Object: "F", Source: []byte(src)}},
 	}
 	back, err := facts.Decode(facts.Encode(fp, in))
 	if err != nil {
 		t.Fatalf("Decode(Encode) failed: %v", err)
 	}
-	if len(back.ConstFuncs) != 1 || len(back.Comptimes) != 1 || len(back.Opts) != 1 || len(back.Fns) != 1 {
+	if len(back.ConstFuncs) != 1 || len(back.Opts) != 1 || len(back.Fns) != 1 {
 		t.Fatalf("round trip lost records: %+v", back)
 	}
 	if back.ConstFuncs[0].Object != "F" || string(back.ConstFuncs[0].Source) != src {

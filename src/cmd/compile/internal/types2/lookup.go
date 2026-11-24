@@ -416,7 +416,7 @@ func (check *Checker) missingMethodAt(V, T Type, static bool, equivalent func(x,
 				break
 			}
 
-			if !equivalent(f.typ, m.typ) {
+			if !equivalent(f.typ, m.typ) && !check.logosGoInterfaceOptionMatch(f, m, pos) {
 				state = wrongSig
 				break
 			}
@@ -473,7 +473,7 @@ func (check *Checker) missingMethodAt(V, T Type, static bool, equivalent func(x,
 				break
 			}
 
-			if !equivalent(f.typ, m.typ) {
+			if !equivalent(f.typ, m.typ) && !check.logosGoInterfaceOptionMatch(f, m, pos) {
 				state = wrongSig
 				break
 			}

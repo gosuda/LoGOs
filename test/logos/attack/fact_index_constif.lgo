@@ -1,0 +1,27 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func First[T any]() string {
+	name := ""
+	const for _, f := range comptime.Fields[T]() {
+		const if f.Index == 0 {
+			name = f.Name
+		}
+	}
+	return name
+}
+
+type Row struct {
+	A int
+	B int
+}
+
+func main() {
+	fmt.Println(First[Row]())
+}

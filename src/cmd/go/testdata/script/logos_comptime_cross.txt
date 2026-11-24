@@ -5,32 +5,45 @@ cd w
 logos build ./...
 logos run ./main
 stdout '^wire-ok$'
-stdout '^names-cfg \[Port\]$'
-stdout '^names-svc \[Port Host hidden\]$'
+# SPEC 2.5: a const for includes the unexported fields of a T declared in
+# the package that defines the generic, here wire, and no others.
+stdout '^names-cfg \[Port secret\]$'
+stdout '^names-svc \[Port Host\]$'
 stdout '^cfg-port 9090$'
-stdout '^labels-cfg \[0=Port\]$'
-stdout '^labels-svc \[0=Port 1=Host 2=hidden\]$'
+stdout '^labels-cfg \[0=Port 1=secret\]$'
+stdout '^labels-svc \[0=Port 1=Host\]$'
 stdout '^describe-svc struct$'
 stdout '^describe-cfg struct$'
 stdout '^describe-int scalar$'
 stdout '^describe-off silent$'
+cp stdout $WORK/native-main.txt
 logos run ./names
-stdout '^\[Port\]$'
-cd ..
+stdout '^\[Port secret\]$'
+cp stdout $WORK/native-names.txt
 
-go list -export -deps -f '{{if .Export}}packagefile {{.ImportPath}}={{.Export}}{{end}}' fmt
-cp stdout $WORK/importcfg
-go tool compile -p example.com/wiretest/wire -importcfg $WORK/importcfg -o $WORK/wire.a w/wire/wire.lgo
-go tool pack p $WORK/wire.a __.LOGOS
-stdout 'comptime Autowire'
-stdout 'comptime Names'
-stdout 'comptime Describe'
-stdout 'const if true && '
-stdout '_logos_ctpkg\.Container'
-stdout '_logos_ctpkg\.Resolve\[f\.Type\]'
-stdout '_logos_tparam0'
-stdout '//logosimp fmt fmt'
-stdout '_logos_ctimp0\.Sprintf'
+# SPEC 2.5: each type-argument list compiles to one native instance in the
+# package that defines the generic; package main holds no copy.
+logos build -gcflags=all=-l -o $WORK/wire.exe ./main
+go tool nm $WORK/wire.exe
+stdout -count=2 ' T example\.com/wiretest/wire\.Autowire\.logosct\.[0-9a-f]{64}$'
+stdout -count=2 ' T example\.com/wiretest/wire\.Names\.logosct\.[0-9a-f]{64}$'
+stdout -count=2 ' T example\.com/wiretest/wire\.Labels\.logosct\.[0-9a-f]{64}$'
+stdout -count=3 ' T example\.com/wiretest/wire\.Describe\.logosct\.[0-9a-f]{64}$'
+! stdout ' T main\..*logosct'
+
+# SPEC 2.5: eject prints Autowire[wire.Config] once, in a generated file of
+# package wire, which can set the unexported field secret, so eject succeeds
+# and the ejected programs print what the native ones print.
+logos eject -o $WORK/out
+! stderr 'internal compiler error'
+cd $WORK/out
+go run ./main
+cmp stdout $WORK/native-main.txt
+go run ./names
+cmp stdout $WORK/native-names.txt
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
 
 -- w/go.mod --
 module example.com/wiretest

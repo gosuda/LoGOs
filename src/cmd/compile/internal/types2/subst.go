@@ -79,11 +79,13 @@ func (check *Checker) subst(pos syntax.Pos, typ Type, smap substMap, expanding *
 }
 
 type subster struct {
-	pos       syntax.Pos
-	smap      substMap
-	check     *Checker // nil if called via Instantiate
-	expanding *Named   // if non-nil, the instance that is being expanded
-	ctxt      *Context
+	pos         syntax.Pos
+	smap        substMap
+	check       *Checker // nil if called via Instantiate
+	expanding   *Named   // if non-nil, the instance that is being expanded
+	ctxt        *Context
+	localRebind *Checker
+	localBody   bool
 }
 
 func (subst *subster) typ(typ Type) Type {
@@ -99,6 +101,15 @@ func (subst *subster) typ(typ Type) Type {
 		// This code follows the code for *Named types closely.
 		// TODO(gri) try to factor better
 		orig := t.Origin()
+		if subst.localRebind != nil {
+			if rebound := subst.logosCtReboundLocal(orig.Obj(), t.TypeArgs().list()); rebound != nil {
+				return rebound
+			}
+		}
+		if obj := orig.Obj(); (subst.localBody || subst.check != nil && subst.check.conf.Logos) &&
+			obj.Pkg() != nil && obj.Parent() != nil && obj.Parent() != obj.Pkg().Scope() {
+			return subst.typ(Unalias(t))
+		}
 		n := orig.TypeParams().Len()
 		if n == 0 {
 			return t // type is not parameterized
@@ -221,26 +232,25 @@ func (subst *subster) typ(typ Type) Type {
 						subst.check.mono.recordCanon(ftp, tp)
 					}
 				}
-				// Now that we have the updated substitution map, use it to
-				// compute the constraints for the fresh type parameters.
+				// Substitute the constraints while retaining the local rebind map.
+				copy := *subst
+				copy.smap = smap
 				for i, tp := range tparams.list() {
-					fresh[i].bound = subst.check.subst(subst.pos, tp.bound, smap, subst.expanding, subst.ctxt)
+					fresh[i].bound = copy.typ(tp.bound)
 				}
-				// Continue with the fresh type parameters and updated map.
 				tparams = &TypeParamList{tparams: fresh}
-				s = &subster{
-					pos:       subst.pos,
-					smap:      smap,
-					check:     subst.check,
-					expanding: subst.expanding,
-					ctxt:      subst.ctxt,
-				}
+				s = &copy
 			}
 		}
 
+		if recv != nil && s.localRebind != nil {
+			if base, _ := deref(recv.typ); asNamed(base) != nil {
+				recv = s.var_(recv)
+			}
+		}
 		params := s.tuple(t.params)
 		results := s.tuple(t.results)
-		if params != t.params || results != t.results || tparams != t.tparams {
+		if recv != t.recv || params != t.params || results != t.results || tparams != t.tparams {
 			return &Signature{
 				rparams: t.rparams,
 				tparams: tparams,
@@ -345,6 +355,20 @@ func (subst *subster) typ(typ Type) Type {
 		//
 		// So we call t.Origin().TypeParams() rather than t.TypeParams().
 		orig := t.Origin()
+		if subst.localRebind != nil {
+			obj, args := orig.Obj(), t.TypeArgs().list()
+			if origin, _, explicit := LogosCtLocalNamed(t); origin != nil {
+				obj, args = origin.Obj(), explicit
+			}
+			if rebound := subst.logosCtReboundLocal(obj, args); rebound != nil {
+				return rebound
+			}
+		}
+		if orig.logosCtLocal != nil {
+			if local := subst.logosCtLocalNamed(t); local != nil {
+				return local
+			}
+		}
 		n := orig.TypeParams().Len()
 		if n == 0 {
 			return t // type is not parameterized

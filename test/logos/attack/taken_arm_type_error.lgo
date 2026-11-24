@@ -1,0 +1,15 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+func Pick[T any]() int {
+	const if !comptime.IsStruct[T]() {
+		var n int = "bad" // ERROR "cannot use"
+		return n
+	}
+	return 1
+}
+
+var _ = Pick[int]()

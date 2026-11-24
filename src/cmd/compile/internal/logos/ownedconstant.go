@@ -175,6 +175,13 @@ func (fl *fileLower) emitOwnedRequest(owner, pkg, source string, decls []logosow
 	if base.LogosEject == "" {
 		return true
 	}
+	return emitOwnedSource(owner, pkg, ownedConstraintHeader(fl), source, decls)
+}
+
+// emitOwnedSource queues one generated file of package owner: cond is its
+// build-constraint text, and every owner import qualifier that source uses
+// gets its import line.
+func emitOwnedSource(owner, pkg, cond, source string, decls []logosowned.Declaration) bool {
 	if imports := ownedOwnerImports[owner]; len(imports) > 0 {
 		packageClause, rest, ok := strings.Cut(source, "\n")
 		if !ok {
@@ -202,7 +209,7 @@ func (fl *fileLower) emitOwnedRequest(owner, pkg, source string, decls []logosow
 		}
 		source = header.String() + rest
 	}
-	source = ownedConstraintHeader(fl) + source
+	source = cond + source
 	if ownedPendingSeen == nil {
 		ownedPendingSeen = make(map[string]bool)
 	}
@@ -655,15 +662,14 @@ func ownedScalarPath(sig *types2.Signature) ([]types2.LogosOwnedStep, bool) {
 	return []types2.LogosOwnedStep{{Kind: types2.LogosOwnedSigResult, Index: 0}}, true
 }
 
-func (fl *fileLower) ownedScalarBridge(obj *types2.Const, v ctfe.Value, init syntax.Expr, pos syntax.Pos) (ctfeResult, bool) {
-	var zero ctfeResult
+func (fl *fileLower) ownedScalarBridge(obj *types2.Const, init, leaf syntax.Expr, pos syntax.Pos) (syntax.Expr, syntax.Expr, bool) {
 	fp, fn, sig, anchor, ok := fl.ownedProvenanceDepth(obj, init, 0)
 	if !ok {
-		return zero, false
+		return nil, nil, false
 	}
 	path, ok := ownedScalarPath(sig)
 	if !ok {
-		return zero, false
+		return nil, nil, false
 	}
 	var desc types2.LogosOwnedType
 	if isGenericFactory(fl, sig, anchor) {
@@ -676,10 +682,6 @@ func (fl *fileLower) ownedScalarBridge(obj *types2.Const, v ctfe.Value, init syn
 	}
 	ownedWitnessByType[obj.Type()] = desc
 	ownedWitnessByType[ownedUnwrapView(obj.Type())] = desc
-	leaf, err := v.Expr(pos)
-	if err != nil {
-		return zero, false
-	}
 	typeName := ownedBareTypeName(obj.Type())
 	defPath := ownedDefiningPath(obj.Type())
 	if defPath == "" {
@@ -687,7 +689,7 @@ func (fl *fileLower) ownedScalarBridge(obj *types2.Const, v ctfe.Value, init syn
 	}
 	defPkg := ownedDefPkgName(fl, obj.Type(), defPath)
 	if defPkg == "" {
-		return zero, false
+		return nil, nil, false
 	}
 	phName := ownedNativePlaceholder(fl, "T")
 	phNode := nameOf(pos, phName)
@@ -703,20 +705,19 @@ func (fl *fileLower) ownedScalarBridge(obj *types2.Const, v ctfe.Value, init syn
 	}
 	decls, dok := ownedDeclsForTypes(obj.Type())
 	if !dok {
-		return zero, false
+		return nil, nil, false
 	}
 	if !fl.emitOwnedRequest(defPath, defPkg, decl, decls) {
-		return zero, false
+		return nil, nil, false
 	}
-	owner := defPath
-	var text string
-	if owner == fl.pkg.tpkg.Path() {
-		text = alias
-	} else {
-		q := fl.ensureEjectImport(owner, pos)
-		text = q + "." + alias
+	if defPath == fl.pkg.tpkg.Path() {
+		return lit, nameOf(pos, alias), true
 	}
-	return ctfeResult{obj: obj, val: v, init: init, lit: lit, text: text}, true
+	q := fl.ensureEjectImport(defPath, pos)
+	if q == "" {
+		return nil, nil, false
+	}
+	return lit, selOf(pos, nameOf(pos, q), alias), true
 }
 
 func ownedFactorySig(info *types2.Info, fp, fn string, call *syntax.CallExpr) (*types2.Signature, bool) {

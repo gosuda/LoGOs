@@ -166,6 +166,7 @@ func (check *Checker) handleError(index int, pos syntax.Pos, code Code, msg stri
 			assert(check.iota != nil)
 			pos = check.errpos
 		}
+		pos = check.logosCtErrorPos(pos) // logos comptime instantiation hook: an error of a const for iteration in an instance names the instantiation site.
 
 		// Report invalid syntax trees explicitly.
 		if code == InvalidSyntaxTree {

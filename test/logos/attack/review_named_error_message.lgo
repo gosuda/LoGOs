@@ -1,0 +1,18 @@
+// errorcheck
+
+package main
+
+import "comptime"
+
+const structRequired = "review named message: a struct is required"
+
+func requireStruct[T any]() {
+	const if !comptime.IsStruct[T]() {
+		comptime.Error(structRequired)
+	}
+}
+
+func main() {
+	requireStruct[struct{}]()
+	requireStruct[int]() // ERROR "\[comptime::error\] review named message: a struct is required$"
+}

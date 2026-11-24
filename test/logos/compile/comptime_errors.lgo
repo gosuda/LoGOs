@@ -29,7 +29,7 @@ func Describe[T any]() []string {
 }
 
 func Wrap[T any]() []string {
-	return Describe[T]() // ERROR "comptime::generic_targ"
+	return Describe[T]() // ERROR "\[comptime::exported_forwarder\] exported function Wrap forwards type parameter T to comptime generic Describe"
 }
 
 func Show[T any](v T) []string {

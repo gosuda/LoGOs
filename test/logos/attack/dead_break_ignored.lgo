@@ -1,0 +1,23 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Count[T any]() int {
+	n := 0
+	for i := 0; i < 4; i++ {
+		const if comptime.IsStruct[T]() {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+func main() {
+	fmt.Println(Count[int]())
+}

@@ -1,0 +1,26 @@
+// compile
+
+package p
+
+import "comptime"
+
+type hidden struct {
+	N int
+}
+
+func Use[T any]() int {
+	h := hidden{N: 3}
+	n := h.N
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+type Pair struct {
+	A int
+	B int
+}
+
+var _ = Use[Pair]()

@@ -12,11 +12,10 @@ import (
 )
 
 func (c *Conn) handleDatagram(now time.Time, dgram *datagram) (handled bool) {
-	if !c.localAddr.IsValid() {
-		// We don't have any way to tell in the general case what address we're
-		// sending packets from. Set our address from the destination address of
-		// the first packet received from the peer.
+	if !c.localAddr.IsValid() && c.localAddr != dgram.localAddr {
+		c.localAddrMu.Lock()
 		c.localAddr = dgram.localAddr
+		c.localAddrMu.Unlock()
 	}
 	if dgram.peerAddr.IsValid() && dgram.peerAddr != c.peerAddr {
 		if c.side == clientSide {
