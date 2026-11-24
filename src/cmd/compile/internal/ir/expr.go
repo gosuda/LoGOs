@@ -38,6 +38,7 @@ const (
 	miniExprBounded
 	miniExprImplicit // for use by implementations; not supported by every Expr
 	miniExprCheckPtr
+	miniExprLogosCtGlobal
 )
 
 func (*miniExpr) isExpr() {}

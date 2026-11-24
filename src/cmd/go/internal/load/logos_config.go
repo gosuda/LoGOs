@@ -136,7 +136,8 @@ func checkLogosCgo(ld *modload.Loader, p *Package) {
 	if root == "" || !settings.ModuleAt(root).Logos() {
 		return
 	}
-	if !p.UsesCgo() && !logosCgoHidden(p) {
+	swigCgo := p.UsesSwig() && settings.Current().Cgo.RaceRuntimeOnly
+	if !p.UsesCgo() && !swigCgo && !logosCgoHidden(p) {
 		return
 	}
 	m := settings.ModuleAt(root)

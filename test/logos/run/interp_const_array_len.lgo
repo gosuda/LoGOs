@@ -1,0 +1,19 @@
+// run
+
+package main
+
+import "fmt"
+
+type Shout string
+
+func (s Shout) String() string { return string(s) + "!" }
+
+const loud Shout = "hi"
+
+var quoted [len([1]string{$"{ "(" }"})]byte
+
+func main() {
+	var closer [len([2]string{$"{ ")" }", $"a{ "b" }c"})]byte
+	folded := $"a{ "b" }c"
+	fmt.Println(len(quoted), len(closer), folded, $"{loud}")
+}

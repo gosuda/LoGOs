@@ -1,0 +1,20 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Kind[T any]() string {
+	const if comptime.IsStruct[T]() {
+		comptime.Error("struct")
+		return "struct"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(Kind[int]())
+}

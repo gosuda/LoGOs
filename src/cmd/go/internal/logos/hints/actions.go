@@ -45,7 +45,9 @@ func DecodeDiagnostic(line []byte) (Diagnostic, error) {
 	return d, nil
 }
 
-func CodeActions(diags []Diagnostic, uri string, src []byte, rng Range) []CodeAction {
+// CodeActions presents compiler candidates for manual review. The diagnostic schema
+// carries no proof that a candidate preserves behavior.
+func CodeActions(diags []Diagnostic, src []byte, rng Range) []CodeAction {
 	idx := newLineIndex(src)
 	var actions []CodeAction
 	for _, d := range diags {
@@ -54,7 +56,18 @@ func CodeActions(diags []Diagnostic, uri string, src []byte, rng Range) []CodeAc
 			continue
 		}
 		for _, f := range d.AutofixCandidates {
-			actions = append(actions, fixAction(d, f, span, uri))
+			var reason string
+			if f.InsertBeforeLine > 0 {
+				reason = fmt.Sprintf("Not proved safe. Review this insertion before line %d:\n%s", f.InsertBeforeLine, f.Replacement)
+			} else {
+				reason = "Not proved safe. Review this replacement before editing:\n" + f.Replacement
+			}
+			actions = append(actions, CodeAction{
+				Title:       f.Description,
+				Kind:        "quickfix",
+				Diagnostics: []LSPDiagnostic{lspDiagnostic(d, span)},
+				Disabled:    CodeActionDisabled{Reason: reason},
+			})
 		}
 	}
 	return actions
@@ -64,20 +77,6 @@ func (x lineIndex) spanRange(s Span) (Range, bool) {
 	start, ok1 := x.position(s.StartLine, s.StartCol)
 	end, ok2 := x.position(s.EndLine, s.EndCol)
 	return Range{Start: start, End: end}, ok1 && ok2
-}
-
-func fixAction(d Diagnostic, f Fix, span Range, uri string) CodeAction {
-	edit := TextEdit{Range: span, NewText: f.Replacement}
-	if f.InsertBeforeLine > 0 {
-		at := Position{Line: f.InsertBeforeLine - 1}
-		edit.Range = Range{Start: at, End: at}
-	}
-	return CodeAction{
-		Title:       f.Description,
-		Kind:        "quickfix",
-		Diagnostics: []LSPDiagnostic{lspDiagnostic(d, span)},
-		Edit:        &WorkspaceEdit{Changes: map[string][]TextEdit{uri: {edit}}},
-	}
 }
 
 func lspDiagnostic(d Diagnostic, span Range) LSPDiagnostic {

@@ -1,0 +1,18 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+func Pick[T any]() string {
+	const switch T {
+	case int:
+		return "int"
+	}
+	var s struct{ X int }
+	_ = s.NoSuch // ERROR "NoSuch"
+	comptime.Error("unsupported")
+	return ""
+}
+
+var _ = Pick[int]() // ERROR "\[comptime::error\] unsupported"

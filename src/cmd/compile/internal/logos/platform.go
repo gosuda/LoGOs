@@ -17,8 +17,7 @@ import (
 // reflect.Type.String prints it, or "" when the type mentions a type
 // parameter. The native tree gains a call node while the eject text
 // gains an exact-span splice of the same call, preserving surrounding
-// comments and formatting. lowerPlatform runs first in lowerFile, so
-// later passes fold its splices into theirs through textOf.
+// comments and formatting.
 
 type platformJob struct {
 	expr syntax.Expr
@@ -105,7 +104,7 @@ func (fl *fileLower) lowerPlatform() {
 		return a.span.start - b.span.start
 	})
 	for _, j := range jobs {
-		inner := fl.textOf(j.span)
+		inner := fl.lazyText(j.span)
 		pos := j.expr.Pos()
 		site := fl.newSite(pos, pos.Line())
 		name := staticTypeNameLit(fl.pkg.info.TypeOf(j.expr))
@@ -119,6 +118,19 @@ func (fl *fileLower) lowerPlatform() {
 		fl.addT(j.span.start, j.span.end, cat(
 			gen(rtAlias+".MustNonNil("), inner, gen(", "+name+", &"+site+")")))
 	}
+}
+
+func (w ctWalker) ctPlatformOperand(original, lowered syntax.Expr) syntax.Expr {
+	fl := w.fl
+	if _, checked := fl.pkg.info.LogosChecks[original]; !checked {
+		return lowered
+	}
+	pos := original.Pos()
+	return callOf(pos, fl.ctPkgSelector(pos, rtImportPath, "MustNonNil"), []syntax.Expr{
+		lowered,
+		litOf(pos, staticTypeNameLit(fl.pkg.info.TypeOf(original)), syntax.StringLit),
+		addrOf(pos, fl.ctTrySite(pos)),
+	})
 }
 
 // platformSpan resolves the exact source span of a recorded expression.

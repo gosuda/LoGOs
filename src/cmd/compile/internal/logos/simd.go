@@ -7,6 +7,7 @@ package logos
 import (
 	"fmt"
 	"go/token"
+	"strconv"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -73,6 +74,7 @@ func simdWordKind(kind types2.BasicKind) bool {
 
 type simdShape struct {
 	arr       *types2.Array
+	typ       types2.Type
 	lane      simdLane
 	len       int64
 	spell     string
@@ -92,9 +94,20 @@ func (fl *fileLower) simdShapeOf(at *types2.Array, typ types2.Type) *simdShape {
 	if !ok {
 		return nil
 	}
+	if fl.ct != nil && simdWordKind(b.Kind()) {
+		lane.width = types2.SizesFor("gc", buildcfg.GOARCH).Sizeof(b)
+	}
 	n := at.Len()
-	if n < 1 || n&(n-1) != 0 || n*lane.width > 64 {
+	if n < 1 || n&(n-1) != 0 || n > 64/lane.width {
 		return nil
+	}
+	_, predeclared := types2.Unalias(at.Elem()).(*types2.Basic)
+	sh := &simdShape{
+		arr: at, typ: typ, lane: lane, len: n,
+		named: typ != at, exact: predeclared && !simdWordKind(b.Kind()),
+	}
+	if fl.ct != nil {
+		return sh
 	}
 	spell, ok := fl.spellType(typ)
 	if !ok {
@@ -109,9 +122,9 @@ func (fl *fileLower) simdShapeOf(at *types2.Array, typ types2.Type) *simdShape {
 		return nil
 	}
 	under := fmt.Sprintf("[%d]%s", n, elem)
-	_, predeclared := types2.Unalias(at.Elem()).(*types2.Basic)
-	exact := predeclared && !simdWordKind(b.Kind())
-	return &simdShape{arr: at, lane: lane, len: n, spell: spell, under: under, named: spell != under, elem: elem, elemSpell: elemSpell, exact: exact}
+	sh.spell, sh.under, sh.named = spell, under, spell != under
+	sh.elem, sh.elemSpell = elem, elemSpell
+	return sh
 }
 
 func (fl *fileLower) simdArrayShape(t types2.Type) *simdShape {
@@ -119,6 +132,9 @@ func (fl *fileLower) simdArrayShape(t types2.Type) *simdShape {
 		return nil
 	}
 	t = unaliasConstView(t)
+	if view, ok := t.(*types2.ReadonlyDescendants); fl.ct != nil && ok {
+		t = types2.Unalias(view.Elem)
+	}
 	at, ok := t.Underlying().(*types2.Array)
 	if !ok {
 		return nil
@@ -205,6 +221,13 @@ func simdFloatBitsTo(sh *simdShape) string {
 	return "BitsToFloat64"
 }
 
+func simdFloatMath(lane simdLane) (toBits, fromBits string) {
+	if lane.width == 4 {
+		return "Float32bits", "Float32frombits"
+	}
+	return "Float64bits", "Float64frombits"
+}
+
 func (fl *fileLower) simdScalarBody(sh *simdShape, op syntax.Operator) string {
 	laneText := func(i int64) string {
 		return fmt.Sprintf("_logos_a[%d] %s _logos_b[%d]", i, simdOps[op].text, i)
@@ -216,12 +239,7 @@ func (fl *fileLower) simdScalarBody(sh *simdShape, op syntax.Operator) string {
 	}
 	if sh.lane.isFloat && simdFloatBitwiseOp(op) {
 		fl.needSimdMath = true
-		bits := "Float64bits"
-		from := "Float64frombits"
-		if sh.lane.width == 4 {
-			bits = "Float32bits"
-			from = "Float32frombits"
-		}
+		bits, from := simdFloatMath(sh.lane)
 		laneText = func(i int64) string {
 			return fmt.Sprintf("%s.%s(%s.%s(_logos_a[%d]) %s %s.%s(_logos_b[%d]))", logosSimdMathAlias, from, logosSimdMathAlias, bits, i, simdOps[op].text, logosSimdMathAlias, bits, i)
 		}
@@ -252,11 +270,11 @@ func (fl *fileLower) lowerSimd() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.Operation:
-			if fl.isSimdBinary(n) {
+			if _, ok := fl.isSimdBinary(n); ok {
 				sites = append(sites, simdSite{n, fl.simdWhole(n, kept), []span{fl.simdSpan(n.X), fl.simdSpan(n.Y)}})
 			}
 		case *syntax.CallExpr:
-			if fl.isSimdCall(n) {
+			if _, sh := fl.isSimdCall(n); sh != nil {
 				sites = append(sites, fl.simdCallSite(n, kept))
 			}
 		}
@@ -466,30 +484,204 @@ func (fl *fileLower) simdAssertEnd(a *syntax.AssertExpr) int {
 	return end
 }
 
-func (fl *fileLower) isSimdBinary(e *syntax.Operation) bool {
+func (fl *fileLower) isSimdBinary(e *syntax.Operation) (*simdShape, bool) {
 	if _, ok := simdOps[e.Op]; !ok || e.Y == nil {
-		return false
+		return nil, false
 	}
-	return fl.simdArrayShape(fl.pkg.info.TypeOf(e)) != nil
+	sh := fl.simdArrayShape(fl.pkg.info.TypeOf(e))
+	return sh, sh != nil
 }
 
-func (fl *fileLower) isSimdCall(c *syntax.CallExpr) bool {
+func (fl *fileLower) isSimdCall(c *syntax.CallExpr) (*syntax.SelectorExpr, *simdShape) {
 	sel, ok := syntax.Unparen(c.Fun).(*syntax.SelectorExpr)
 	if !ok || sel.Sel == nil || !types2.LogosSimdMethod(sel.Sel.Value) {
-		return false
+		return nil, nil
 	}
 	t := fl.pkg.info.TypeOf(sel.X)
-	if fl.simdArrayShape(t) == nil {
-		return false
+	sh := fl.simdArrayShape(t)
+	if sh == nil {
+		return nil, nil
 	}
 	if fl.pkg.info.Selections != nil {
 		if _, ok := fl.pkg.info.Selections[sel]; ok {
-			return false
+			return nil, nil
 		}
 	} else if obj, _, _ := types2.LookupFieldOrMethod(t, true, fl.pkg.tpkg, sel.Sel.Value); obj != nil {
-		return false
+		return nil, nil
 	}
-	return true
+	return sel, sh
+}
+
+func (w ctWalker) ctSIMDExpr(e syntax.Expr) (syntax.Expr, []syntax.Stmt, bool) {
+	var next syntax.Expr
+	var pre []syntax.Stmt
+	switch n := e.(type) {
+	case *syntax.Operation:
+		sh, ok := w.fl.isSimdBinary(n)
+		if !ok {
+			return e, nil, false
+		}
+		args := []syntax.Expr{n.X, n.Y}
+		pre = w.exprList(args)
+		next = w.fl.ctSIMDInvoke(n.Pos(), sh, args, w.fl.ctSIMDElemwise(n.Pos(), sh, n.Op))
+	case *syntax.CallExpr:
+		sel, sh := w.fl.isSimdCall(n)
+		if sh == nil {
+			return e, nil, false
+		}
+		pos, method := n.Pos(), sel.Sel.Value
+		args := []syntax.Expr{sel.X}
+		if method == "dot" {
+			operands := []syntax.Expr{sel.X, n.ArgList[0]}
+			pre = w.exprList(operands)
+			args[0] = w.fl.ctSIMDInvoke(pos, sh, operands, w.fl.ctSIMDElemwise(pos, sh, syntax.Mul))
+			method = "sum"
+		} else {
+			pre = w.exprList(args)
+		}
+		next = w.fl.ctSIMDInvoke(pos, sh, args, w.fl.ctSIMDReduce(pos, sh.len, method))
+	default:
+		return e, nil, false
+	}
+	w.fl.carryType(next, e)
+	return next, pre, true
+}
+
+const (
+	ctSIMDLeft   = "_logos_a"
+	ctSIMDRight  = "_logos_b"
+	ctSIMDResult = "_logos_r"
+)
+
+func (fl *fileLower) ctSIMDInvoke(pos syntax.Pos, sh *simdShape, args []syntax.Expr, body []syntax.Stmt) *syntax.CallExpr {
+	names := [...]string{ctSIMDLeft, ctSIMDRight}
+	params := make([]*syntax.Field, len(args))
+	for i := range params {
+		params[i] = at(&syntax.Field{Name: nameOf(pos, names[i]), Type: fl.ctTypeExpr(pos, sh.typ)}, pos)
+	}
+	result := sh.arr.Elem()
+	if len(args) == 2 {
+		result = sh.typ
+	}
+	sig := at(&syntax.FuncType{
+		ParamList:  params,
+		ResultList: []*syntax.Field{at(&syntax.Field{Type: fl.ctTypeExpr(pos, result)}, pos)},
+	}, pos)
+	fn := at(&syntax.FuncLit{Type: sig, Body: blockOf(pos, body)}, pos)
+	return callOf(pos, fn, args)
+}
+
+func (fl *fileLower) ctSIMDElemwise(pos syntax.Pos, sh *simdShape, op syntax.Operator) []syntax.Stmt {
+	vec, chunks, feature, ok := simdVecForm(sh, op)
+	if !ok {
+		return []syntax.Stmt{fl.ctSIMDScalar(pos, sh, op)}
+	}
+	var pointer types2.Type
+	perChunk := sh.len / chunks
+	if chunks > 1 {
+		pointer = types2.NewPointer(types2.NewArray(sh.arr.Elem(), perChunk))
+	} else if sh.named {
+		pointer = types2.NewPointer(sh.arr)
+	}
+	address := func(name string, chunk int64) syntax.Expr {
+		array := nameOf(pos, name)
+		var operand syntax.Expr
+		if chunks == 1 {
+			operand = addrOf(pos, array)
+		} else {
+			lo := litOf(pos, strconv.FormatInt(chunk*perChunk, 10), syntax.IntLit)
+			hi := litOf(pos, strconv.FormatInt((chunk+1)*perChunk, 10), syntax.IntLit)
+			operand = at(&syntax.SliceExpr{X: array, Index: [3]syntax.Expr{lo, hi}}, pos)
+		}
+		if pointer == nil {
+			return operand
+		}
+		return callOf(pos, fl.ctTypeExpr(pos, pointer), []syntax.Expr{operand})
+	}
+	loadName := "Load" + vec + "Array"
+	bitwise := sh.lane.isFloat && simdFloatBitwiseOp(op)
+	load := func(name string, chunk int64) syntax.Expr {
+		data := callOf(pos, fl.ctPkgSelector(pos, logosSimdPath, loadName), []syntax.Expr{address(name, chunk)})
+		if bitwise {
+			return callOf(pos, selOf(pos, data, "ToBits"), nil)
+		}
+		return data
+	}
+	result := at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, ctSIMDResult)}, Type: fl.ctTypeExpr(pos, sh.typ)}, pos)
+	body := make([]syntax.Stmt, 0, chunks+2)
+	body = append(body, at(&syntax.DeclStmt{DeclList: []syntax.Decl{result}}, pos))
+	for c := range chunks {
+		method := selOf(pos, load(ctSIMDLeft, c), simdOps[op].method)
+		value := callOf(pos, method, []syntax.Expr{load(ctSIMDRight, c)})
+		if bitwise {
+			value = callOf(pos, selOf(pos, value, simdFloatBitsTo(sh)), nil)
+		}
+		store := callOf(pos, selOf(pos, value, "StoreArray"), []syntax.Expr{address(ctSIMDResult, c)})
+		body = append(body, exprStmtOf(pos, store))
+	}
+	body = append(body, returnOf(pos, []syntax.Expr{nameOf(pos, ctSIMDResult)}))
+	if buildcfg.GOAMD64 >= feature.goamd64 {
+		return body
+	}
+	check := selOf(pos, fl.ctPkgSelector(pos, logosSimdPath, "X86"), feature.check)
+	fallback := blockOf(pos, []syntax.Stmt{fl.ctSIMDScalar(pos, sh, op)})
+	return []syntax.Stmt{ifElseOf(pos, nil, callOf(pos, check, nil), body, fallback)}
+}
+
+func (fl *fileLower) ctSIMDScalar(pos syntax.Pos, sh *simdShape, op syntax.Operator) syntax.Stmt {
+	elem := sh.arr.Elem()
+	bitwise := sh.lane.isFloat && simdFloatBitwiseOp(op)
+	var toBits, fromBits string
+	var bitsType types2.Type
+	if bitwise {
+		toBits, fromBits = simdFloatMath(sh.lane)
+		if !sh.exact {
+			bitsType = elem.Underlying()
+		}
+	}
+	lanes := make([]syntax.Expr, sh.len)
+	for i := range sh.len {
+		a, b := ctSIMDIndex(pos, ctSIMDLeft, i), ctSIMDIndex(pos, ctSIMDRight, i)
+		if bitwise {
+			if bitsType != nil {
+				a = callOf(pos, fl.ctTypeExpr(pos, bitsType), []syntax.Expr{a})
+				b = callOf(pos, fl.ctTypeExpr(pos, bitsType), []syntax.Expr{b})
+			}
+			a = callOf(pos, fl.ctPkgSelector(pos, logosSimdMathPath, toBits), []syntax.Expr{a})
+			b = callOf(pos, fl.ctPkgSelector(pos, logosSimdMathPath, toBits), []syntax.Expr{b})
+		}
+		var value syntax.Expr = at(&syntax.Operation{Op: op, X: a, Y: b}, pos)
+		if bitwise {
+			value = callOf(pos, fl.ctPkgSelector(pos, logosSimdMathPath, fromBits), []syntax.Expr{value})
+		}
+		if bitsType != nil || sh.lane.isFloat && op == syntax.Mul {
+			value = callOf(pos, fl.ctTypeExpr(pos, elem), []syntax.Expr{value})
+		}
+		lanes[i] = value
+	}
+	value := at(&syntax.CompositeLit{Type: fl.ctTypeExpr(pos, sh.typ), ElemList: lanes, Rbrace: pos}, pos)
+	return returnOf(pos, []syntax.Expr{value})
+}
+
+func (fl *fileLower) ctSIMDReduce(pos syntax.Pos, length int64, method string) []syntax.Stmt {
+	var combine func(start, count int64) syntax.Expr
+	combine = func(start, count int64) syntax.Expr {
+		if count == 1 {
+			return ctSIMDIndex(pos, ctSIMDLeft, start)
+		}
+		half := count / 2
+		a, b := combine(start, half), combine(start+half, half)
+		if method == "sum" {
+			return at(&syntax.Operation{Op: syntax.Add, X: a, Y: b}, pos)
+		}
+		return callOf(pos, fl.ctBuiltin(pos, method), []syntax.Expr{a, b})
+	}
+	return []syntax.Stmt{returnOf(pos, []syntax.Expr{combine(0, length)})}
+}
+
+func ctSIMDIndex(pos syntax.Pos, name string, lane int64) syntax.Expr {
+	index := litOf(pos, strconv.FormatInt(lane, 10), syntax.IntLit)
+	return at(&syntax.IndexExpr{X: nameOf(pos, name), Index: index}, pos)
 }
 
 func simdAddr(sh *simdShape, v string) string {

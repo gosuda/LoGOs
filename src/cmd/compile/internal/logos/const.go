@@ -634,3 +634,58 @@ func infoHasConstView(info *types2.Info, files []*syntax.File) bool {
 	}
 	return false
 }
+
+func (w ctWalker) ctConstSlice(s *syntax.SliceExpr) (syntax.Expr, []syntax.Stmt, bool) {
+	info := w.fl.pkg.info
+	if !info.LogosConstSlices[s] || !w.fl.constSliceIsWrappable(s) {
+		return nil, nil, false
+	}
+	pos := s.Pos()
+	baseType, resultType := info.TypeOf(s.X), info.TypeOf(s)
+	if baseType == nil || resultType == nil {
+		w.reject(s, "missing checked const slice base or result type")
+		return s, nil, true
+	}
+	params := make([]*syntax.Field, 1, 4)
+	params[0] = at(&syntax.Field{
+		Name: nameOf(pos, constClosureParam),
+		Type: w.fl.ctTypeExpr(pos, baseType),
+	}, pos)
+	args := make([]syntax.Expr, 1, 4)
+	args[0] = s.X
+	var indices [3]syntax.Expr
+	for i, ix := range s.Index {
+		if ix == nil {
+			continue
+		}
+		boundType := info.TypeOf(ix)
+		if boundType == nil {
+			w.reject(ix, "missing checked const slice bound type")
+			return s, nil, true
+		}
+		name := fmt.Sprintf("%s%d", constClosureParam, i)
+		params = append(params, at(&syntax.Field{
+			Name: nameOf(pos, name),
+			Type: w.fl.ctTypeExpr(pos, types2.Default(boundType)),
+		}, pos))
+		args = append(args, ix)
+		indices[i] = nameOf(pos, name)
+	}
+	length := func() syntax.Expr {
+		return callOf(pos, w.fl.ctBuiltin(pos, "len"), []syntax.Expr{nameOf(pos, constClosureParam)})
+	}
+	var target syntax.Expr = nameOf(pos, constClosureParam)
+	if indices[2] == nil {
+		indices[2] = length()
+	} else {
+		target = at(&syntax.SliceExpr{X: target, Index: [3]syntax.Expr{nil, length(), length()}, Full: true}, pos)
+	}
+	value := at(&syntax.SliceExpr{X: target, Index: indices, Full: true}, pos)
+	result := at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, resultType)}, pos)
+	lit := at(&syntax.FuncLit{
+		Type: at(&syntax.FuncType{ParamList: params, ResultList: []*syntax.Field{result}}, pos),
+		Body: blockOf(pos, []syntax.Stmt{returnOf(pos, []syntax.Expr{value})}),
+	}, pos)
+	pre := w.exprList(args)
+	return callOf(pos, lit, args), pre, true
+}

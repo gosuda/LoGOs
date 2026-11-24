@@ -21,7 +21,6 @@ func dupHead() string {
 func dupBase() string {
 	return dupHead() +
 		"allocfree F\n" +
-		"comptime C 4\nabcd\n" +
 		"conforms S example.com/x I\n" +
 		"const K P0\n" +
 		"constcomp M\n" +
@@ -55,7 +54,6 @@ func TestDecodeRoundTripEveryKind(t *testing.T) {
 		Readonlys:  []facts.ReadonlyFact{{Object: "R", Path: "P0"}},
 		Props:      []facts.PropFact{{Interface: "I", Prefix: "Get"}},
 		Conforms:   []facts.ConformsFact{{Type: "S", IfacePath: "example.com/x", Iface: "I"}},
-		Comptimes:  []facts.ComptimeFact{{Object: "C", Source: []byte("abcd")}},
 		ConstFuncs: []facts.ConstFuncFact{{Object: "N", Source: []byte("wxyz")}},
 		ConstMaps: []facts.ConstMapFact{
 			{
@@ -94,7 +92,6 @@ func TestDecodeRejectsDuplicateKey(t *testing.T) {
 		{"jsonmeta conflicting flags", dupHead() + "jsonmeta J decoder\njsonmeta J eligible\n"},
 		{"jsonkey conflicting body", dupHead() + "jsonkey J 0000 3\nkey\njsonkey J 0000 4\nkey2\n"},
 		{"unionmember conflicting member", dupHead() + "unionmember U 0000 example.com/x.S\nunionmember U 0000 example.com/x.T\n"},
-		{"comptime conflicting body", dupHead() + "comptime C 3\nabc\ncomptime C 4\nabcd\n"},
 		{"constfn conflicting body", dupHead() + "constfn N 3\nabc\nconstfn N 4\nabcd\n"},
 		{"default conflicting text", dupHead() + "default T Fld 2\nab\ndefault T Fld 3\nabc\n"},
 		{"constmap conflicting body", dupHead() + "constmap M 16\nbearing 0\norder\n\nconstmap M 36\nbearing 0\norder 0\nentry 1a 1 1 1\nckv\n"},
@@ -203,7 +200,6 @@ func TestDecodeTruncationNoPanic(t *testing.T) {
 func TestDecodeRejectsSwappedAdjacent(t *testing.T) {
 	blocks := []string{
 		"allocfree F\n",
-		"comptime C 4\nabcd\n",
 		"conforms S example.com/x I\n",
 		"const K P0\n",
 		"constcomp M\n",
@@ -261,8 +257,8 @@ func TestDecodeRejectsDuplicateMapKey(t *testing.T) {
 func TestDecodeRejectsMalformedShapes(t *testing.T) {
 	cases := []struct{ name, input string }{
 		{"unknown kind", dupHead() + "union U A|B\n"},
-		{"oversized count", dupHead() + "comptime F 99999999999999999999\n"},
-		{"huge count", dupHead() + "comptime F 1000000000000\n"},
+		{"oversized count", dupHead() + "constfn F 99999999999999999999\n"},
+		{"huge count", dupHead() + "constfn F 1000000000000\n"},
 		{"version skew", "logos-facts 2\nfingerprint 0001020304050607\n"},
 		{"version skew high", "logos-facts 99\nfingerprint 0001020304050607\n"},
 	}
@@ -324,7 +320,7 @@ func FuzzDecode(f *testing.F) {
 		dupHead() + "union U A|B\n",
 		"",
 		"logos-facts 3\n",
-		dupHead() + "comptime C 4\nabcd",
+		dupHead() + "constfn N 4\nwxyz",
 	}
 	for _, s := range seeds {
 		f.Add([]byte(s))

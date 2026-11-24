@@ -151,7 +151,7 @@ var filemap = map[string]action{
 	"gcsizes.go":      func(f *ast.File) { stripLogosHooks(f); renameIdents(f, "IsSyncAtomicAlign64->_IsSyncAtomicAlign64") },
 	"hilbert_test.go": func(f *ast.File) { renameImportPath(f, `"cmd/compile/internal/types2"->"go/types"`) },
 	"infer.go":        func(f *ast.File) { stripLogosHooks(f); fixTokenPos(f); fixInferSig(f) },
-	"initorder.go":    nil,
+	"initorder.go":    stripLogosHooks,
 	// "initorder.go": fixErrErrorfCall, // disabled for now due to unresolved error_ use implications for gopls
 	"instantiate.go": func(f *ast.File) {
 		stripLogosHooks(f) // must happen before renaming identifiers
@@ -182,7 +182,7 @@ var filemap = map[string]action{
 		insertImportPath(f, `"go/ast"`)
 		renameSelectorExprs(f, "syntax.Expr->ast.Expr")
 	},
-	"named.go": func(f *ast.File) { fixTokenPos(f); renameSelectors(f, "Trace->_Trace") },
+	"named.go": func(f *ast.File) { stripLogosHooks(f); fixTokenPos(f); renameSelectors(f, "Trace->_Trace") },
 	"object.go": func(f *ast.File) {
 		stripLogosHooks(f)
 		fixTokenPos(f)
@@ -218,7 +218,7 @@ var filemap = map[string]action{
 		renameIdents(f, "syntax->ast")
 		fixAtPosCall(f)
 	},
-	"scope.go":     func(f *ast.File) { fixTokenPos(f); renameIdents(f, "InsertLazy->_InsertLazy") },
+	"scope.go":     func(f *ast.File) { stripLogosHooks(f); fixTokenPos(f); renameIdents(f, "InsertLazy->_InsertLazy") },
 	"selection.go": nil,
 	"sizes.go":     func(f *ast.File) { stripLogosHooks(f); renameIdents(f, "IsSyncAtomicAlign64->_IsSyncAtomicAlign64") },
 	"slice.go":     nil,
@@ -568,24 +568,35 @@ func fixSprintf(f *ast.File) {
 //
 //	if check.logosXxx(...) { ... return }   // guard: dropped
 //	if !check.logosXxx(...) { body }        // wrapper: replaced by body
+//	if x && !check.logosXxx(...) { body }   // conjunct: dropped, x stays
 //	check.logosXxx(...)                     // bare call: dropped
 //	case *syntax.X: <hooks only>            // case clause: dropped
 //	case *LogoType: <body>                  // logo-only type clause: dropped
 //	case *T, *LogoType:                     // mixed type list: logo type removed
+//
+// A hook reports false outside loGo/s, and so does a read of loGo/s state
+// (isLogosField: x.logosXxx, x.LogosXxx, a logosFields field). An if without
+// else whose condition is false by these rules (isLogosFalse) is dropped
+// like a guard; its init may only bind getter results (logosDeadInit).
+// The loGo/s-only declarations (logosDecls, and the methods of their
+// types), struct fields (logosFields) and parameters (logosParams, with
+// their arguments) are dropped, and so are the imports only they used.
 //
 // Logo types are types2-only types that go/types cannot represent (no
 // go/ast node produces them): the logosTypes set; Union and
 // AssertedStruct stay syntax-level, not types2 types, so they never
 // reach these switches.
 // The hooks must follow the gofmt layout, each on lines of its own. Anything
-// else that still calls check.logosXxx afterwards is a new hook shape and
-// causes a panic, rather than generating go/types code that doesn't compile.
+// else that still calls check.logosXxx or reads loGo/s state afterwards is a
+// new hook shape and causes a panic, rather than generating go/types code
+// that doesn't compile.
 //
 // This must run before any renaming: the case clauses of nodes that only
 // exist in types2 are dropped here, before renameIdents turns their types
 // into non-existent ast.X types.
 func stripLogosHooks(f *ast.File) {
 	tf := fset.File(f.Pos())
+	bases := selectorBases(f)
 
 	// drop removes the lines from..to from the printed output. The go/printer
 	// derives blank lines from the distance between the line numbers of
@@ -646,6 +657,11 @@ func stripLogosHooks(f *ast.File) {
 					continue
 				}
 			case *ast.IfStmt:
+				if s.Else == nil && isLogosFalse(s.Cond) && logosDeadInit(s.Init) {
+					drop(s.Pos(), s.End())
+					list = slices.Delete(list, i, i+1)
+					continue
+				}
 				if s.Init != nil || s.Else != nil {
 					break
 				}
@@ -715,6 +731,7 @@ func stripLogosHooks(f *ast.File) {
 			if c := stripLogosOr(n.Cond); c != nil && c != n.Cond {
 				n.Cond = c
 			}
+			n.Cond = stripLogosAnd(n.Cond)
 		case *ast.ReturnStmt:
 			if len(n.Results) == 1 {
 				if call, _ := n.Results[0].(*ast.CallExpr); call != nil && isLogosCall(call) {
@@ -768,9 +785,15 @@ func stripLogosHooks(f *ast.File) {
 		})
 	}
 
+	stripLogosParams(f)
+	dropUnusedImports(f, drop, bases)
+
 	ast.Inspect(f, func(n ast.Node) bool {
 		if call, _ := n.(*ast.CallExpr); call != nil && isLogosCall(call) {
 			panic("unhandled logos hook: " + logosCallName(call))
+		}
+		if sel, _ := n.(*ast.SelectorExpr); sel != nil && isLogosField(sel) {
+			panic("unhandled logos field: " + sel.Sel.Name)
 		}
 		return true
 	})
@@ -811,7 +834,7 @@ var logosMethods = map[string]bool{
 	"LogosAssertEffects":        true,
 	"SetLogosAssertEffects":     true,
 	"SetLogosReadonly":          true,
-	"logosCgoTypeName":          true,
+	"logosTypeName":             true,
 	"logosStructTupleIdentical": true,
 	"ifaceWord":                 true,
 	"logosIfaceWord":            true,
@@ -825,6 +848,9 @@ var logosFuncs = map[string]bool{
 	"logosAnyIsReadonlyDescendants":       true,
 	"logosUnwrapTuples":                   true,
 	"logosUnwrapReadonlyDescendants":      true,
+	"LogosCtLocalNamed":                   true,
+	"logosClosedUnion":                    true,
+	"logosUnionAdmits":                    true,
 }
 
 func logosCallName(call *ast.CallExpr) string {
@@ -881,6 +907,112 @@ func stripLogosOr(e ast.Expr) ast.Expr {
 	return e
 }
 
+// isLogosField reports whether sel reads state that only types2 has: a field
+// of logosFields, or any member spelled logosXxx or LogosXxx (such as
+// Checker.logosXxx or Config.Logos); go/types declares none of them.
+func isLogosField(sel *ast.SelectorExpr) bool {
+	name := sel.Sel.Name
+	if strings.HasPrefix(strings.ToLower(name), "logos") {
+		return true
+	}
+	for _, fields := range logosFields {
+		if fields[name] {
+			return true
+		}
+	}
+	return false
+}
+
+// isLogosFalse reports whether e is false wherever go/types evaluates it: a
+// hook, a bool or non-nil test of loGo/s state, or an && or || of those. An
+// && operand left of a false one must be callFree, so no effect is lost.
+func isLogosFalse(e ast.Expr) bool {
+	switch e := e.(type) {
+	case *ast.ParenExpr:
+		return isLogosFalse(e.X)
+	case *ast.CallExpr:
+		return isLogosCall(e)
+	case *ast.SelectorExpr:
+		return isLogosField(e)
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case token.NEQ:
+			sel, _ := e.X.(*ast.SelectorExpr)
+			return sel != nil && isLogosField(sel) && isIdent(e.Y, "nil")
+		case token.LAND:
+			return isLogosFalse(e.X) || isLogosFalse(e.Y) && callFree(e.X)
+		case token.LOR:
+			return isLogosFalse(e.X) && isLogosFalse(e.Y)
+		}
+	}
+	return false
+}
+
+// callFree reports whether e neither calls nor receives.
+func callFree(e ast.Expr) bool {
+	free := true
+	ast.Inspect(e, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.CallExpr:
+			free = false
+		case *ast.UnaryExpr:
+			free = free && n.Op != token.ARROW
+		}
+		return free
+	})
+	return free
+}
+
+// logosDeadInit reports whether init, the init statement of an if that
+// go/types never enters, can be dropped with it: it is absent, or it defines
+// variables (scoped to the if) from method calls without arguments, the
+// getters such as orig.Obj().
+func logosDeadInit(init ast.Stmt) bool {
+	if init == nil {
+		return true
+	}
+	a, _ := init.(*ast.AssignStmt)
+	if a == nil || a.Tok != token.DEFINE {
+		return false
+	}
+	getters := true
+	for _, e := range a.Rhs {
+		ast.Inspect(e, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.CallExpr:
+				_, method := n.Fun.(*ast.SelectorExpr)
+				getters = getters && method && len(n.Args) == 0
+			case *ast.UnaryExpr:
+				getters = getters && n.Op != token.ARROW
+			}
+			return getters
+		})
+	}
+	return getters
+}
+
+// stripLogosAnd drops the && operands of e that are true wherever go/types
+// evaluates them, the negated isLogosFalse operands such as
+// !check.logosXxx(...): the other operand decides alone.
+func stripLogosAnd(e ast.Expr) ast.Expr {
+	bin, _ := e.(*ast.BinaryExpr)
+	if bin == nil || bin.Op != token.LAND {
+		return e
+	}
+	isTrue := func(e ast.Expr) bool {
+		not, _ := e.(*ast.UnaryExpr)
+		return not != nil && not.Op == token.NOT && isLogosFalse(not.X)
+	}
+	bin.X, bin.Y = stripLogosAnd(bin.X), stripLogosAnd(bin.Y)
+	if isTrue(bin.Y) {
+		return bin.X
+	}
+	if isTrue(bin.X) {
+		return bin.Y
+	}
+	return bin
+}
+
 var logosDecls = map[string]bool{
 	"LogosReadonly":         true,
 	"LogosAssertEffects":    true,
@@ -892,18 +1024,27 @@ var logosDecls = map[string]bool{
 	"logosMonoCyclicDecl":   true,
 	"logosMonoCyclicNamed":  true,
 	"ifaceWord":             true,
+	"LogosCtInitOrder":      true,
+	"logosInitInstance":     true,
+	"logosInitUse":          true,
+	"logosInitGraph":        true,
+	"logosMarkIndexVar":     true,
+	"logosConstForAssign":   true,
 }
 var logosFields = map[string]map[string]bool{
 	"Func":       {"logosReadonly": true, "logosAssert": true},
-	"Package":    {"logosDerived": true},
-	"typeWriter": {"logosCgoPkg": true},
+	"typeWriter": {"logosCgoPkg": true, "logosLocal": true},
+	"Named":      {"logosCtLocal": true},
+	"Package":    {"logosDerived": true, "logosCtLocals": true},
+	"Scope":      {"logosUsageDeferred": true},
+	"subster":    {"localRebind": true, "localBody": true},
 }
 
 func stripLogosDecls(f *ast.File, drop func(from, to token.Pos)) {
 	var kept []ast.Decl
 	for _, d := range f.Decls {
 		if fn, _ := d.(*ast.FuncDecl); fn != nil {
-			if logosDecls[fn.Name.Name] {
+			if logosDecls[fn.Name.Name] || logosDecls[recvName(fn)] {
 				if fn.Doc != nil {
 					drop(fn.Doc.Pos(), fn.End())
 				} else {
@@ -971,11 +1112,9 @@ func stripLogosFields(f *ast.File, drop func(from, to token.Pos)) {
 				if fd.Doc != nil {
 					from = fd.Doc.Pos()
 				}
-				// A stripped last field takes the blank lines above it, so
-				// none is left before the closing brace.
-				if idx > 0 && idx == len(fl.List)-1 {
+				if idx == len(fl.List)-1 && len(kept) > 0 {
 					tf := fset.File(f.Pos())
-					from = tf.LineStart(tf.Line(fl.List[idx-1].End()) + 1)
+					from = tf.LineStart(tf.Line(kept[len(kept)-1].End()) + 1)
 				}
 				drop(from, fd.End())
 				del = append(del, idx)
@@ -1024,6 +1163,126 @@ func stripLogosFields(f *ast.File, drop func(from, to token.Pos)) {
 		}
 		return true
 	})
+}
+
+// recvName returns the name of the receiver type of fn, or "".
+func recvName(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) != 1 {
+		return ""
+	}
+	t := fn.Recv.List[0].Type
+	if star, _ := t.(*ast.StarExpr); star != nil {
+		t = star.X
+	}
+	if id, _ := t.(*ast.Ident); id != nil {
+		return id.Name
+	}
+	return ""
+}
+
+// logosParams is the set of types2-only parameter types.
+var logosParams = map[string]bool{
+	"resultSlot": true,
+}
+
+// stripLogosParams drops the parameters of a logosParams type from the
+// functions of f, and from the calls in f the arguments that fill them: a
+// composite literal of such a type, or a dropped parameter passed on.
+func stripLogosParams(f *ast.File) {
+	isParam := func(fd *ast.Field) bool {
+		id, _ := fd.Type.(*ast.Ident)
+		return id != nil && logosParams[id.Name]
+	}
+	for _, d := range f.Decls {
+		fn, _ := d.(*ast.FuncDecl)
+		if fn == nil {
+			continue
+		}
+		dropped := make(map[string]bool)
+		for _, fd := range fn.Type.Params.List {
+			if isParam(fd) {
+				for _, name := range fd.Names {
+					dropped[name.Name] = true
+				}
+			}
+		}
+		fn.Type.Params.List = slices.DeleteFunc(fn.Type.Params.List, isParam)
+		if fn.Body == nil {
+			continue
+		}
+		isArg := func(arg ast.Expr) bool {
+			if lit, _ := arg.(*ast.CompositeLit); lit != nil {
+				id, _ := lit.Type.(*ast.Ident)
+				return id != nil && logosParams[id.Name]
+			}
+			id, _ := arg.(*ast.Ident)
+			return id != nil && dropped[id.Name]
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if call, _ := n.(*ast.CallExpr); call != nil {
+				call.Args = slices.DeleteFunc(call.Args, isArg)
+			}
+			return true
+		})
+		var unhandled func(n ast.Node) bool
+		unhandled = func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.SelectorExpr:
+				ast.Inspect(n.X, unhandled)
+				return false
+			case *ast.Ident:
+				if dropped[n.Name] || logosParams[n.Name] {
+					panic("unhandled logos parameter: " + n.Name)
+				}
+			}
+			return true
+		}
+		ast.Inspect(fn.Body, unhandled)
+	}
+}
+
+// selectorBases returns the identifiers that f uses as selector bases, the
+// names of its imported packages among them.
+func selectorBases(f *ast.File) map[string]bool {
+	bases := make(map[string]bool)
+	ast.Inspect(f, func(n ast.Node) bool {
+		if sel, _ := n.(*ast.SelectorExpr); sel != nil {
+			if id, _ := sel.X.(*ast.Ident); id != nil {
+				bases[id.Name] = true
+			}
+		}
+		return true
+	})
+	return bases
+}
+
+// dropUnusedImports drops the imports of f whose package name was a selector
+// base before the loGo/s code was dropped (bases) and is none now.
+func dropUnusedImports(f *ast.File, drop func(from, to token.Pos), bases map[string]bool) {
+	left := selectorBases(f)
+	unused := func(imp *ast.ImportSpec) bool {
+		path := strings.Trim(imp.Path.Value, `"`)
+		name := path[strings.LastIndex(path, "/")+1:]
+		if imp.Name != nil {
+			name = imp.Name.Name
+		}
+		return bases[name] && !left[name]
+	}
+	for _, d := range f.Decls {
+		gd, _ := d.(*ast.GenDecl)
+		if gd == nil || gd.Tok != token.IMPORT {
+			continue
+		}
+		gd.Specs = slices.DeleteFunc(gd.Specs, func(s ast.Spec) bool {
+			imp := s.(*ast.ImportSpec)
+			if !unused(imp) {
+				return false
+			}
+			drop(imp.Pos(), imp.End())
+			return true
+		})
+	}
+	f.Imports = slices.DeleteFunc(f.Imports, unused)
 }
 
 // isLogosType reports whether e names a types2-only type that go/types

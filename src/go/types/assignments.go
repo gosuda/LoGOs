@@ -22,6 +22,10 @@ import (
 // Use T == nil to indicate assignment to an untyped blank identifier.
 // If the assignment check fails, x.mode is set to invalid.
 func (check *Checker) assignment(x *operand, T Type, context string) {
+	check.assignOperand(x, T, context)
+}
+
+func (check *Checker) assignOperand(x *operand, T Type, context string) {
 	check.singleValue(x)
 
 	switch x.mode() {
@@ -177,7 +181,7 @@ func (check *Checker) initVar(lhs *Var, x *operand, context string) {
 		lhs.typ = typ
 	}
 
-	check.assignment(x, lhs.typ, context)
+	check.assignOperand(x, lhs.typ, context)
 }
 
 // lhsVar checks a lhs variable in an assignment and returns its type.
@@ -384,7 +388,7 @@ func (check *Checker) returnError(at positioner, lhs []*Var, rhs []*operand) {
 // to variables lhs.
 // If returnStmt is non-nil, initVars type-checks the implicit assignment
 // of result expressions orig_rhs to function result parameters lhs.
-func (check *Checker) initVars(lhs []*Var, orig_rhs []ast.Expr, returnStmt ast.Stmt) {
+func (check *Checker) initVars(lhs []*Var, orig_rhs []ast.Expr, returnStmt *ast.ReturnStmt) {
 	l, r := len(lhs), len(orig_rhs)
 
 	context := "assignment"

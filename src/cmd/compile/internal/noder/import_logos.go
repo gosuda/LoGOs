@@ -12,7 +12,6 @@ import (
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/importer"
-	"cmd/compile/internal/ir"
 	"cmd/compile/internal/logos/facts"
 	"cmd/compile/internal/typecheck"
 	"cmd/compile/internal/types"
@@ -89,25 +88,23 @@ func readLogosFacts(f *os.File, path, data string) (*facts.Facts, error) {
 type logosImporterState struct {
 	isLogos        bool
 	restoreOverlay bool
+	ct             logosCtImportState
 }
 
-var logosImporters = make(map[*gcimports]logosImporterState)
-
 func logosMarkImporter(m *gcimports, isLogos, restoreOverlay bool) {
-	logosImporters[m] = logosImporterState{
+	m.logos = logosImporterState{
 		isLogos:        isLogos,
 		restoreOverlay: restoreOverlay,
 	}
 }
 
 func logosImportFrom(m *gcimports, path string) (*types2.Package, error) {
-	st := logosImporters[m]
-	_, pkg, err := readImportFileImpl(path, typecheck.Target, m.ctxt, m.packages, st.isLogos, st.restoreOverlay)
+	_, pkg, err := readImportFileImpl(m, path)
 	return pkg, err
 }
 
-func preloadLogosOwners(target *ir.Package, env *types2.Context, packages map[string]*types2.Package, pr *pkgbits.PkgDecoder, selfPath string, st logosImporterState) error {
-	if packages == nil || pr == nil {
+func preloadLogosOwners(m *gcimports, pr *pkgbits.PkgDecoder, selfPath string) error {
+	if m.packages == nil || pr == nil {
 		return nil
 	}
 	n := pr.NumElems(pkgbits.SectionPkg)
@@ -124,13 +121,13 @@ func preloadLogosOwners(target *ir.Package, env *types2.Context, packages map[st
 			continue
 		}
 		seen[dep] = struct{}{}
-		if pkg, ok := packages[dep]; ok && pkg.Complete() {
+		if pkg, ok := m.packages[dep]; ok && pkg.Complete() {
 			continue
 		}
 		if !logosDepResolvable(dep) {
 			continue
 		}
-		if !st.restoreOverlay {
+		if !m.logos.restoreOverlay {
 			need, err := logosDepNeedsPreload(dep)
 			if err != nil {
 				return err
@@ -139,14 +136,15 @@ func preloadLogosOwners(target *ir.Package, env *types2.Context, packages map[st
 				continue
 			}
 		}
-		if _, _, err := readImportFileImpl(dep, target, env, packages, st.isLogos, st.restoreOverlay); err != nil {
+		if _, _, err := readImportFileImpl(m, dep); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func readImportFileImpl(path string, target *ir.Package, env *types2.Context, packages map[string]*types2.Package, isLogos, restoreOverlay bool) (pkg1 *types.Pkg, pkg2 *types2.Package, err error) {
+func readImportFileImpl(m *gcimports, path string) (pkg1 *types.Pkg, pkg2 *types2.Package, err error) {
+	target, packages := typecheck.Target, m.packages
 	path, err = resolveImportPath(path)
 	if err != nil {
 		return
@@ -214,16 +212,31 @@ func readImportFileImpl(path string, target *ir.Package, env *types2.Context, pa
 
 	pr := pkgbits.NewPkgDecoder(pkg1.Path, data)
 
-	if err = preloadLogosOwners(target, env, packages, &pr, path, logosImporterState{isLogos: isLogos, restoreOverlay: restoreOverlay}); err != nil {
+	restoreUnions := m.logos.restoreOverlay && logosFacts != nil && !logosFacts.GoPackage
+	if restoreUnions && !logosFacts.CheckedUnionTypes {
+		err = fmt.Errorf("logos: %s was built without checked union types; rebuild it with this toolchain", path)
 		undo()
 		return
 	}
 
-	checkLogosUnion := !isLogos && logosFacts != nil && logosExportHasLogosFile(&pr)
+	if err = preloadLogosOwners(m, &pr, path); err != nil {
+		undo()
+		return
+	}
 
-	readPackage(newPkgReader(pr), pkg1, false)
-	pkg2 = importer.ReadPackage(env, packages, pr)
-	if pkg2 != nil && restoreOverlay {
+	checkLogosUnion := !m.logos.isLogos && logosFacts != nil && logosExportHasLogosFile(&pr)
+
+	var ct *logosCtImportState
+	if m.logos.isLogos {
+		ct = &m.logos.ct
+	}
+	readPackage(newPkgReader(pr), pkg1, false, ct)
+	if restoreUnions {
+		pkg2 = importer.ReadLogosPackage(m.ctxt, packages, pr)
+	} else {
+		pkg2 = importer.ReadPackage(m.ctxt, packages, pr)
+	}
+	if pkg2 != nil && m.logos.restoreOverlay {
 		if pkg2, err = applyLogosOverlayForLgoImporter(path, pkg2, packages, logosFacts); err != nil {
 			undo()
 			return

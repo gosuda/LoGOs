@@ -960,7 +960,7 @@ func (b *Builder) build(ctx context.Context, a *Action) (err error) {
 
 	// A program built for `logos conc` imports logos/rt, which carries the
 	// monitor in such a build, also when no file of the program needs it.
-	if p.Name == "main" && slices.Contains(cfg.BuildContext.BuildTags, load.LogosMonitorTag) {
+	if p.Name == "main" && !p.Internal.ForceLibrary && slices.Contains(cfg.BuildContext.BuildTags, load.LogosMonitorTag) {
 		monitorImport := objdir + "_logosconc_.go"
 		if p.IsLogos() {
 			monitorImport = objdir + "_logosconc_.lgo"

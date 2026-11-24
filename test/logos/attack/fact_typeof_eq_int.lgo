@@ -1,0 +1,19 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func IsInt[T any]() bool {
+	const if comptime.TypeOf[T]() == comptime.TypeOf[int]() {
+		return true
+	}
+	return false
+}
+
+func main() {
+	fmt.Println(IsInt[int](), IsInt[string]())
+}

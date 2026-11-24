@@ -1,0 +1,42 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import "comptime"
+
+type FirstID int
+type SecondID int
+type OptionalIntPointer = *int?
+
+func PointerTypesDiffer() bool {
+	return differentTypes[*int, OptionalIntPointer]()
+}
+
+func differentTypes[A, B any]() bool {
+	const if comptime.TypeOf[A]() != comptime.TypeOf[B]() {
+		return true
+	}
+	return false
+}
+
+// Q3: an exported forwarding function in an importable package is a
+// compile-time error, so owner holds only the comptime generic Kind.
+// The exported forwarder lives in forward.Pair (negative case).
+
+func Kind[T any]() string {
+	const if comptime.TypeOf[T]() == comptime.TypeOf[*int]() {
+		return "non-nil"
+	}
+	const if comptime.TypeOf[T]() == comptime.TypeOf[OptionalIntPointer]() {
+		return "optional"
+	}
+	const if comptime.TypeOf[T]() == comptime.TypeOf[FirstID]() {
+		return "first-id"
+	}
+	const if comptime.TypeOf[T]() == comptime.TypeOf[SecondID]() {
+		return "second-id"
+	}
+	panic("unexpected type argument")
+}

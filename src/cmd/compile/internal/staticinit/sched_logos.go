@@ -15,11 +15,12 @@ import (
 	"cmd/compile/internal/types"
 )
 
-func logosBackingArray(l *ir.Name, loff int64, t *types.Type) *ir.Name {
+func logosBackingName(l *ir.Name, loff int64, t *types.Type) *ir.Name {
 	if !l.Readonly() {
 		return StaticName(t)
 	}
-	sym := types.LocalPkg.Lookup(l.Sym().Name + "·logos_backing" + strconv.FormatInt(loff, 10))
+	parent := l.Sym()
+	sym := parent.Pkg.Lookup(parent.Name + "·logos_backing" + strconv.FormatInt(loff, 10))
 	if sym.Def != nil {
 		base.FatalfAt(base.Pos, "logos: backing %v already defined", sym)
 	}
@@ -28,98 +29,76 @@ func logosBackingArray(l *ir.Name, loff int64, t *types.Type) *ir.Name {
 	n.Class = ir.PEXTERN
 	typecheck.Target.Externs = append(typecheck.Target.Externs, n)
 	n.Linksym().Align = int16(t.Alignment())
+	if l.LogosCtGlobal() {
+		n.SetLogosCtGlobal(true)
+	}
 	n.MarkReadonly()
 	return n
 }
 
 func logosStaticInit(s *Schedule, n ir.Node) bool {
-	markLogosRodata(n)
-	if logosStaticSlice(s, n) {
-		return true
+	target := logosRodataTarget(n)
+	if target == nil || target.LogosCtGlobal() {
+		return s.tryStaticInit(n)
+	}
+	if as, ok := n.(*ir.AssignStmt); ok {
+		target.MarkReadonly()
+		if sl, ok := as.Y.(*ir.SliceExpr); ok && sl.Op() == ir.OSLICE3 && s.logosStaticSlice(target, 0, sl) {
+			return true
+		}
 	}
 	nOut := len(s.Out)
 	ok := s.tryStaticInit(n)
-	if target, name := logosRodataTarget(n); target && (!ok || len(s.Out) != nOut) {
-		if !logos.IsWrittenRodata(types.LocalPkg.Path, name) {
-			base.FatalfAt(n.Pos(), "logos: const composite %s needs dynamic initialization", name)
+	if !ok || len(s.Out) != nOut {
+		sym := target.Sym()
+		if !logos.IsWrittenRodata(sym.Pkg.Path, sym.Name) {
+			base.FatalfAt(n.Pos(), "logos: const composite %s needs dynamic initialization", sym.Name)
 		}
-		base.ErrorfAt(n.Pos(), 0, "[correctness::rodata_dynamic_init] variable %s marked //logos:rodata needs dynamic initialization", name)
+		base.ErrorfAt(n.Pos(), 0, "[correctness::rodata_dynamic_init] variable %s marked //logos:rodata needs dynamic initialization", sym.Name)
 	}
 	return ok
 }
 
-func logosRodataTarget(n ir.Node) (bool, string) {
+func logosRodataTarget(n ir.Node) *ir.Name {
+	var nm *ir.Name
 	switch n.Op() {
 	case ir.OAS:
-		as := n.(*ir.AssignStmt)
-		nm, ok := as.X.(*ir.Name)
-		if !ok || nm.Class != ir.PEXTERN {
-			return false, ""
-		}
-		return logosRodataName(nm)
+		nm, _ = n.(*ir.AssignStmt).X.(*ir.Name)
 	case ir.OCALLFUNC:
-		call, ok := n.(*ir.CallExpr)
-		if !ok {
-			return false, ""
+		fn, ok := n.(*ir.CallExpr).Fun.(*ir.Name)
+		if ok && fn.Func != nil {
+			nm = MapInitToVar[fn.Func]
 		}
-		fn, ok := call.Fun.(*ir.Name)
-		if !ok || fn.Func == nil {
-			return false, ""
-		}
-		v := MapInitToVar[fn.Func]
-		if v == nil {
-			return false, ""
-		}
-		return logosRodataName(v)
 	}
-	return false, ""
+	if nm == nil || nm.Class != ir.PEXTERN {
+		return nil
+	}
+	if nm.LogosCtGlobal() {
+		if nm.Readonly() {
+			return nm
+		}
+		return nil
+	}
+	sym := nm.Sym()
+	if logos.IsRodata(sym.Pkg.Path, sym.Name) {
+		return nm
+	}
+	return nil
 }
 
-func logosRodataName(nm *ir.Name) (bool, string) {
-	name := nm.Sym().Name
-	if !logos.IsRodata(types.LocalPkg.Path, name) {
-		return false, ""
+func logosStaticTemp(l *ir.Name, loff int64, t *types.Type) *ir.Name {
+	if l.Readonly() && l.LogosCtGlobal() {
+		return logosBackingName(l, loff, t)
 	}
-	return true, name
-}
-
-func markLogosRodata(n ir.Node) {
-	if ok, _ := logosRodataTarget(n); !ok {
-		return
-	}
-	as, ok := n.(*ir.AssignStmt)
-	if !ok {
-		return
-	}
-	if nm, ok := as.X.(*ir.Name); ok {
-		nm.MarkReadonly()
-	}
-}
-
-func logosMarkTemp(a, l *ir.Name) {
-	if l != nil && l.Readonly() {
+	a := StaticName(t)
+	if l.Readonly() {
 		a.MarkReadonly()
 	}
+	return a
 }
 
-func logosStaticSlice(s *Schedule, n ir.Node) bool {
-	target, _ := logosRodataTarget(n)
-	if !target {
-		return false
-	}
-	as, ok := n.(*ir.AssignStmt)
-	if !ok {
-		return false
-	}
-	nm, ok := as.X.(*ir.Name)
-	if !ok || nm.Class != ir.PEXTERN || !nm.Readonly() {
-		return false
-	}
+func (s *Schedule) logosStaticSlice(l *ir.Name, loff int64, sl *ir.SliceExpr) bool {
 	if base.Ctxt.IsFIPS() {
-		return false
-	}
-	sl, ok := as.Y.(*ir.SliceExpr)
-	if !ok || sl.Op() != ir.OSLICE3 {
 		return false
 	}
 	lo, ok := staticSliceBound(sl.Low, 0)
@@ -138,25 +117,31 @@ func logosStaticSlice(s *Schedule, n ir.Node) bool {
 	if !ok || back.Op() != ir.OSLICELIT {
 		return false
 	}
-	ln, cp := hi-lo, mx-lo
-	if lo < 0 || ln < 0 || cp < ln || mx > int64(back.Len) {
+	if lo < 0 || hi < lo || mx < hi || mx > int64(back.Len) {
 		return false
 	}
-	l, loff := nm, int64(0)
-	ta := types.NewArray(back.Type().Elem(), back.Len)
-	ta.SetNoalg(true)
-	a := logosBackingArray(l, loff, ta)
+	ln, cp := hi-lo, mx-lo
 	s.initplan(back)
 	p := s.Plans[back]
-	for i := range p.E {
-		e := &p.E[i]
-		if e.Expr.Op() != ir.OLITERAL && e.Expr.Op() != ir.ONIL {
-			return false
+	if !l.LogosCtGlobal() {
+		for i := range p.E {
+			if e := &p.E[i]; e.Expr.Op() != ir.OLITERAL && e.Expr.Op() != ir.ONIL {
+				return false
+			}
 		}
 	}
+	ta := types.NewArray(back.Type().Elem(), back.Len)
+	ta.SetNoalg(true)
+	a := logosBackingName(l, loff, ta)
 	for i := range p.E {
 		e := &p.E[i]
-		staticdata.InitConst(a, e.Xoffset, e.Expr, int(e.Expr.Type().Size()))
+		if e.Expr.Op() == ir.OLITERAL || e.Expr.Op() == ir.ONIL {
+			staticdata.InitConst(a, e.Xoffset, e.Expr, int(e.Expr.Type().Size()))
+			continue
+		}
+		if !s.StaticAssign(a, e.Xoffset, e.Expr, e.Expr.Type()) {
+			return false
+		}
 	}
 	s.Temps[back] = a
 	sym := l.Linksym()

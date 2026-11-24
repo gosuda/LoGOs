@@ -1,0 +1,28 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Count[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+func Wrap[T any]() int { return Count[T]() }
+
+type Pair struct {
+	A int
+	B int
+}
+
+func main() {
+	fmt.Println(Wrap[Pair]())
+}

@@ -30,12 +30,13 @@ type logosCaseInfo struct {
 	kind logosCaseKind
 	tpar *TypeParam
 	pend bool // case type is an unbound f.Type: unknown until instantiation
-	vary bool // case type is an outer loop's bound f.Type: concrete per iteration but varies across them
+	vary bool // case type is concrete in this check but varies across checks: an outer loop's bound f.Type, or a type parameter an instance substituted
 }
 
 type LogosConstCase struct {
-	Target *TypeName
-	Vars   map[*Var]Type
+	Target   *TypeName
+	Vars     map[*Var]Type
+	Switched *TypeParam
 }
 
 type logosIfaceCase struct {
@@ -46,6 +47,10 @@ type logosIfaceCase struct {
 }
 
 func (check *Checker) logosConstSwitch(ctxt stmtContext, s *syntax.ConstSwitchStmt) {
+	if check.logosCtDeclCheck {
+		check.logosNoteDeadUses(s)
+		return
+	}
 	tag := check.logosConstTag(s.Targ)
 	if tag == nil {
 		return
@@ -61,24 +66,32 @@ func (check *Checker) logosConstSwitch(ctxt stmtContext, s *syntax.ConstSwitchSt
 	owner := check.logosFieldTypeOwner[syntax.Unparen(s.Targ)]
 	tagPend := check.logosFieldTypePend(owner)
 	narrow := owner
+	// An instance, copy or field iteration knows the tag: only the first
+	// matching case is checked, and every other case is marked dead so
+	// no walk reports it.
+	instance := (check.logosCtSubst != nil || check.logosCopy || check.logosFieldBind != nil) && !isTypeParam(tag) && !tagPend
+	bound := fieldTag || instance && check.logosCtSubst != nil
 	inner := ctxt &^ (fallthroughOk | finalSwitchCase | inTypeSwitch)
 	var seen []logosCaseInfo
 	for _, c := range s.Cases {
 		info := check.logosConstCase(c, tag)
-		if info == nil {
-			continue
+		// Field-bound and substituted tags vary per check, so the
+		// tag-satisfiable clause does not apply. Coverage among cases
+		// whose types are the same in every check still makes a case
+		// dead for every check; a copy repeats a checked declaration
+		// and reports nothing.
+		live := info != nil && (check.logosCopy || !check.logosCaseShadowed(info, seen, tag, bound, tagPend))
+		if live {
+			seen = append(seen, *info)
+			live = !check.logosDeadCopyCase(c, tag, info, fieldTag || instance, seen[:len(seen)-1])
 		}
-		// Field-bound tags vary per iteration, so the tag-satisfiable
-		// clause does not apply; coverage among the cases themselves
-		// still makes a case dead for every iteration.
-		if !check.logosCopy && check.logosCaseShadowed(info, seen, tag, fieldTag, tagPend) {
-			continue
+		switch {
+		case live:
+			check.logosConstCaseBody(inner, c, tag, info, narrow)
+		case instance:
+			check.logosCtMarkDead(c.Body...)
+			check.logosNoteDeadUses(c.Body...)
 		}
-		seen = append(seen, *info)
-		if check.logosDeadCopyCase(c, tag, info, fieldTag, seen[:len(seen)-1]) {
-			continue
-		}
-		check.logosConstCaseBody(inner, c, tag, info, narrow)
 	}
 }
 
@@ -145,7 +158,7 @@ func (check *Checker) logosConstCase(c *syntax.ConstSwitchCase, tag Type) *logos
 	}
 	check.record(&x)
 	owner := check.logosFieldTypeOwner[syntax.Unparen(c.Type)]
-	info := &logosCaseInfo{syn: c, typ: x.typ(), pend: check.logosFieldTypePend(owner), vary: check.logosFieldTypeVary(owner)}
+	info := &logosCaseInfo{syn: c, typ: x.typ(), pend: check.logosFieldTypePend(owner), vary: check.logosFieldTypeVary(owner) || check.logosCtParamCase(c.Type)}
 	if tpar, ok := tag.(*TypeParam); ok {
 		info.tpar = tpar
 	}
@@ -159,6 +172,39 @@ func (check *Checker) logosConstCase(c *syntax.ConstSwitchCase, tag Type) *logos
 		info.typ = base
 	}
 	return info
+}
+
+// logosCtParamCase answers whether case type e names a type parameter
+// of the comptime instance being checked: the instance resolves it to
+// the argument, while the declaration's case is the parameter.
+func (check *Checker) logosCtParamCase(e syntax.Expr) bool {
+	if check.logosCtSubst == nil {
+		return false
+	}
+	found := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if name, ok := n.(*syntax.Name); ok && check.logosCtBinder(check.Uses[name]) {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// logosCtBinder answers whether obj is the name logosCtCheckBody binds
+// to a type argument. The binder sits in the instance's parameter scope
+// with no parent link, while every declared type name has one.
+func (check *Checker) logosCtBinder(obj Object) bool {
+	tn, ok := obj.(*TypeName)
+	if !ok || tn.Parent() != nil {
+		return false
+	}
+	for tpar, arg := range check.logosCtSubst {
+		if tpar.Obj().Name() == tn.Name() && tn.Type() == arg {
+			return true
+		}
+	}
+	return false
 }
 
 func logosConstCaseKind(typ Type, tilde bool) logosCaseKind {
@@ -177,7 +223,7 @@ func LogosConstSelectedCase(info *Info, s *syntax.ConstSwitchStmt) (sel *syntax.
 	if tag == nil {
 		return nil, false
 	}
-	if _, ok := tag.(*TypeParam); ok {
+	if isTypeParam(tag) {
 		return nil, false
 	}
 	for _, c := range s.Cases {
@@ -193,19 +239,15 @@ func LogosConstSelectedCase(info *Info, s *syntax.ConstSwitchStmt) (sel *syntax.
 }
 
 func logosConstTypeOf(info *Info, e syntax.Expr) Type {
-	var name *syntax.Name
-	switch e := e.(type) {
-	case *syntax.Name:
-		name = e
-	case *syntax.SelectorExpr:
-		name = e.Sel
+	if typ := info.TypeOf(e); typ != nil {
+		return typ
 	}
-	if name != nil {
-		if tn, ok := info.Uses[name].(*TypeName); ok {
+	if sel, ok := e.(*syntax.SelectorExpr); ok {
+		if tn, ok := info.Uses[sel.Sel].(*TypeName); ok {
 			return tn.Type()
 		}
 	}
-	return info.TypeOf(e)
+	return nil
 }
 
 // LogosConstMatch answers whether tag selects case c the way a const
@@ -254,9 +296,9 @@ func (check *Checker) logosCaseShadowed(info *logosCaseInfo, seen []logosCaseInf
 
 func (check *Checker) logosCaseCovered(info *logosCaseInfo, seen []logosCaseInfo, tag Type, fieldTag, tagPend bool) bool {
 	if info.pend || info.vary {
-		// A pending or varying case resolves only per iteration; whether
-		// earlier cases cover it varies with them, so it is never
-		// statically covered.
+		// A pending or varying case resolves only per iteration or
+		// instance; whether earlier cases cover it varies with them, so
+		// it is never statically covered.
 		return false
 	}
 	if !fieldTag && info.kind == logosCaseExact && !check.logosCaseSatisfiable(info.typ, tag, tagPend) {
@@ -272,8 +314,9 @@ func (check *Checker) logosCaseCovered(info *logosCaseInfo, seen []logosCaseInfo
 
 func (check *Checker) logosCaseCoveredBy(prev, info *logosCaseInfo) bool {
 	if prev.pend || prev.vary {
-		// An unbound or outer-bound f.Type case resolves only at
-		// instantiation and covers nothing statically.
+		// An unbound or outer-bound f.Type case, or a case that names a
+		// substituted type parameter, varies per iteration or instance
+		// and covers nothing statically.
 		return false
 	}
 	switch info.kind {
@@ -390,37 +433,14 @@ func (check *Checker) logosConstCaseBody(ctxt stmtContext, c *syntax.ConstSwitch
 }
 
 func (check *Checker) logosTerminatingConstSwitch(s *syntax.ConstSwitchStmt) bool {
-	tag := check.Info.TypeOf(s.Targ)
-	if tag == nil || isTypeParam(tag) {
-		return false
-	}
-	for _, c := range s.Cases {
-		if !check.logosConcreteCaseMatches(c, tag) {
-			continue
-		}
-		return check.isTerminatingList(c.Body, "")
-	}
-	return false
-}
-
-func (check *Checker) logosConcreteCaseMatches(c *syntax.ConstSwitchCase, tag Type) bool {
-	ctv := check.Info.TypeOf(c.Type)
-	if ctv == nil {
-		return false
-	}
-	if c.Tilde {
-		ub, ok := Unalias(tag).Underlying().(*Basic)
-		cb, ok2 := underBasic(ctv)
-		return ok && ok2 && Identical(ub, cb)
-	}
-	if isIfaceCase(ctv) {
-		iface, _ := Unalias(ctv).Underlying().(*Interface)
-		return iface != nil && Implements(tag, iface)
-	}
-	return Identical(ctv, tag)
+	sel, static := LogosConstSelectedCase(check.Info, s)
+	return static && sel != nil && check.isTerminatingList(sel.Body, "")
 }
 
 func (check *Checker) logosHasBreakConstSwitch(s *syntax.ConstSwitchStmt, label string, implicit bool) bool {
+	if sel, static := LogosConstSelectedCase(check.Info, s); static {
+		return sel != nil && check.hasBreakList(sel.Body, label, implicit)
+	}
 	for _, c := range s.Cases {
 		if check.hasBreakList(c.Body, label, implicit) {
 			return true
@@ -433,6 +453,7 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 	pos := info.syn.Type.Pos()
 	bind := info.typ
 	var shadow *TypeName
+	var switched *TypeParam
 	if info.kind == logosCaseTilde {
 		// Inside a ~B case the switched type keeps its identity — a nested
 		// const switch still dispatches on the actual type argument — but
@@ -440,11 +461,12 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 		// converted to it and variables naming it keep their spelling.
 		shadow = NewTypeName(pos, check.pkg, tpar.Obj().Name(), nil)
 		bind = NewTypeParam(shadow, NewInterfaceType(nil, []Type{NewUnion([]*Term{NewTerm(true, info.typ)})}))
+		switched = tpar
 	} else {
 		shadow = NewTypeName(pos, check.pkg, tpar.Obj().Name(), bind)
 	}
 	check.scope.Insert(shadow)
-	rec := LogosConstCase{Target: shadow, Vars: make(map[*Var]Type)}
+	rec := LogosConstCase{Target: shadow, Vars: make(map[*Var]Type), Switched: switched}
 	seen := make(map[string]bool)
 	for sc := check.scope.Parent(); sc != nil; sc = sc.Parent() {
 		for _, objName := range sc.Names() {

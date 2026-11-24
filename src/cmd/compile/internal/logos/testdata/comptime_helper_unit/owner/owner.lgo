@@ -1,0 +1,78 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Shared struct{ N int }
+type Distinct struct{ N int }
+
+var calls int
+var early = initial[Shared]()
+var late = initialize()
+
+func initialize() int {
+	calls++
+	return 40 + calls
+}
+
+func initial[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return readLate()
+	}
+	return -1
+}
+
+func readLate() int { return late }
+
+func Initialization() (int, int, int) { return early, late, calls }
+
+const DeclaredTable = map[int]int{1: 61, 0: 51}
+
+func DeclaredFromOwner() map[int]int {
+	var materialized map[int]int = DeclaredTable
+	return materialized
+}
+
+func Declared[T any]() map[int]int {
+	const if comptime.IsStruct[T]() {
+		var materialized map[int]int = DeclaredTable
+		return materialized
+	}
+	return map[int]int{}
+}
+
+func DeclaredValue(key int) int { return DeclaredTable[key] ?? -1 }
+
+func Probe[T any](key, instance int) (map[int]int, map[int]int) {
+	const if comptime.IsStruct[T]() {
+		const shifts = []int{2, 3, 5}
+		fmt.Println(instance, shifts[key%len(shifts)])
+	}
+
+	const table = map[int]int{8: 80, 2: 20, 5: 50, 0: 0, 3: 30, 1: 10, 7: 70, 6: 60, 4: 40}
+	var outer map[int]int = table
+	fmt.Print(fmt.Sprintf("%p", table), " ", fmt.Sprintf("%p", outer),
+		" ", table[key] ?? -1, " ", table[key+10] ?? -1, " ", len(outer))
+	for k, v := range table {
+		fmt.Print(" ", k, " ", v, " ", outer[k] ?? -1)
+	}
+	fmt.Println()
+
+	{
+		const table = map[int]int{7: 170, 2: 120, 1: 110, 8: 180, 4: 140, 0: 100, 5: 150, 3: 130, 6: 160}
+		var inner map[int]int = table
+		fmt.Print(fmt.Sprintf("%p", table), " ", fmt.Sprintf("%p", inner),
+			" ", table[key] ?? -1, " ", table[key+10] ?? -1, " ", len(inner))
+		for k, v := range table {
+			fmt.Print(" ", k, " ", v, " ", inner[k] ?? -1)
+		}
+		fmt.Println()
+		return outer, inner
+	}
+}

@@ -30,6 +30,7 @@ func (c *Conn) startTLS(now time.Time, initialConnID []byte, peerHostname string
 	if c.side == clientSide {
 		c.tls = tls.QUICClient(qconfig)
 	} else {
+		qconfig.EnableSessionEvents = true
 		c.tls = tls.QUICServer(qconfig)
 	}
 	c.tls.SetTransportParameters(marshalTransportParameters(params))
@@ -100,6 +101,8 @@ func (c *Conn) handleTLSEvents(now time.Time) error {
 			if err := c.receiveTransportParameters(params); err != nil {
 				return err
 			}
+		case tls.QUICResumeSession:
+			e.SessionState.EarlyData = false
 		}
 	}
 }
