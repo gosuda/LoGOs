@@ -167,15 +167,66 @@ func tildeComposite[T any](v T) {
 func caseList[T any](v T) {
 	_ = v
 	const switch T {
-	case int, /* ERROR "const switch case takes a single type, not a list" */ string :
+	case int, string:
+		var z T = v
+		_ = z
 	}
+}
+
+func caseListShadowed[T any](v T) {
+	_ = v
+	const switch T {
+	case int:
+		return
+	case int, string:
+		return
+	}
+	return
+}
+
+func caseListCovered[T any](v T) {
+	_ = v
+	const switch T {
+	case int:
+		return
+	case string:
+		return
+	case int, string /* ERROR "comptime::unreachable_case" */ :
+		return
+	}
+	return
 }
 
 func caseDefault[T any](v T) {
 	_ = v
 	const switch T {
-	default /* ERROR "expected case or }" */ :
+	case int:
+		return "int"
+	default:
+		return "other"
 	}
+}
+
+func caseDefaultShadowed[T any](v T) {
+	_ = v
+	const switch T {
+	default:
+		return "d"
+	case string /* ERROR "comptime::unreachable_case" */ :
+		return "s"
+	}
+	return "other"
+}
+
+func caseDefaultCovered[T any](v T) {
+	_ = v
+	const switch T {
+	case any:
+		return "any"
+	default /* ERROR "comptime::unreachable_case" */ :
+		return "d"
+	}
+	return "other"
 }
 
 func breakInCase[T any](v T) {

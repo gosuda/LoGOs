@@ -6,7 +6,7 @@ An untaken branch is const-dead: it is not type-checked, is not counted for term
 
 Two packages are not a fixture. The logos testdir harness writes one source file into a throwaway module and builds that file. A second package has no import path. `identity_two_callsites.lgo` is the single-file form of I1 (one instance per type-argument list). An importing caller of an exported comptime generic is the same gap. `cross_unexported_helper.lgo` and `cross_unexported_type.lgo` attack the defining-package half of that rule. `src/cmd/go/testdata/script/logos_comptime_unexported.txt` covers the importer half: the instance is compiled for the defining package, so an instantiation in another package builds and runs. `logos eject` refuses with `[comptime::unexported_in_exported]` only an instance that it prints outside its defining package and that names such an identifier (`src/cmd/go/testdata/script/logos_comptime_instance_identity.txt`).
 
-`eval.zig:413`, `inline_switch.zig`, and `for.zig:396` are not here. They are `const for` over arrays and `const switch` type lists, which SPEC 2.5 still rejects and which later slices own.
+`eval.zig:413` and `for.zig:396` are not here. They are `const for` over arrays, which a later slice owns. `const switch` type lists and `default` are covered below (slice 3).
 
 | File | Invariant | Zig |
 | --- | --- | --- |
@@ -28,6 +28,13 @@ Two packages are not a fixture. The logos testdir harness writes one source file
 | switch_no_match_error.lgo | I3 and SPEC 2.5. No matching case leaves the later `comptime.Error` live. | |
 | taken_arm_type_error.lgo | I3. A type error in the taken `const if` arm still fails. | |
 | taken_switch_type_error.lgo | I3. A type error in the taken `const switch` case still fails. | |
+| switch_typelist_firstmatch.lgo | SPEC 2.5. A `case int, string:` list matches in order and rebinds per element; no match falls through. | |
+| switch_typelist_mixed.lgo | SPEC 2.5. One case mixes `~int` and exact elements; an interface list matches either member. | |
+| switch_default_taken.lgo | SPEC 2.5. `default` runs when nothing matches and never when a case matches; a default-only switch always runs. | |
+| switch_shadow_partial_list.lgo | SPEC 2.5. A list partly covered by an earlier case stays live for the rest: shadowing is case-level. | |
+| switch_shadow_after_default.lgo | SPEC 2.5. A case after `default` fails `[comptime::unreachable_case]`. | |
+| switch_shadow_full_list.lgo | SPEC 2.5. A list wholly covered by earlier cases fails `[comptime::unreachable_case]`. | |
+| switch_default_shadowed_by_any.lgo | SPEC 2.5. A `default` arm after `case any:` fails `[comptime::unreachable_case]`. | |
 | fact_name_constif.lgo | I2. `f.Name` is a `const if` condition. | |
 | fact_index_constif.lgo | I2. `f.Index` is a `const if` condition. | |
 | fact_exported_constif.lgo | I2. `f.Exported` is a `const if` condition. | |

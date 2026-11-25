@@ -1,0 +1,16 @@
+// errorcheck
+
+package p
+
+func defaultShadowedByAny[T any](v T) string {
+	_ = v
+	const switch T {
+	case any:
+		return "any"
+	default: // ERROR "comptime::unreachable_case"
+		return "d"
+	}
+	return "other"
+}
+
+var _ = defaultShadowedByAny[int](1)

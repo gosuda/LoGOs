@@ -1,0 +1,18 @@
+// errorcheck
+
+package p
+
+func shadowedFullList[T any](v T) string {
+	_ = v
+	const switch T {
+	case int:
+		return "int"
+	case string:
+		return "string"
+	case int, string: // ERROR "comptime::unreachable_case"
+		return "both"
+	}
+	return "other"
+}
+
+var _ = shadowedFullList[int](1)

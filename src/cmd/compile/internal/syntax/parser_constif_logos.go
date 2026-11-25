@@ -196,19 +196,31 @@ func (p *parser) constCase() *ConstSwitchCase {
 
 	c := new(ConstSwitchCase)
 	c.Case = p.pos()
+	if p.tok == _Default {
+		c.Default = true
+		p.next()
+		c.Colon = p.pos()
+		p.want(_Colon)
+		c.Body = p.stmtList()
+		return c
+	}
 	if p.tok != _Case {
 		return p.constCaseRecover(c)
 	}
 	p.next()
-	if p.tok == _Operator && p.op == Tilde {
-		c.Tilde = true
-		c.TildePos = p.pos()
+	for {
+		var e ConstSwitchCaseElem
+		if p.tok == _Operator && p.op == Tilde {
+			e.Tilde = true
+			e.TildePos = p.pos()
+			p.next()
+		}
+		e.Type = p.type_()
+		c.Elems = append(c.Elems, e)
+		if p.tok != _Comma {
+			break
+		}
 		p.next()
-	}
-	c.Type = p.type_()
-	if p.tok == _Comma {
-		p.syntaxError("const switch case takes a single type, not a list")
-		p.advance(_Colon, _Case, _Rbrace)
 	}
 	c.Colon = p.pos()
 	p.want(_Colon)
@@ -218,11 +230,11 @@ func (p *parser) constCase() *ConstSwitchCase {
 
 func (p *parser) constCaseRecover(c *ConstSwitchCase) *ConstSwitchCase {
 	p.syntaxError("expected case or }")
-	p.advance(_Colon, _Case, _Rbrace)
-	if p.tok != _Colon && p.tok != _Case && p.tok != _Rbrace && p.tok != _EOF {
+	p.advance(_Colon, _Case, _Default, _Rbrace)
+	if p.tok != _Colon && p.tok != _Case && p.tok != _Default && p.tok != _Rbrace && p.tok != _EOF {
 		p.next()
 	}
-	c.Type = p.badExpr()
+	c.Elems = []ConstSwitchCaseElem{{Type: p.badExpr()}}
 	c.Colon = p.pos()
 	if p.got(_Colon) {
 		c.Body = p.stmtList()

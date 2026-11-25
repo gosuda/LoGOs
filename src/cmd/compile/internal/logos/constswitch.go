@@ -27,6 +27,8 @@ const (
 
 type cswCase struct {
 	syn  *syntax.ConstSwitchCase
+	elem int // element index; -1 for the default arm
+	body []syntax.Stmt
 	kind cswKind
 
 	spell otext
@@ -48,8 +50,15 @@ type cswLower struct {
 	start int
 	end   int
 	cases []cswCase
+	// Default arm lowering, when the switch has one. Lowered once per
+	// switch; the clauses below splice its statements and text in place.
+	defStmts []syntax.Stmt
+	defText otext
+	hasDef bool
+	defPos syntax.Pos
+	defClose syntax.Pos
+	hostTexts map[*syntax.ConstSwitchCase]otext
 }
-
 type cswRebind struct {
 	obj   *types2.Var
 	name  string
@@ -57,7 +66,7 @@ type cswRebind struct {
 }
 
 func (fl *fileLower) snapshotConstSwitchCases() {
-	var cases map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase
+	var cases map[*syntax.ConstSwitchStmt]ctSwitchSel
 	info := fl.pkg.info
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if stmt, ok := n.(syntax.Stmt); ok && info.LogosConstIfDead[stmt] {
@@ -67,14 +76,14 @@ func (fl *fileLower) snapshotConstSwitchCases() {
 		if !ok {
 			return true
 		}
-		sel, static := types2.LogosConstSelectedCase(info, s)
+		sel, elem, static := types2.LogosConstSelectedElem(info, s)
 		if !static {
 			return true
 		}
 		if cases == nil {
-			cases = make(map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase)
+			cases = make(map[*syntax.ConstSwitchStmt]ctSwitchSel)
 		}
-		cases[s] = sel
+		cases[s] = ctSwitchSel{sel: sel, elem: elem}
 		return true
 	})
 	fl.pkg.ctExp.switches = cases
@@ -91,37 +100,64 @@ func (fc *funcLower) lowerConstSwitchStmt(s *syntax.ConstSwitchStmt) []syntax.St
 		end:   fl.off(s.Rbrace) + 1,
 	}
 	if sel, static := fl.pkg.ctExp.switches[s]; static {
+		if sel.sel == nil {
+			c.replaceFolded(otext{})
+			return nil
+		}
+		if sel.elem < 0 {
+			match := c.defaultCase(sel.sel)
+			return c.lowerFold(&match)
+		}
+		match := c.caseAtElem(sel.sel, sel.elem, sel.sel.Body)
+		return c.lowerFold(&match)
+	}
+	// Fresh copies from region lowering are not snapshotted: select
+	// directly. Their tags resolve through the copy's bindings, so a
+	// nested switch inside a copy selects statically.
+	if sel, elem, static := types2.LogosConstSelectedElem(c.info, s); static {
 		if sel == nil {
 			c.replaceFolded(otext{})
 			return nil
 		}
-		match := c.caseAt(slices.Index(s.Cases, sel))
+		if elem < 0 {
+			match := c.defaultCase(sel)
+			return c.lowerFold(&match)
+		}
+		match := c.caseAtElem(sel, elem, sel.Body)
 		return c.lowerFold(&match)
 	}
 	if _, ok := types2.Unalias(checkedTypeOf(c.info, s.Targ)).(*types2.TypeParam); !ok {
 		base.Fatalf("logos: const switch at %s has no compile-time selection", s.Pos().String())
 	}
-	c.cases = make([]cswCase, len(s.Cases))
-	for i := range c.cases {
-		c.cases[i] = c.caseAt(i)
-	}
 	return c.lowerRuntime()
 }
 
-func (c *cswLower) caseAt(i int) cswCase {
+// defaultArm answers the switch's default arm, or nil.
+func defaultArm(s *syntax.ConstSwitchStmt) *syntax.ConstSwitchCase {
+	for _, c := range s.Cases {
+		if c.Default {
+			return c
+		}
+	}
+	return nil
+}
+
+func (c *cswLower) caseAtElem(syn *syntax.ConstSwitchCase, elem int, body []syntax.Stmt) cswCase {
 	fl, s := c.fl, c.stmt
-	syn := s.Cases[i]
-	typ := checkedTypeOf(c.info, syn.Type)
+	e := &syn.Elems[elem]
+	typ := checkedTypeOf(c.info, e.Type)
 	cs := cswCase{
 		syn:   syn,
+		elem:  elem,
+		body:  body,
 		kind:  cswExact,
-		spell: c.spell(fl.off(syn.Case), fl.off(syn.Colon)),
+		spell: c.elemSpell(e),
 		lo:    fl.off(syn.Colon) + 1,
 		hi:    fl.off(s.Rbrace),
 		close: s.Rbrace,
-		sub:   c.info.LogosConstCases[syn],
+		sub:   c.info.LogosConstCases[types2.LogosConstCaseKey{Case: syn, Elem: elem}],
 	}
-	if i+1 < len(s.Cases) {
+	if i := slices.Index(s.Cases, syn); i+1 < len(s.Cases) {
 		cs.hi = fl.off(s.Cases[i+1].Case)
 		cs.close = s.Cases[i+1].Case
 	}
@@ -131,12 +167,38 @@ func (c *cswLower) caseAt(i int) cswCase {
 		// spell the checked type in its lowered plain form instead.
 		cs.spell = gen(fl.plainTypeSpell(typ))
 	}
-	if syn.Tilde {
+	if e.Tilde {
 		cs.kind = cswTilde
 	} else if _, ok := types2.Unalias(typ).Underlying().(*types2.Interface); ok {
 		cs.kind = cswIface
 	}
 	return cs
+}
+
+// defaultCase builds the fold case for a default arm: no alias, no
+// rebinding, just the arm body in place of the switch.
+func (c *cswLower) defaultCase(syn *syntax.ConstSwitchCase) cswCase {
+	fl, s := c.fl, c.stmt
+	cs := cswCase{
+		syn:   syn,
+		elem:  -1,
+		body:  syn.Body,
+		kind:  cswExact,
+		lo:    fl.off(syn.Colon) + 1,
+		hi:    fl.off(s.Rbrace),
+		close: s.Rbrace,
+	}
+	if i := slices.Index(s.Cases, syn); i+1 < len(s.Cases) {
+		cs.hi = fl.off(s.Cases[i+1].Case)
+		cs.close = s.Cases[i+1].Case
+	}
+	return cs
+}
+
+func (c *cswLower) elemSpell(e *syntax.ConstSwitchCaseElem) otext {
+	// StartPos, not Pos: a qualified type names its selector position
+	// at the dot, and the spell must keep the qualifier.
+	return c.fl.textOf(span{c.fl.off(syntax.StartPos(e.Type)), c.fl.exprEndOf(e.Type)})
 }
 
 func checkedTypeOf(info *types2.Info, e syntax.Expr) types2.Type {
@@ -228,6 +290,306 @@ func (c *cswLower) runs() [][]*cswCase {
 }
 
 func (c *cswLower) lowerRuntime() []syntax.Stmt {
+	// A switch with a multi-element case lowers through regions: each arm
+	// is reparsed from the transformed body text and checked and lowered
+	// on its own, so per-element spellings never share spans.
+	for _, syn := range c.stmt.Cases {
+		if len(syn.Elems) > 1 {
+			return c.lowerRuntimeHost()
+		}
+	}
+	return c.lowerRuntimeSync()
+}
+// cswHostArm is one lowered arm of a region-based switch: an if-chain
+// link whose body lives in its own region until finalization. Head and
+// condition texts are fixed at lowering; the body composes at finalize,
+// after nested hosts finalize.
+type cswHostArm struct {
+	init syntax.SimpleStmt
+	initText otext
+	hasInit  bool
+	cond     syntax.Expr
+	condText otext
+	head     []syntax.Stmt
+	headText otext
+	body     []syntax.Stmt
+	region   *cfRegion
+	pos      syntax.Pos
+	close    syntax.Pos
+	isDefault bool
+}
+
+func (c *cswLower) cond(cs *cswCase) (syntax.Expr, otext) {
+	c.fl.needRT = true
+	tag := c.spell(c.fl.off(c.stmt.Pos()), c.fl.off(c.stmt.Lbrace))
+	helper := "Implements"
+	if cs.kind == cswTilde {
+		helper = "TildeIs"
+	}
+	text := cat(gen(rtAlias+"."+helper+"["), tag, gen(", "), cs.spell, gen("]()"))
+	expr, ok := parseExprAt(text.s, cs.syn.Case)
+	if !ok {
+		base.Fatalf("logos: const switch case %s at %s cannot be respelled", cs.spell.s, cs.syn.Case.String())
+	}
+	return expr, text
+}
+
+func (c *cswLower) lowerRuntimeHost() []syntax.Stmt {
+	var arms []cswHostArm
+	for _, syn := range c.stmt.Cases {
+		if syn.Default {
+			arms = append(arms, c.lowerHostArm(syn, -1))
+			continue
+		}
+		for i := range syn.Elems {
+			arms = append(arms, c.lowerHostArm(syn, i))
+		}
+	}
+	// Nodes assemble now: an if-chain over the lowered arms. The default
+	// arm, if present, is the final else: shadowing already rejects any
+	// arm after it, so it is last.
+	var root syntax.Stmt
+	for i := len(arms) - 1; i >= 0; i-- {
+		arm := arms[i]
+		// Each arm block closes where the next arm opens. A block that
+		// ran to the switch end (or the next case) would close after
+		// the next arm opens, and scope marks must stay monotonic.
+		close := arm.close
+		if i+1 < len(arms) {
+			close = arms[i+1].pos
+		}
+		if arm.isDefault {
+			root = closeAt(arm.pos, append(arm.head, arm.body...), close)
+			continue
+		}
+		root = at(&syntax.IfStmt{
+			Init: arm.init,
+			Cond: arm.cond,
+			Then: closeAt(arm.pos, append(arm.head, arm.body...), close),
+			Else: root,
+		}, arm.pos)
+	}
+	if root == nil {
+		root = closeAt(c.stmt.Pos(), nil, c.stmt.Rbrace)
+	}
+	// Text assembles at finalization, when every region (including nested
+	// hosts inside the copies) is finished.
+	host := &cfHost{compose: func(h *cfHost) otext { return c.composeHostSwitch(arms) }}
+	for _, arm := range arms {
+		host.regions = append(host.regions, arm.region)
+	}
+	c.fl.addHost(c.start, c.end, host)
+	return []syntax.Stmt{root}
+}
+
+// composeHostSwitch assembles the eject text of a region-based switch:
+// the if-chain skeleton with each arm's head text and composed region.
+func (c *cswLower) composeHostSwitch(arms []cswHostArm) otext {
+	var out otext
+	for i, arm := range arms {
+		if arm.isDefault {
+			out = cat(out, gen(" else {"), arm.headText, c.fl.composeRegionNow(arm.region), gen("}"))
+			continue
+		}
+		if i == 0 {
+			out = gen("if ")
+		} else {
+			out = cat(out, gen(" else if "))
+		}
+		if arm.hasInit {
+			out = cat(out, arm.initText, gen("; "))
+		}
+		out = cat(out, arm.condText, gen(" {"), arm.headText, c.fl.composeRegionNow(arm.region), gen("}"))
+	}
+	return out
+}
+
+// lowerHostArm lowers one arm of a region-based switch into its own
+// region: the body text is reparsed from the transformed source, checked
+// under the arm's bindings, adopted into a fresh region, and lowered
+// there, so per-element spellings never share spans.
+func (c *cswLower) lowerHostArm(syn *syntax.ConstSwitchCase, elem int) cswHostArm {
+	fl := c.fl
+	if syn.Default {
+		bodyText := c.hostBodyText(syn)
+		fnBody, fbase := reparseCswBody(bodyText.s, syn.Case)
+		c.miniCheckCopy(fnBody, syn, elem, nil, false)
+		region := fl.adoptRegion(bodyText, syn.Case, fbase, 3, []syntax.Node{fnBody})
+		fnBody.List = c.fc.lowerConstIfList(fnBody.List)
+		lowered := c.fc.lowerList(fnBody.List)
+		return cswHostArm{body: lowered, region: region, pos: syn.Case, close: c.armClose(syn), isDefault: true}
+	}
+	e := &syn.Elems[elem]
+	typ := checkedTypeOf(c.info, e.Type)
+	var kind cswKind
+	kind = cswExact
+	if e.Tilde {
+		kind = cswTilde
+	} else if _, ok := types2.Unalias(typ).Underlying().(*types2.Interface); ok {
+		kind = cswIface
+	}
+	bodyText := c.hostBodyText(syn)
+	fnBody, fbase := reparseCswBody(bodyText.s, e.Type.Pos())
+	c.miniCheckCopy(fnBody, syn, elem, typ, kind == cswIface)
+	region := fl.adoptRegion(bodyText, syn.Case, fbase, 3, []syntax.Node{fnBody})
+	fnBody.List = c.fc.lowerConstIfList(fnBody.List)
+	cs := cswCase{syn: syn, elem: elem, body: fnBody.List, kind: kind}
+	cs.spell = c.elemSpell(e)
+	cs.sub = c.info.LogosConstCases[types2.LogosConstCaseKey{Case: syn, Elem: elem}]
+	cs.lo, cs.hi = region.start, region.end
+	cs.close = syn.Case
+	head, headText := c.caseHead(&cs)
+	lowered := c.fc.lowerList(fnBody.List)
+	arm := cswHostArm{head: head, headText: headText, body: lowered, region: region, pos: syn.Case, close: c.armClose(syn)}
+	if kind == cswExact {
+		tag := c.spell(fl.off(c.stmt.Pos()), fl.off(c.stmt.Lbrace))
+		tagExpr, ok := parseExprAt("any((*"+tag.s+")(nil))", syn.Case)
+		if !ok {
+			base.Fatalf("logos: const switch tag %s at %s cannot be respelled", tag.s, syn.Case.String())
+		}
+		ptr, ok := parseExprAt("*"+cs.spell.s, syn.Case)
+		if !ok {
+			base.Fatalf("logos: const switch case %s at %s cannot be respelled", cs.spell.s, syn.Case.String())
+		}
+		asrt := at(&syntax.AssertExpr{X: tagExpr, Type: ptr}, syn.Case)
+		okName := c.fl.cswName("ok")
+		arm.init = defineOf(syn.Case, []syntax.Expr{nameOf(syn.Case, "_"), nameOf(syn.Case, okName)}, []syntax.Expr{asrt})
+		arm.initText = gen("_, "+okName+" := any((*"+tag.s+")(nil)).(*"+cs.spell.s+")")
+		arm.hasInit = true
+		arm.cond = nameOf(syn.Case, okName)
+		arm.condText = gen(okName)
+	} else {
+		cond, condText := c.cond(&cs)
+		arm.cond, arm.condText = cond, condText
+	}
+	return arm
+}
+
+// armEnd answers the source end offset of a case body: the next case's
+// start, or the switch's closing brace.
+func (c *cswLower) armEnd(syn *syntax.ConstSwitchCase) int {
+	if i := slices.Index(c.stmt.Cases, syn); i+1 < len(c.stmt.Cases) {
+		return c.fl.off(c.stmt.Cases[i+1].Case)
+	}
+	return c.fl.off(c.stmt.Rbrace)
+}
+
+func (c *cswLower) armClose(syn *syntax.ConstSwitchCase) syntax.Pos {
+	if i := slices.Index(c.stmt.Cases, syn); i+1 < len(c.stmt.Cases) {
+		return c.stmt.Cases[i+1].Case
+	}
+	return c.stmt.Rbrace
+}
+
+// hostBodyText returns the transformed source of one case body, memoized
+// per case: textOf drains the span's splices, so reparsing every element
+// from one call would starve the later copies.
+func (c *cswLower) hostBodyText(syn *syntax.ConstSwitchCase) otext {
+	if c.hostTexts == nil {
+		c.hostTexts = make(map[*syntax.ConstSwitchCase]otext)
+	}
+	if text, ok := c.hostTexts[syn]; ok {
+		return text
+	}
+	text := c.fl.textOf(span{c.fl.off(syn.Colon) + 1, c.armEnd(syn)})
+	c.hostTexts[syn] = text
+	return text
+}
+
+// miniCheckCopy checks one freshly parsed arm body under that arm's
+// bindings and records the facts for lowering it. Diagnostics stay with
+// the declaration check, which already reported them on the shared body.
+func (c *cswLower) miniCheckCopy(fnBody *syntax.BlockStmt, syn *syntax.ConstSwitchCase, elem int, typ types2.Type, isIface bool) {
+	fl, info := c.fl, c.info
+	scopeRec, ok := info.LogosConstSwitchScope[c.stmt]
+	if !ok || scopeRec.Scope == nil || scopeRec.Sig == nil {
+		base.Fatalf("logos: const switch at %s has no recorded scope for region lowering", c.stmt.Pos().String())
+	}
+	ctx := types2.LogosCopyContext{
+		Scope:     scopeRec.Scope,
+		Sig:       scopeRec.Sig,
+		Version:   scopeRec.Version,
+		Disqual:   info.LogosDisqual[c.fc.body],
+		Aliases:   fl.cfAliases(),
+		MaxSteps:  info.LogosCTFEMaxSteps,
+		NodeLimit: base.LogosComptimeNodes,
+		Importer:  info.LogosImporter,
+		Context:   info.LogosContext,
+		Bind:      fl.cfRuntimeBindings(),
+	}
+	key := types2.LogosConstCaseKey{Case: syn, Elem: elem}
+	shadow := types2.LogosConstSwitchShadow{
+		Rec:     info.LogosConstCases[key],
+		Tag:     scopeRec.Tag,
+		Elem:    key,
+		Typ:     typ,
+		IsIface: isIface,
+	}
+	types2.LogosCheckSwitchElem(fl.pkg.tpkg, info, ctx, shadow, []*syntax.BlockStmt{fnBody})
+}
+
+// reparseCswBody parses one arm body for isolated lowering. The text
+// already carries every file-pass transform; the fresh base keeps the
+// copy's nodes distinct from the shared originals.
+func reparseCswBody(text string, pos syntax.Pos) (*syntax.BlockStmt, *syntax.PosBase) {
+	fbase := syntax.NewFileBase("csw")
+	var errs []error
+	f, _ := syntax.Parse(fbase, strings.NewReader("package cswparse\nfunc cswparse() {\n"+text+"\n}\n"), func(err error) {
+		errs = append(errs, err)
+	}, nil, syntax.LogosMode)
+	if len(errs) > 0 || f == nil {
+		base.Fatalf("logos: cannot reparse const switch body at %s: %v", pos.String(), errs)
+	}
+	for _, decl := range f.DeclList {
+		if fn, ok := decl.(*syntax.FuncDecl); ok && fn.Body != nil {
+			return fn.Body, fbase
+		}
+	}
+	base.Fatalf("logos: cannot reparse const switch body at %s", pos.String())
+	return nil, nil
+}
+
+// composeRegionNow composes one adopted region's finished text: the
+// region bytes with the region's edits applied, plus any nested host
+// text whose splice landed inside the region. Consumed nested host
+// splices are dropped so the final composition does not repeat them.
+func (fl *fileLower) composeRegionNow(r *cfRegion) otext {
+	inner := make([]splice, 0, len(r.splices)+4)
+	inner = append(inner, r.splices...)
+	var kept []splice
+	for _, sp := range fl.splices {
+		if sp.host != nil && sp.start >= r.start && sp.end <= r.end {
+			inner = append(inner, splice{start: sp.start, end: sp.end, text: sp.text, chunks: sp.chunks})
+			for _, h := range fl.hosts {
+				if h == sp.host {
+					h.retired = true
+				}
+			}
+		} else {
+			kept = append(kept, sp)
+		}
+	}
+	fl.splices = kept
+	adj := make([]splice, len(inner))
+	for i, sp := range inner {
+		adj[i] = sp
+		adj[i].start -= r.start
+		adj[i].end -= r.start
+	}
+	out, err := applyChunks(fl.srcMap.sliceO(r.start, r.end), adj)
+	if err != nil {
+		base.Fatalf("logos: %v", err)
+	}
+	return out
+}
+func (c *cswLower) lowerRuntimeSync() []syntax.Stmt {
+	c.cases = make([]cswCase, 0, len(c.stmt.Cases))
+	for _, syn := range c.stmt.Cases {
+		if syn.Default {
+			continue
+		}
+		c.cases = append(c.cases, c.caseAtElem(syn, 0, syn.Body))
+	}
 	runs := c.runs()
 	if len(runs) <= 1 || (len(runs) == 2 && runs[0][0].kind == cswExact) {
 		var exacts, rest []*cswCase
@@ -238,12 +600,14 @@ func (c *cswLower) lowerRuntime() []syntax.Stmt {
 				rest = run
 			}
 		}
+		c.lowerDefault("")
 		stmt, text := c.typeSwitch(exacts, rest, "")
 		c.fl.addT(c.start, c.end, text)
 		return []syntax.Stmt{stmt}
 	}
 	pos := c.stmt.Pos()
 	done := fmt.Sprintf("_logos_csw%d", c.start)
+	c.lowerDefault(done)
 	block := at(&syntax.BlockStmt{Rbrace: c.stmt.Rbrace}, pos)
 	block.List = append(block.List, defineOf(pos, []syntax.Expr{nameOf(pos, done)}, []syntax.Expr{nameOf(pos, "false")}))
 	text := gen("{" + done + " := false\n")
@@ -267,10 +631,35 @@ func (c *cswLower) lowerRuntime() []syntax.Stmt {
 		}, first))
 		text = cat(text, gen("if !"+done+" {"), innerText, gen("}\n"))
 	}
+	if c.hasDef {
+		guard := at(&syntax.Operation{Op: syntax.Not, X: nameOf(c.defPos, done)}, c.defPos)
+		block.List = append(block.List, at(&syntax.IfStmt{
+			Cond: guard,
+			Then: closeAt(c.defPos, c.defStmts, c.defClose),
+		}, c.defPos))
+		text = cat(text, gen("if !"+done+" {"), c.defText, gen("}\n"))
+	}
 	text = cat(text, gen("}"))
 	c.fl.addT(c.start, c.end, text)
 	return []syntax.Stmt{block}
 }
+
+// lowerDefault lowers the switch's default arm once, if present. The arm
+// carries no alias and no rebinding: it is the body as written, plus the
+// done assignment when the switch dispatches under a done guard.
+func (c *cswLower) lowerDefault(done string) {
+	c.hasDef = false
+	defSyn := defaultArm(c.stmt)
+	if defSyn == nil {
+		return
+	}
+	dc := c.defaultCase(defSyn)
+	c.defStmts, c.defText = c.caseBody(&dc, done)
+	c.hasDef = true
+	c.defPos = defSyn.Case
+	c.defClose = dc.close
+}
+
 
 func (c *cswLower) typeSwitch(exacts, rest []*cswCase, done string) (syntax.Stmt, otext) {
 	pos := c.stmt.Pos()
@@ -300,13 +689,37 @@ func (c *cswLower) typeSwitch(exacts, rest []*cswCase, done string) (syntax.Stmt
 	}
 	if len(rest) > 0 {
 		chain, chainText := c.chainIf(rest, done)
+		if c.hasDef {
+			chain, chainText = c.attachDefault(chain, chainText)
+		}
 		sw.Body = append(sw.Body, at(&syntax.CaseClause{Body: []syntax.Stmt{chain}}, rest[0].syn.Case))
 		text = cat(text, gen("\ndefault:\n"), chainText)
+	} else if c.hasDef {
+		sw.Body = append(sw.Body, at(&syntax.CaseClause{Body: c.defStmts}, c.defPos))
+		text = cat(text, gen("\ndefault:\n"), c.defText)
 	}
 	text = cat(text, gen("\n}"))
 	return sw, text
 }
 
+// attachDefault sets the final else of a chainIf chain to the switch's
+// default arm. The chain nests IfStmt nodes only, so the walk always lands
+// on the innermost link.
+func (c *cswLower) attachDefault(chain syntax.Stmt, chainText otext) (syntax.Stmt, otext) {
+	last, ok := chain.(*syntax.IfStmt)
+	if !ok {
+		base.Fatalf("logos: const switch chain at %s is not an if chain", chain.Pos().String())
+	}
+	for last.Else != nil {
+		inner, ok := last.Else.(*syntax.IfStmt)
+		if !ok {
+			base.Fatalf("logos: const switch chain at %s is not an if chain", chain.Pos().String())
+		}
+		last = inner
+	}
+	last.Else = closeAt(c.defPos, c.defStmts, c.defClose)
+	return chain, cat(chainText, gen(" else {"), c.defText, gen("}"))
+}
 func (c *cswLower) chainIf(run []*cswCase, done string) (syntax.Stmt, otext) {
 	var next syntax.Stmt
 	var nextText otext
@@ -331,23 +744,17 @@ func (c *cswLower) chainIf(run []*cswCase, done string) (syntax.Stmt, otext) {
 func closeAt(pos syntax.Pos, list []syntax.Stmt, close syntax.Pos) *syntax.BlockStmt {
 	return at(&syntax.BlockStmt{List: list, Rbrace: close}, pos)
 }
-
-func (c *cswLower) cond(cs *cswCase) (syntax.Expr, otext) {
-	c.fl.needRT = true
-	tag := c.spell(c.fl.off(c.stmt.Pos()), c.fl.off(c.stmt.Lbrace))
-	helper := "Implements"
-	if cs.kind == cswTilde {
-		helper = "TildeIs"
+func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
+	head, headText := c.caseHead(cs)
+	if done != "" {
+		head = append(head, at(&syntax.AssignStmt{Lhs: nameOf(cs.syn.Case, done), Rhs: nameOf(cs.syn.Case, "true")}, cs.syn.Case))
+		headText = cat(headText, gen(done+" = true\n"))
 	}
-	text := cat(gen(rtAlias+"."+helper+"["), tag, gen(", "), cs.spell, gen("]()"))
-	expr, ok := parseExprAt(text.s, cs.syn.Case)
-	if !ok {
-		base.Fatalf("logos: const switch case %s at %s cannot be respelled", cs.spell.s, cs.syn.Case.String())
-	}
-	return expr, text
+	lowered, bodyText := c.caseTail(cs)
+	return append(head, lowered...), cat(headText, bodyText)
 }
 
-func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
+func (c *cswLower) caseHead(cs *cswCase) ([]syntax.Stmt, otext) {
 	var head []syntax.Stmt
 	var headText otext
 	if cs.kind == cswIface || cs.sub.Target != nil {
@@ -365,8 +772,8 @@ func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 		headText = gen("type " + cs.alias + " = " + cs.spell.s + "\n")
 	}
 	if cs.kind == cswIface {
-		selWraps := c.wrapSelectors(cs.syn.Body, cs)
-		decls, dtext := c.wrapConvs(cs.syn.Body, cs, selWraps)
+		selWraps := c.wrapSelectors(cs.body, cs)
+		decls, dtext := c.wrapConvs(cs.body, cs, selWraps)
 		head = append(head, decls...)
 		headText = cat(headText, dtext)
 	} else if cs.sub.Target != nil {
@@ -374,15 +781,13 @@ func (c *cswLower) caseBody(cs *cswCase, done string) ([]syntax.Stmt, otext) {
 		head = append(head, decls...)
 		headText = cat(headText, dtext)
 	}
-	lowered := c.fc.lowerList(cs.syn.Body)
-	if done != "" {
-		head = append(head, at(&syntax.AssignStmt{Lhs: nameOf(cs.syn.Case, done), Rhs: nameOf(cs.syn.Case, "true")}, cs.syn.Case))
-		headText = cat(headText, gen(done+" = true\n"))
-	}
-	body := c.fl.lazyText(span{cs.lo, cs.hi})
-	return append(head, lowered...), cat(headText, body)
+	return head, headText
 }
 
+func (c *cswLower) caseTail(cs *cswCase) ([]syntax.Stmt, otext) {
+	lowered := c.fc.lowerList(cs.body)
+	return lowered, c.fl.lazyText(span{cs.lo, cs.hi})
+}
 // rewriteRebound respells the switched type's name to the case type and
 // rewrites every use of a variable bound to the switched type as a
 // dereference of a type-correct pointer into the variable's own storage,
@@ -427,7 +832,7 @@ func (c *cswLower) rewriteRebound(cs *cswCase) ([]syntax.Stmt, otext) {
 	// pointer dereference, which len/cap accept without evaluation. The
 	// dereference spells the variable's own substituted type: it may carry
 	// a different length than the case type.
-	for _, s := range cs.syn.Body {
+	for _, s := range cs.body {
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			call, ok := n.(*syntax.CallExpr)
 			if !ok {
@@ -494,7 +899,7 @@ func (c *cswLower) rewriteRebound(cs *cswCase) ([]syntax.Stmt, otext) {
 	}
 	c.fixReboundDef(cs, targets)
 	w := cswWalker{info: c.info, off: c.fl.off, targets: targets}
-	w.list(cs.syn.Body)
+	w.list(cs.body)
 	return decls, dtext
 }
 
@@ -508,12 +913,12 @@ func (c *cswLower) rewriteRebound(cs *cswCase) ([]syntax.Stmt, otext) {
 func (c *cswLower) fixReboundDef(cs *cswCase, targets map[types2.Object]cswTarget) {
 	parents := map[syntax.Node]*[]syntax.Stmt{}
 	owner := map[syntax.Node]syntax.Node{}
-	for i := range cs.syn.Body {
-		parents[cs.syn.Body[i]] = &cs.syn.Body
+	for i := range cs.body {
+		parents[cs.body[i]] = &cs.body
 	}
 	var assigns []*syntax.AssignStmt
 	var ranges []*syntax.RangeClause
-	for _, s := range cs.syn.Body {
+	for _, s := range cs.body {
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			switch t := n.(type) {
 			case *syntax.BlockStmt:
@@ -709,7 +1114,7 @@ func lhsNames(e syntax.Expr) []*syntax.Name {
 func (c *cswLower) rebound(cs *cswCase) []cswRebind {
 	var out []cswRebind
 	seen := make(map[*types2.Var]bool)
-	for _, s := range cs.syn.Body {
+	for _, s := range cs.body {
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			name, ok := n.(*syntax.Name)
 			if !ok {
@@ -977,7 +1382,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 				}
 			}
 			e, ok := n.(syntax.Expr)
-			if !ok || c.info.LogosConstConv[e] != cs.syn {
+			if !ok || c.info.LogosConstConv[e].Case != cs.syn {
 				return true
 			}
 			start := c.fl.off(leftmostOf(e))
@@ -1049,7 +1454,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 			})
 		}
 	}
-	scanTypeDecls(&cs.syn.Body)
+	scanTypeDecls(&cs.body)
 	// localTypeOf reports the last case-body declaration that any object
 	// inside t names, by object identity — a same-named declaration of
 	// another scope never matches, so a package type shadowed inside the
@@ -1245,7 +1650,7 @@ func (c *cswLower) wrapConvs(body []syntax.Stmt, cs *cswCase, selWraps []selWrap
 					}
 				}
 			}
-			if two && rhs != nil && c.info.LogosConstConv[rhs] == cs.syn {
+			if two && rhs != nil && c.info.LogosConstConv[rhs].Case == cs.syn {
 				if secondT == nil {
 					secondT, two = secondOf(rhs)
 				}
@@ -1799,7 +2204,7 @@ func (c *cswLower) wrapSelectors(body []syntax.Stmt, cs *cswCase) []selWrap {
 	for _, s := range body {
 		syntax.Inspect(s, func(n syntax.Node) bool {
 			sel, ok := n.(*syntax.SelectorExpr)
-			if !ok || c.info.LogosConstSel[sel] != cs.syn {
+			if !ok || c.info.LogosConstSel[sel].Case != cs.syn {
 				return true
 			}
 			sels = append(sels, sel)

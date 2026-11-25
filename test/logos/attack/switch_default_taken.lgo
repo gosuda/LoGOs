@@ -1,0 +1,34 @@
+// run
+
+package main
+
+import "fmt"
+
+func withDefault[T any](v T) string {
+	_ = v
+	out := ""
+	const switch T {
+	case int:
+		out = "int"
+	default:
+		out = "fallback"
+	}
+	return out
+}
+
+func defaultOnly[T any](v T) string {
+	_ = v
+	out := ""
+	const switch T {
+	default:
+		out = "always"
+	}
+	return out
+}
+
+func main() {
+	fmt.Println(withDefault(1))
+	fmt.Println(withDefault(1.5))
+	fmt.Println(defaultOnly(1))
+	fmt.Println(defaultOnly("x"))
+}

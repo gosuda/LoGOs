@@ -117,6 +117,56 @@ func LogosCheckCopy(pkg *Package, info *Info, ctx LogosCopyContext, blocks []*sy
 	mc.logosCopyFinish()
 }
 
+// LogosConstSwitchShadow carries one const switch element's bindings for
+// checking a freshly parsed copy of its case body during lowering. The
+// copy checks under the same bindings the declaration check used, so the
+// recorded facts match the element. Rec is empty for interface arms,
+// which rebind nothing.
+type LogosConstSwitchShadow struct {
+	Rec     LogosConstCase
+	Tag     Type
+	Elem    LogosConstCaseKey
+	Typ     Type
+	IsIface bool
+}
+
+// LogosConstSwitchCtx records what a lowering-time check of a const
+// switch case body needs: the scope and signature enclosing the switch,
+// the switched type, and the file version.
+type LogosConstSwitchCtx struct {
+	Scope   *Scope
+	Sig     *Signature
+	Tag     Type
+	Version string
+}
+
+// LogosCheckSwitchElem checks freshly parsed copies of one const switch
+// element's body under that element's bindings and records the facts for
+// the lowering. A nested const switch inside the copy sees the switched
+// type bound to the element, so it selects statically. Diagnostics stay
+// with the declaration check, which already reported them on the shared
+// body.
+func LogosCheckSwitchElem(pkg *Package, info *Info, ctx LogosCopyContext, shadow LogosConstSwitchShadow, blocks []*syntax.BlockStmt) {
+	if ctx.Scope == nil || ctx.Sig == nil {
+		return
+	}
+	mc := ctx.logosCopyChecker(pkg, info)
+	if shadow.Rec.Target != nil {
+		mc.scope.Insert(shadow.Rec.Target)
+		for v := range shadow.Rec.Vars {
+			mc.scope.Insert(v)
+		}
+	}
+	if shadow.IsIface {
+		iface, _ := Unalias(shadow.Typ).Underlying().(*Interface)
+		mc.logosCSwitch = append(mc.logosCSwitch, logosIfaceCase{recv: shadow.Tag, iface: iface, typ: shadow.Typ, syn: shadow.Elem.Case, elem: shadow.Elem.Elem})
+	}
+	for _, b := range blocks {
+		mc.stmt(0, b)
+	}
+	mc.logosCopyFinish()
+}
+
 type LogosTypeBindings struct {
 	Pkgs map[string]*Package
 }

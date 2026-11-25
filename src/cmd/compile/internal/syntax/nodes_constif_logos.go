@@ -12,13 +12,18 @@ type ConstIfStmt struct {
 	stmt
 }
 
-type ConstSwitchCase struct {
+type ConstSwitchCaseElem struct {
 	Type     Expr
 	Tilde    bool
 	TildePos Pos
-	Body     []Stmt
-	Case     Pos
-	Colon    Pos
+}
+
+type ConstSwitchCase struct {
+	Elems   []ConstSwitchCaseElem
+	Default bool
+	Body    []Stmt
+	Case    Pos
+	Colon   Pos
 }
 
 type ConstSwitchStmt struct {

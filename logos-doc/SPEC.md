@@ -1320,7 +1320,7 @@ A `const switch` tag that is not a type MUST fail with `[comptime::switch_not_ty
 
 A `const switch` case that is not a type MUST fail with `[comptime::case_not_type]`. [T-205]
 
-A `const switch` case MUST name exactly one type. A `default` arm and a list of types MUST be syntax errors. [T-205]
+A `const switch` case names one type or a comma-separated list of types; each listed type may carry its own `~`. Cases evaluate top-down in first-match order across the types of each case. A case whose every type is covered by earlier cases MUST fail with `[comptime::unreachable_case]`; a partially covered case stays live for the rest. A `default` arm matches every tag at its position and never rebinds; a `default` arm covered by an earlier `default` or an empty-interface case MUST fail with `[comptime::unreachable_case]`. [T-205]
 
 An unlabeled `break` or `continue` directly in a `const switch` case MUST fail with `[comptime::const_switch_jump]`, because the cases lower into generated switches. [T-205]
 

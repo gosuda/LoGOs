@@ -43,7 +43,15 @@ type cfExpander struct {
 	byObj    map[*types2.Func]*cfGenericDef
 	byDecl   map[*syntax.FuncDecl]*cfGenericDef
 	pkgs     map[string]*types2.Package
-	switches map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase
+	switches map[*syntax.ConstSwitchStmt]ctSwitchSel
+}
+
+// ctSwitchSel records one const switch's compile-time selection: the
+// selected case and element, or nil with elem -1 when nothing matches.
+// The default arm selects with elem -1.
+type ctSwitchSel struct {
+	sel  *syntax.ConstSwitchCase
+	elem int
 }
 
 func newCfExpander(shared *packageLower, files []*syntax.File, src map[*syntax.File][]byte) {
@@ -936,9 +944,9 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 				return r.constant(e.Pos(), tv.Value)
 			}
 		}
-		if selected := f.info.LogosConstSel[e]; selected != nil {
+		if selected := f.info.LogosConstSel[e]; selected.Case != nil {
 			pos := e.Pos()
-			typ := f.caseType(selected)
+			typ := f.caseType(selected.Case, selected.Elem)
 			if typ == nil {
 				r.invalid(e, "missing concrete interface case type")
 				return nil
@@ -974,17 +982,18 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 	}
 	return nil
 }
-
-func (f *ctFrame) caseType(c *syntax.ConstSwitchCase) types2.Type {
+func (f *ctFrame) caseType(c *syntax.ConstSwitchCase, elem int) types2.Type {
+	if elem < 0 || elem >= len(c.Elems) {
+		return nil
+	}
 	for f != nil {
-		if typ := f.info.TypeOf(c.Type); typ != nil {
+		if typ := f.info.TypeOf(c.Elems[elem].Type); typ != nil {
 			return typ
 		}
 		f = f.outer
 	}
 	return nil
 }
-
 func (r *ctReducer) constant(pos syntax.Pos, v constant.Value) syntax.Expr {
 	switch v.Kind() {
 	case constant.Int:

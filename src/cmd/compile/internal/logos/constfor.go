@@ -81,6 +81,11 @@ type cfHost struct {
 	sep     string
 	tail    string
 	retired bool
+	// compose builds a host's finished text at finalization. When nil the
+	// host composes as head, regions, sep, tail. A custom composer lets a
+	// lowered construct arrange its region texts itself; it runs after
+	// nested hosts finalized, so nested compositions are already set.
+	compose func(h *cfHost) otext
 }
 
 type cfFuncCtx struct {
@@ -765,7 +770,9 @@ func cfMapPositions(root syntax.Node, fn func(syntax.Pos) syntax.Pos) {
 			for _, c := range s.Cases {
 				c.Case = fn(c.Case)
 				c.Colon = fn(c.Colon)
-				c.TildePos = fn(c.TildePos)
+				for i := range c.Elems {
+					c.Elems[i].TildePos = fn(c.Elems[i].TildePos)
+				}
 			}
 		}
 		v := reflect.ValueOf(n).Elem()
@@ -822,7 +829,11 @@ func (fl *fileLower) retireHost(h *cfHost) otext {
 func (fl *fileLower) finalizeConstFor() {
 	for _, h := range fl.hosts {
 		if !h.retired {
-			fl.setHostText(h, fl.composeHost(h))
+			if h.compose != nil {
+				fl.setHostText(h, h.compose(h))
+			} else {
+				fl.setHostText(h, fl.composeHost(h))
+			}
 		}
 	}
 }

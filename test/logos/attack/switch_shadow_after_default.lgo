@@ -1,0 +1,16 @@
+// errorcheck
+
+package p
+
+func shadowedAfterDefault[T any](v T) string {
+	_ = v
+	const switch T {
+	default:
+		return "d"
+	case int: // ERROR "comptime::unreachable_case"
+		return "int"
+	}
+	return "other"
+}
+
+var _ = shadowedAfterDefault[int](1)

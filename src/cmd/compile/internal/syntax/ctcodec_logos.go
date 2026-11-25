@@ -213,12 +213,17 @@ func ctSyntaxSwitchCase(c *ctSyntaxCodec, slot **ConstSwitchCase) {
 		*slot = &copy
 	}
 	n := *slot
-	ctSyntaxNode(c, &n.Type)
-	c.boolean(&n.Tilde)
-	c.fields.Pos(&n.TildePos)
+	c.boolean(&n.Default)
+	ctSyntaxSlice(c, &n.Elems, ctSyntaxSwitchCaseElem)
 	ctSyntaxSlice(c, &n.Body, ctSyntaxNode[Stmt])
 	c.fields.Pos(&n.Case)
 	c.fields.Pos(&n.Colon)
+}
+
+func ctSyntaxSwitchCaseElem(c *ctSyntaxCodec, e *ConstSwitchCaseElem) {
+	ctSyntaxNode(c, &e.Type)
+	c.boolean(&e.Tilde)
+	c.fields.Pos(&e.TildePos)
 }
 
 // The tags are local to the comptime template payload, not Go export data.
