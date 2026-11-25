@@ -50,8 +50,8 @@
     {
       "path": "logos-doc/validation/tagged-method-facts/old-facts.go.txt",
       "original_path": "src/cmd/compile/internal/logos/facts/facts.go",
-      "git_blob": "13f842a70cbb6e85624ebab417d6a80d8b9403ea",
-      "sha256": "ad7a070cb8cc72a92f7a78b7e18ec53005e35228f24f898bbe6b7868330efa83",
+      "git_blob": "d50655d9c331695694eecd5b924a74539abbd5da",
+      "sha256": "b5a1e2b975089fabd3a475b87e9cef59aa09fbccb327b92ed24b560e33349500",
       "negative_test": "TestTaggedMethodCodecGrammar/Box@simd128.Read",
       "expected_failure": "ValidObject = false, want true"
     },

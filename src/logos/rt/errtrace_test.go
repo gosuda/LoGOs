@@ -18,8 +18,10 @@ package rt_test
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -183,6 +185,72 @@ func TestLogosTraceClearedOnGoroutineExit(t *testing.T) {
 		wg.Wait()
 		if len(got) != 0 {
 			t.Fatalf("reused goroutine ErrorTrace length = %d, want 0 (stale trace survived goroutine exit: %v)", len(got), got)
+		}
+	}
+}
+
+func formatOracle(trace []rt.Site) string {
+	parts := make([]string, len(trace))
+	for i, s := range trace {
+		parts[i] = fmt.Sprintf("%s:%d", s.File, s.Line)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func TestFormatTraceEmpty(t *testing.T) {
+	if got := rt.FormatTrace(nil); got != "" {
+		t.Fatalf("FormatTrace(nil) = %q, want empty", got)
+	}
+	if got := rt.FormatTrace([]rt.Site{}); got != "" {
+		t.Fatalf("FormatTrace(empty) = %q, want empty", got)
+	}
+}
+
+func TestFormatTraceTable(t *testing.T) {
+	eight := make([]rt.Site, 8)
+	for i := range eight {
+		eight[i] = rt.Site{File: "ring.go", Line: 100 + i}
+	}
+	twelve := make([]rt.Site, 12)
+	for i := range twelve {
+		twelve[i] = rt.Site{File: "wide.go", Line: i}
+	}
+	cases := []struct {
+		name  string
+		trace []rt.Site
+	}{
+		{"single", []rt.Site{{File: "a.go", Line: 1}}},
+		{"three", []rt.Site{{File: "parse.lgo", Line: 11}, {File: "load.lgo", Line: 22}, {File: "flush.lgo", Line: 33}}},
+		{"eight", eight},
+		{"twelve", twelve},
+		{"zeroLine", []rt.Site{{File: "z.go", Line: 0}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			want := formatOracle(tc.trace)
+			if got := rt.FormatTrace(tc.trace); got != want {
+				t.Fatalf("FormatTrace(%v) = %q, want %q", tc.trace, got, want)
+			}
+		})
+	}
+}
+
+func TestFormatTraceFromRing(t *testing.T) {
+	err := errors.New("format-ring")
+	a := rt.Site{File: "parse.lgo", Line: 11}
+	b := rt.Site{File: "load.lgo", Line: 22}
+	c := rt.Site{File: "flush.lgo", Line: 33}
+	rt.TraceErr(err, &a)
+	rt.TraceErr(err, &b)
+	rt.TraceErr(err, &c)
+	got := rt.FormatTrace(rt.ErrorTrace())
+	want := formatOracle([]rt.Site{a, b, c})
+	if got != want {
+		t.Fatalf("FormatTrace(ErrorTrace()) = %q, want %q", got, want)
+	}
+	for _, s := range []rt.Site{a, b, c} {
+		if !strings.Contains(got, s.File) {
+			t.Fatalf("FormatTrace output %q misses site %q", got, s.File)
 		}
 	}
 }

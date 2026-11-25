@@ -480,6 +480,13 @@ func insertOverlayDecl(out *types2.Package, graph *overlayGraph, byObj map[strin
 		return nil
 	case *types2.Var:
 		t := graph.constMapView(name, substType(graph.sub, obj.Type()))
+		for _, p := range byObj[name] {
+			steps := strings.Split(p.path, ".")
+			if len(steps) == 0 || steps[0] != "V" {
+				continue
+			}
+			t = wrapAtQual(graph.sub.pkg, t, steps[1:], p.qual)
+		}
 		if t == obj.Type() {
 			out.Scope().Insert(obj)
 			return nil
@@ -672,6 +679,10 @@ func (g *overlayGraph) references(t types2.Type, refs map[types2.Type]bool, seen
 
 func (g *overlayGraph) route(t types2.Type, steps []string, q qualKind) {
 	if t == nil || len(steps) == 0 {
+		return
+	}
+	if steps[0] == "V" {
+		g.route(t, steps[1:], q)
 		return
 	}
 	if steps[0] == "O" {
@@ -2359,6 +2370,9 @@ func wrapAtQual(pkg *types2.Package, t types2.Type, steps []string, q qualKind) 
 	if len(steps) == 0 {
 		return applyQual(t, q)
 	}
+	if steps[0] == "V" {
+		return wrapAtQual(pkg, t, steps[1:], q)
+	}
 	if t == nil {
 		return t
 	}
@@ -2663,6 +2677,19 @@ func toOption(t types2.Type) types2.Type {
 		if obj := n.Obj(); obj != nil && obj.Name() == "Option" && obj.Pkg() != nil && obj.Pkg().Path() == "logos/rt" {
 			if targs := n.TypeArgs(); targs != nil && targs.Len() == 1 {
 				return &types2.Option{Elem: targs.At(0)}
+			}
+		}
+	}
+	// Unwrap the lowered wrapped-option representation
+	// struct{Value E; Present bool} so restoring an option fact
+	// yields Option[E] instead of Option[struct{...}].
+	if st, ok := types2.Unalias(t).(*types2.Struct); ok {
+		if st.NumFields() == 2 &&
+			st.Field(0) != nil && st.Field(0).Name() == "Value" &&
+			st.Field(1) != nil && st.Field(1).Name() == "Present" &&
+			!st.Field(0).Embedded() && !st.Field(1).Embedded() {
+			if b, ok := st.Field(1).Type().(*types2.Basic); ok && b.Kind() == types2.Bool {
+				return &types2.Option{Elem: st.Field(0).Type()}
 			}
 		}
 	}

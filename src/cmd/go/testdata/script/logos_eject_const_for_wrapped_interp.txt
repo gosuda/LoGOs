@@ -1,0 +1,121 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A wrapped interpolated call lowered inside a const for copy must nest
+# inside its MustNonNil wrapper in eject instead of aborting with
+# overlapping edits. The wrapper and the interpolation both target the
+# same unrolled copy, so their buffer offsets share one region while
+# their origin chunks share the original offsets; the fold maps through
+# buffer placement. The plain wrapped call is the control that already
+# nested.
+
+cd m
+logos run .
+stdout '^control plain$'
+stdout '^fallback Name$'
+stdout '^fallback Count$'
+cp stdout $WORK/native-stdout.txt
+
+logos eject -o out
+exists out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native-stdout.txt
+go vet ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ..
+cd ..
+cd b
+logos run .
+stdout '^fallback Name Name$'
+stdout '^fallback Count Count$'
+cp stdout $WORK/b-native-stdout.txt
+
+logos eject -o out
+exists out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/b-native-stdout.txt
+go vet ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ..
+cd ..
+
+-- m/go.mod --
+module example.com/ejectcfwrap
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"strings"
+)
+
+type Row struct {
+	Name string
+	Count int
+}
+
+func showReader(r *strings.Reader, tag string) {
+	var sb strings.Builder
+	if _, err := r.WriteTo(&sb); err != nil {
+		fmt.Println("error", err)
+		return
+	}
+	fmt.Println(sb.String(), tag)
+}
+
+func plain() *strings.Reader {
+	return strings.NewReader($"control")
+}
+
+func main() {
+	showReader(plain(), "plain")
+	const for _, f := range comptime.Fields[Row]() {
+		var r *strings.Reader = strings.NewReader($"fallback")
+		showReader(r, f.Name)
+	}
+}
+
+-- b/go.mod --
+module example.com/ejectcfwrapb
+
+go 1.27
+
+-- b/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"strings"
+)
+
+type Row struct {
+	Name string
+	Count int
+}
+
+func showReader(r *strings.Reader, tag string) {
+	var sb strings.Builder
+	if _, err := r.WriteTo(&sb); err != nil {
+		fmt.Println("error", err)
+		return
+	}
+	fmt.Println(sb.String(), tag)
+}
+
+func main() {
+	const for _, f := range comptime.Fields[Row]() {
+		var r *strings.Reader = strings.NewReader($"fallback {f.Name}")
+		showReader(r, f.Name)
+	}
+}

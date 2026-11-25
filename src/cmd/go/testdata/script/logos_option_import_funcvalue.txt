@@ -1,0 +1,72 @@
+# A wrapped-option function value bound in a package with no lowering
+# edit must cross the export boundary as rt.Option[E]. The importer
+# restores the function through the option facts while the bound local
+# is erased by the export writer; the two must agree or the reader
+# rejects the assignment as a shape mismatch.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd src
+logos build ./...
+logos lint ./...
+logos run ./cmd
+stderr 'bound false: true'
+stderr 'bound true: false'
+stderr 'direct false: true'
+stderr 'direct true: false'
+
+-- src/go.mod --
+module example.com/optfuncvalue
+
+go 1.27
+
+-- src/beta/beta.lgo --
+package beta
+
+func GetOpt(make bool) int? {
+	if !make {
+		return nil
+	}
+	return 41
+}
+
+func IsNil(v int?) bool {
+	return v == nil
+}
+
+-- src/use/use.lgo --
+package use
+
+import "example.com/optfuncvalue/beta"
+
+// This package spells no option type and uses no option expression,
+// so lowering makes no edit and the inferred function value type
+// reaches the export writer as written by the first check.
+func Bound(make bool) bool {
+	f := beta.GetOpt
+	return beta.IsNil(f(make))
+}
+
+func Direct(make bool) bool {
+	return beta.IsNil(beta.GetOpt(make))
+}
+
+-- src/cmd/main.lgo --
+package main
+
+import "example.com/optfuncvalue/use"
+
+func show(tag string, v bool) {
+	if v {
+		println(tag + ": true")
+	} else {
+		println(tag + ": false")
+	}
+}
+
+func main() {
+	show("bound false", use.Bound(false))
+	show("bound true", use.Bound(true))
+	show("direct false", use.Direct(false))
+	show("direct true", use.Direct(true))
+}

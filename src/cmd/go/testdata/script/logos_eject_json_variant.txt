@@ -1,0 +1,96 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+# Pin the default experiment set: the harness passes ambient GOEXPERIMENT
+# through, so an inherited nojsonv2 would fail the default run below.
+env GOEXPERIMENT=
+
+cd variants
+
+# A JSON type under a disjunctive experiment guard: the source is selected
+# both with jsonv2 and with nojsonv2+loopvar. Eject must keep the v1
+# lowering buildable without jsonv2 and the v2 methods behind jsonv2.
+# The negated guard below is selected under nojsonv2 even without loopvar;
+# the helper must still prefer a jsonv2 branch so the v2 methods are kept.
+logos run .
+stdout '^\{"title":"hello","count":3\}$'
+cp stdout $WORK/native-default.txt
+
+env GOEXPERIMENT=nojsonv2,loopvar
+logos run .
+stdout '^\{"title":"hello","count":3\}$'
+cp stdout $WORK/native-variant.txt
+env GOEXPERIMENT=jsonv2,loopvar
+logos run .
+stdout '^\{"title":"hello","count":3\}$'
+cp stdout $WORK/native-both.txt
+env GOEXPERIMENT=
+
+logos eject -o out
+exists out/main.go
+exists out/data.go
+exists out/data_jsonv2.go
+grep 'goexperiment.jsonv2' out/data.go
+grep 'goexperiment.loopvar' out/data.go
+! grep 'jsontext' out/data.go
+grep 'jsontext' out/data_jsonv2.go
+grep 'goexperiment.jsonv2' out/data_jsonv2.go
+exists out/data_neg.go
+exists out/data_neg_jsonv2.go
+grep 'goexperiment.loopvar' out/data_neg.go
+! grep 'jsontext' out/data_neg.go
+grep 'jsontext' out/data_neg_jsonv2.go
+grep 'goexperiment.jsonv2' out/data_neg_jsonv2.go
+
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native-default.txt
+env GOEXPERIMENT=nojsonv2,loopvar
+go build ./...
+go run .
+cmp stdout $WORK/native-variant.txt
+env GOEXPERIMENT=jsonv2,loopvar
+go build ./...
+go run .
+cmp stdout $WORK/native-both.txt
+
+-- variants/go.mod --
+module example.com/jsonvariant
+
+go 1.27
+
+-- variants/main.lgo --
+package main
+
+import "fmt"
+
+func main() {
+  v := Data{Title: "hello", Count: 3}
+  buf, err := v.MarshalJSON()
+  if err != nil {
+    fmt.Println("marshal err:", err)
+    return
+  }
+  fmt.Println(string(buf))
+}
+
+-- variants/data.lgo --
+//go:build goexperiment.jsonv2 || goexperiment.loopvar
+
+package main
+
+type Data struct {
+  Title string `json:"title"`
+  Count int32  `json:"count"`
+}
+
+-- variants/data_neg.lgo --
+//go:build !goexperiment.jsonv2 || goexperiment.loopvar
+
+package main
+
+type DataNeg struct {
+  Title string `json:"title"`
+  Count int32  `json:"count"`
+}

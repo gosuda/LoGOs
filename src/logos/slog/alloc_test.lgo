@@ -1,0 +1,203 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog_test
+
+import (
+	"context"
+	"internal/race"
+	"io"
+	"log/slog"
+	"testing"
+	"time"
+
+	twinslog "logos/slog"
+)
+
+func twinWantAllocs(t *testing.T, want int, f func()) {
+	t.Helper()
+	if race.Enabled {
+		t.Skip("skipping alloc counts under race; the race runtime adds one per record")
+	}
+	got := int(testing.AllocsPerRun(20, f))
+	if got != want {
+		t.Errorf("got %d allocs, want %d", got, want)
+	}
+}
+
+func twinAttrs6() []slog.Attr {
+	return []slog.Attr{
+		slog.String("s", "hello"),
+		slog.Int64("i", -123456789),
+		slog.Bool("b", true),
+		slog.Duration("d", 123456789*time.Nanosecond),
+		slog.Time("t", twinTestTime),
+		slog.Float64("f", 3.14159),
+	}
+}
+
+// The allocation bound: the handler formatting path allocates nothing at
+// any attribute count. Through the Logger, records with more than the
+// five inline slog.Record slots add exactly the one slice-growth
+// allocation that log/slog itself performs; the twin adds nothing.
+func TestTwinAllocs(t *testing.T) {
+	discardText := twinslog.NewTextHandler(io.Discard, new(slog.HandlerOptions))
+	discardJSON := twinslog.NewJSONHandler(io.Discard, new(slog.HandlerOptions))
+	origText := slog.NewTextHandler(io.Discard, new(slog.HandlerOptions))
+	origJSON := slog.NewJSONHandler(io.Discard, new(slog.HandlerOptions))
+
+	mkLogger := func(h slog.Handler) *twinslog.Logger { return twinslog.New(h) }
+	mkOrig := func(h slog.Handler) *slog.Logger { return slog.New(h) }
+
+	t.Run("text logger 0", func(t *testing.T) {
+		l := mkLogger(discardText)
+		o := mkOrig(origText)
+		t.Logf("orig text 0: %.1f", testing.AllocsPerRun(20, func() {
+			o.LogAttrs(t.Context(), slog.LevelInfo, "msg")
+		}))
+		twinWantAllocs(t, 0, func() {
+			l.Info("msg")
+		})
+	})
+	t.Run("json logger 0", func(t *testing.T) {
+		l := mkLogger(discardJSON)
+		o := mkOrig(origJSON)
+		t.Logf("orig json 0: %.1f", testing.AllocsPerRun(20, func() {
+			o.LogAttrs(t.Context(), slog.LevelInfo, "msg")
+		}))
+		twinWantAllocs(t, 0, func() {
+			l.Info("msg")
+		})
+	})
+	attrs12 := append(twinAttrs6(), twinAttrs6()...)
+	for _, tc := range []struct {
+		name  string
+		attrs []slog.Attr
+	}{
+		{"6", twinAttrs6()},
+		{"12", attrs12},
+	} {
+		t.Run("text logger "+tc.name, func(t *testing.T) {
+			l := mkLogger(discardText)
+			o := mkOrig(origText)
+			t.Logf("orig text %s: %.1f", tc.name, testing.AllocsPerRun(20, func() {
+				o.LogAttrs(t.Context(), slog.LevelInfo, "msg", tc.attrs...)
+			}))
+			twinWantAllocs(t, 1, func() {
+				l.Info("msg", tc.attrs...)
+			})
+		})
+		t.Run("json logger "+tc.name, func(t *testing.T) {
+			l := mkLogger(discardJSON)
+			o := mkOrig(origJSON)
+			t.Logf("orig json %s: %.1f", tc.name, testing.AllocsPerRun(20, func() {
+				o.LogAttrs(t.Context(), slog.LevelInfo, "msg", tc.attrs...)
+			}))
+			twinWantAllocs(t, 1, func() {
+				l.Info("msg", tc.attrs...)
+			})
+		})
+		t.Run("text handle "+tc.name, func(t *testing.T) {
+			r := slog.NewRecord(twinTestTime, slog.LevelInfo, "msg", 0)
+			r.AddAttrs(tc.attrs...)
+			ctx := context.Background()
+			twinWantAllocs(t, 0, func() {
+				_ = discardText.Handle(ctx, r)
+			})
+		})
+		t.Run("json handle "+tc.name, func(t *testing.T) {
+			r := slog.NewRecord(twinTestTime, slog.LevelInfo, "msg", 0)
+			r.AddAttrs(tc.attrs...)
+			ctx := context.Background()
+			twinWantAllocs(t, 0, func() {
+				_ = discardJSON.Handle(ctx, r)
+			})
+		})
+	}
+	for _, tc := range []struct {
+		name string
+		attr slog.Attr
+	}{
+		{"float", slog.Float64("f", 3.14159)},
+		{"duration", slog.Duration("d", 123456789*time.Nanosecond)},
+		{"time", slog.Time("t", twinTestTime)},
+		{"string", slog.String("s", "hello")},
+		{"int", slog.Int64("i", -123456789)},
+		{"uint", slog.Uint64("u", 123456789)},
+		{"bool", slog.Bool("b", true)},
+		{"bytes", twinslog.Bytes("b", []byte("hello"))},
+	} {
+		t.Run("text single "+tc.name, func(t *testing.T) {
+			l := mkLogger(discardText)
+			o := mkOrig(origText)
+			t.Logf("orig text %s: %.1f", tc.name, testing.AllocsPerRun(20, func() {
+				o.LogAttrs(t.Context(), slog.LevelInfo, "msg", tc.attr)
+			}))
+			twinWantAllocs(t, 0, func() {
+				l.Info("msg", tc.attr)
+			})
+		})
+		t.Run("json single "+tc.name, func(t *testing.T) {
+			l := mkLogger(discardJSON)
+			o := mkOrig(origJSON)
+			t.Logf("orig json %s: %.1f", tc.name, testing.AllocsPerRun(20, func() {
+				o.LogAttrs(t.Context(), slog.LevelInfo, "msg", tc.attr)
+			}))
+			twinWantAllocs(t, 0, func() {
+				l.Info("msg", tc.attr)
+			})
+		})
+	}
+	t.Run("text groups", func(t *testing.T) {
+		l := mkLogger(discardText.WithAttrs([]slog.Attr{slog.Int("p", 1)}).WithGroup("g"))
+		o := mkOrig(origText.WithAttrs([]slog.Attr{slog.Int("p", 1)}).WithGroup("g"))
+		attrs := twinAttrs6()
+		t.Logf("orig text groups: %.1f", testing.AllocsPerRun(20, func() {
+			o.LogAttrs(t.Context(), slog.LevelInfo, "msg", attrs...)
+		}))
+		twinWantAllocs(t, 1, func() {
+			l.Info("msg", attrs...)
+		})
+	})
+	t.Run("json groups", func(t *testing.T) {
+		l := mkLogger(discardJSON.WithAttrs([]slog.Attr{slog.Int("p", 1)}).WithGroup("g"))
+		o := mkOrig(origJSON.WithAttrs([]slog.Attr{slog.Int("p", 1)}).WithGroup("g"))
+		attrs := twinAttrs6()
+		t.Logf("orig json groups: %.1f", testing.AllocsPerRun(20, func() {
+			o.LogAttrs(t.Context(), slog.LevelInfo, "msg", attrs...)
+		}))
+		twinWantAllocs(t, 1, func() {
+			l.Info("msg", attrs...)
+		})
+	})
+	t.Run("handler groups", func(t *testing.T) {
+		th := twinslog.NewTextHandler(io.Discard, new(slog.HandlerOptions)).WithAttrs([]slog.Attr{slog.Int("p", 1)}).WithGroup("g")
+		jh := twinslog.NewJSONHandler(io.Discard, new(slog.HandlerOptions)).WithAttrs([]slog.Attr{slog.Int("p", 1)}).WithGroup("g")
+		r := slog.NewRecord(twinTestTime, slog.LevelInfo, "msg", 0)
+		r.AddAttrs(attrs12...)
+		ctx := context.Background()
+		twinWantAllocs(t, 0, func() {
+			_ = th.Handle(ctx, r)
+		})
+		twinWantAllocs(t, 0, func() {
+			_ = jh.Handle(ctx, r)
+		})
+	})
+	t.Run("helpers", func(t *testing.T) {
+		raw := []byte("hello")
+		var boxed any = raw
+		bs, ok := twinslog.ByteSliceOf(boxed)
+		if !ok || string(bs) != "hello" {
+			t.Fatalf("ByteSliceOf = %q, %v", string(bs), ok)
+		}
+		twinWantAllocs(t, 0, func() {
+			_, _ = twinslog.ByteSliceOf(boxed)
+		})
+		named := twinNamedBytes("hello")
+		twinWantAllocs(t, 0, func() {
+			_ = twinslog.Bytes("b", raw)
+			_ = twinslog.BytesOf("b", named)
+		})
+	})
+}

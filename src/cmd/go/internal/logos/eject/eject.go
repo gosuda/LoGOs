@@ -18,6 +18,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"internal/buildcfg"
 	"internal/logosfile"
 	"io/fs"
 	"os"
@@ -70,9 +71,13 @@ leaves out .git contents, logos.toml files, .lgo sources, the
 destination subtree, symlinks and special files, and foreign
 nested modules.
 
-DIR must not exist or must be empty. The ejected tree builds with an
-upstream Go 1.27.2 or newer toolchain. Eject never writes into the
-source tree.
+DIR must not exist or must be empty. DIR/go.mod keeps the go
+directive of the main module, which logos mod init sets to the
+version logos version reports, and the shared support module copies
+it. Build the ejected tree with an upstream Go toolchain that
+satisfies every go directive in it; the ejected code needs Go 1.27.2
+or newer. Eject leaves the source tree unchanged apart from DIR,
+which may lie inside it.
 	`,
 }
 
@@ -228,7 +233,7 @@ func ejectToDir(ctx context.Context, out string) {
 	if !isEjectVariant() {
 		variantOuts = stageInactiveVariantsIntoStaging(ctx, plan, staging)
 	}
-	writeEjectedTree(ctx, plan, staging, out)
+	writeEjectedTree(ctx, plan, staging, out, builds)
 	for _, dir := range variantOuts {
 		_ = os.RemoveAll(dir)
 		_ = os.RemoveAll(variantStatePath(dir))
@@ -674,7 +679,9 @@ func withoutEjectFlags(flags []string) []string {
 
 // writeEjectedTree assembles the output directory from copied sources,
 // compiler-emitted files, the support module, and rewritten go.mod files.
-func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string) {
+// tests carries the test-variant builds whose test files are emitted, so
+// the support closure also covers logos/ packages their tests import.
+func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string, tests []testBuild) {
 	abs, err := filepath.Abs(out)
 	if err != nil {
 		base.Fatalf("logos eject: %s: %v", out, err)
@@ -747,15 +754,205 @@ func ejectPackageNames(p *load.Package, plan *ejectPlan) ([]string, map[string]b
 
 func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte) bool {
 	fixed, uses := rewriteEjectedGo(raw, name)
+	mainBytes, extraBytes := splitJSONv2File(fixed)
 	dst := filepath.Join(dstRoot, rel, stem+".go")
 	if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
-	if err := os.WriteFile(dst, fixed, 0666); err != nil {
+	if err := os.WriteFile(dst, mainBytes, 0666); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 	queueEjectGofmt(dst)
+	if extraBytes != nil {
+		extraDst := filepath.Join(dstRoot, rel, jsonv2ExtraStem(stem)+".go")
+		if err := os.WriteFile(extraDst, extraBytes, 0666); err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+		queueEjectGofmt(extraDst)
+	}
 	return uses
+}
+
+// jsonv2ExtraStem inserts _jsonv2 before any platform or test suffix so
+// the Go tool still reads the last suffix elements. Go matches only the
+// trailing elements: foo_linux_jsonv2.go has no platform rule, while
+// foo_jsonv2_linux.go stays linux-only and foo_jsonv2_test.go stays a
+// test file.
+func jsonv2ExtraStem(stem string) string {
+	test := false
+	base := stem
+	if strings.HasSuffix(base, "_test") {
+		test = true
+		base = strings.TrimSuffix(base, "_test")
+	}
+	platform := ""
+	for _, goarch := range ownedGoarchTags {
+		if !strings.HasSuffix(base, "_"+goarch) {
+			continue
+		}
+		matched := "_" + goarch
+		for _, goos := range ownedGoosTags {
+			if strings.HasSuffix(base, "_"+goos+"_"+goarch) {
+				matched = "_" + goos + "_" + goarch
+				break
+			}
+		}
+		platform = matched
+		base = strings.TrimSuffix(base, matched)
+		break
+	}
+	if platform == "" {
+		for _, goos := range ownedGoosTags {
+			if strings.HasSuffix(base, "_"+goos) {
+				platform = "_" + goos
+				base = strings.TrimSuffix(base, platform)
+				break
+			}
+		}
+	}
+	out := base + "_jsonv2" + platform
+	if test {
+		out += "_test"
+	}
+	return out
+}
+
+// splitJSONv2File moves experiment-dependent JSONv2 methods into a separate
+// file constrained to goexperiment.jsonv2. The compiler lowers a .lgo file
+// once under the helper context, so an ejected file that keeps the source
+// original guard (for example goexperiment.jsonv2 || goexperiment.loopvar)
+// would otherwise carry MarshalJSONTo/UnmarshalJSONFrom and their
+// encoding/json/jsontext import into a context where jsontext has no
+// buildable files. The main file keeps the type and the v1 methods with the
+// original guard; the extra file holds only the v2 methods with the
+// original guard narrowed by jsonv2.
+func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
+	if !bytes.Contains(fixed, []byte("encoding/json/jsontext")) {
+		return fixed, nil
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", fixed, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		return fixed, nil
+	}
+	type span struct{ s, e int }
+	var moved []span
+	var movedText [][]byte
+	offset := func(p token.Pos) int {
+		return fset.Position(p).Offset
+	}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name == nil {
+			continue
+		}
+		if fn.Name.Name != "MarshalJSONTo" && fn.Name.Name != "UnmarshalJSONFrom" {
+			continue
+		}
+		s, e := offset(fn.Pos()), offset(fn.End())
+		if s < 0 || e <= s || e > len(fixed) {
+			return fixed, nil
+		}
+		moved = append(moved, span{s, e})
+		movedText = append(movedText, bytes.TrimRight(fixed[s:e], "\n"))
+	}
+	if len(moved) == 0 {
+		return fixed, nil
+	}
+	// Original go:build expression from the leading comments.
+	origExpr := ""
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			if expr, ok := strings.CutPrefix(c.Text, "//go:build "); ok {
+				// Only the header constraint before the package clause
+				// selects this file; comments inside the body are not it.
+				if fset.Position(c.Pos()).Line < fset.Position(f.Package).Line {
+					origExpr = strings.TrimSpace(expr)
+					break
+				}
+			}
+		}
+		if origExpr != "" {
+			break
+		}
+	}
+	// Remove the moved declarations from the main file, from the end so
+	// earlier offsets stay valid.
+	main := bytes.Clone(fixed)
+	for i := len(moved) - 1; i >= 0; i-- {
+		s, e := moved[i].s, moved[i].e
+		// Extend to the end of the line so no half-line remains.
+		for e < len(main) && main[e] != '\n' {
+			e++
+		}
+		if e < len(main) {
+			e++
+		}
+		main = append(main[:s], main[e:]...)
+	}
+	// Drop the jsontext import from the main file when nothing left uses it.
+	if !bytes.Contains(main, []byte("_logos_jsontext.")) {
+		lines := bytes.SplitAfter(main, []byte("\n"))
+		var kept [][]byte
+		for _, ln := range lines {
+			if bytes.Contains(ln, []byte("encoding/json/jsontext")) {
+				continue
+			}
+			kept = append(kept, ln)
+		}
+		main = bytes.Join(kept, nil)
+	}
+	// Imports for the extra file: every import whose alias is used by the
+	// moved declarations.
+	joinedMoved := bytes.Join(movedText, []byte("\n"))
+	var extraImports []string
+	for _, decl := range f.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			imp, ok := spec.(*ast.ImportSpec)
+			if !ok {
+				continue
+			}
+			alias := ""
+			if imp.Name != nil {
+				alias = imp.Name.Name
+			} else {
+				path := strings.Trim(imp.Path.Value, "\"")
+				alias = path[strings.LastIndex(path, "/")+1:]
+			}
+			if alias == "_" || alias == "." {
+				continue
+			}
+			if bytes.Contains(joinedMoved, []byte(alias+".")) {
+				impPath := strings.TrimSpace(imp.Path.Value)
+				extraImports = append(extraImports, "import "+alias+" "+impPath)
+			}
+		}
+	}
+	var extra bytes.Buffer
+	if origExpr == "" {
+		extra.WriteString("//go:build goexperiment.jsonv2\n")
+	} else {
+		extra.WriteString("//go:build (" + origExpr + ") && goexperiment.jsonv2\n")
+	}
+	extra.WriteString("\npackage " + f.Name.Name + "\n\n")
+	for _, ln := range extraImports {
+		extra.WriteString(ln + "\n")
+	}
+	if len(extraImports) > 0 {
+		extra.WriteString("\n")
+	}
+	for i, txt := range movedText {
+		extra.Write(txt)
+		extra.WriteString("\n")
+		if i+1 < len(movedText) {
+			extra.WriteString("\n")
+		}
+	}
+	return main, extra.Bytes()
 }
 
 // emitPackageGoFiles writes the compiler-emitted Go files of one loGo/s
@@ -892,6 +1089,7 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 	var goosMentioned []string
 	var goarchMentioned []string
 	var customMentioned []string
+	var expMentioned []string
 	for _, t := range uniqMention {
 		if t == "wasip1" || slices.Contains(ownedGoosTags, t) {
 			goosMentioned = append(goosMentioned, t)
@@ -904,7 +1102,14 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 			goarchMentioned = append(goarchMentioned, t)
 			continue
 		}
-		if t == "cgo" || t == "ignore" || t == "unix" || t == "boringcrypto" || t == "logos" || t == "gc" || t == "gccgo" || architectureFeatureTag(t) || slices.Contains(cfg.BuildContext.ToolTags, t) || strings.HasPrefix(t, "go1.") || strings.HasPrefix(t, "goexperiment.") {
+		// Experiment tags vary with the helper's real GOEXPERIMENT
+		// value, solved as their own dimension below; they must not
+		// be mistaken for custom -tags or frozen as host facts.
+		if rest, ok := strings.CutPrefix(t, "goexperiment."); ok && rest != "" {
+			expMentioned = append(expMentioned, rest)
+			continue
+		}
+		if t == "cgo" || t == "ignore" || t == "unix" || t == "boringcrypto" || t == "logos" || t == "gc" || t == "gccgo" || architectureFeatureTag(t) || slices.Contains(cfg.BuildContext.ToolTags, t) || strings.HasPrefix(t, "go1.") {
 			continue
 		}
 		customMentioned = append(customMentioned, t)
@@ -930,7 +1135,49 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 		}
 	}
 	slices.Sort(customUniq)
-	if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq, uniqMention); ok {
+	slices.Sort(expMentioned)
+	// Synthesized GOEXPERIMENT values must parse. ParseGOEXPERIMENT rejects an
+	// unknown experiment in either polarity, so an unknown tag next to a real
+	// one would poison every candidate. Unknown tags stay fixed facts for the
+	// matcher, which reads an absent tag as false.
+	var expKnown []string
+	for _, name := range expMentioned {
+		if buildcfg.KnownExperiment(name) {
+			expKnown = append(expKnown, name)
+		}
+	}
+	search := func(goosCands, goarchCands []string) (variantCtx, bool) {
+		combos := experimentCombinations(expKnown)
+		// Prefer a jsonv2-enabled helper when the guard allows one. The
+		// helper lowering is frozen into the ejected tree; a nojsonv2
+		// lowering carries no MarshalJSONTo/UnmarshalJSONFrom, so the
+		// jsonv2 branches of a disjunctive guard such as !jsonv2 ||
+		// loopvar would silently lose the v2 methods. A jsonv2 lowering
+		// splits into v1 plus a jsonv2-gated extra file and covers all
+		// branches. Raw stays first; only the synthesized entries reorder.
+		if len(combos) > 1 && slices.Contains(expKnown, "jsonv2") {
+			rest := slices.Clone(combos[1:])
+			slices.SortStableFunc(rest, func(a, b string) int {
+				ha, hb := comboEnablesJSONv2(a), comboEnablesJSONv2(b)
+				switch {
+				case ha == hb:
+					return 0
+				case ha && !hb:
+					return -1
+				default:
+					return 1
+				}
+			})
+			combos = append([]string{combos[0]}, rest...)
+		}
+		for _, experiment := range combos {
+			if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, experiment, customUniq, uniqMention); ok {
+				return vc, true
+			}
+		}
+		return variantCtx{}, false
+	}
+	if vc, ok := search(goosCands, goarchCands); ok {
 		return vc, true
 	}
 	for _, g := range []string{"linux", "darwin", "windows", "freebsd"} {
@@ -954,10 +1201,69 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 			goarchCands = append(goarchCands, a)
 		}
 	}
-	return searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, customUniq, uniqMention)
+	return search(goosCands, goarchCands)
 }
 
-func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags, customUniq, mentioned []string) (variantCtx, bool) {
+// comboEnablesJSONv2 reports whether a synthesized GOEXPERIMENT value
+// enables jsonv2. An absent jsonv2 means the toolchain default, which
+// enables it.
+func comboEnablesJSONv2(combo string) bool {
+	if combo == "" {
+		return true
+	}
+	for item := range strings.SplitSeq(combo, ",") {
+		if item == "jsonv2" {
+			return true
+		}
+		if item == "nojsonv2" {
+			return false
+		}
+	}
+	return true
+}
+
+// experimentCombinations lists the GOEXPERIMENT values to try for files
+// mentioning experiment tags, host value first. Later entries set every
+// mentioned experiment explicitly, one combination at a time, so a helper
+// runs with a real GOEXPERIMENT value instead of a synthesized user tag.
+func experimentCombinations(mentioned []string) []string {
+	raw := cfg.RawGOEXPERIMENT
+	if len(mentioned) == 0 {
+		return []string{raw}
+	}
+	out := []string{raw}
+	for mask := range 1 << len(mentioned) {
+		var keep []string
+		if raw != "" {
+			for item := range strings.SplitSeq(raw, ",") {
+				drop := false
+				for _, name := range mentioned {
+					if item == name || item == "no"+name {
+						drop = true
+						break
+					}
+				}
+				if !drop {
+					keep = append(keep, item)
+				}
+			}
+		}
+		for i, name := range mentioned {
+			if mask&(1<<i) != 0 {
+				keep = append(keep, name)
+			} else {
+				keep = append(keep, "no"+name)
+			}
+		}
+		combo := strings.Join(keep, ",")
+		if combo != raw {
+			out = append(out, combo)
+		}
+	}
+	return out
+}
+
+func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags []string, experiment string, customUniq, mentioned []string) (variantCtx, bool) {
 	for _, goos := range goosCands {
 		for _, goarch := range goarchCands {
 			if work.CheckGOOSARCHPair(goos, goarch) != nil {
@@ -965,7 +1271,7 @@ func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, 
 			}
 			archName, levels := variantArchLevels(goarch, mentioned)
 			for _, level := range levels {
-				vc := variantCtx{goos: goos, goarch: goarch, archName: archName, archValue: level}
+				vc := variantCtx{goos: goos, goarch: goarch, archName: archName, archValue: level, experiment: experiment}
 				ctxt, ok := variantBuildContext(vc)
 				if !ok {
 					continue
@@ -980,21 +1286,32 @@ func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, 
 	return variantCtx{}, false
 }
 
-// variantCtx is one helper-eject build context: the GOOS, GOARCH, and
-// full -tags list that select a group of inactive files with correct
-// dependencies.
+// variantCtx is one helper-eject build context: the GOOS, GOARCH,
+// GOEXPERIMENT value, and full -tags list that select a group of inactive
+// files with correct dependencies.
 type variantCtx struct {
-	goos      string
-	goarch    string
-	archName  string
-	archValue string
-	tags      []string
-	packages  []string
-	files     []inactiveFile
+	goos       string
+	goarch     string
+	archName   string
+	archValue  string
+	experiment string
+	tags       []string
+	packages   []string
+	files      []inactiveFile
 }
 
 func variantKey(vc variantCtx) string {
-	return vc.goos + "\x00" + vc.goarch + "\x00" + vc.archValue + "\x00" + strings.Join(vc.tags, ",")
+	return vc.goos + "\x00" + vc.goarch + "\x00" + vc.archValue + "\x00" + vc.experiment + "\x00" + strings.Join(vc.tags, ",")
+}
+
+// variantExperiment returns the GOEXPERIMENT value a variant helper must
+// receive. Contexts selected without an experiment dimension carry the
+// host value; selected ones carry the synthesized combination.
+func variantExperiment(vc variantCtx) string {
+	if vc.experiment == "" {
+		return cfg.RawGOEXPERIMENT
+	}
+	return vc.experiment
 }
 
 // variantContextsForFiles groups inactive files by one satisfying
@@ -1009,7 +1326,7 @@ func variantContextsForFiles(files []inactiveFile) []variantCtx {
 	for _, f := range files {
 		vc, ok := selectVariantContext(f.pkg.Dir, f.name, hostGOOS, hostGOARCH, hostTags)
 		if !ok {
-			base.Fatalf("logos eject: no build context selects inactive file %s", filepath.Join(f.pkg.Dir, f.name))
+			base.Fatalf("logos eject: no build context selects inactive file %s: %s", filepath.Join(f.pkg.Dir, f.name), inactiveConstraintHint(f.pkg.Dir, f.name))
 		}
 		key := variantKey(vc)
 		if existing, exists := byKey[key]; exists {
@@ -1029,6 +1346,31 @@ func variantContextsForFiles(files []inactiveFile) []variantCtx {
 		out = append(out, byKey[k])
 	}
 	return out
+}
+
+// inactiveConstraintHint names the build constraint no GOOS/GOARCH/tags/
+// GOEXPERIMENT combination could satisfy, so the failure points at the
+// file's own //go:build lines instead of the search. A file constrained
+// only by its name gets the filename rule instead.
+func inactiveConstraintHint(pkgDir, name string) string {
+	const fixed = "no GOOS/GOARCH/tags/GOEXPERIMENT combination satisfies its build constraint"
+	data, err := fsys.ReadFile(filepath.Join(pkgDir, name))
+	if err != nil {
+		return fixed
+	}
+	var lines []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(trimmed, "//go:build "); ok {
+			lines = append(lines, strings.TrimSpace(rest))
+		} else if strings.HasPrefix(trimmed, "package ") {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return "no GOOS/GOARCH/tags/GOEXPERIMENT combination satisfies its filename and build constraints"
+	}
+	return fixed + " (" + strings.Join(lines, " / ") + "); check for an unsatisfiable feature combination"
 }
 
 // spawnVariantEjects runs one plain helper eject per variant context.
@@ -1072,7 +1414,7 @@ func spawnVariantEjects(ctx context.Context, ctxs []variantCtx) []string {
 		if vc.archName != "" {
 			env = append(env, vc.archName+"="+vc.archValue)
 		}
-		env = append(env, "GOEXPERIMENT="+cfg.RawGOEXPERIMENT)
+		env = append(env, "GOEXPERIMENT="+variantExperiment(vc))
 		cgo := "0"
 		if cfg.BuildContext.CgoEnabled {
 			cgo = "1"
@@ -1766,6 +2108,17 @@ var ejectedBuildLines = [][]byte{
 	[]byte("// +build logosejected"),
 	[]byte("//go:build !logosconc"),
 }
+
+// copySupportPackage copies the Go sources of one support package directory
+// without descending into subdirectories: every subdirectory is a separate
+// package the closure names explicitly when the ejected tree needs it.
+// Files are rewritten to the ejected import paths and formatted by the
+// gofmt pass. A package holding only .lgo files stops the eject: eject
+// lowers user .lgo packages through the compiler into staging, but
+// support packages ride from GOROOT source and have no such lowering.
+
+// stripEjectedBuildTag removes ejected build lines, so the support copy
+// compiles under plain go with no tags set.
 
 // stripEjectedBuildTag removes the ejectedBuildLines, so the support
 // copy compiles under plain go with every set of tags.

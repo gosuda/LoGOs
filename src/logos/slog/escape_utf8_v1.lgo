@@ -1,0 +1,11 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+//go:build !goexperiment.jsonv2
+
+package slog
+
+// invalidUTF8Replacement is appended for an invalid UTF-8 byte in a JSON
+// string when the jsonv2 experiment is off: the six characters \ufffd.
+const invalidUTF8Replacement = `\ufffd`

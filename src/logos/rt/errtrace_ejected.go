@@ -12,3 +12,7 @@ func TraceErr(err error, s *Site) {}
 
 // ErrorTrace returns no sites in ejected code.
 func ErrorTrace() []Site { return nil }
+
+// FormatTrace returns empty string in ejected code: traces exist only in
+// binaries built by logos with the runtime trace ring.
+func FormatTrace(trace []Site) string { return "" }

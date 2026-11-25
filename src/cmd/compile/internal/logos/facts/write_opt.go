@@ -24,6 +24,9 @@ func writeOpts(pkg *types2.Package, f *Facts) {
 	eachExportedNamed(pkg, func(name string, named *types2.Named) {
 		walkNamedQuals(name, named, emit, nil)
 	})
+	eachExportedVar(pkg, func(object string, v *types2.Var) {
+		walkQualType(v.Type(), []string{"V"}, object, emit, nil, make(map[types2.Type]bool))
+	})
 	eachExportedAlias(pkg, func(name string, rhs types2.Type) {
 		walkAliasQuals(name, rhs, emit, nil)
 	})
