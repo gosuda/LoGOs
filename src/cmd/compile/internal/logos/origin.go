@@ -10,7 +10,9 @@ import (
 	"cmd/compile/internal/base"
 )
 
-type chunk struct{ out, orig, n int }
+type chunk struct {
+	out, orig, place, n int
+}
 
 type otext struct {
 	s      string
@@ -38,7 +40,7 @@ func cat(parts ...otext) otext {
 			if c.n == 0 {
 				continue
 			}
-			chunks = append(chunks, chunk{out: off + c.out, orig: c.orig, n: c.n})
+			chunks = append(chunks, chunk{out: off + c.out, orig: c.orig, place: c.place, n: c.n})
 		}
 		off += len(p.s)
 	}
@@ -57,13 +59,15 @@ func (t otext) slice(start, end int) otext {
 			continue
 		}
 		if cs < start {
-			c.orig += start - cs
+			shift := start - cs
+			c.orig += shift
+			c.place += shift
 			cs = start
 		}
 		if ce > end {
 			ce = end
 		}
-		chunks = append(chunks, chunk{out: cs - start, orig: c.orig, n: ce - cs})
+		chunks = append(chunks, chunk{out: cs - start, orig: c.orig, place: c.place, n: ce - cs})
 	}
 	return otext{s: sub, chunks: chunks}
 }
@@ -118,7 +122,7 @@ func substNul(t otext, lookup func(mark string) (otext, bool)) otext {
 		}
 		sb.WriteString(t.s[prev:upto])
 		for _, c := range t.slice(prev, upto).chunks {
-			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, n: c.n})
+			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, place: c.place, n: c.n})
 		}
 		out += upto - prev
 	}
@@ -137,7 +141,7 @@ func substNul(t otext, lookup func(mark string) (otext, bool)) otext {
 			flush(i)
 			sb.WriteString(repl.s)
 			for _, c := range repl.chunks {
-				chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, n: c.n})
+				chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, place: c.place, n: c.n})
 			}
 			out += len(repl.s)
 			prev = j + 1
@@ -166,7 +170,7 @@ func substNeedle(t otext, needle, repl otext) otext {
 	emit := func(p otext) {
 		sb.WriteString(p.s)
 		for _, c := range p.chunks {
-			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, n: c.n})
+			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, place: c.place, n: c.n})
 		}
 		out += len(p.s)
 	}
@@ -197,7 +201,7 @@ func origBuf(b []byte) srcBuf {
 	if len(b) == 0 {
 		return srcBuf{}
 	}
-	return srcBuf{b: b, chunks: []chunk{{out: 0, orig: 0, n: len(b)}}}
+	return srcBuf{b: b, chunks: []chunk{{out: 0, orig: 0, place: 0, n: len(b)}}}
 }
 
 func (b *srcBuf) sliceO(start, end int) otext {
@@ -215,14 +219,17 @@ func (b *srcBuf) clip(start, end int) []chunk {
 			continue
 		}
 		oc := c.orig
+		pc := c.place
 		if cs < start {
-			oc += start - cs
+			shift := start - cs
+			oc += shift
+			pc += shift
 			cs = start
 		}
 		if ce > end {
 			ce = end
 		}
-		out = append(out, chunk{out: cs - start, orig: oc, n: ce - cs})
+		out = append(out, chunk{out: cs - start, orig: oc, place: pc, n: ce - cs})
 	}
 	return out
 }
@@ -234,6 +241,6 @@ func (b *srcBuf) appendO(t otext) {
 		if c.n == 0 {
 			continue
 		}
-		b.chunks = append(b.chunks, chunk{out: base + c.out, orig: c.orig, n: c.n})
+		b.chunks = append(b.chunks, chunk{out: base + c.out, orig: c.orig, place: base + c.out, n: c.n})
 	}
 }

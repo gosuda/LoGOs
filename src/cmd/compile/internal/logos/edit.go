@@ -186,10 +186,11 @@ func strictlyCovers(cs, ce, s, e int) bool {
 // or option lowering inside a MustNonNil-wrapped call reaches here,
 // because the wrapper runs before those passes. An option lowering
 // records owned boundary inserts and deletes the ?? operator, so owned
-// splices and deletions fold too. The merge maps the inner span through
-// the cover's origin chunks and substitutes the inner text there,
-// keeping generated fragments the cover already holds. A span that maps
-// nowhere is refused, leaving the caller to record the splice on its own.
+// splices and deletions fold too. The merge maps the inner working-buffer
+// span through the cover's placement chunks and substitutes the inner
+// text there, keeping generated fragments the cover already holds. A
+// span that maps nowhere is refused, leaving the caller to record the
+// splice on its own. Provenance stays in orig for the edit map.
 func foldIntoCover(list *[]splice, sp splice) bool {
 	if sp.host != nil || (sp.text == "" && sp.start == sp.end) {
 		return false
@@ -253,25 +254,25 @@ func nestSplice(cover, inner splice) (splice, bool) {
 			continue
 		}
 		if c.out < os {
-			out.chunks = append(out.chunks, chunk{out: c.out, orig: c.orig, n: os - c.out})
+			out.chunks = append(out.chunks, chunk{out: c.out, orig: c.orig, place: c.place, n: os - c.out})
 		}
 	}
 	for _, c := range r.chunks {
 		if c.n <= 0 {
 			continue
 		}
-		out.chunks = append(out.chunks, chunk{out: c.out + os, orig: c.orig, n: c.n})
+		out.chunks = append(out.chunks, chunk{out: c.out + os, orig: c.orig, place: c.place, n: c.n})
 	}
 	for _, c := range cover.chunks {
 		if c.n <= 0 {
 			continue
 		}
 		if c.out >= oe {
-			out.chunks = append(out.chunks, chunk{out: c.out + delta, orig: c.orig, n: c.n})
+			out.chunks = append(out.chunks, chunk{out: c.out + delta, orig: c.orig, place: c.place, n: c.n})
 			continue
 		}
 		if c.out+c.n > oe {
-			out.chunks = append(out.chunks, chunk{out: oe + delta, orig: c.orig + (oe - c.out), n: c.out + c.n - oe})
+			out.chunks = append(out.chunks, chunk{out: oe + delta, orig: c.orig + (oe - c.out), place: c.place + (oe - c.out), n: c.out + c.n - oe})
 		}
 	}
 	return out, true
@@ -300,25 +301,26 @@ func fullyCovered(chunks []chunk, os, oe int) bool {
 	return pos >= oe
 }
 
-// mapStart maps p to the output offset of the chunk that holds p on its
-// inside for a range start: an interior position maps inside its chunk;
-// an edge maps to the chunk that starts at p, so generated text inserted
-// at the edge stays before the replacement. When several chunks start at
-// p, the latest output wins, preserving the recorded order of inserts at
-// the same source position.
+// mapStart maps a working-buffer offset p to the output offset of the
+// chunk that holds p on its inside for a range start: an interior
+// position maps inside its chunk; an edge maps to the chunk that starts
+// at p, so generated text inserted at the edge stays before the
+// replacement. When several chunks start at p, the latest output wins,
+// preserving the recorded order of inserts at the same source position.
+// for the edit map.
 func mapStart(chunks []chunk, p int) (int, bool) {
 	for _, c := range chunks {
 		if c.n <= 0 {
 			continue
 		}
-		if c.orig < p && p < c.orig+c.n {
-			return c.out + (p - c.orig), true
+		if c.place < p && p < c.place+c.n {
+			return c.out + (p - c.place), true
 		}
 	}
 	best := -1
 	found := false
 	for _, c := range chunks {
-		if c.n <= 0 || p != c.orig {
+		if c.n <= 0 || p != c.place {
 			continue
 		}
 		if !found || c.out > best {
@@ -330,7 +332,7 @@ func mapStart(chunks []chunk, p int) (int, bool) {
 		return best, true
 	}
 	for _, c := range chunks {
-		if c.n <= 0 || p != c.orig+c.n {
+		if c.n <= 0 || p != c.place+c.n {
 			continue
 		}
 		if !found || c.out+c.n > best {
@@ -344,25 +346,26 @@ func mapStart(chunks []chunk, p int) (int, bool) {
 	return best, true
 }
 
-// mapEnd maps p to the output offset of the chunk that holds p on its
-// inside for a range end: an interior position maps inside its chunk;
-// an edge maps to the chunk that ends at p, so generated text inserted at
-// the edge stays after the replacement. When several chunks end at p, the
-// earliest output wins, keeping the replacement before every adjacent
-// generated fragment.
+// mapEnd maps a working-buffer offset p to the output offset of the chunk
+// that holds p on its inside for a range end: an interior position maps
+// inside its chunk; an edge maps to the chunk that ends at p, so generated
+// text inserted at the edge stays after the replacement. When several
+// chunks end at p, the earliest output wins, keeping the replacement
+// before every adjacent generated fragment. The lookup runs over placement
+// coordinates; provenance stays in orig for the edit map.
 func mapEnd(chunks []chunk, p int) (int, bool) {
 	for _, c := range chunks {
 		if c.n <= 0 {
 			continue
 		}
-		if c.orig < p && p < c.orig+c.n {
-			return c.out + (p - c.orig), true
+		if c.place < p && p < c.place+c.n {
+			return c.out + (p - c.place), true
 		}
 	}
 	best := -1
 	found := false
 	for _, c := range chunks {
-		if c.n <= 0 || p != c.orig+c.n {
+		if c.n <= 0 || p != c.place+c.n {
 			continue
 		}
 		if !found || c.out+c.n < best {
@@ -374,7 +377,7 @@ func mapEnd(chunks []chunk, p int) (int, bool) {
 		return best, true
 	}
 	for _, c := range chunks {
-		if c.n <= 0 || p != c.orig {
+		if c.n <= 0 || p != c.place {
 			continue
 		}
 		if !found || c.out < best {
@@ -400,25 +403,25 @@ func insertChunks(cover, r []chunk, k, n int) []chunk {
 			continue
 		}
 		if c.out < k {
-			out = append(out, chunk{out: c.out, orig: c.orig, n: k - c.out})
+			out = append(out, chunk{out: c.out, orig: c.orig, place: c.place, n: k - c.out})
 		}
 	}
 	for _, c := range r {
 		if c.n <= 0 {
 			continue
 		}
-		out = append(out, chunk{out: c.out + k, orig: c.orig, n: c.n})
+		out = append(out, chunk{out: c.out + k, orig: c.orig, place: c.place, n: c.n})
 	}
 	for _, c := range cover {
 		if c.n <= 0 {
 			continue
 		}
 		if c.out >= k {
-			out = append(out, chunk{out: c.out + n, orig: c.orig, n: c.n})
+			out = append(out, chunk{out: c.out + n, orig: c.orig, place: c.place, n: c.n})
 			continue
 		}
 		if c.out+c.n > k {
-			out = append(out, chunk{out: c.out + (k - c.out) + n, orig: c.orig + (k - c.out), n: c.out + c.n - k})
+			out = append(out, chunk{out: c.out + (k - c.out) + n, orig: c.orig + (k - c.out), place: c.place + (k - c.out), n: c.out + c.n - k})
 		}
 	}
 	return out
@@ -441,7 +444,7 @@ func applyChunks(src otext, splices []splice) (otext, error) {
 		}
 		sb.WriteString(src.s[prev:upto])
 		for _, c := range src.slice(prev, upto).chunks {
-			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, n: c.n})
+			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, place: c.place, n: c.n})
 		}
 		out += upto - prev
 	}
@@ -456,7 +459,7 @@ func applyChunks(src otext, splices []splice) (otext, error) {
 			if c.n == 0 {
 				continue
 			}
-			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, n: c.n})
+			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, place: c.place, n: c.n})
 		}
 		out += len(s.text)
 		prev = s.end
