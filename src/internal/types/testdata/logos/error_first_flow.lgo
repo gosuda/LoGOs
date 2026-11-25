@@ -591,3 +591,59 @@ func c4BareReturn() (n int, err error) {
 	n, err = fetch()
 	return
 }
+
+func c2DirectLitProvesResultPlain() {
+	n, err := fetch()
+	if err != nil {
+		return
+	}
+	use(n)
+	func() {
+		n, err = fetch()
+	}()
+	if err != nil {
+		return
+	}
+	use(n)
+}
+
+func c2Sink(n int) {}
+
+func c2DeferArgProvesImmediately() {
+	var n int
+	var err error
+	defer c2Sink(func() int {
+		n, err = fetch()
+		return 0
+	}())
+	if err != nil {
+		return
+	}
+	use(n)
+}
+
+func c2DeadStoreDiscarded() {
+	var n int
+	defer func() {
+		n, _ = fetch()
+		n = 0
+	}()
+	n = 0
+	defer func() {
+		use(n)
+	}()
+}
+
+func c2DeadStoreDiscardedOuter() {
+	var n int
+	func() {
+		defer func() {
+			n, _ = fetch()
+			n = 0
+		}()
+	}()
+	n = 0
+	defer func() {
+		use(n)
+	}()
+}

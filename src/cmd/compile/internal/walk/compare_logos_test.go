@@ -215,9 +215,15 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 	if !ok {
 		t.Fatalf("nested loop post is not an assign: %v", loop.Post)
 	}
+	if xn, ok := post.X.(*ir.Name); !ok || xn.Sym() != idx.Sym() {
+		t.Fatalf("nested loop post does not advance the loop index: %v", loop.Post)
+	}
 	step, ok := post.Y.(*ir.BinaryExpr)
 	if stride, ok := eqLoopConst(t, step.Y); !ok || step.Op() != ir.OADD || stride != sub.Size() {
 		t.Fatalf("nested loop does not stride by one element: %v", loop.Post)
+	}
+	if xn, ok := step.X.(*ir.Name); !ok || xn.Sym() != idx.Sym() {
+		t.Fatalf("nested loop post does not stride the loop index: %v", loop.Post)
 	}
 	// Each read must cover a different field: counting the calls alone
 	// lets two reads of one field pass with another field unread, so

@@ -413,7 +413,11 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 			// into a nil value.
 			if p, ok := unaliasConstView(c.typ).(*types2.Pointer); ok {
 				isPtr = true
-				sample = sourceTypeString(p.Elem(), js.qualify, js.holderPkg, js.cgoSource)
+				elem := p.Elem()
+				if !spellableType(elem, js.holderPkg) {
+					elem = unaliasConstView(elem)
+				}
+				sample = sourceTypeString(elem, js.qualify, js.holderPkg, js.cgoSource)
 			}
 		}
 		uc.members[i] = trialMember{

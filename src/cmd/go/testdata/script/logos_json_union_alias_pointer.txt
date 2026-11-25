@@ -4,11 +4,14 @@ env GOTOOLCHAIN=local
 # A union member that is an alias for a pointer to an accessible alias of
 # an unexported decoder type decodes through the accessible spelling: the
 # trial allocates new(lib.Public), not new(lib.hidden), which the holder
+# package cannot name. The inverse member is an exported pointer alias
+# that wraps a private alias of an exported decoder: the trial allocates
+# new(lib.InverseValue), not new(lib.inverseAlias), which the holder
 # package cannot name.
 cd good
 logos run .
 stdout '^ok ptr 11$'
-
+stdout '^ok inverse 12$'
 -- good/go.mod --
 module example.com/unionaliasptr
 
@@ -41,6 +44,27 @@ func (h *hidden) UnmarshalJSON(data []byte) error {
 type Public = hidden
 
 type Ptr = *Public
+
+type InverseValue struct {
+	X int64 `json:"x"`
+}
+
+func (v *InverseValue) UnmarshalJSON(data []byte) error {
+	var m map[string]int64
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	x, ok := m["x"]
+	if !ok {
+		return errors.New("InverseValue requires x")
+	}
+	v.X = x
+	return nil
+}
+
+type inverseAlias = InverseValue
+
+type InversePtr = *inverseAlias
 -- good/main.lgo --
 package main
 
@@ -76,6 +100,14 @@ type H struct {
 	Item U `json:"item"`
 }
 
+type U2 interface {
+	lib.InversePtr | *Other
+}
+
+type H2 struct {
+	Item U2 `json:"item"`
+}
+
 func main() {
 	var h H
 	if err := json.Unmarshal([]byte(`{"item":{"x":11}}`), &h); err != nil {
@@ -84,7 +116,18 @@ func main() {
 	}
 	if p, ok := h.Item.(lib.Ptr); ok {
 		fmt.Println("ok ptr", p.X)
+	} else {
+		fmt.Printf("WRONG TYPE %T\n", h.Item)
 		return
 	}
-	fmt.Printf("WRONG TYPE %T\n", h.Item)
+	var h2 H2
+	if err := json.Unmarshal([]byte(`{"item":{"x":12}}`), &h2); err != nil {
+		fmt.Println("decode err:", err)
+		return
+	}
+	if p, ok := h2.Item.(lib.InversePtr); ok {
+		fmt.Println("ok inverse", p.X)
+		return
+	}
+	fmt.Printf("WRONG TYPE %T\n", h2.Item)
 }
