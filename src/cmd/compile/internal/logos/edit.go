@@ -167,6 +167,291 @@ func sortSplices(splices []splice) {
 	})
 }
 
+// strictlyCovers reports whether the recorded span [cs, ce) strictly
+// contains the new span [s, e). A zero-width insert on the cover's
+// boundary stays outside the cover: it places text immediately before or
+// after it, matching the boundary rule textOf drains with.
+func strictlyCovers(cs, ce, s, e int) bool {
+	if s == e {
+		return cs < s && s < ce
+	}
+	return cs <= s && e <= ce && (cs < s || e < ce)
+}
+
+// foldIntoCover merges sp into the narrowest splice of list that strictly
+// covers it, rewriting the cover's text in place, and reports whether it
+// did. A splice recorded after its cover cannot drain into the cover's
+// text through textOf: the cover already snapshotted its bytes. Without
+// this the two splices overlap and the lowering aborts; an interpolation
+// or option lowering inside a MustNonNil-wrapped call reaches here,
+// because the wrapper runs before those passes. An option lowering
+// records owned boundary inserts and deletes the ?? operator, so owned
+// splices and deletions fold too. The merge maps the inner working-buffer
+// span through the cover's placement chunks and substitutes the inner
+// text there, keeping generated fragments the cover already holds. A
+// span that maps nowhere is refused, leaving the caller to record the
+// splice on its own. Provenance stays in orig for the edit map. A span
+// whose cover bytes carry no provenance still folds when the cover holds
+// pristine working-buffer source there: a const for substitution leaves
+// substituted bytes without chunks, and the inner pass parsed those very
+// bytes, so the inner text accounts for every byte being replaced.
+func foldIntoCover(list *[]splice, sp splice, src []byte) bool {
+	if sp.host != nil || (sp.text == "" && sp.start == sp.end) {
+		return false
+	}
+	best := -1
+	for i := range *list {
+		cover := &(*list)[i]
+		if cover.host != nil || cover.text == "" {
+			continue
+		}
+		if !strictlyCovers(cover.start, cover.end, sp.start, sp.end) {
+			continue
+		}
+		if best == -1 || cover.end-cover.start < (*list)[best].end-(*list)[best].start {
+			best = i
+		}
+	}
+	if best == -1 {
+		return false
+	}
+	merged, ok := nestSplice((*list)[best], sp, src)
+	if !ok {
+		return false
+	}
+	(*list)[best] = merged
+	return true
+}
+
+// nestSplice returns cover with inner's text substituted over the inner
+// span. The inner text is a complete lowering of its span, so it replaces
+// the whole mapped output range at once; source the cover no longer spells
+// verbatim (earlier folds) would need the inner text re-lowered over them,
+// which the inner pass cannot see, so such spans are refused instead. When
+// the cover's bytes over the mapped range are byte-identical to the
+// working-buffer source over the inner span, no earlier fold rewrote them:
+// the gap is only missing provenance from a const for substitution, which
+// the inner pass saw, so the fold proceeds.
+func nestSplice(cover, inner splice, src []byte) (splice, bool) {
+	r := otext{s: inner.text, chunks: inner.chunks}
+	os, ok1 := mapStart(cover.chunks, inner.start)
+	oe, ok2 := mapEnd(cover.chunks, inner.end)
+	if !ok1 || !ok2 {
+		return splice{}, false
+	}
+	if inner.start == inner.end {
+		out := splice{start: cover.start, end: cover.end, owner: cover.owner, placement: cover.placement}
+		out.text = cover.text[:os] + r.s + cover.text[os:]
+		out.chunks = insertChunks(cover.chunks, r.chunks, os, len(r.s))
+		return out, true
+	}
+	if oe <= os {
+		return splice{}, false
+	}
+	if !fullyCovered(cover.chunks, os, oe) && !pristineCover(cover.text, os, oe, src, inner.start, inner.end) {
+		return splice{}, false
+	}
+	out := splice{start: cover.start, end: cover.end, owner: cover.owner, placement: cover.placement}
+	out.text = cover.text[:os] + r.s + cover.text[oe:]
+	delta := len(r.s) - (oe - os)
+	for _, c := range cover.chunks {
+		if c.n <= 0 || c.out+c.n <= os {
+			if c.n > 0 {
+				out.chunks = append(out.chunks, c)
+			}
+			continue
+		}
+		if c.out < os {
+			out.chunks = append(out.chunks, chunk{out: c.out, orig: c.orig, place: c.place, n: os - c.out})
+		}
+	}
+	for _, c := range r.chunks {
+		if c.n <= 0 {
+			continue
+		}
+		out.chunks = append(out.chunks, chunk{out: c.out + os, orig: c.orig, place: c.place, n: c.n})
+	}
+	for _, c := range cover.chunks {
+		if c.n <= 0 {
+			continue
+		}
+		if c.out >= oe {
+			out.chunks = append(out.chunks, chunk{out: c.out + delta, orig: c.orig, place: c.place, n: c.n})
+			continue
+		}
+		if c.out+c.n > oe {
+			out.chunks = append(out.chunks, chunk{out: oe + delta, orig: c.orig + (oe - c.out), place: c.place + (oe - c.out), n: c.out + c.n - oe})
+		}
+	}
+	return out, true
+}
+
+// pristineCover reports whether the cover's output bytes over [os, oe)
+// are byte-identical to the working-buffer source over [s, e). A const
+// for substitution leaves substituted bytes without provenance chunks,
+// so fullyCovered refuses the fold even though no earlier fold rewrote
+// those bytes: the substitution sits in the working buffer itself, which
+// the inner pass parsed, so the inner text accounts for every replaced
+// byte and the fold drops nothing.
+func pristineCover(cover string, os, oe int, src []byte, s, e int) bool {
+	if oe-os != e-s {
+		return false
+	}
+	if s < 0 || e > len(src) || os < 0 || oe > len(cover) {
+		return false
+	}
+	return cover[os:oe] == string(src[s:e])
+}
+
+// fullyCovered reports whether every output offset in [os, oe) is spelled
+// by a verbatim chunk. Generated bytes in between mean an earlier fold
+// the inner text cannot see, so the span is not a clean replacement.
+func fullyCovered(chunks []chunk, os, oe int) bool {
+	pos := os
+	for _, c := range chunks {
+		if c.n <= 0 {
+			continue
+		}
+		if c.out+c.n <= pos {
+			continue
+		}
+		if c.out > pos {
+			return false
+		}
+		pos = c.out + c.n
+		if pos >= oe {
+			return true
+		}
+	}
+	return pos >= oe
+}
+
+// mapStart maps a working-buffer offset p to the output offset of the
+// chunk that holds p on its inside for a range start: an interior
+// position maps inside its chunk; an edge maps to the chunk that starts
+// at p, so generated text inserted at the edge stays before the
+// replacement. When several chunks start at p, the latest output wins,
+// preserving the recorded order of inserts at the same source position.
+// for the edit map.
+func mapStart(chunks []chunk, p int) (int, bool) {
+	for _, c := range chunks {
+		if c.n <= 0 {
+			continue
+		}
+		if c.place < p && p < c.place+c.n {
+			return c.out + (p - c.place), true
+		}
+	}
+	best := -1
+	found := false
+	for _, c := range chunks {
+		if c.n <= 0 || p != c.place {
+			continue
+		}
+		if !found || c.out > best {
+			best = c.out
+			found = true
+		}
+	}
+	if found {
+		return best, true
+	}
+	for _, c := range chunks {
+		if c.n <= 0 || p != c.place+c.n {
+			continue
+		}
+		if !found || c.out+c.n > best {
+			best = c.out + c.n
+			found = true
+		}
+	}
+	if !found {
+		return -1, false
+	}
+	return best, true
+}
+
+// mapEnd maps a working-buffer offset p to the output offset of the chunk
+// that holds p on its inside for a range end: an interior position maps
+// inside its chunk; an edge maps to the chunk that ends at p, so generated
+// text inserted at the edge stays after the replacement. When several
+// chunks end at p, the earliest output wins, keeping the replacement
+// before every adjacent generated fragment. The lookup runs over placement
+// coordinates; provenance stays in orig for the edit map.
+func mapEnd(chunks []chunk, p int) (int, bool) {
+	for _, c := range chunks {
+		if c.n <= 0 {
+			continue
+		}
+		if c.place < p && p < c.place+c.n {
+			return c.out + (p - c.place), true
+		}
+	}
+	best := -1
+	found := false
+	for _, c := range chunks {
+		if c.n <= 0 || p != c.place+c.n {
+			continue
+		}
+		if !found || c.out+c.n < best {
+			best = c.out + c.n
+			found = true
+		}
+	}
+	if found {
+		return best, true
+	}
+	for _, c := range chunks {
+		if c.n <= 0 || p != c.place {
+			continue
+		}
+		if !found || c.out < best {
+			best = c.out
+			found = true
+		}
+	}
+	if !found {
+		return -1, false
+	}
+	return best, true
+}
+
+// insertChunks returns the chunks of cover with the n output bytes that
+// r maps inserted at output offset k, shifting later cover chunks by n.
+func insertChunks(cover, r []chunk, k, n int) []chunk {
+	var out []chunk
+	for _, c := range cover {
+		if c.n <= 0 || c.out+c.n <= k {
+			if c.n > 0 {
+				out = append(out, c)
+			}
+			continue
+		}
+		if c.out < k {
+			out = append(out, chunk{out: c.out, orig: c.orig, place: c.place, n: k - c.out})
+		}
+	}
+	for _, c := range r {
+		if c.n <= 0 {
+			continue
+		}
+		out = append(out, chunk{out: c.out + k, orig: c.orig, place: c.place, n: c.n})
+	}
+	for _, c := range cover {
+		if c.n <= 0 {
+			continue
+		}
+		if c.out >= k {
+			out = append(out, chunk{out: c.out + n, orig: c.orig, place: c.place, n: c.n})
+			continue
+		}
+		if c.out+c.n > k {
+			out = append(out, chunk{out: c.out + (k - c.out) + n, orig: c.orig + (k - c.out), place: c.place + (k - c.out), n: c.out + c.n - k})
+		}
+	}
+	return out
+}
+
 func applySplices(src []byte, splices []splice) ([]byte, error) {
 	t, err := applyChunks(otext{s: string(src)}, splices)
 	return []byte(t.s), err
@@ -184,7 +469,7 @@ func applyChunks(src otext, splices []splice) (otext, error) {
 		}
 		sb.WriteString(src.s[prev:upto])
 		for _, c := range src.slice(prev, upto).chunks {
-			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, n: c.n})
+			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, place: c.place, n: c.n})
 		}
 		out += upto - prev
 	}
@@ -199,7 +484,7 @@ func applyChunks(src otext, splices []splice) (otext, error) {
 			if c.n == 0 {
 				continue
 			}
-			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, n: c.n})
+			chunks = append(chunks, chunk{out: out + c.out, orig: c.orig, place: c.place, n: c.n})
 		}
 		out += len(s.text)
 		prev = s.end

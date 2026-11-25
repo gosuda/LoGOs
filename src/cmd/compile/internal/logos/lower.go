@@ -375,16 +375,25 @@ func (fl *fileLower) clearMoved(s span) {
 func (fl *fileLower) placeSplice(sp splice, m *chainMove) {
 	fl.changed = true
 	if m != nil {
+		if foldIntoCover(&m.inner, sp, fl.src) {
+			return
+		}
 		m.inner = append(m.inner, sp)
 		return
 	}
 	r := fl.regionAt(sp.start, sp.end)
 	if r == nil {
+		if foldIntoCover(&fl.splices, sp, fl.src) {
+			return
+		}
 		fl.splices = append(fl.splices, sp)
 		return
 	}
 	if r.host != nil && r.host.retired {
 		base.Fatalf("logos: edit [%d,%d) lands in a finished const for expansion", sp.start, sp.end)
+	}
+	if foldIntoCover(&r.splices, sp, fl.src) {
+		return
 	}
 	r.splices = append(r.splices, sp)
 }

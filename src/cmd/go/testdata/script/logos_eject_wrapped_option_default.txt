@@ -1,0 +1,70 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A ?? whose fallback is an interpolated string, lowered inside a call
+# the MustNonNil wrapper covers, must nest inside the wrapper in eject
+# instead of dropping the interpolation. The wrapped call stores a Go
+# package's pointer result into a declared non-nil location; the option
+# and interpolation lowerings run after the wrapper, so the fallback
+# replacement ends where the ?? tail insert sits. The plain fallback
+# is the control that already nested.
+
+cd m
+logos run .
+stdout '^reader fallback 7$'
+stdout '^reader plain$'
+cp stdout $WORK/native-stdout.txt
+
+logos eject -o out
+exists out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native-stdout.txt
+go vet ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ..
+cd ..
+
+-- m/go.mod --
+module example.com/wrapdefault
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func maybeName(n int) string? {
+	if n == 7 {
+		return "seven"
+	}
+	return nil
+}
+
+func showReader(r *strings.Reader) {
+	var sb strings.Builder
+	if _, err := r.WriteTo(&sb); err != nil {
+		fmt.Println("error", err)
+		return
+	}
+	fmt.Println(sb.String())
+}
+
+func readerOrInterp(name string?, tag int) *strings.Reader {
+	return strings.NewReader(name ?? $"reader fallback {tag}")
+}
+
+func readerOrPlain(name string?) *strings.Reader {
+	return strings.NewReader(name ?? "reader plain")
+}
+
+func main() {
+	showReader(readerOrInterp(nil, 7))
+	showReader(readerOrPlain(nil))
+}
