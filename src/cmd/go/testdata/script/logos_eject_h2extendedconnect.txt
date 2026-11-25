@@ -1,7 +1,9 @@
 # Eject widens the opt-in: the fork enables extended CONNECT per server
 # while stock Go offers only the process-global GODEBUG=http2xconnect=1.
-# The rewritten call requires that setting and panics naming the server
-# otherwise, so ejected servers fail fast instead of serving without it.
+# The rewritten call delegates to the ejected support module, which
+# requires that setting in the process startup environment and panics
+# naming the server otherwise, so ejected servers fail fast instead of
+# serving without it.
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
@@ -13,7 +15,8 @@ cp stdout $WORK/native.txt
 logos eject -o out
 exists out/main.go
 ! grep 'EnableHTTP2ExtendedConnect' out/main.go
-grep 'http2xconnect=1' out/main.go
+grep 'RequireExtendedConnect' out/main.go
+grep 'http2xconnect=1' out/_logos_deps/rt/net/http/h2extendedconnect_ejected.go
 cd out
 go build ./...
 env GODEBUG=http2xconnect=1
@@ -30,7 +33,41 @@ exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+
+# A Go data fixture with overlapping import edits ejects unchanged and
+# does not fail the command: the overlap is a remap failure, so the data
+# path preserves the original bytes.
+cd m2
+logos eject -o out
+cmp out/testdata/connect.go testdata/connect.go
 cd ..
+
+-- m2/go.mod --
+module example.com/h2fixture
+
+go 1.27
+
+-- m2/main.lgo --
+package main
+
+import (
+	"net/http"
+)
+
+func main() {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	srv.EnableHTTP2ExtendedConnect()
+}
+
+-- m2/testdata/connect.go --
+package main
+
+import "net/http"
+import "comptime"
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
 
 -- m/go.mod --
 module example.com/h2xconnect

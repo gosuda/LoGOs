@@ -19,27 +19,29 @@ import (
 const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 
 // h2ExtendedConnectEdits rewrites direct EnableHTTP2ExtendedConnect calls to
-// a self-contained stock form: an immediately-invoked check that requires
-// GODEBUG=http2xconnect=1 and panics otherwise, naming the server and the
-// setting. It fires only in files importing net/http; the method name is
+// a call into the ejected support module, which fails fast unless the stock
+// process-global GODEBUG=http2xconnect=1 was in effect at process startup.
+// It fires only in files importing net/http; the method name is
 // fork-specific, so a user type with the same zero-argument method name in
 // such a file would also be rewritten (no such type exists in the wild).
 // A call whose receiver needs another rewrite (a compiler-temporary
-// _logos_site name) is left alone. The rewrite keeps the receiver text
-// verbatim, so go and defer statements wrapping the call keep working, and
-// the receiver still counts as used. Needed os and strings imports are added
-// when missing; the gofmt pass normalizes layout.
+// _logos_site name) is left alone. The receiver passes as a call argument,
+// so go and defer statements wrapping the call evaluate it in the calling
+// goroutine at the call site, exactly like the native method call. The
+// support import is added under an alias when missing; the gofmt pass
+// normalizes layout.
 //
 // Widening: the fork enables extended CONNECT per server, while stock Go
 // offers only the process-global GODEBUG=http2xconnect=1, so after eject
 // the per-server intent becomes a process-global requirement. Every
-// rewritten call in the process checks the same setting, and a process
-// without it fails fast at the first call instead of serving without the
-// feature.
-func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []textEdit {
+// rewritten call in the process checks the same startup setting, and a
+// process without it fails fast at the first call instead of serving
+// without the feature. Last-wins GODEBUG parsing lives in the shared
+// support helper, so the emitted code carries no parsing of its own.
+func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]textEdit, bool) {
+	supportPath := rtModulePath + "/net/http"
 	hasNetHTTP := false
-	haveOS := false
-	haveStrings := false
+	haveSupport := false
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
@@ -48,14 +50,12 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 		switch path {
 		case "net/http":
 			hasNetHTTP = true
-		case "os":
-			haveOS = true
-		case "strings":
-			haveStrings = true
+		case supportPath:
+			haveSupport = true
 		}
 	}
 	if !hasNetHTTP {
-		return nil
+		return nil, false
 	}
 	var edits []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -76,25 +76,17 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 			return true
 		}
 		receiver := string(data[recvStart:recvEnd])
-		msg := "net/http: extended CONNECT on server " + strconv.Quote(receiver) + " needs GODEBUG=http2xconnect=1 in the ejected process environment"
-		repl := "func() {\n_ = " + receiver + "\nif !strings.Contains(os.Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}()"
+		repl := "ejectedhttp.RequireExtendedConnect(" + strconv.Quote(receiver) + ", " + receiver + ")"
 		edits = append(edits, textEdit{start, end, repl})
 		return true
 	})
 	if len(edits) == 0 {
-		return nil
+		return nil, false
 	}
-	var missing []string
-	if !haveOS {
-		missing = append(missing, "\"os\"")
+	if !haveSupport {
+		edits = append(edits, h2ImportEdit(fset, f, []string{`ejectedhttp "` + supportPath + `"`}))
 	}
-	if !haveStrings {
-		missing = append(missing, "\"strings\"")
-	}
-	if len(missing) > 0 {
-		edits = append(edits, h2ImportEdit(fset, f, missing))
-	}
-	return edits
+	return edits, true
 }
 
 // h2OverlapOffset returns the start offset of the first h2 edit that

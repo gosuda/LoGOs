@@ -1933,7 +1933,8 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	}
 	edits, uses := ejectedImportEdits(data, fset, f)
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
-	h2edits := h2ExtendedConnectEdits(fset, data, f)
+	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f)
+	uses = uses || h2uses
 	if _, overlap := h2OverlapOffset(edits, h2edits); overlap {
 		// An overlap is a remap failure, not a command-wide error: the
 		// data path preserves the original bytes, and callers that
