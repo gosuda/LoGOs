@@ -59,6 +59,13 @@ func FixedSizeNonStruct[T any]() int {
 }
 
 func StructSizeOf[T any]() int {
+	const if comptime.HasUnexported[T]() {
+		// No projection exists for an unexported field: not in this
+		// package, not in a foreign one, and not through a blank
+		// field. The original path sees every byte, so an incomplete
+		// visible layout never encodes or decodes.
+		return -1
+	}
 	total := 0
 	const for _, f := range comptime.Fields[T]() {
 		s := FixedSizeOf[f.Type]()
@@ -67,11 +74,6 @@ func StructSizeOf[T any]() int {
 		}
 		total += s
 	}
-	// comptime.Fields omits unexported fields of a T from another
-	// package, so a foreign layout can look complete while hiding
-	// bytes. A total of nothing proves nothing: only a nonempty
-	// visible layout takes the fast path, and the original path
-	// keeps every byte of the rest.
 	if total == 0 {
 		return -1
 	}
