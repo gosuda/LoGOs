@@ -2184,6 +2184,7 @@ A violation at severity `deny` aborts linking with ERROR capabilities::unauthori
 The report MUST list the shortest call chain with file and line per frame. [T-Sec11]
 For the allowlist keys that authorize each sink, see Sec 8.4. [T-Sec8][T-Sec11]
 Unsafe violations use capabilities::unauthorized_unsafe with the shortest import chain. [T-Sec11]
+A transitive_unsafe violation stays silent at the default `allow`, which skips the audit entirely. At `warn` cmd/go prints the violation and continues; at `deny` the violation aborts linking. Both severities audit the same set: dependencies that import `unsafe` and packages that hold linked assembly files or precompiled `.syso` objects, reported as `capabilities::unauthorized_unsafe` and `capabilities::unclassified_assembly`; an entry in `transitive_unsafe_allowlist` authorizes either. [T-Sec11]
 cgo reachability reports capabilities::unauthorized_cgo unless the cgo policy allows the package. [T-Sec11][T-101.2]
 Only a dependency that owns the cgo wrapper is blamed: the standard library's own cgo never blames the dependencies that call it. [T-Sec11]
 The cgo sink is the per-call-site `pkg._Cfunc_*` or `pkg._C2func_*` wrapper of the package that owns it, reported as `runtime.cgocall`, because `runtime.cgocall` itself lies in the runtime and has no owning dependency to blame. [T-Sec11]
