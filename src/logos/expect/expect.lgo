@@ -1,0 +1,145 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package expect holds structural test assertions with unified,
+// greppable failure output. It is the LoGOs counterpart of Zig's
+// std.testing expect helpers (lib/std/testing.zig at revision
+// c7826aa7a0: expectEqualSlices, expectEqualStrings, expectEqualDeep):
+// one-line asserts whose mismatches print the differing lines. Output
+// carries no color codes so gate logs stay greppable.
+//
+// Structural comparison uses comptime field iteration: struct values
+// render one field per line in declaration order, so a failing Equal
+// shows exactly the fields that differ. The port carries ideas, not
+// code: every line below is original. Unexported fields of foreign
+// packages are invisible to comptime iteration and do not take part
+// in the comparison; fields of option, pointer, map, slice, or
+// function type render with %v.
+package expect
+
+import (
+	"comptime"
+	"fmt"
+	"strings"
+)
+
+// Reporter is the failure sink Equal writes to. *testing.T satisfies
+// it, and tests pass a recorder.
+type Reporter interface {
+	Helper()
+	Errorf(format string, args ...any)
+}
+
+// Equal asserts that want and got render identically, and fails the
+// test with a unified diff otherwise. Struct values compare field by
+// field through comptime iteration; every other value compares through
+// LeafText. Strings compare line by line so the diff shows the exact
+// line that changed. Equal leaf texts of different dynamic types still
+// fail, with both types named, so an ambiguous value such as the
+// string "nil" never compares equal to nil.
+func Equal[T any](r Reporter, want T, got T) {
+	r.Helper()
+	const if comptime.IsStruct[T]() {
+		wantText := ""
+		gotText := ""
+		const for _, f := range comptime.Fields[T]() {
+			wantText += FieldText(f.Name, any(want.[f])) + "\n"
+			gotText += FieldText(f.Name, any(got.[f])) + "\n"
+		}
+		if wantText != gotText {
+			r.Errorf("expect: values differ\n%s", Diff(wantText, gotText))
+		}
+	} else {
+		wantText := LeafText(any(want))
+		gotText := LeafText(any(got))
+		if wantText != gotText {
+			r.Errorf("expect: values differ\n%s", Diff(wantText, gotText))
+		} else if fmt.Sprintf("%T", any(want)) != fmt.Sprintf("%T", any(got)) {
+			// A string "nil" renders like nil and equal texts can hide
+			// different types, so a text match across types fails with
+			// both types named.
+		r.Errorf("expect: ambiguous values differ in type\n- (%T) %s\n+ (%T) %s\n",
+				any(want), wantText, any(got), gotText)
+		}
+	}
+}
+
+// FieldText renders one named field value on a single line. String
+// values use %q so embedded newlines stay escaped and one field keeps
+// one line; every other value renders through LeafText. It stays
+// exported because Equal names it, and "An exported comptime generic
+// that names an unexported package-level identifier of its own package
+// MUST fail with `[comptime::unexported_in_exported]` at that identifier
+// in the defining package. [T-205]
+func FieldText(name string, v any) string {
+	if s, ok := v.(string); ok {
+		return name + ": " + fmt.Sprintf("%q", s)
+	}
+	return name + ": " + LeafText(v)
+}
+
+// LeafText renders one non-struct value. Strings keep their raw form
+// so multi-line text diffs line by line; nil renders as nil; every
+// other value renders with %v. It stays exported because Equal names
+// it, and "An exported comptime generic that names an unexported
+// package-level identifier of its own package MUST fail with
+// `[comptime::unexported_in_exported]` at that identifier in the
+// defining package. [T-205]
+func LeafText(v any) string {
+	switch s := v.(type) {
+	case nil:
+		return "nil"
+	case string:
+		return s
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// Diff renders the unified difference between two texts with no color
+// codes. It returns "" when the texts are equal. Otherwise it shows
+// the changed middle with up to two lines of context on each side,
+// removed lines prefixed with "- " and added lines with "+ ", so the
+// output stays greppable. It stays exported because Equal names it,
+// and "An exported comptime generic that names an unexported
+// package-level identifier of its own package MUST fail with
+// `[comptime::unexported_in_exported]` at that identifier in the
+// defining package. [T-205]
+func Diff(want string, got string) string {
+	if want == got {
+		return ""
+	}
+	w := strings.Split(want, "\n")
+	g := strings.Split(got, "\n")
+	head := 0
+	for head < len(w) && head < len(g) && w[head] == g[head] {
+		head++
+	}
+	tail := 0
+	for tail < len(w)-head && tail < len(g)-head && w[len(w)-1-tail] == g[len(g)-1-tail] {
+		tail++
+	}
+	out := "--- want\n+++ got\n"
+	start := head - 2
+	if start < 0 {
+		start = 0
+	}
+	for i := start; i < head; i++ {
+		out += "  " + w[i] + "\n"
+	}
+	for i := head; i < len(w)-tail; i++ {
+		out += "- " + w[i] + "\n"
+	}
+	for i := head; i < len(g)-tail; i++ {
+		out += "+ " + g[i] + "\n"
+	}
+	end := len(w) - tail + 2
+	if end > len(w) {
+		end = len(w)
+	}
+	for i := len(w) - tail; i < end; i++ {
+		out += "  " + w[i] + "\n"
+	}
+	return out
+}

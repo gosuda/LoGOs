@@ -88,6 +88,23 @@ func separatorUnit(r rune) (escapeUnitBytes, int) {
 	return escapeUnitBytes{'\\', 'u', '2', '0', '2', hexDigits[r&0xf]}, 6
 }
 
+// hasLoneSurrogate reports whether s holds a CESU-8-style lone surrogate
+// code unit: the bytes ED A0 80 through ED BF BF, which spell U+D800
+// through U+DFFF. No valid UTF-8 string contains that byte pattern, and
+// utf8.DecodeRuneInString reports it as RuneError, so the escaper would
+// otherwise replace it with U+FFFD like any invalid byte. The encoder
+// rejects it instead: the decoder maps lone \uD800..\uDFFF escapes to
+// U+FFFD rather than round-tripping them, so silent replacement on
+// encode would not survive a decode.
+func hasLoneSurrogate(s string) bool {
+	for i := 0; i+2 < len(s); i++ {
+		if s[i] == 0xED && s[i+1] >= 0xA0 && s[i+1] <= 0xBF && s[i+2] >= 0x80 && s[i+2] <= 0xBF {
+			return true
+		}
+	}
+	return false
+}
+
 func classifyMulti(s string, i int) (kind int, r rune, size int) {
 	r, size = utf8.DecodeRuneInString(s[i:])
 	switch {
