@@ -190,8 +190,12 @@ func strictlyCovers(cs, ce, s, e int) bool {
 // span through the cover's placement chunks and substitutes the inner
 // text there, keeping generated fragments the cover already holds. A
 // span that maps nowhere is refused, leaving the caller to record the
-// splice on its own. Provenance stays in orig for the edit map.
-func foldIntoCover(list *[]splice, sp splice) bool {
+// splice on its own. Provenance stays in orig for the edit map. A span
+// whose cover bytes carry no provenance still folds when the cover holds
+// pristine working-buffer source there: a const for substitution leaves
+// substituted bytes without chunks, and the inner pass parsed those very
+// bytes, so the inner text accounts for every byte being replaced.
+func foldIntoCover(list *[]splice, sp splice, src []byte) bool {
 	if sp.host != nil || (sp.text == "" && sp.start == sp.end) {
 		return false
 	}
@@ -211,7 +215,7 @@ func foldIntoCover(list *[]splice, sp splice) bool {
 	if best == -1 {
 		return false
 	}
-	merged, ok := nestSplice((*list)[best], sp)
+	merged, ok := nestSplice((*list)[best], sp, src)
 	if !ok {
 		return false
 	}
@@ -223,8 +227,12 @@ func foldIntoCover(list *[]splice, sp splice) bool {
 // span. The inner text is a complete lowering of its span, so it replaces
 // the whole mapped output range at once; source the cover no longer spells
 // verbatim (earlier folds) would need the inner text re-lowered over them,
-// which the inner pass cannot see, so such spans are refused instead.
-func nestSplice(cover, inner splice) (splice, bool) {
+// which the inner pass cannot see, so such spans are refused instead. When
+// the cover's bytes over the mapped range are byte-identical to the
+// working-buffer source over the inner span, no earlier fold rewrote them:
+// the gap is only missing provenance from a const for substitution, which
+// the inner pass saw, so the fold proceeds.
+func nestSplice(cover, inner splice, src []byte) (splice, bool) {
 	r := otext{s: inner.text, chunks: inner.chunks}
 	os, ok1 := mapStart(cover.chunks, inner.start)
 	oe, ok2 := mapEnd(cover.chunks, inner.end)
@@ -240,7 +248,7 @@ func nestSplice(cover, inner splice) (splice, bool) {
 	if oe <= os {
 		return splice{}, false
 	}
-	if !fullyCovered(cover.chunks, os, oe) {
+	if !fullyCovered(cover.chunks, os, oe) && !pristineCover(cover.text, os, oe, src, inner.start, inner.end) {
 		return splice{}, false
 	}
 	out := splice{start: cover.start, end: cover.end, owner: cover.owner, placement: cover.placement}
@@ -276,6 +284,23 @@ func nestSplice(cover, inner splice) (splice, bool) {
 		}
 	}
 	return out, true
+}
+
+// pristineCover reports whether the cover's output bytes over [os, oe)
+// are byte-identical to the working-buffer source over [s, e). A const
+// for substitution leaves substituted bytes without provenance chunks,
+// so fullyCovered refuses the fold even though no earlier fold rewrote
+// those bytes: the substitution sits in the working buffer itself, which
+// the inner pass parsed, so the inner text accounts for every replaced
+// byte and the fold drops nothing.
+func pristineCover(cover string, os, oe int, src []byte, s, e int) bool {
+	if oe-os != e-s {
+		return false
+	}
+	if s < 0 || e > len(src) || os < 0 || oe > len(cover) {
+		return false
+	}
+	return cover[os:oe] == string(src[s:e])
 }
 
 // fullyCovered reports whether every output offset in [os, oe) is spelled
