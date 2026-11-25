@@ -1,0 +1,68 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package binary
+
+import (
+	stdbinary "encoding/binary"
+	"io"
+)
+
+// The varint functions encode and decode single integer values with a
+// variable-length encoding; smaller values need fewer bytes. They carry
+// no reflect and are already allocation-efficient, so the twin forwards
+// them to encoding/binary. Each wrapper inlines to the original call.
+
+const (
+	// MaxVarintLen16 is the maximum length of a varint-encoded 16-bit integer.
+	MaxVarintLen16 = stdbinary.MaxVarintLen16
+	// MaxVarintLen32 is the maximum length of a varint-encoded 32-bit integer.
+	MaxVarintLen32 = stdbinary.MaxVarintLen32
+	// MaxVarintLen64 is the maximum length of a varint-encoded 64-bit integer.
+	MaxVarintLen64 = stdbinary.MaxVarintLen64
+)
+
+// AppendUvarint appends the varint-encoded form of x to buf.
+func AppendUvarint(buf []byte, x uint64) []byte {
+	return stdbinary.AppendUvarint(buf, x)
+}
+
+// PutUvarint encodes x into buf and returns the bytes written.
+// It panics when buf is too small.
+func PutUvarint(buf []byte, x uint64) int {
+	return stdbinary.PutUvarint(buf, x)
+}
+
+// Uvarint decodes a uint64 from buf, returning the value and the bytes
+// read (> 0), or n <= 0 on error.
+func Uvarint(buf []byte) (uint64, int) {
+	return stdbinary.Uvarint(buf)
+}
+
+// AppendVarint appends the varint-encoded form of x to buf.
+func AppendVarint(buf []byte, x int64) []byte {
+	return stdbinary.AppendVarint(buf, x)
+}
+
+// PutVarint encodes x into buf and returns the bytes written.
+// It panics when buf is too small.
+func PutVarint(buf []byte, x int64) int {
+	return stdbinary.PutVarint(buf, x)
+}
+
+// Varint decodes an int64 from buf, returning the value and the bytes
+// read (> 0), or n <= 0 on error.
+func Varint(buf []byte) (int64, int) {
+	return stdbinary.Varint(buf)
+}
+
+// ReadUvarint reads a varint-encoded uint64 from r.
+func ReadUvarint(r io.ByteReader) (uint64, error) {
+	return stdbinary.ReadUvarint(r)
+}
+
+// ReadVarint reads a varint-encoded int64 from r.
+func ReadVarint(r io.ByteReader) (int64, error) {
+	return stdbinary.ReadVarint(r)
+}
