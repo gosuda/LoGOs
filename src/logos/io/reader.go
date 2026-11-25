@@ -68,12 +68,16 @@ func (r *FixedReader) Buffered() int {
 
 // StreamReader reads from src into buf, a caller-owned window that
 // must hold the largest frame the caller takes at once. Short source
-// reads are legal. The zero value is unusable; build with NewReader.
+// reads are legal. A source error that arrives with data is held as
+// pending and surfaces on the next Fill, so a truncated final read
+// is never reported as a clean end of stream. The zero value is
+// unusable; build with NewReader.
 type StreamReader struct {
-	src  stdio.Reader
-	buf  []byte
-	seek int
-	end  int
+	src     stdio.Reader
+	buf     []byte
+	seek    int
+	end     int
+	pending error
 }
 
 // NewReader returns a Reader that fills buf from src. It panics on a
@@ -110,8 +114,15 @@ func (r *StreamReader) Discard(n int) {
 
 // Fill moves one source read into the window, compacting first when
 // the tail is full. It returns nil after adding bytes, ErrEndOfStream
-// when src ends, and ErrBufferFull when the window stays full.
+// when src ends, and ErrBufferFull when the window stays full. An
+// error that arrived with data on an earlier Fill is reported before
+// the source is read again.
 func (r *StreamReader) Fill() error {
+	if r.pending != nil {
+		err := r.pending
+		r.pending = nil
+		return err
+	}
 	if r.end == len(r.buf) {
 		if r.seek == 0 {
 			return ErrBufferFull
@@ -122,11 +133,20 @@ func (r *StreamReader) Fill() error {
 	n, err := r.src.Read(r.buf[r.end:])
 	if n > 0 {
 		r.end += n
+		if err != nil {
+			r.pending = fillError(err)
+		}
 		return nil
 	}
 	if err == nil {
 		return nil
 	}
+	return fillError(err)
+}
+
+// fillError translates a source error at a window boundary: EOF means
+// the stream ended, anything else keeps its cause.
+func fillError(err error) error {
 	if err == stdio.EOF {
 		return ErrEndOfStream
 	}
@@ -177,9 +197,16 @@ func (l *LimitedReader) Discard(n int) {
 	l.r.Discard(n)
 }
 
-// Fill reports end of stream past the cap, else fills below.
+// Fill reports end of stream past the cap, else fills below. Once the
+// finite remainder is fully buffered, it reports end of stream without
+// reading past the limit: a Take for more than the cap can never
+// succeed, so filling further would only wait on bytes the caller may
+// never spend.
 func (l *LimitedReader) Fill() error {
 	if l.remaining != Unlimited && l.remaining <= 0 {
+		return ErrEndOfStream
+	}
+	if l.remaining != Unlimited && int64(len(l.r.Peek(l.remaining.Clamp(1<<30)))) >= int64(l.remaining) {
 		return ErrEndOfStream
 	}
 	return l.r.Fill()

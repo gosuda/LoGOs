@@ -14,7 +14,7 @@ func (check *Checker) logosExhaustiveStmtSwitch(s *syntax.SwitchStmt, sx *operan
 	if !check.conf.Logos || sx == nil {
 		return
 	}
-	tset := logosClosedUnion(sx.typ())
+	tset := logosClosedUnionView(sx.typ())
 	if tset == nil {
 		return
 	}

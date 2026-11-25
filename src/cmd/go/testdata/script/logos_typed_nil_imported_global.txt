@@ -16,7 +16,7 @@ stderr 'platform pointer Q \(\*os\.File\)'
 stderr 'platform pointer lib\.P \(\*os\.File\)'
 ! logos build ./...
 stderr -count=1 '\[correctness::typed_nil_return\]'
-stderr 'lib/lib\.lgo:\d+:\d+: \[correctness::typed_nil_return\]'
+stderr 'lib[/\\]lib\.lgo:\d+:\d+: \[correctness::typed_nil_return\]'
 
 -- m/go.mod --
 module example.com/derived
