@@ -9,10 +9,25 @@ import (
 	"cmd/compile/internal/types2"
 )
 
-func logosWriterNormalizeType(typ types2.Type) types2.Type {
+func logosWriterNormalizeType(typ types2.Type, st *logosExportState) types2.Type {
 normalize:
 	for {
 		switch t := typ.(type) {
+		case *types2.Option:
+			// Options survive in inferred positions (locals, init
+			// statements) when lowering makes no edit and no recheck
+			// runs. Erase them to the instantiated logos/rt.Option[E]
+			// so the reader sees the same named type the import
+			// overlay restores for the referenced declaration; the
+			// anonymous struct stays the layout shape only. When
+			// logos/rt is unreachable, keep the struct erasure.
+			if st != nil {
+				if et := types2.LogosOptionExportType(st.rt, t, st.ctxt); et != nil {
+					typ = et
+					break normalize
+				}
+			}
+			typ = types2.LogosOptionRepr(t)
 		case *types2.ConstView:
 			typ = t.Elem
 		case *types2.ReadonlyDescendants:
@@ -27,6 +42,25 @@ normalize:
 		}
 	}
 	return typ
+}
+
+// logosExportState carries the state for writing option types at the
+// export boundary: the reachable logos/rt package for instantiating
+// logos/rt.Option[E], and one shared instantiation context so repeated
+// writes of the same option reuse one instance.
+type logosExportState struct {
+	rt   *types2.Package
+	ctxt *types2.Context
+}
+
+func (pw *pkgWriter) logosExportState() *logosExportState {
+	if pw.logosExport == nil {
+		pw.logosExport = &logosExportState{rt: types2.LogosRTPackage(pw.curpkg)}
+	}
+	if pw.logosExport.ctxt == nil {
+		pw.logosExport.ctxt = types2.NewContext()
+	}
+	return pw.logosExport
 }
 
 func logosWriterIsNil(obj types2.Object, tv syntax.TypeAndValue) bool {

@@ -1,0 +1,55 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog
+
+import "sync"
+
+// buffer is a pooled byte buffer. It mirrors the allocation discipline of
+// log/slog/internal/buffer: one pooled 1 KiB buffer per record, returned
+// to the pool only while it stays at or below 16 KiB.
+type buffer []byte
+
+var bufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 1024)
+		return (*buffer)(&b)
+	},
+}
+
+func newBuffer() *buffer {
+	return bufPool.Get().(*buffer)
+}
+
+func (b *buffer) free() {
+	const maxBufferSize = 16 << 10
+	if cap(*b) <= maxBufferSize {
+		*b = (*b)[:0]
+		bufPool.Put(b)
+	}
+}
+
+func (b *buffer) bytes() []byte {
+	return *b
+}
+
+func (b *buffer) write(p []byte) {
+	*b = append(*b, p...)
+}
+
+func (b *buffer) writeString(s string) {
+	*b = append(*b, s...)
+}
+
+func (b *buffer) writeByte(c byte) {
+	*b = append(*b, c)
+}
+
+func (b *buffer) length() int {
+	return len(*b)
+}
+
+func (b *buffer) setLength(n int) {
+	*b = (*b)[:n]
+}

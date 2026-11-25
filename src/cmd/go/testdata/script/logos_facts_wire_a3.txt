@@ -7,7 +7,7 @@ cd ..
 go tool pack p $WORK/lgo.a __.LOGOS
 stdout '^logos-facts 3$'
 stdout '^fingerprint [0-9a-f]{16}$'
-stdout '^comptime Generate [0-9]+$'
+! stdout '^comptime '
 stdout '^const Box FF0$'
 stdout '^fn Add ParamMutated=1$'
 stdout '^fn ReadIface.Name Readonly$'

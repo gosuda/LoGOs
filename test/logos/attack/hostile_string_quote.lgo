@@ -1,0 +1,24 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Msg[T any]() string {
+	s := "a\"b"
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	return s
+}
+
+type Row struct {
+	A int
+}
+
+func main() {
+	fmt.Println(Msg[Row]())
+}

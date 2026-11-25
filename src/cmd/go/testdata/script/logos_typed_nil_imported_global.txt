@@ -1,0 +1,64 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOCACHE=$WORK/cache
+
+# A Go-derived package-level var keeps its platform origin across a
+# package boundary (SPEC Sec 2.2, T-202). lib.P holds os.Stdout under an
+# inferred *os.File type; the producing package records the derivation
+# in its export facts, so the importer's typed_nil_return check reports
+# the cross-package return exactly like the same-package ones. Without
+# the facts record (stale archives) the importer stays silent.
+cd m
+! logos lint ./...
+stderr -count=3 '\[correctness::typed_nil_return\]'
+stderr 'platform pointer P \(\*os\.File\)'
+stderr 'platform pointer Q \(\*os\.File\)'
+stderr 'platform pointer lib\.P \(\*os\.File\)'
+! logos build ./...
+stderr -count=1 '\[correctness::typed_nil_return\]'
+stderr 'lib/lib\.lgo:\d+:\d+: \[correctness::typed_nil_return\]'
+
+-- m/go.mod --
+module example.com/derived
+
+go 1.27
+
+-- m/lib/lib.lgo --
+package lib
+
+import (
+	"io"
+	"os"
+)
+
+var P = os.Stdout
+
+func Get() io.Closer {
+	return P
+}
+
+-- m/main/main.lgo --
+package main
+
+import (
+	"io"
+	"os"
+
+	"example.com/derived/lib"
+)
+
+var Q = os.Stdout
+
+func Local() io.Closer {
+	return Q
+}
+
+func Imported() io.Closer {
+	return lib.P
+}
+
+func main() {
+	_ = Local()
+	_ = Imported()
+	_ = lib.Get()
+}

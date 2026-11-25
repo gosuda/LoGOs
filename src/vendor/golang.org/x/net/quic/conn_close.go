@@ -265,8 +265,7 @@ func (c *Conn) waitReady(ctx context.Context) error {
 //	err := conn.Wait(context.Background())
 func (c *Conn) Close() error {
 	c.Abort(nil)
-	<-c.lifetime.donec
-	return c.lifetime.finalErr
+	return c.Wait(context.Background())
 }
 
 // Wait waits for the peer to close the connection.
@@ -281,6 +280,9 @@ func (c *Conn) Close() error {
 func (c *Conn) Wait(ctx context.Context) error {
 	if err := c.waitOnDone(ctx, c.lifetime.donec); err != nil {
 		return err
+	}
+	if err, ok := c.lifetime.finalErr.(peerTransportError); ok && err.code == errNo {
+		return nil
 	}
 	return c.lifetime.finalErr
 }

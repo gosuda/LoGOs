@@ -1,0 +1,66 @@
+// errorcheck
+
+package p
+
+func efVarFetch(i int) (int, error) {
+	return i, nil
+}
+
+// A result declared before the loop and stored once inside it is shared
+// by every iteration: when a later call fails, the deferred literal an
+// earlier iteration registered reads the failed call's result.
+func efVarLoopBreak() {
+	var n int
+	for i := 0; i < 3; i++ {
+		var err error
+		n, err = efVarFetch(i)
+		if err != nil {
+			break
+		}
+		defer func() {
+			println(n) // ERROR "result_before_error_check"
+		}()
+	}
+}
+
+func efVarLoopReturn() {
+	var n int
+	for i := 0; i < 2; i++ {
+		var err error
+		n, err = efVarFetch(i)
+		if err != nil {
+			return
+		}
+		defer func() {
+			println(n) // ERROR "result_before_error_check"
+		}()
+	}
+}
+
+// Outside a loop the store is still an assignment besides the
+// declaration, so the proof does not cross the capture boundary.
+func efVarStraightLine() {
+	var n int
+	var err error
+	n, err = efVarFetch(0)
+	if err != nil {
+		return
+	}
+	defer func() {
+		println(n) // ERROR "result_before_error_check"
+	}()
+}
+
+// A result initialized at its declaration inside the loop is a new
+// variable each iteration, so it keeps the proof.
+func efVarLoopFreshAccepted() {
+	for i := 0; i < 3; i++ {
+		n, err := efVarFetch(i)
+		if err != nil {
+			break
+		}
+		defer func() {
+			println(n)
+		}()
+	}
+}

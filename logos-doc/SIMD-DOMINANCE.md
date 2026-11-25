@@ -169,22 +169,3 @@ RED/GREEN/PROBE proof and publication boundary; the candidate's
 [PR #54 checks](https://github.com/gosuda/LoGOs/pull/54/checks) determine full
 upstream acceptance. All three frozen attack hashes still match the table
 above; no speed claim follows from these correctness results.
-
-## Reproduction and merge gate
-
-After `src/make.bash` rebuilds and installs the fork, put its `bin` first on
-`PATH` and run from `src`:
-
-```sh
-go test -count=1 -short cmd/compile/internal/ssa
-go vet cmd/compile/internal/ssa
-go test -count=1 -race -timeout=40m -v cmd/go \
-  -run '^TestScript$/^(README|logos_simd_(zero_dominance|feature_gate|gate_avx512|gate_branch)|logos_eject_simd_slice)$'
-GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
-```
-
-The source/ejection scripts use the repository's pinned upstream 1.27.2,
-1.27.3, and 1.27.4 toolchains as independent oracles. Changed Go files must
-also pass `gofmt`. The dedicated `simd-dominance.yml` workflow separates the
-focused checks from the full regression run. Queued or incomplete CI is not
-a pass and does not permit merging.

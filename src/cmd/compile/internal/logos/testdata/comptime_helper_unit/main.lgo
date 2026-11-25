@@ -1,0 +1,36 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"fmt"
+
+	"example.com/helperunit/left"
+	"example.com/helperunit/owner"
+	"example.com/helperunit/right"
+)
+
+func main() {
+	fmt.Println(owner.Initialization())
+	sharedOuter, sharedInner := left.Probe(0)
+	sharedOuter[7] = 701
+	sharedInner[8] = 1801
+	right.Probe(7)
+	distinctOuter, distinctInner := right.ProbeDistinct(0)
+	distinctOuter[8] = 803
+	distinctInner[7] = 1703
+	left.Probe(8)
+	right.ProbeDistinct(7)
+	fmt.Println(sharedOuter[7] ?? -1, sharedOuter[8] ?? -1, sharedInner[7] ?? -1, sharedInner[8] ?? -1)
+	fmt.Println(distinctOuter[7] ?? -1, distinctOuter[8] ?? -1, distinctInner[7] ?? -1, distinctInner[8] ?? -1)
+
+	owned := owner.DeclaredFromOwner()
+	fromLeft := left.Declared()
+	fmt.Println(owned[0] ?? -1, fromLeft[0] ?? -1)
+	fromLeft[0] = 90
+	fromRight := right.Declared()
+	fmt.Println(fmt.Sprintf("%p", owned), fmt.Sprintf("%p", fromLeft), fmt.Sprintf("%p", fromRight))
+	fmt.Println(owned[0] ?? -1, fromRight[0] ?? -1, owner.DeclaredValue(0))
+}

@@ -1,0 +1,74 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog_test
+
+import (
+	"io"
+	"log/slog"
+	"strings"
+	"testing"
+
+	twinslog "logos/slog"
+)
+
+// TestTwinJSONStrings drives tricky strings through both handlers and
+// requires byte-equal output. The oracle is the standard handler, which
+// pins the HTML-off escaping, U+2028/29 and invalid-UTF-8 rules. The
+// same strings also run through both text handlers for the quoting rule.
+func TestTwinJSONStrings(t *testing.T) {
+	var sb strings.Builder
+	for c := 0; c < 0x20; c++ {
+		sb.WriteByte('a')
+		sb.WriteByte(byte(c))
+	}
+	sb.WriteString("tail")
+	controls := sb.String()
+	strs := []string{
+		"",
+		"plain",
+		"<escape&>",
+		"\"quote\"",
+		"back\\slash",
+		"line\nbreak\ttab\rcarriage",
+		"  ",
+		"θ  ￾",
+		"bad\xf6utf",
+		"\xff\xfe",
+		"lone\x80continuation",
+		"µåπ𝄞",
+		"\u007f",
+		controls,
+		strings.Repeat("x", 3000) + "\u0001" + strings.Repeat("y", 3000),
+		"emoji 🙂 and text",
+		"null\x00byte",
+		"end backslash\\",
+		"\\",
+		" ",
+		"=",
+		" space=equals ",
+	}
+	upper := func(_ []string, a slog.Attr) slog.Attr {
+		a.Key = "K:" + a.Key
+		return a
+	}
+	for _, tc := range []struct {
+		name string
+		opts *slog.HandlerOptions
+	}{
+		{"plain", new(slog.HandlerOptions)},
+		{"replace", &slog.HandlerOptions{ReplaceAttr: upper}},
+	} {
+		for _, s := range strs {
+			r := slog.NewRecord(twinTestTime, slog.LevelInfo, "msg", 0)
+			r.AddAttrs(slog.String("k", s), slog.String(s, "v"))
+			compareBoth(t, r,
+				func(w io.Writer) slog.Handler { return twinslog.NewJSONHandler(w, tc.opts) },
+				func(w io.Writer) slog.Handler { return slog.NewJSONHandler(w, tc.opts) })
+			compareBoth(t, r,
+				func(w io.Writer) slog.Handler { return twinslog.NewTextHandler(w, tc.opts) },
+				func(w io.Writer) slog.Handler { return slog.NewTextHandler(w, tc.opts) })
+		}
+	}
+}

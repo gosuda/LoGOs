@@ -33,6 +33,7 @@ type constMapGen struct {
 	nkeys       int
 	bearing     bool
 	lead        syntax.Expr
+	owner       *types2.Var
 }
 
 func (g *constMapGen) lookupName() string { return g.name + "_lookup" }
@@ -99,6 +100,7 @@ func emitConstMapDecls(e constMapEmission) string {
 			fmt.Fprintf(&b, "{Key: %s, Val: %s}", e.keyTexts[i], e.valTexts[i])
 		}
 		b.WriteString("}\n")
+		fmt.Fprintf(&b, "func %s_all(_logos_yield func(%s, %s) bool) { %s.ConstAll(%s_sorted)(_logos_yield) }\n", name, e.kT, e.vT, rtAlias, name)
 	} else {
 		fmt.Fprintf(&b, "%s\nvar %s_sorted = []%s.ConstEntry[%s, uint32]{", rodataMarker, name, rtAlias, e.kT)
 		for j, i := range e.order {
@@ -109,9 +111,11 @@ func emitConstMapDecls(e constMapEmission) string {
 		}
 		b.WriteString("}\n")
 	}
-	fmt.Fprintf(&b, "var %s_mat %s.ConstMapMaterialization[%s, %s, %s]\n", name, rtAlias, e.mapT, e.kT, e.vT)
-	fmt.Fprintf(&b, "func %s_build() %s { return %s }\n", name, e.mapT, e.builderBody)
-	fmt.Fprintf(&b, "func %s_map() %s { return %s_mat.Get(%s_build) }\n", name, e.mapT, name, name)
+	if e.builderBody != "" {
+		fmt.Fprintf(&b, "var %s_mat %s.ConstMapMaterialization[%s, %s, %s]\n", name, rtAlias, e.mapT, e.kT, e.vT)
+		fmt.Fprintf(&b, "func %s_build() %s { return %s }\n", name, e.mapT, e.builderBody)
+		fmt.Fprintf(&b, "func %s_map() %s { return %s_mat.Get(%s_build) }\n", name, e.mapT, name, name)
+	}
 	if e.bearing {
 		fmt.Fprintf(&b, "func %s_val(_logos_idx uint32) %s {\n\tswitch _logos_idx {\n", name, e.vT)
 		for i := range e.valTexts {
@@ -185,37 +189,41 @@ func emitConstMapDecls(e constMapEmission) string {
 func collectConstMaps(files []*syntax.File, info *types2.Info) map[*types2.Const]*constMapGen {
 	clearConstMat()
 	out := map[*types2.Const]*constMapGen{}
-	seq := 0
 	for _, file := range files {
-		syntax.Inspect(file, func(n syntax.Node) bool {
-			cd, ok := n.(*syntax.ConstDecl)
-			if !ok || len(cd.NameList) != 1 {
-				return true
-			}
-			obj, ok := info.Defs[cd.NameList[0]].(*types2.Const)
-			if !ok {
-				return true
-			}
-			v, ok := info.LogosCTFE[obj]
-			if !ok || v.Type() == nil || v.Type().Kind != ctfe.KMap {
-				return true
-			}
-			init := cd.Values
-			g := &constMapGen{
-				name: fmt.Sprintf("_logos_cm%d_%s", seq, cd.NameList[0].Value),
-				obj:  obj,
-				val:  v,
-				init: init,
-			}
-			keys, vals := v.MapEntries()
-			g.nkeys = len(keys)
-			g.bearing = constMapBearing(vals)
-			out[obj] = g
-			seq++
-			return true
-		})
+		collectConstMapDecls(file, info, out)
 	}
 	return out
+}
+
+func (fl *fileLower) enrollLoweredConstMaps() {
+	collectConstMapDecls(fl.file, fl.pkg.info, fl.pkg.constMaps)
+}
+
+func collectConstMapDecls(root syntax.Node, info *types2.Info, out map[*types2.Const]*constMapGen) {
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		cd, ok := n.(*syntax.ConstDecl)
+		if !ok || len(cd.NameList) != 1 {
+			return true
+		}
+		obj, ok := info.Defs[cd.NameList[0]].(*types2.Const)
+		if !ok || out[obj] != nil {
+			return true
+		}
+		v, ok := info.LogosCTFE[obj]
+		if !ok || v.Type() == nil || v.Type().Kind != ctfe.KMap {
+			return true
+		}
+		keys, vals := v.MapEntries()
+		out[obj] = &constMapGen{
+			name:    fmt.Sprintf("_logos_cm%d_%s", len(out), obj.Name()),
+			obj:     obj,
+			val:     v,
+			init:    cd.Values,
+			nkeys:   len(keys),
+			bearing: constMapBearing(vals),
+		}
+		return true
+	})
 }
 
 func (fl *fileLower) constMapReadUse(x syntax.Expr) (*constMapGen, bool) {
@@ -301,7 +309,10 @@ func (fl *fileLower) importedConstMap(obj *types2.Var, pos syntax.Pos) (*constMa
 	}
 	name := fmt.Sprintf("_logos_icm%d_%s", fl.pkg.importedSeq, obj.Name())
 	fl.pkg.importedSeq++
-	g, ok := fl.emitImportedConstMap(importedMapSpec{label: obj.Pkg().Path() + "." + obj.Name(), mapType: constMapElem(obj.Type()), mt: mt, rec: rec, name: name}, pos)
+	g, ok := fl.emitImportedConstMap(importedMapSpec{
+		label: obj.Pkg().Path() + "." + obj.Name(), mapType: constMapElem(obj.Type()),
+		mt: mt, rec: rec, name: name, owner: obj,
+	}, pos)
 	if ok {
 		fl.pkg.importedMaps[obj] = g
 	}
@@ -314,6 +325,7 @@ type importedMapSpec struct {
 	mt      *types2.Map
 	rec     facts.ConstMapFact
 	name    string
+	owner   *types2.Var
 }
 
 func (fl *fileLower) emitImportedConstMap(s importedMapSpec, pos syntax.Pos) (*constMapGen, bool) {
@@ -348,11 +360,19 @@ func (fl *fileLower) emitImportedConstMap(s importedMapSpec, pos syntax.Pos) (*c
 	for i := range rec.Keys {
 		entries[i] = constMapKey{hash: rec.Hashes[i], canon: rec.Canons[i]}
 	}
-	pairs := make([]string, len(rec.Keys))
-	for i := range rec.Keys {
-		pairs[i] = keys[i] + ": " + vals[i]
+	var builderBody, materialized string
+	if s.owner != nil {
+		materialized = s.owner.Name()
+		if qual, ok := fl.constMapImportQual(s.owner.Pkg()); ok {
+			materialized = qual + "." + materialized
+		}
+	} else {
+		pairs := make([]string, len(rec.Keys))
+		for i := range pairs {
+			pairs[i] = keys[i] + ": " + vals[i]
+		}
+		builderBody = mapT + "{" + strings.Join(pairs, ", ") + "}"
 	}
-	builderBody := mapT + "{" + strings.Join(pairs, ", ") + "}"
 	text := finalizeConstMapEmission(pos, constMapEmission{
 		name:        s.name,
 		kT:          kT,
@@ -365,15 +385,35 @@ func (fl *fileLower) emitImportedConstMap(s importedMapSpec, pos syntax.Pos) (*c
 		order:       rec.Order,
 		bearing:     rec.Bearing,
 	}, entries)
+	if materialized != "" {
+		text += fmt.Sprintf("func %s_map() %s { return %s }\n", s.name, mapT, materialized)
+	}
 	g := &constMapGen{name: s.name, nkeys: len(rec.Keys), bearing: rec.Bearing}
+	if s.owner != nil && fl.pkg.info.LogosCtImportConstMap != nil {
+		if row, ok := fl.pkg.info.LogosCtImportConstMap(s.owner.Pkg().Path(), s.owner.Name()); ok && row.Binding == s.owner {
+			g.owner = s.owner
+			g.nkeys = row.Count
+		}
+	}
 	if !fl.pkg.importedDone[s.name] {
 		fl.pkg.importedDone[s.name] = true
-		decls := parseConstMapDecls(text, pos)
-		fl.markConstMapTables(decls, g)
-		fl.constDecls = append(fl.constDecls, decls...)
+		if g.owner == nil {
+			decls := parseConstMapDecls(text, pos)
+			fl.markConstMapTables(decls, g)
+			fl.constDecls = append(fl.constDecls, decls...)
+			fl.needRT = true
+		} else {
+			fl.needRTText = true
+			if fl.genImps != nil {
+				for path, alias := range fl.genImps.qual {
+					if q, imported := fl.existingImportName(path); imported && q != "" && q == alias && containsIdent(text, alias) {
+						fl.ensureEjectImport(path, pos)
+					}
+				}
+			}
+		}
 		fl.constText += "\n" + text
 	}
-	fl.needRT = true
 	return g, true
 }
 
@@ -631,6 +671,7 @@ func constMapElem(t types2.Type) types2.Type {
 	return t
 }
 func (fl *fileLower) lowerConstMapSpec(cd *syntax.ConstDecl, g *constMapGen) {
+	fl.recordCtConstMap(g)
 
 	fl.needRT = true
 	if _, ejectText, ok := fl.constMapOwnedTexts(g, cd.Pos()); ok {
@@ -652,6 +693,20 @@ func (fl *fileLower) lowerConstMapSpec(cd *syntax.ConstDecl, g *constMapGen) {
 	fl.constDecls = append(fl.constDecls, decls...)
 	fl.constText += "\n" + text
 	fl.dropConstSpec(cd)
+}
+
+func (fl *fileLower) recordCtConstMap(g *constMapGen) {
+	if g.obj.Parent() != fl.pkg.tpkg.Scope() {
+		return
+	}
+	info := fl.pkg.info
+	if info.LogosCtExportConstMaps == nil {
+		info.LogosCtExportConstMaps = make(map[string]types2.LogosCtConstMapExport)
+	}
+	info.LogosCtExportConstMaps[g.obj.Name()] = types2.LogosCtConstMapExport{
+		Type: g.obj.Type(), Count: g.nkeys, Bearing: g.bearing,
+		Lookup: g.lookupName(), Materialize: g.mapName(), Iterate: g.allName(),
+	}
 }
 
 func (fl *fileLower) recordConstMapFact(g *constMapGen, parts constMapParts) {
@@ -908,6 +963,12 @@ func (fl *fileLower) lowerConstMapRanges() {
 		}
 		pos := rc.X.Pos()
 		start, end := fl.off(syntax.StartPos(rc.X)), fl.endOff(rc.X)
+		if g.owner != nil {
+			id, text := fl.constMapRef(pos, g, types2.LogosCtMapIterate)
+			fl.add(start, end, text)
+			rc.X = id
+			return true
+		}
 		if g.bearing {
 			fl.add(start, end, g.allName())
 			fl.needRT = true
@@ -945,12 +1006,14 @@ func (fl *fileLower) lowerConstMapName(e *syntax.Name) (syntax.Expr, bool) {
 		return nil, false
 	}
 	start := fl.off(e.Pos())
-	fl.add(start, start+len(e.Value), g.mapName()+"()")
-	return callOf(e.Pos(), nameOf(e.Pos(), g.mapName()), nil), true
+	id, text := fl.constMapRef(e.Pos(), g, types2.LogosCtMapMaterialize)
+	fl.add(start, start+len(e.Value), text+"()")
+	return callOf(e.Pos(), id, nil), true
 }
 func (fl *fileLower) lowerConstMapSelector(e *syntax.SelectorExpr, g *constMapGen) syntax.Expr {
-	fl.add(fl.off(syntax.StartPos(e)), fl.endOff(e), g.mapName()+"()")
-	return callOf(e.Pos(), nameOf(e.Pos(), g.mapName()), nil)
+	id, text := fl.constMapRef(e.Pos(), g, types2.LogosCtMapMaterialize)
+	fl.add(fl.off(syntax.StartPos(e)), fl.endOff(e), text+"()")
+	return callOf(e.Pos(), id, nil)
 }
 
 func (fl *fileLower) lowerConstMapLen(e *syntax.CallExpr) (syntax.Expr, bool) {
@@ -976,13 +1039,14 @@ func (fl *fileLower) lowerConstMapRead(e *syntax.IndexExpr, g *constMapGen) synt
 	mStart, lbrack, rbrack := fl.lookupSpans(e)
 	e.Index = fl.lowerOptExpr(e.Index)
 	args := []syntax.Expr{e.Index}
-	head, open := g.lookupName(), "("
+	fn, head := fl.constMapRef(pos, g, types2.LogosCtMapLookup)
+	open := "("
 	if g.lead != nil {
 		args = []syntax.Expr{g.lead, e.Index}
 		head += "(" + string(fl.src[fl.off(syntax.StartPos(g.lead)):fl.exprEndOf(g.lead)]) + ", "
 		open = ""
 	}
-	lookup := callOf(pos, nameOf(pos, g.lookupName()), args)
+	lookup := callOf(pos, fn, args)
 	opt := fl.asOption(fl.optType(e))
 	if opt == nil {
 		fl.addOwned(id, mStart, lbrack, head)
@@ -1004,4 +1068,804 @@ func (fl *fileLower) lowerConstMapRead(e *syntax.IndexExpr, g *constMapGen) synt
 	fl.wrapSpan[out] = span{start: mStart, end: rbrack + 1}
 	fl.wrapOwner[out] = id
 	return out
+}
+
+type constMapTextRef struct {
+	ref      types2.LogosCtConstMapRef
+	portable string
+}
+
+type constMapFragmentMark struct {
+	offset int
+	text   constMapTextRef
+}
+
+func (fl *fileLower) constMapRef(pos syntax.Pos, g *constMapGen, role types2.LogosCtConstMapRole) (*syntax.Name, string) {
+	var portable string
+	switch role {
+	case types2.LogosCtMapLookup:
+		portable = g.lookupName()
+	case types2.LogosCtMapMaterialize:
+		portable = g.mapName()
+	case types2.LogosCtMapIterate:
+		portable = g.allName()
+	default:
+		panic("invalid imported const map helper role")
+	}
+	id := nameOf(pos, portable)
+	if g.owner == nil {
+		return id, portable
+	}
+	if fl.constMapMarks == nil {
+		fl.constMapMarks = make(map[string]constMapTextRef)
+	}
+	ref := types2.LogosCtConstMapRef{Path: g.owner.Pkg().Path(), Name: g.owner.Name(), Role: role}
+	mark := fmt.Sprintf("\x00constmap:%d\x00", len(fl.constMapMarks))
+	fl.constMapMarks[mark] = constMapTextRef{ref: ref, portable: portable}
+	fl.registerConstMapUse(id, ref)
+	return id, mark
+}
+
+func (fl *fileLower) registerConstMapUse(id *syntax.Name, ref types2.LogosCtConstMapRef) {
+	info := fl.pkg.info
+	if info.LogosCtConstMapUses == nil {
+		info.LogosCtConstMapUses = make(map[*syntax.Name]types2.LogosCtConstMapRef)
+	}
+	info.LogosCtConstMapUses[id] = ref
+}
+
+func (fl *fileLower) expandConstMapFragment(src string) (string, []constMapFragmentMark) {
+	if len(fl.constMapMarks) == 0 || !strings.ContainsRune(src, 0) {
+		return src, nil
+	}
+	var marks []constMapFragmentMark
+	var out strings.Builder
+	copied, scan := 0, 0
+	for scan < len(src) {
+		open := strings.IndexByte(src[scan:], 0)
+		if open < 0 {
+			break
+		}
+		open += scan
+		close := strings.IndexByte(src[open+1:], 0)
+		if close < 0 {
+			break
+		}
+		close += open + 1
+		scan = close + 1
+		if ref, ok := fl.constMapMarks[src[open:scan]]; ok {
+			out.WriteString(src[copied:open])
+			marks = append(marks, constMapFragmentMark{offset: out.Len(), text: ref})
+			out.WriteString(ref.portable)
+			copied = scan
+		}
+	}
+	if len(marks) == 0 {
+		return src, nil
+	}
+	out.WriteString(src[copied:])
+	return out.String(), marks
+}
+
+func (fl *fileLower) bindConstMapFragment(root syntax.Node, src string, marks []constMapFragmentMark) {
+	if len(marks) == 0 {
+		return
+	}
+	offsets := make(map[int]constMapTextRef, len(marks))
+	for _, mark := range marks {
+		offsets[mark.offset] = mark.text
+	}
+	starts := lineStarts([]byte(src))
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		id, ok := n.(*syntax.Name)
+		if !ok || len(offsets) == 0 {
+			return len(offsets) != 0
+		}
+		pos := id.Pos()
+		if pos.Line() == 0 || pos.Col() == 0 || int(pos.Line()) > len(starts) {
+			return true
+		}
+		off := starts[pos.Line()-1] + int(pos.Col()) - 1
+		if text, ok := offsets[off]; ok {
+			if id.Value != text.portable {
+				base.Fatalf("logos: malformed generated const map helper at %s", pos.String())
+			}
+			fl.registerConstMapUse(id, text.ref)
+			delete(offsets, off)
+		}
+		return true
+	})
+	if len(offsets) != 0 {
+		base.Fatalf("logos: reparsed fragment lost a generated const map helper reference")
+	}
+}
+
+func (fl *fileLower) finishConstMapEjectText() {
+	if len(fl.constMapMarks) == 0 {
+		return
+	}
+	lookup := func(mark string) (otext, bool) {
+		if ref, ok := fl.constMapMarks[mark]; ok {
+			return gen(ref.portable), true
+		}
+		return otext{}, false
+	}
+	for i := range fl.splices {
+		sp := &fl.splices[i]
+		text := substNul(otext{s: sp.text, chunks: sp.chunks}, lookup)
+		sp.text, sp.chunks = text.s, text.chunks
+	}
+}
+
+func (w ctWalker) ctConstMapExpr(e syntax.Expr) (syntax.Expr, []syntax.Stmt, bool) {
+	switch n := e.(type) {
+	case *syntax.IndexExpr:
+		if !w.fl.isMapRead(n) {
+			break
+		}
+		g, ok := w.ctMapUse(n.X)
+		if !ok {
+			break
+		}
+		m := w.ctOptionMap(n.X)
+		if m == nil {
+			w.reject(n.X, "missing checked const map type")
+			return e, nil, true
+		}
+		if !g.valid() {
+			return e, nil, true
+		}
+		key, pre := w.optionOperand(n.Index, m.Key())
+		pos := n.Pos()
+		lookup := callOf(pos, w.ctMapHelper(pos, g, types2.LogosCtMapLookup), []syntax.Expr{key})
+		t := w.fl.optType(n)
+		if opt := w.fl.asOption(t); opt != nil && !types2.Identical(t, m.Elem()) {
+			wrap := "Opt"
+			if types2.LogosOptionIsBare(opt.Elem) {
+				wrap = "Bare"
+			}
+			return callOf(pos, w.fl.ctPkgSelector(pos, rtImportPath, wrap), []syntax.Expr{lookup}), pre, true
+		}
+		return lookup, pre, true
+	case *syntax.CallExpr:
+		if len(n.ArgList) != 1 {
+			break
+		}
+		fn, _ := syntax.Unparen(n.Fun).(*syntax.Name)
+		if w.fl.pkg.info.Uses[fn] != types2.Universe.Lookup("len") {
+			break
+		}
+		if w.ctOptionMap(n.ArgList[0]) != nil {
+			if val, ok := typeConst(w.fl.pkg.info, n); ok {
+				return litOf(n.Pos(), val.ExactString(), syntax.IntLit), nil, true
+			}
+		}
+		if g, ok := w.ctMapUse(n.ArgList[0]); ok {
+			if count, ok := w.ctMapCount(g); ok {
+				return ctConstNumber(n.Pos(), uint64(count)), nil, true
+			}
+			w.reject(e, "missing checked const map count")
+			return e, nil, true
+		}
+	case *syntax.Name, *syntax.SelectorExpr:
+		if g, ok := w.ctMapUse(e); ok {
+			if !g.valid() {
+				return e, nil, true
+			}
+			pos := e.Pos()
+			var value syntax.Expr = callOf(pos, w.ctMapHelper(pos, g, types2.LogosCtMapMaterialize), nil)
+			t := constMapElem(w.fl.pkg.info.TypeOf(e))
+			if _, named := types2.Unalias(t).(*types2.Named); named {
+				value = callOf(pos, w.fl.ctTypeExpr(pos, t), []syntax.Expr{value})
+			}
+			return value, nil, true
+		}
+	}
+	return nil, nil, false
+}
+
+func (w ctWalker) ctConstMapRange(s *syntax.ForStmt) ([]syntax.Stmt, bool) {
+	rc, ok := s.Init.(*syntax.RangeClause)
+	if !ok {
+		return nil, false
+	}
+	pos := rc.X.Pos()
+	b := ctMapSyntax{w, pos}
+	if g, ok := w.ctMapUse(rc.X); ok {
+		switch {
+		case !g.valid():
+		case g.owner != nil || g.local.bearing:
+			rc.X = w.ctMapHelper(pos, g, types2.LogosCtMapIterate)
+		default:
+			rc.X = callOf(pos, b.rt("ConstAll"), []syntax.Expr{b.name(g.local.sortedName())})
+		}
+		return nil, true
+	}
+	mt, ok := w.fl.rangedConstMap(rc.X)
+	if !ok {
+		return nil, false
+	}
+	x, pre := w.expr(rc.X)
+	entry := "SortedAll"
+	args := []syntax.Expr{x}
+	if b.dynamicOrder(mt.Key()) {
+		entry = "SortedAllDynamic"
+	} else {
+		compare := b.compare(mt.Key())
+		if compare == nil {
+			compare = w.fl.ctBuiltin(pos, "nil")
+		}
+		args = append(args, compare)
+	}
+	rc.X = callOf(pos, b.rt(entry), args)
+	return pre, true
+}
+
+type ctMapAccess struct {
+	local *constMapGen
+	owner types2.Object
+}
+
+func (g ctMapAccess) valid() bool { return g.local != nil || g.owner != nil }
+
+func (w ctWalker) ctMapHelper(pos syntax.Pos, g ctMapAccess, role types2.LogosCtConstMapRole) *syntax.Name {
+	if g.owner != nil {
+		id := nameOf(pos, "_logos_ct_map")
+		if w.fl.ct.constMapUses == nil {
+			w.fl.ct.constMapUses = make(map[*syntax.Name]types2.LogosCtConstMapRef)
+		}
+		w.fl.ct.constMapUses[id] = types2.LogosCtConstMapRef{Path: g.owner.Pkg().Path(), Name: g.owner.Name(), Role: role}
+		return id
+	}
+	switch role {
+	case types2.LogosCtMapLookup:
+		return nameOf(pos, g.local.lookupName())
+	case types2.LogosCtMapMaterialize:
+		return nameOf(pos, g.local.mapName())
+	case types2.LogosCtMapIterate:
+		return nameOf(pos, g.local.allName())
+	}
+	panic("invalid comptime const map helper role")
+}
+
+func (ct *ctLowerContext) bindConstMapUses(conf *types2.Config) error {
+	for id, ref := range ct.constMapUses {
+		var helper *types2.Func
+		if conf.LogosCtImportConstMap != nil {
+			if row, ok := conf.LogosCtImportConstMap(ref.Path, ref.Name); ok {
+				helper = row.Helper(ref.Role)
+			}
+		}
+		if helper == nil {
+			return fmt.Errorf("%s: missing owner const map helper for %s.%s", id.Pos(), ref.Path, ref.Name)
+		}
+		ct.bindUse(id, helper)
+	}
+	return nil
+}
+
+func (w ctWalker) ctMapCount(g ctMapAccess) (int, bool) {
+	if g.local != nil {
+		return g.local.nkeys, true
+	}
+	info := w.fl.pkg.info
+	if obj, ok := g.owner.(*types2.Const); ok {
+		if val, ok := info.LogosCTFE[obj]; ok {
+			keys, _ := val.MapEntries()
+			return len(keys), true
+		}
+	}
+	if g.owner != nil && info.LogosCtImportConstMap != nil {
+		row, ok := info.LogosCtImportConstMap(g.owner.Pkg().Path(), g.owner.Name())
+		return row.Count, ok
+	}
+	return 0, false
+}
+
+func (w ctWalker) ctMapUse(e syntax.Expr) (ctMapAccess, bool) {
+	info := w.fl.pkg.info
+	var obj types2.Object
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.Name:
+		obj = info.Uses[e]
+	case *syntax.SelectorExpr:
+		if info.Selections[e] == nil {
+			obj = info.Uses[e.Sel]
+		}
+	}
+	switch obj := obj.(type) {
+	case *types2.Const:
+		if _, isMap := compositeUnderlying(obj.Type()).(*types2.Map); !isMap {
+			break
+		}
+		if obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() {
+			return ctMapAccess{owner: obj}, true
+		}
+		if v, ok := info.LogosCTFE[obj]; ok && compositeIsBare(v, obj.Type()) {
+			return ctMapAccess{local: w.ctMapConstant(obj, v, e.Pos())}, true
+		}
+	case *types2.Var:
+		view := constAsView(obj.Type())
+		if obj.Pkg() == nil || obj.IsField() || view == nil || !view.ConstMap {
+			break
+		}
+		if obj.Parent() == obj.Pkg().Scope() {
+			return ctMapAccess{owner: obj}, true
+		}
+		if info.LogosCtImportConstMap != nil {
+			if row, ok := info.LogosCtImportConstMap(obj.Pkg().Path(), obj.Name()); ok && row.Binding == obj {
+				return ctMapAccess{owner: obj}, true
+			}
+		}
+	}
+	return ctMapAccess{}, false
+}
+
+func (w ctWalker) ctMapConstant(obj *types2.Const, v ctfe.Value, pos syntax.Pos) *constMapGen {
+	if g := w.fl.ct.constMaps[obj]; g != nil {
+		return g
+	}
+	mapT := constMapElem(obj.Type())
+	mt, ok := compositeUnderlying(mapT).(*types2.Map)
+	if !ok {
+		if w.fl.ct.err == nil {
+			w.fl.ct.err = fmt.Errorf("%s: expected checked const map type for %s", pos, obj.Name())
+		}
+		return nil
+	}
+	keys, vals := v.MapEntries()
+	g := &constMapGen{name: w.ctConstName(), nkeys: len(keys), bearing: constMapBearing(vals)}
+	m := ctMapBuilder{
+		ctMapSyntax: ctMapSyntax{w, pos}, constMapGen: g, mapT: mapT, mt: mt,
+		value: v, keys: keys, vals: vals,
+	}
+	decls, err := m.declarations()
+	if err != nil {
+		if w.fl.ct.err == nil {
+			w.fl.ct.err = fmt.Errorf("%s: const map %s: %w", pos, obj.Name(), err)
+		}
+		return nil
+	}
+	if w.fl.ct.constMaps == nil {
+		w.fl.ct.constMaps = make(map[types2.Object]*constMapGen)
+	}
+	w.fl.ct.constMaps[obj] = g
+	w.fl.constDecls = append(w.fl.constDecls, decls...)
+	w.fl.markConstMapTables(decls, g)
+	return g
+}
+
+type ctMapSyntax struct {
+	w   ctWalker
+	pos syntax.Pos
+}
+
+func (b ctMapSyntax) name(s string) *syntax.Name { return nameOf(b.pos, s) }
+
+func (b ctMapSyntax) rt(s string) *syntax.SelectorExpr {
+	return b.w.fl.ctPkgSelector(b.pos, rtImportPath, s)
+}
+
+func (b ctMapSyntax) typ(t types2.Type) syntax.Expr { return b.w.fl.ctTypeExpr(b.pos, t) }
+
+func (b ctMapSyntax) number(n uint64) syntax.Expr { return ctConstNumber(b.pos, n) }
+
+func (b ctMapSyntax) field(name string, typ syntax.Expr) *syntax.Field {
+	f := at(&syntax.Field{Type: typ}, b.pos)
+	if name != "" {
+		f.Name = b.name(name)
+	}
+	return f
+}
+
+func (b ctMapSyntax) generic(fn syntax.Expr, args ...syntax.Expr) syntax.Expr {
+	return at(&syntax.IndexExpr{X: fn, Index: listOf(b.pos, args)}, b.pos)
+}
+
+func (b ctMapSyntax) literal(typ syntax.Expr, elems ...syntax.Expr) *syntax.CompositeLit {
+	return at(&syntax.CompositeLit{Type: typ, ElemList: elems, Rbrace: b.pos}, b.pos)
+}
+
+func (b ctMapSyntax) pair(key, val syntax.Expr) *syntax.KeyValueExpr {
+	return at(&syntax.KeyValueExpr{Key: key, Value: val}, b.pos)
+}
+
+func (b ctMapSyntax) result(exprs ...syntax.Expr) *syntax.ReturnStmt { return returnOf(b.pos, exprs) }
+
+func (b ctMapSyntax) do(fn syntax.Expr, args ...syntax.Expr) *syntax.CallExpr {
+	return callOf(b.pos, fn, args)
+}
+
+func (b ctMapSyntax) fnType(params, results []*syntax.Field) *syntax.FuncType {
+	return at(&syntax.FuncType{ParamList: params, ResultList: results}, b.pos)
+}
+
+func (b ctMapSyntax) switchOn(tag syntax.Expr, cases []*syntax.CaseClause) *syntax.SwitchStmt {
+	return at(&syntax.SwitchStmt{Tag: tag, Body: cases, Rbrace: b.pos}, b.pos)
+}
+
+func (b ctMapSyntax) choice(value syntax.Expr, body ...syntax.Stmt) *syntax.CaseClause {
+	return at(&syntax.CaseClause{Cases: value, Body: body, Colon: b.pos}, b.pos)
+}
+
+func (b ctMapSyntax) variable(name string, typ, value syntax.Expr) *syntax.VarDecl {
+	return at(&syntax.VarDecl{NameList: []*syntax.Name{b.name(name)}, Type: typ, Values: value}, b.pos)
+}
+
+func (b ctMapSyntax) decl(name string, ft *syntax.FuncType, body ...syntax.Stmt) syntax.Decl {
+	return at(&syntax.FuncDecl{Name: b.name(name), Type: ft, Body: blockOf(b.pos, body)}, b.pos)
+}
+
+func (b ctMapSyntax) local(v *syntax.VarDecl) *syntax.DeclStmt {
+	return at(&syntax.DeclStmt{DeclList: []syntax.Decl{v}}, b.pos)
+}
+
+type ctMapBuilder struct {
+	ctMapSyntax
+	*constMapGen
+	mapT  types2.Type
+	mt    *types2.Map
+	value ctfe.Value
+	keys  []ctfe.Value
+	vals  []ctfe.Value
+}
+
+func (m ctMapBuilder) name(s string) *syntax.Name { return m.ctMapSyntax.name(s) }
+
+func (m ctMapBuilder) declarations() ([]syntax.Decl, error) {
+	var lookup syntax.Decl
+	var table syntax.Decl
+	var err error
+	if m.nkeys <= constMapSwitchMax {
+		lookup, err = m.switchLookup()
+	} else {
+		table, lookup, err = m.tableLookup()
+	}
+	if err != nil {
+		return nil, err
+	}
+	sorted, err := m.sorted()
+	if err != nil {
+		return nil, err
+	}
+	build, err := m.materialize()
+	if err != nil {
+		return nil, err
+	}
+	decls := append(build, lookup, sorted)
+	if table != nil {
+		decls = append(decls, table)
+	}
+	if m.bearing {
+		val, err := m.values()
+		if err != nil {
+			return nil, err
+		}
+		decls = append(decls, val, m.all())
+	}
+	return decls, nil
+}
+
+func (m ctMapBuilder) materialize() ([]syntax.Decl, error) {
+	value, err := m.w.ctConstValue(m.value, m.mapT, m.pos)
+	if err != nil {
+		return nil, err
+	}
+	memo := m.generic(m.rt("ConstMapMaterialization"), m.typ(m.mapT), m.typ(m.mt.Key()), m.typ(m.mt.Elem()))
+	mapResult := func() *syntax.FuncType { return m.fnType(nil, []*syntax.Field{m.field("", m.typ(m.mapT))}) }
+	get := m.do(selOf(m.pos, m.name(m.matName()), "Get"), m.name(m.buildName()))
+	return []syntax.Decl{
+		m.variable(m.matName(), memo, nil),
+		m.decl(m.buildName(), mapResult(), m.result(value)),
+		m.decl(m.mapName(), mapResult(), m.result(get)),
+	}, nil
+}
+
+func (m ctMapBuilder) valueSlotType() syntax.Expr {
+	if m.bearing {
+		return m.w.fl.ctBuiltin(m.pos, "uint32")
+	}
+	return m.typ(m.mt.Elem())
+}
+
+func (m ctMapBuilder) valueSlot(i int) (syntax.Expr, error) {
+	if m.bearing {
+		return m.number(uint64(i)), nil
+	}
+	return m.w.ctConstValue(m.vals[i], m.mt.Elem(), m.pos)
+}
+
+func (m ctMapBuilder) entry(i int, fields ...syntax.Expr) (syntax.Expr, error) {
+	key, err := m.w.ctConstValue(m.keys[i], m.mt.Key(), m.pos)
+	if err != nil {
+		return nil, err
+	}
+	val, err := m.valueSlot(i)
+	if err != nil {
+		return nil, err
+	}
+	elems := make([]syntax.Expr, 0, 2+len(fields))
+	elems = append(elems, m.pair(m.name("Key"), key), m.pair(m.name("Val"), val))
+	elems = append(elems, fields...)
+	lit := m.literal(nil, elems...)
+	lit.NKeys = len(elems)
+	return lit, nil
+}
+
+func (m ctMapBuilder) sorted() (syntax.Decl, error) {
+	order := make([]int, m.nkeys)
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortFunc(order, func(a, b int) int { return ctfe.CompareKeys(m.keys[a], m.keys[b]) })
+	elems := make([]syntax.Expr, m.nkeys)
+	for j, i := range order {
+		e, err := m.entry(i)
+		if err != nil {
+			return nil, err
+		}
+		elems[j] = e
+	}
+	entry := m.generic(m.rt("ConstEntry"), m.typ(m.mt.Key()), m.valueSlotType())
+	return m.variable(m.sortedName(), nil, m.literal(at(&syntax.SliceType{Elem: entry}, m.pos), elems...)), nil
+}
+
+func (m ctMapBuilder) lookupType() *syntax.FuncType {
+	params := []*syntax.Field{m.field("_logos_key", m.typ(m.mt.Key()))}
+	results := []*syntax.Field{m.field("", m.typ(m.mt.Elem())), m.field("", m.w.fl.ctBuiltin(m.pos, "bool"))}
+	return m.fnType(params, results)
+}
+
+func (m ctMapBuilder) switchLookup() (syntax.Decl, error) {
+	cases := make([]*syntax.CaseClause, m.nkeys)
+	for i := range cases {
+		key, err := m.w.ctConstValue(m.keys[i], m.mt.Key(), m.pos)
+		if err != nil {
+			return nil, err
+		}
+		val, err := m.valueSlot(i)
+		if err != nil {
+			return nil, err
+		}
+		if m.bearing {
+			val = m.do(m.name(m.valName()), val)
+		}
+		cases[i] = m.choice(key, m.result(val, m.w.fl.ctBuiltin(m.pos, "true")))
+	}
+	return m.decl(m.lookupName(), m.lookupType(),
+		m.switchOn(m.name("_logos_key"), cases),
+		m.local(m.variable("_logos_zero", m.typ(m.mt.Elem()), nil)),
+		m.result(m.name("_logos_zero"), m.w.fl.ctBuiltin(m.pos, "false"))), nil
+}
+
+func (m ctMapBuilder) tableLookup() (syntax.Decl, syntax.Decl, error) {
+	entries := make([]constMapKey, m.nkeys)
+	for i, key := range m.keys {
+		entries[i] = constMapKey{hash: constKeyHash(key), canon: constKeyCanon(key)}
+	}
+	layout, err := buildConstMap(entries, constMapSeedBudget(m.pos))
+	if err != nil {
+		return nil, nil, err
+	}
+	buckets := make([]syntax.Expr, len(layout.buckets))
+	for i, bk := range layout.buckets {
+		e := m.literal(nil, m.pair(m.name("Off"), m.number(uint64(bk.off))),
+			m.pair(m.name("Size"), m.number(uint64(bk.size))), m.pair(m.name("Seed"), m.number(bk.seed)))
+		e.NKeys = 3
+		buckets[i] = e
+	}
+	slots := make([]syntax.Expr, len(layout.slots))
+	for i, k := range layout.slots {
+		if k < 0 {
+			slots[i] = m.literal(nil)
+			continue
+		}
+		occ := m.pair(m.name("Occ"), m.w.fl.ctBuiltin(m.pos, "true"))
+		slots[i], err = m.entry(k, occ)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	kt := m.mt.Key()
+	bt := at(&syntax.SliceType{Elem: m.rt("ConstBucket")}, m.pos)
+	st := at(&syntax.SliceType{Elem: m.generic(m.rt("ConstSlot"), m.typ(kt), m.valueSlotType())}, m.pos)
+	tt := m.generic(m.rt("ConstTable"), m.typ(kt), m.valueSlotType())
+	lit := m.literal(tt, m.pair(m.name("Salt"), m.number(layout.salt)),
+		m.pair(m.name("Buckets"), m.literal(bt, buckets...)), m.pair(m.name("Slots"), m.literal(st, slots...)))
+	lit.NKeys = 3
+	table := m.variable(m.tabName(), nil, lit)
+	hash := m.hashKey(kt, m.name("_logos_key"))
+	lookup := m.do(selOf(m.pos, m.name(m.tabName()), "Get"), hash, m.name("_logos_key"))
+	ft := m.lookupType()
+	if !m.bearing {
+		return table, m.decl(m.lookupName(), ft, m.result(lookup)), nil
+	}
+	init := defineOf(m.pos, []syntax.Expr{m.name("_logos_idx"), m.name("_logos_ok")}, []syntax.Expr{lookup})
+	hit := ifOf(m.pos, init, m.name("_logos_ok"), []syntax.Stmt{
+		m.result(m.do(m.name(m.valName()), m.name("_logos_idx")), m.w.fl.ctBuiltin(m.pos, "true")),
+	})
+	return table, m.decl(m.lookupName(), ft, hit,
+		m.local(m.variable("_logos_zero", m.typ(m.mt.Elem()), nil)),
+		m.result(m.name("_logos_zero"), m.w.fl.ctBuiltin(m.pos, "false"))), nil
+}
+
+func (m ctMapBuilder) values() (syntax.Decl, error) {
+	cases := make([]*syntax.CaseClause, m.nkeys)
+	for i := range cases {
+		val, err := m.w.ctConstValue(m.vals[i], m.mt.Elem(), m.pos)
+		if err != nil {
+			return nil, err
+		}
+		cases[i] = m.choice(m.number(uint64(i)), m.result(val))
+	}
+	params := []*syntax.Field{m.field("_logos_idx", m.w.fl.ctBuiltin(m.pos, "uint32"))}
+	results := []*syntax.Field{m.field("", m.typ(m.mt.Elem()))}
+	return m.decl(m.valName(), m.fnType(params, results), m.switchOn(m.name("_logos_idx"), cases),
+		m.local(m.variable("_logos_zero", m.typ(m.mt.Elem()), nil)), m.result(m.name("_logos_zero"))), nil
+}
+
+func (m ctMapBuilder) all() syntax.Decl {
+	yield := m.fnType([]*syntax.Field{m.field("", m.typ(m.mt.Key())), m.field("", m.typ(m.mt.Elem()))},
+		[]*syntax.Field{m.field("", m.w.fl.ctBuiltin(m.pos, "bool"))})
+	ft := m.fnType([]*syntax.Field{m.field("_logos_yield", yield)}, nil)
+	key := selOf(m.pos, m.name("_logos_e"), "Key")
+	val := m.do(m.name(m.valName()), selOf(m.pos, m.name("_logos_e"), "Val"))
+	keep := m.do(m.name("_logos_yield"), key, val)
+	stop := ifOf(m.pos, nil, at(&syntax.Operation{Op: syntax.Not, X: keep}, m.pos), []syntax.Stmt{m.result()})
+	rc := at(&syntax.RangeClause{
+		Lhs: listOf(m.pos, []syntax.Expr{m.name("_"), m.name("_logos_e")}),
+		Def: true,
+		X:   m.name(m.sortedName()),
+	}, m.pos)
+	loop := at(&syntax.ForStmt{Init: rc, Body: blockOf(m.pos, []syntax.Stmt{stop})}, m.pos)
+	return m.decl(m.allName(), ft, loop)
+}
+
+func (b ctMapSyntax) selector(x syntax.Expr, field *types2.Var) syntax.Expr {
+	s := selOf(b.pos, x, field.Name())
+	if !field.Exported() {
+		b.w.fl.ct.bindOwnedSelector(s)
+	}
+	return s
+}
+
+func (b ctMapSyntax) dynamicOrder(t types2.Type) bool {
+	if b.w.fl.asOption(t) != nil {
+		return true
+	}
+	switch u := compositeUnderlying(t).(type) {
+	case *types2.Interface:
+		return true
+	case *types2.Struct:
+		for i := range u.NumFields() {
+			f := u.Field(i)
+			if f.Name() != "_" && b.dynamicMemberOrder(f.Type()) {
+				return true
+			}
+		}
+	case *types2.Array:
+		return b.dynamicMemberOrder(u.Elem())
+	}
+	return false
+}
+
+func (b ctMapSyntax) dynamicMemberOrder(t types2.Type) bool {
+	if _, ok := compositeUnderlying(t).(*types2.Interface); ok {
+		return false
+	}
+	return b.dynamicOrder(t)
+}
+
+func (b ctMapSyntax) compare(t types2.Type) syntax.Expr {
+	switch u := compositeUnderlying(t).(type) {
+	case *types2.Basic:
+		switch basicSortClass(u) {
+		case sortOrdered:
+			return b.generic(b.rt("CompareOrdered"), b.typ(t))
+		case sortBool:
+			return b.generic(b.rt("CompareBool"), b.typ(t))
+		case sortComplex:
+			return b.generic(b.rt("CompareComplex"), b.typ(t))
+		}
+	case *types2.Struct:
+		var body []syntax.Stmt
+		for i := range u.NumFields() {
+			f := u.Field(i)
+			if f.Name() == "_" {
+				continue
+			}
+			if cmp := b.compare(f.Type()); cmp != nil {
+				body = append(body, b.compareStep(cmp, b.selector(b.name(sortOrderLeft), f), b.selector(b.name(sortOrderRight), f)))
+			}
+		}
+		if len(body) != 0 {
+			return b.compareFunc(t, body)
+		}
+	case *types2.Array:
+		if cmp := b.compare(u.Elem()); cmp != nil {
+			index := func(name string) syntax.Expr {
+				return at(&syntax.IndexExpr{X: b.name(name), Index: b.name(sortOrderIndex)}, b.pos)
+			}
+			body := []syntax.Stmt{b.compareStep(cmp, index(sortOrderLeft), index(sortOrderRight))}
+			rng := at(&syntax.RangeClause{Lhs: b.name(sortOrderIndex), Def: true, X: b.name(sortOrderLeft)}, b.pos)
+			return b.compareFunc(t, []syntax.Stmt{at(&syntax.ForStmt{Init: rng, Body: blockOf(b.pos, body)}, b.pos)})
+		}
+	}
+	return nil
+}
+
+func (b ctMapSyntax) compareStep(cmp, left, right syntax.Expr) syntax.Stmt {
+	init := defineOf(b.pos, []syntax.Expr{b.name(sortOrderDiff)}, []syntax.Expr{b.do(cmp, left, right)})
+	ne := at(&syntax.Operation{Op: syntax.Neq, X: b.name(sortOrderDiff), Y: b.number(0)}, b.pos)
+	return ifOf(b.pos, init, ne, []syntax.Stmt{b.result(b.name(sortOrderDiff))})
+}
+
+func (b ctMapSyntax) compareFunc(t types2.Type, body []syntax.Stmt) syntax.Expr {
+	params := []*syntax.Field{b.field(sortOrderLeft, b.typ(t)), b.field(sortOrderRight, b.typ(t))}
+	results := []*syntax.Field{b.field("", b.w.fl.ctBuiltin(b.pos, "int"))}
+	return at(&syntax.FuncLit{Type: b.fnType(params, results), Body: blockOf(b.pos, append(body, b.result(b.number(0))))}, b.pos)
+}
+
+func (b ctMapSyntax) hashKey(t types2.Type, x syntax.Expr) syntax.Expr {
+	switch u := compositeUnderlying(t).(type) {
+	case *types2.Basic:
+		convert := func(name string, arg syntax.Expr) syntax.Expr {
+			return b.do(b.w.fl.ctBuiltin(b.pos, name), arg)
+		}
+		switch info := u.Info(); {
+		case info&types2.IsString != 0:
+			return b.do(b.rt("HashString"), convert("string", x))
+		case info&types2.IsBoolean != 0:
+			return b.do(b.rt("HashBool"), convert("bool", x))
+		case info&types2.IsInteger != 0:
+			return b.do(b.rt("HashUint64"), convert("uint64", x))
+		case info&types2.IsFloat != 0:
+			return b.do(b.rt("HashFloat64"), convert("float64", x))
+		case info&types2.IsComplex != 0:
+			realPart := b.do(b.rt("HashFloat64"), convert("float64", convert("real", b.name(constMapHashRecv))))
+			imagPart := b.do(b.rt("HashFloat64"), convert("float64", convert("imag", b.name(constMapHashRecv))))
+			ft := b.hashType(t)
+			combine := b.do(b.rt("HashCombine"), realPart, imagPart)
+			return b.do(at(&syntax.FuncLit{Type: ft, Body: blockOf(b.pos, []syntax.Stmt{b.result(combine)})}, b.pos), x)
+		}
+	case *types2.Struct:
+		body := make([]syntax.Stmt, 0, u.NumFields()+2)
+		for i := range u.NumFields() {
+			f := u.Field(i)
+			if f.Name() != "_" {
+				body = append(body, b.hashFold(f.Type(), b.selector(b.name(constMapHashRecv), f)))
+			}
+		}
+		return b.hashAggregate(t, x, body)
+	case *types2.Array:
+		rng := at(&syntax.RangeClause{
+			Lhs: listOf(b.pos, []syntax.Expr{b.name("_"), b.name("_logos_e")}),
+			Def: true,
+			X:   b.name(constMapHashRecv),
+		}, b.pos)
+		body := blockOf(b.pos, []syntax.Stmt{b.hashFold(u.Elem(), b.name("_logos_e"))})
+		return b.hashAggregate(t, x, []syntax.Stmt{at(&syntax.ForStmt{Init: rng, Body: body}, b.pos)})
+	}
+	b.w.reject(x, fmt.Sprintf("cannot hash checked const map key type %s", t))
+	return x
+}
+
+func (b ctMapSyntax) hashType(t types2.Type) *syntax.FuncType {
+	params := []*syntax.Field{b.field(constMapHashRecv, b.typ(t))}
+	results := []*syntax.Field{b.field("", b.w.fl.ctBuiltin(b.pos, "uint64"))}
+	return b.fnType(params, results)
+}
+
+func (b ctMapSyntax) hashFold(t types2.Type, value syntax.Expr) syntax.Stmt {
+	combine := b.do(b.rt("HashCombine"), b.name(constMapHashAcc), b.hashKey(t, value))
+	return assignOf(b.pos, []syntax.Expr{b.name(constMapHashAcc)}, []syntax.Expr{combine})
+}
+
+func (b ctMapSyntax) hashAggregate(t types2.Type, x syntax.Expr, steps []syntax.Stmt) syntax.Expr {
+	acc := b.local(b.variable(constMapHashAcc, b.w.fl.ctBuiltin(b.pos, "uint64"), nil))
+	body := []syntax.Stmt{acc}
+	body = append(body, steps...)
+	body = append(body, b.result(b.name(constMapHashAcc)))
+	lit := at(&syntax.FuncLit{Type: b.hashType(t), Body: blockOf(b.pos, body)}, b.pos)
+	return b.do(lit, x)
 }

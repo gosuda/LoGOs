@@ -1,0 +1,123 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# Ordinary generics call a later private generic with a standalone const
+# switch. The calls come through a const for, directly, and through an
+# exported wrapper in another package. The imported call distinguishes an
+# alias from a defined type with the same underlying type. Native and
+# ejected builds must print the same results.
+
+cd m
+logos run .
+stdout '^forwarded 2$'
+stdout '^direct 2 1$'
+stdout '^plain 2$'
+stdout '^imported exact underlying$'
+cp stdout expected.txt
+logos eject -o out
+exists out/main.go
+exists out/version/version.go
+cd out
+go run .
+stdout '^forwarded 2$'
+stdout '^direct 2 1$'
+stdout '^plain 2$'
+stdout '^imported exact underlying$'
+cmp stdout ../expected.txt
+exists $UPROOT1274/bin/go
+exec env -u GOROOT $UPROOT1274/bin/go run .
+stdout '^forwarded 2$'
+stdout '^direct 2 1$'
+stdout '^plain 2$'
+stdout '^imported exact underlying$'
+cmp stdout ../expected.txt
+cd ..
+
+-- m/go.mod --
+module example.com/ctforwarded
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+
+	"example.com/ctforwarded/version"
+)
+
+type Row struct {
+	ID  int64
+	Ver int32
+}
+
+type Table struct {
+	ver int
+}
+
+type ExactVersion = int64
+type NamedVersion int64
+
+func mapCol[E any, K comparable, F any](t *Table, name string, project func(*E) *F) {
+	if name == "Ver" {
+		t.ver = versionCol[E, F](project)
+	}
+}
+
+func versionCol[E any, F any](project func(*E) *F) int {
+	const switch F {
+	case int64:
+		return 1
+	case int32:
+		return 2
+	}
+	return 0
+}
+
+func mapTable[E any, K comparable](t *Table) {
+	const if comptime.IsStruct[E]() {
+		const for _, f := range comptime.Fields[E]() {
+			mapCol[E, K, f.Type](t, f.Name, func(e *E) *f.Type { return &e.[f] })
+		}
+	}
+}
+
+func probeCol[E any, K comparable, F any](t *Table, project func(*E) *F) {
+	t.ver = versionCol[E, F](project)
+}
+
+func main() {
+	table := &Table{}
+	mapTable[Row, int64](table)
+	fmt.Println("forwarded", table.ver)
+
+	d32 := &Table{}
+	probeCol[Row, int64, int32](d32, func(e *Row) *int32 { return &e.Ver })
+	d64 := &Table{}
+	probeCol[Row, int64, int64](d64, func(e *Row) *int64 { return &e.ID })
+	fmt.Println("direct", d32.ver, d64.ver)
+
+	plain := versionCol[Row, int32](func(e *Row) *int32 { return &e.Ver })
+	fmt.Println("plain", plain)
+
+	fmt.Println("imported", version.Kind[ExactVersion](), version.Kind[NamedVersion]())
+}
+
+-- m/version/version.lgo --
+package version
+
+func Kind[T any]() string {
+	return kindOf[T]()
+}
+
+func kindOf[T any]() string {
+	const switch T {
+	case int64:
+		return "exact"
+	case ~int64:
+		return "underlying"
+	}
+	return "other"
+}

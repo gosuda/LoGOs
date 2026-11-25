@@ -115,10 +115,9 @@ func (fl *fileLower) materializeScalar(obj *types2.Const, v ctfe.Value, init syn
 	if err != nil {
 		return zero, false
 	}
-	text0 := renderExpr(lit0)
 	if !spellableMatType(obj.Type(), fl.pkg.tpkg) {
-		if r, ok := fl.ownedScalarBridge(obj, v, init, pos); ok {
-			return r, true
+		if native, eject, ok := fl.ownedScalarBridge(obj, init, lit0, pos); ok {
+			return ctfeResult{obj: obj, val: v, init: init, lit: native, text: renderExpr(eject)}, true
 		}
 		return zero, false
 	}
@@ -131,7 +130,7 @@ func (fl *fileLower) materializeScalar(obj *types2.Const, v ctfe.Value, init syn
 		return zero, false
 	}
 	conv := at(&syntax.CallExpr{Fun: te, ArgList: []syntax.Expr{lit0}}, pos)
-	return ctfeResult{obj: obj, val: v, init: init, lit: conv, text: spell + "(" + text0 + ")"}, true
+	return ctfeResult{obj: obj, val: v, init: init, lit: conv, text: spell + "(" + renderExpr(lit0) + ")"}, true
 }
 
 func (fl *fileLower) materializeComposite(obj *types2.Const, v ctfe.Value, init syntax.Expr, pos syntax.Pos) (ctfeResult, bool) {

@@ -1,0 +1,39 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+
+	"example.com/localidentity/capture"
+	"example.com/localidentity/probe"
+)
+
+type record struct {
+	Small uint8
+	Large uint64
+	Other uint8
+}
+
+func fields() ([3]int, [3]any) {
+	var sizes [3]int
+	var tokens [3]any
+	const for i, f := range comptime.Fields[record]() {
+		type slot struct{ Value f.Type }
+		sizes[i], tokens[i] = probe.Measure[slot](slot{})
+	}
+	return sizes, tokens
+}
+
+func main() {
+	small, smallStamp := capture.Measure[uint8]()
+	large, largeStamp := capture.Measure[uint64]()
+	_, smallAgain := capture.Measure[uint8]()
+	fmt.Println("captures", small, large, smallStamp == smallAgain, smallStamp != largeStamp)
+
+	sizes, slots := fields()
+	fmt.Println("fields", sizes, slots[0] != slots[2])
+}

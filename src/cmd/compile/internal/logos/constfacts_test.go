@@ -459,7 +459,7 @@ func (c *Counter) Bump() {
 	}
 	for _, kind := range []int{
 		len(got.Opts), len(got.Consts), len(got.Readonlys), len(got.Props),
-		len(got.Conforms), len(got.Comptimes), len(got.ConstFuncs),
+		len(got.Conforms), len(got.ConstFuncs),
 		len(got.Defaults), len(got.Locks), len(got.AllocFrees),
 	} {
 		if kind != 0 {

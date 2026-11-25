@@ -203,6 +203,10 @@ func (s http2ServerConfig) ErrorLog() *log.Logger          { return s.s.ErrorLog
 func (s http2ServerConfig) ReadTimeout() time.Duration     { return s.s.ReadTimeout }
 func (s http2ServerConfig) DisableClientPriority() bool    { return s.s.DisableClientPriority }
 
+func (s http2ServerConfig) ExtendedConnectEnabled() bool {
+	return s.s.h2ExtendedConnect.Load()
+}
+
 func (s http2ServerConfig) IdleTimeout() time.Duration {
 	if s.s.h2Config != nil {
 		return s.s.h2Config.IdleTimeout()

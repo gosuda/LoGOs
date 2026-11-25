@@ -1,0 +1,48 @@
+// run
+
+package main
+
+import "comptime"
+
+type withStop struct {
+	Before int
+	Stop   struct{}
+	After  int
+}
+
+type withoutStop struct {
+	Before int
+	Middle int
+	After  int
+}
+
+func visitUntilStruct(visited *string) string {
+	const for _, field := range comptime.Fields[withStop]() {
+		*visited += field.Name
+		const if comptime.IsStruct[field.Type]() {
+			return field.Name
+		}
+	}
+}
+
+func visitAllFields(visited *string) string {
+	const for _, field := range comptime.Fields[withoutStop]() {
+		*visited += field.Name
+		const if comptime.IsStruct[field.Type]() {
+			return field.Name
+		}
+	}
+	return "complete"
+}
+
+func main() {
+	visited := ""
+	if got := visitUntilStruct(&visited); got != "Stop" || visited != "BeforeStop" {
+		panic("early field return: result=" + got + ", visited=" + visited)
+	}
+
+	visited = ""
+	if got := visitAllFields(&visited); got != "complete" || visited != "BeforeMiddleAfter" {
+		panic("full field traversal: result=" + got + ", visited=" + visited)
+	}
+}

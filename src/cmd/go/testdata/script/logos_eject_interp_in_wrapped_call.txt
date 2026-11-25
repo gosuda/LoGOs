@@ -1,0 +1,121 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# An interpolated string or option default lowered inside a call the
+# MustNonNil wrapper covers must nest inside the wrapper, not overlap
+# it. The wrapped call stores a Go package's pointer result into a
+# declared non-nil location; the interpolation and option lowerings
+# run after the wrapper, so their splices land strictly inside the
+# wrapper span. The LoGOs-to-LoGOs calls are controls that take no
+# wrapper.
+
+cd m
+logos run .
+stdout '^webtest\.invalid Test invalid fault\.$'
+stdout '^webtest\.plain plain message$'
+stdout '^webtest\.plain fallback$'
+stdout '^reader invalid of 2$'
+stdout '^reader fallback$'
+cp stdout $WORK/native-stdout.txt
+
+logos eject -o out
+exists out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native-stdout.txt
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ..
+cd out
+go vet ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ..
+cd ..
+
+-- m/go.mod --
+module example.com/ejectwrap
+
+go 1.27
+
+-- m/lib/error.lgo --
+package lib
+
+type Kind uint8
+
+const (
+	Invalid Kind = iota + 1
+)
+
+func (k Kind) String() string {
+	if k == Invalid {
+		return "invalid"
+	}
+	return "unknown"
+}
+
+type Code string
+
+type Error struct {
+	Code    Code
+	Kind    Kind
+	Message string
+}
+
+func New(code Code, kind Kind, message string) *Error {
+	return &Error{Code: code, Kind: kind, Message: message}
+}
+
+-- m/main.lgo --
+package main
+
+import (
+	"example.com/ejectwrap/lib"
+	"fmt"
+	"strings"
+)
+
+func local(kind lib.Kind) *lib.Error {
+	return lib.New(lib.Code($"webtest.{kind.String()}"), kind, $"Test {kind.String()} fault.")
+}
+
+func plain(kind lib.Kind) *lib.Error {
+	return lib.New("webtest.plain", kind, "plain message")
+}
+
+func withDefault(kind lib.Kind, name string?) *lib.Error {
+	return lib.New("webtest.plain", kind, name ?? "fallback")
+}
+
+func readerOf(kind lib.Kind) *strings.Reader {
+	return strings.NewReader($"reader {kind.String()} of {int(kind) + 1}")
+}
+
+func readerOr(name string?) *strings.Reader {
+	return strings.NewReader(name ?? "reader fallback")
+}
+
+func show(e *lib.Error) {
+	fmt.Println(e.Code, e.Message)
+}
+
+func showReader(r *strings.Reader) {
+	var sb strings.Builder
+	if _, err := r.WriteTo(&sb); err != nil {
+		fmt.Println("error", err)
+		return
+	}
+	fmt.Println(sb.String())
+}
+
+func main() {
+	show(local(lib.Invalid))
+	show(plain(lib.Invalid))
+	show(withDefault(lib.Invalid, nil))
+	showReader(readerOf(lib.Invalid))
+	showReader(readerOr(nil))
+}

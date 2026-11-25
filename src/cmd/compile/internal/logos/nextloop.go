@@ -5,21 +5,9 @@
 package logos
 
 import (
-	"strconv"
-	"strings"
-
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
-
-type loopMatch struct {
-	loop  *syntax.ForStmt
-	iv    string
-	xs    string
-	ys    string
-	elem  syntax.Expr
-	spans [][2]int
-}
 
 func (s *nextScan) loopAppend(list []syntax.Stmt, i int, ctx nextCtx) bool {
 	loop, ok := list[i].(*syntax.ForStmt)
@@ -49,16 +37,14 @@ func (s *nextScan) loopAppend(list []syntax.Stmt, i int, ctx nextCtx) bool {
 		}
 		return s.taskLoop(loop, ctx, "the loop body does more than append one element, so no single chain expresses it")
 	}
-	m := loopMatch{loop: loop, iv: iv, xs: xs, ys: ys, elem: call.ArgList[1]}
 	c := &elemCheck{scan: s, xs: xs, iv: iv, ys: ys, val: val, unsafeCalls: s.receiverUnsafe(loop, xs, ctx)}
-	if !c.expr(m.elem) {
+	if !c.expr(call.ArgList[1]) {
 		return s.taskLoop(loop, ctx, "the appended element escapes the chain form, so the loop needs a manual rewrite")
 	}
-	m.spans = c.spans
-	if len(m.spans) == 0 {
+	if !c.usesElem {
 		return false
 	}
-	return s.loopPair(list, i, m, ctx)
+	return s.loopPair(list, i, ys, ctx)
 }
 
 func (s *nextScan) appends(body *syntax.BlockStmt) bool {
@@ -73,39 +59,22 @@ func (s *nextScan) appends(body *syntax.BlockStmt) bool {
 	return found
 }
 
-func (s *nextScan) loopPair(list []syntax.Stmt, i int, m loopMatch, ctx nextCtx) bool {
-	start, declIdx, declEnd := s.findDecl(list, i, m.ys)
-	if start < 0 {
+func (s *nextScan) loopPair(list []syntax.Stmt, i int, ys string, ctx nextCtx) bool {
+	declIdx := findSliceDecl(list[:i], ys)
+	if declIdx < 0 {
 		return false
 	}
+	loop := list[i]
 	if declIdx != i-1 {
-		if !touchedBetween(list, declIdx, i, m.ys) {
-			return s.taskLoop(m.loop, ctx, "an unrelated statement sits between the declaration and the loop, so the loop needs a manual rewrite")
+		if !touchedBetween(list, declIdx, i, ys) {
+			return s.taskLoop(loop, ctx, "an unrelated statement sits between the declaration and the loop, so the loop needs a manual rewrite")
 		}
-		return s.taskLoop(m.loop, ctx, "the target accumulates before the loop, so no single chain expresses it")
+		return s.taskLoop(loop, ctx, "the target accumulates before the loop, so no single chain expresses it")
 	}
-	if !declNilSlice(list[declIdx], m.ys) {
+	if !declNilSlice(list[declIdx], ys) {
 		return false
 	}
-	return s.spliceLoop(m, start, declEnd, ctx)
-}
-
-func (s *nextScan) spliceLoop(m loopMatch, start, declEnd int, ctx nextCtx) bool {
-	end, err := offsetOf(s.starts, len(s.src), m.loop.Body.Rbrace)
-	if err != nil {
-		return false
-	}
-	trailing, blocked := scanComments(s.src, start, declEnd, end+1)
-	if blocked {
-		return s.taskLoop(m.loop, ctx, "a comment sits inside the rewrite span, so the loop needs a manual rewrite")
-	}
-	param := chainParam(m.elem, m.xs, m.iv)
-	built, ok := s.substitute(m.elem, m.spans, param)
-	if !ok {
-		return false
-	}
-	s.emit(start, end+1, m.ys+" := "+m.xs+".map("+param+" => "+built+")"+trailing)
-	return true
+	return s.taskLoop(loop, ctx, "keep the append loop unless all consumers permit changes in slice capacity and nilness")
 }
 
 func (s *nextScan) taskLoop(loop syntax.Stmt, ctx nextCtx, instruction string) bool {
@@ -164,15 +133,16 @@ func (s *nextScan) isRangeFunc(loop *syntax.ForStmt) bool {
 	return ok
 }
 
-func (s *nextScan) findDecl(list []syntax.Stmt, i int, ys string) (int, int, int) {
-	for j := i - 1; j >= 0; j-- {
-		start, declEnd, ok := s.declBounds(list[j], ys)
-		if !ok {
-			continue
+func findSliceDecl(list []syntax.Stmt, ys string) int {
+	for j := len(list) - 1; j >= 0; j-- {
+		if declNilSlice(list[j], ys) {
+			return j
 		}
-		return start, j, declEnd
+		if n, ok := list[j].(*syntax.AssignStmt); ok && declBoundsEmptySlice(n, ys) {
+			return j
+		}
 	}
-	return -1, 0, 0
+	return -1
 }
 
 func touchedBetween(list []syntax.Stmt, decl, i int, ys string) bool {
@@ -199,38 +169,6 @@ func mentions(stmt syntax.Stmt, name string) bool {
 	return found
 }
 
-func (s *nextScan) declBounds(prev syntax.Stmt, ys string) (int, int, bool) {
-	switch n := prev.(type) {
-	case *syntax.DeclStmt:
-		return s.declBoundsVarDecl(n, ys)
-	case *syntax.AssignStmt:
-		return s.declBoundsAssign(n, ys)
-	}
-	return 0, 0, false
-}
-
-func (s *nextScan) declBoundsVarDecl(n *syntax.DeclStmt, ys string) (int, int, bool) {
-	if len(n.DeclList) != 1 {
-		return 0, 0, false
-	}
-	decl, ok := n.DeclList[0].(*syntax.VarDecl)
-	if !ok {
-		return 0, 0, false
-	}
-	if !declBoundsVarForm(decl, ys) {
-		return 0, 0, false
-	}
-	start, err := offsetOf(s.starts, len(s.src), n.Pos())
-	if err != nil {
-		return 0, 0, false
-	}
-	end, ok := s.endOf(decl.Type)
-	if !ok {
-		return 0, 0, false
-	}
-	return start, end, true
-}
-
 func declBoundsVarForm(decl *syntax.VarDecl, ys string) bool {
 	if len(decl.NameList) != 1 {
 		return false
@@ -251,21 +189,6 @@ func declNilSlice(stmt syntax.Stmt, ys string) bool {
 	}
 	decl, ok := n.DeclList[0].(*syntax.VarDecl)
 	return ok && declBoundsVarForm(decl, ys)
-}
-
-func (s *nextScan) declBoundsAssign(n *syntax.AssignStmt, ys string) (int, int, bool) {
-	if !declBoundsEmptySlice(n, ys) {
-		return 0, 0, false
-	}
-	start, ok := s.startOf(n.Lhs)
-	if !ok {
-		return 0, 0, false
-	}
-	end, ok := s.endOf(n.Rhs)
-	if !ok {
-		return 0, 0, false
-	}
-	return start, end, true
 }
 
 func declBoundsEmptySlice(n *syntax.AssignStmt, ys string) bool {
@@ -579,7 +502,7 @@ type elemCheck struct {
 	ys          string
 	val         string
 	unsafeCalls bool
-	spans       [][2]int
+	usesElem    bool
 }
 
 func (s *nextScan) receiverUnsafe(loop *syntax.ForStmt, xs string, ctx nextCtx) bool {
@@ -626,7 +549,8 @@ func (c *elemCheck) expr(e syntax.Expr) bool {
 	switch n := unwrapParen(e).(type) {
 	case *syntax.Name:
 		if c.val != "" && n.Value == c.val {
-			return c.elemRef(n)
+			c.usesElem = true
+			return true
 		}
 		return exprName(n, c.ys, c.iv)
 	case *syntax.BasicLit:
@@ -644,19 +568,6 @@ func (c *elemCheck) expr(e syntax.Expr) bool {
 	}
 	return false
 }
-func (c *elemCheck) elemRef(n *syntax.Name) bool {
-	start, err := offsetOf(c.scan.starts, len(c.scan.src), n.Pos())
-	if err != nil {
-		return false
-	}
-	end, ok := c.scan.endOf(n)
-	if !ok {
-		return false
-	}
-	c.spans = append(c.spans, [2]int{start, end})
-	return true
-}
-
 func exprName(n *syntax.Name, ys, iv string) bool {
 	return n.Value != ys && n.Value != iv
 }
@@ -680,15 +591,7 @@ func (c *elemCheck) index(n *syntax.IndexExpr) bool {
 	if !ok || i.Value != c.iv {
 		return false
 	}
-	start, err := offsetOf(c.scan.starts, len(c.scan.src), x.Pos())
-	if err != nil {
-		return false
-	}
-	end, ok := c.scan.endOf(n)
-	if !ok {
-		return false
-	}
-	c.spans = append(c.spans, [2]int{start, end})
+	c.usesElem = true
 	return true
 }
 
@@ -756,48 +659,4 @@ func (c *elemCheck) callArgs(n *syntax.CallExpr) bool {
 		}
 	}
 	return true
-}
-
-func chainParam(elem syntax.Expr, xs, iv string) string {
-	used := map[string]bool{xs: true, iv: true}
-	syntax.Inspect(elem, func(n syntax.Node) bool {
-		if name, ok := n.(*syntax.Name); ok {
-			used[name.Value] = true
-		}
-		return true
-	})
-	for _, cand := range []string{"x", "v", "e", "elem"} {
-		if !used[cand] {
-			return cand
-		}
-	}
-	for i := 1; ; i++ {
-		cand := "elem" + strconv.Itoa(i)
-		if !used[cand] {
-			return cand
-		}
-	}
-}
-
-func (s *nextScan) substitute(elem syntax.Expr, spans [][2]int, param string) (string, bool) {
-	start, ok := s.startOf(elem)
-	if !ok {
-		return "", false
-	}
-	end, ok := s.endOf(elem)
-	if !ok {
-		return "", false
-	}
-	var out strings.Builder
-	pos := start
-	for _, span := range spans {
-		if span[0] < pos || span[1] > end {
-			return "", false
-		}
-		out.Write(s.src[pos:span[0]])
-		out.WriteString(param)
-		pos = span[1]
-	}
-	out.Write(s.src[pos:end])
-	return out.String(), true
 }

@@ -150,31 +150,25 @@ const MINFUNC = 16 // minimum size for a function
 
 const FuncTabBucketSize = 256 * MINFUNC // size of bucket in the pc->func lookup table
 
-// loGo/s comptime clone suffix rule (SPEC T-205, red-team #9, #74).
+// loGo/s comptime instance suffix rule (SPEC T-205, red-team #9, #74).
 //
-// Comptime generic expansions carry a terminal suffix with a nonempty
-// decimal sequence number:
+// The function symbol of a comptime generic instance is the generic's
+// name followed by LogosCtInstanceInfix and the instance id, which is
+// LogosCtInstanceIDLen lower-case hexadecimal digits:
 //
-//	<f>·logosct<N>      comptime generic expansion (M7-S3), middle-dot form
-//	<f>_logosct<N>      comptime generic expansion (M7-S3), source-level form
+//	<f>.logosct.<id>
 //
-// Comptime copies are built by splicing source text that the parser reads
-// back, so the copy symbol keeps the ASCII spelling <f>_logosct<N>: U+00B7
-// MIDDLE DOT is not a source identifier character and can never appear in
-// spliced text.
+// A closure inside the instance appends its own suffix after the id.
 //
 // Naming rule: the link symbol and the symbol table (go tool nm) keep the
-// full canonical suffix, so every clone stays stable, unique, and
-// resolvable by name across shared, plugin, and internal links (one
-// generateFuncnametab path serves every mode). The pclntab funcnametab
-// copy strips the suffixes to the base (SPEC T-205, red-team #9, #74)
-// so traces print <f>; capability sink matching strips the same
-// suffixes to the base for sink identity. The spellings must stay in sync
-// with cfCopyInfix in cmd/compile/internal/logos/comptime.go, the linker
-// helpers in cmd/link/internal/ld/pcln_logos.go, capSinkName in
-// cmd/link/internal/ld/capabilities_logos.go, and logosCloneBaseName in
-// src/runtime/symtab_logos.go.
+// full name, so every instance stays unique and resolvable by name across
+// shared, plugin, and internal links. The pclntab funcnametab copy strips
+// each infix and id that ends the name or precedes a '.', so traces print
+// <f>; capability sink matching strips the same suffix for sink identity.
+// The compiler marks a function whose name contains the infix
+// (cmd/compile/internal/ir/abi.go), and cmd/link/internal/ld/pcln_logos.go
+// strips it.
 const (
-	LogosCtDisplayInfix = "·logosct"
-	LogosCtASCIIInfix   = "_logosct"
+	LogosCtInstanceInfix = ".logosct."
+	LogosCtInstanceIDLen = 64
 )

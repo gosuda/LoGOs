@@ -218,6 +218,21 @@ func (w *writer) logosUnderlying(obj *types2.TypeName, under types2.Type) {
 	w.typ(types2.NewInterfaceType(methods, kept))
 }
 
+func logosCaptureUnionTypes(info *types2.Info, files []*syntax.File) map[string]*types2.Interface {
+	var rows map[string]*types2.Interface
+	for obj, use := range logos.ClassifyDeclaredUnions(info, files) {
+		if use != logos.UnionValueOnly || obj.Parent() != obj.Pkg().Scope() {
+			continue
+		}
+		iface := obj.Type().Underlying().(*types2.Interface)
+		if rows == nil {
+			rows = make(map[string]*types2.Interface)
+		}
+		rows[obj.Name()] = iface
+	}
+	return rows
+}
+
 func (pw *pkgWriter) logosClassifyUnionUses(info *types2.Info, noders []*noder) {
 	if !base.Logos {
 		return

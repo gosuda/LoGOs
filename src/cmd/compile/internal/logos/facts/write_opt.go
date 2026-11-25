@@ -24,6 +24,12 @@ func writeOpts(pkg *types2.Package, f *Facts) {
 	eachExportedNamed(pkg, func(name string, named *types2.Named) {
 		walkNamedQuals(name, named, emit, nil)
 	})
+	eachExportedVar(pkg, func(object string, v *types2.Var) {
+		walkQualType(v.Type(), []string{"V"}, object, emit, nil, make(map[types2.Type]bool))
+	})
+	eachExportedAlias(pkg, func(name string, rhs types2.Type) {
+		walkAliasQuals(name, rhs, emit, nil)
+	})
 }
 
 func walkSigQuals(sig *types2.Signature, object string, emitOpt, emitConst func(string, string)) {
@@ -92,6 +98,23 @@ func walkNamedQuals(name string, named *types2.Named, emitOpt, emitConst func(st
 			}
 		}
 	}
+}
+
+// walkAliasQuals records the qualifiers of an exported alias right-hand
+// side. The general export drops a top-level option, so the fact carries a
+// root marker step ("O") that the overlay applies to the decoded
+// right-hand side before any deeper path. Deeper qualifiers reuse the
+// ordinary steps under that marker. A right-hand side without a top-level
+// option walks with the ordinary empty base.
+func walkAliasQuals(name string, rhs types2.Type, emitOpt, emitConst func(string, string)) {
+	if opt, ok := unaliasAs[*types2.Option](rhs); ok {
+		if emitOpt != nil {
+			emitOpt(name, "O")
+		}
+		walkQualType(opt.Elem, []string{"O", "E"}, name, emitOpt, emitConst, make(map[types2.Type]bool))
+		return
+	}
+	walkQualType(rhs, nil, name, emitOpt, emitConst, make(map[types2.Type]bool))
 }
 
 func walkQualType(t types2.Type, path []string, object string, emitOpt, emitConst func(string, string), seen map[types2.Type]bool) {

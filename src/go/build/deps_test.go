@@ -900,8 +900,20 @@ var depsRules = `
 	sync, sync/atomic, unsafe, weak, logos/internal/conc
 	< logos/sync;
 
+	NONE
+	< logos/ascii;
+
 	encoding/binary, errors, io, math, slices, sync
 	< logos/binary;
+
+	errors, fmt, io
+	< logos/io;
+
+	os, runtime, strconv, testing, time
+	< logos/leak;
+
+	context, fmt, os, os/exec, sync, syscall
+	< logos/proc;
 `
 
 // listStdPkgs returns the same list of packages as "go list std".

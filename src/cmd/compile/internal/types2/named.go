@@ -108,7 +108,8 @@ type Named struct {
 
 	allowNilRHS bool // may be true from creation via [NewNamed] until [Named.SetUnderlying]
 
-	inst *instance // information for instantiated types; nil otherwise
+	inst         *instance // information for instantiated types; nil otherwise
+	logosCtLocal *logosCtLocalType
 
 	mu         sync.Mutex     // guards all fields below
 	state_     uint32         // the current state of this type; must only be accessed atomically or when mu is held

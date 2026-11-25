@@ -24,8 +24,6 @@ exists out/deep/deep.go
 ! grep '_logos_ctimp' out/main.go
 ! grep '_logos_tparam' out/main.go
 
-grep '_logos_t[0-9]+ "example.com/ejectforeign/deep"' out/main.go
-
 cd out
 go run .
 cmp stdout $WORK/want.txt

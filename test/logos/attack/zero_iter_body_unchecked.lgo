@@ -1,0 +1,20 @@
+// compile
+
+package p
+
+import "comptime"
+
+type Empty struct{}
+
+type Other struct {
+	A int
+}
+
+func Pick[T any](o Other) int {
+	const for _, f := range comptime.Fields[T]() {
+		_ = o.Missing
+	}
+	return 0
+}
+
+var _ = Pick[Empty](Other{})

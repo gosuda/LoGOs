@@ -1,0 +1,20 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Box struct {
+	N int
+}
+
+func Loop[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n + Loop[Box]()
+}
+
+var _ = Loop[Box]() // ERROR "comptime::circular_instantiation\] Box -> Box"

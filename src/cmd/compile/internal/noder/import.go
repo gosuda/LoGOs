@@ -26,6 +26,7 @@ import (
 type gcimports struct {
 	ctxt     *types2.Context
 	packages map[string]*types2.Package
+	logos    logosImporterState
 }
 
 func (m *gcimports) Import(path string) (*types2.Package, error) {

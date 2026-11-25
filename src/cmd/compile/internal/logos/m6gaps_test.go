@@ -36,6 +36,7 @@ func lowerSnippetSrc(t *testing.T, name, src string) string {
 		Uses:       make(map[*syntax.Name]types2.Object),
 		Types:      make(map[syntax.Expr]types2.TypeAndValue),
 		Selections: make(map[*syntax.SelectorExpr]*types2.Selection),
+		Implicits:  make(map[syntax.Node]types2.Object),
 		Scopes:     make(map[syntax.Node]*types2.Scope),
 		Instances:  make(map[*syntax.Name]types2.Instance),
 	}

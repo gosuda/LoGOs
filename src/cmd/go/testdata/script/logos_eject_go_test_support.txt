@@ -1,0 +1,67 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos eject -o out
+exists out/_logos_deps/rt/sync/sync.go
+exists out/_logos_deps/rt/arena/arena.go
+
+cd out
+go test -v ./...
+stdout '^--- PASS: TestInPackageSupport '
+stdout '^--- PASS: TestExternalSupport '
+
+-- m/go.mod --
+module example.com/testsupport
+
+go 1.27
+
+-- m/anchor.go --
+package testsupport
+
+const Input = "ABC"
+
+-- m/anchor_test.go --
+package testsupport
+
+import (
+	"testing"
+
+	"logos/sync"
+)
+
+func TestInPackageSupport(t *testing.T) {
+	var locked sync.Locked[string]
+	locked.WithLock(func(value *string) {
+		*value = Input
+	})
+	var got string
+	locked.WithLock(func(value *string) {
+		got = *value
+	})
+	if got != Input {
+		t.Fatalf("locked value = %q, want %q", got, Input)
+	}
+}
+
+-- m/arena_test.go --
+package testsupport_test
+
+import (
+	"testing"
+
+	"example.com/testsupport"
+	"logos/arena"
+)
+
+func TestExternalSupport(t *testing.T) {
+	region := arena.Open()
+	got := arena.Make[byte](region, 2)
+	if len(got) != 2 || got[0] != 0 || got[1] != 0 {
+		t.Fatalf("arena.Make[byte](region, 2) = %v, want [0 0]", got)
+	}
+	copy(got, testsupport.Input)
+	if string(got) != "AB" {
+		t.Fatalf("copied arena slice = %q, want %q", got, "AB")
+	}
+}

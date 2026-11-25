@@ -9,35 +9,54 @@ cp stdout $WORK/run-before.txt
 
 cp range.go $WORK/range.go.orig
 cp neg.go $WORK/neg.go.orig
+cp next_tasks.json $WORK/plan-stale.orig
 
 logos next
-stdout '^--- a/range\.go$'
-stdout '^\+\+\+ b/range\.lgo$'
+stdout 'no conversions found'
+stderr 'review only: loop-chain'
 ! exists range.lgo
+cmp next_tasks.json $WORK/plan-stale.orig
 cmp range.go $WORK/range.go.orig
 cmp neg.go $WORK/neg.go.orig
 
 logos next --fix
-stdout 'tasks in next_tasks.json'
+cp stdout $WORK/fix.patch
+stderr '^logos next:'
+! stdout '^logos next:'
+stderr 'review only: loop-chain'
+cmp next_tasks.json $WORK/plan-stale.orig
+! exists range.lgo
+! exists neg.lgo
+cmp range.go $WORK/range.go.orig
+cmp neg.go $WORK/neg.go.orig
+grep '^-{"version":"logos-next-1","tasks":\[\]}$' $WORK/fix.patch
+grep '^\+.*"rule": "loop-chain"' $WORK/fix.patch
+
+logos next --fix
+cp stdout $WORK/fix-again.patch
+cmp $WORK/fix.patch $WORK/fix-again.patch
+cmp next_tasks.json $WORK/plan-stale.orig
+cmp range.go $WORK/range.go.orig
+cmp neg.go $WORK/neg.go.orig
+
+[!exec:patch] skip 'patch unavailable'
+
+exec patch --batch --fuzz=0 -p1 -i $WORK/fix.patch
 exists next_tasks.json
 exists range.lgo
 exists neg.lgo
 ! exists range.go
 ! exists neg.go
-
+cmp range.lgo $WORK/range.go.orig
 cmp neg.lgo $WORK/neg.go.orig
-
-grep 'ys := xs\.map' range.lgo
-! grep 'for ' range.lgo
 grep 'for .*range' neg.lgo
-
-grep -count=4 '"category": "ai-patch"' next_tasks.json
-grep -count=4 '"rule": "loop-chain"' next_tasks.json
 grep 'func breakOut\(xs \[\]int, limit int\) \[\]int' next_tasks.json
 grep 'func countSide\(xs \[\]int\) \(int, \[\]int\)' next_tasks.json
 grep 'func useIndex\(xs \[\]int\) \[\]int' next_tasks.json
+grep 'func doubleAllIdx' next_tasks.json
+grep 'func doubleAllVal' next_tasks.json
+grep 'slice capacity' next_tasks.json
 grep 'func twoSlices\(xs, zs \[\]int\) \[\]int' next_tasks.json
-
 logos build ./...
 logos run .
 cmp stdout $WORK/run-before.txt
@@ -47,6 +66,9 @@ stdout '^\[1\]$'
 stdout '^2 \[-1 2\]$'
 stdout '^\[0 2 4\]$'
 stdout '^\[11 22\]$'
+logos next --fix
+stderr 'already converted'
+! stdout 'already converted'
 
 -- m/go.mod --
 module example.com/nextrange
@@ -135,3 +157,6 @@ func twoSlices(xs, zs []int) []int {
 	}
 	return out
 }
+
+-- m/next_tasks.json --
+{"version":"logos-next-1","tasks":[]}

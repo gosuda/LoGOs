@@ -5,30 +5,36 @@
 package types2
 
 import (
+	"cmd/compile/internal/syntax"
 	"cmp"
 	"container/heap"
 	"fmt"
 	. "internal/types/errors"
+	"maps"
 	"slices"
 	"sort"
 )
 
 // initOrder computes the Info.InitOrder for package variables.
 func (check *Checker) initOrder() {
+	check.initOrderFor(check.objMap)
+}
+
+func (check *Checker) initOrderFor(objMap map[Object]*declInfo) {
 	// An InitOrder may already have been computed if a package is
 	// built from several calls to (*Checker).Files. Clear it.
 	check.Info.InitOrder = check.Info.InitOrder[:0]
 
 	// Compute the object dependency graph and initialize
 	// a priority queue with the list of graph nodes.
-	pq := nodeQueue(dependencyGraph(check.objMap))
+	pq := nodeQueue(dependencyGraph(objMap))
 	heap.Init(&pq)
 
 	const debug = false
 	if debug {
 		fmt.Printf("Computing initialization order for %s\n\n", check.pkg)
 		fmt.Println("Object dependency graph:")
-		for obj, d := range check.objMap {
+		for obj, d := range objMap {
 			// only print objects that may appear in the dependency graph
 			if obj, _ := obj.(dependency); obj != nil {
 				if len(d.deps) > 0 {
@@ -73,7 +79,7 @@ func (check *Checker) initOrder() {
 
 		// if n still depends on other nodes, we have a cycle
 		if n.ndeps > 0 {
-			cycle := findPath(check.objMap, n.obj, n.obj, make(map[Object]bool))
+			cycle := findPath(objMap, n.obj, n.obj, make(map[Object]bool))
 			// If n.obj is not part of the cycle (e.g., n.obj->b->c->d->c),
 			// cycle will be nil. Don't report anything in that case since
 			// the cycle is reported when the algorithm gets to an object
@@ -99,7 +105,7 @@ func (check *Checker) initOrder() {
 
 		// record the init order for variables with initializers only
 		v, _ := n.obj.(*Var)
-		info := check.objMap[v]
+		info := objMap[v]
 		if v == nil || !info.hasInitializer() {
 			continue
 		}
@@ -128,6 +134,226 @@ func (check *Checker) initOrder() {
 			fmt.Printf("\t%s\n", init)
 		}
 		fmt.Println()
+	}
+}
+
+// LogosCtInitOrder recomputes package variable order after LogosCtFinish.
+// The compiler must preserve the checked call-site nodes used by the writer
+// and bind prepared uses to this checker's package objects. Prepared helper
+// data remains in its separate schedule.
+func (check *Checker) LogosCtInitOrder() (err error) {
+	if check.firstErr != nil || len(check.LogosCtPrepared) == 0 || len(check.LogosCtSiteKeys) == 0 {
+		return nil
+	}
+	var prepared map[string]*LogosCtInst
+	for _, inst := range check.LogosCtPrepared {
+		if inst.Pkg == check.pkg {
+			if prepared == nil {
+				prepared = make(map[string]*LogosCtInst)
+			}
+			prepared[inst.ID] = inst
+		}
+	}
+	if len(prepared) == 0 {
+		return nil
+	}
+	defer check.handleBailout(&err)
+	graph := logosInitGraph{
+		check:     check,
+		objects:   maps.Clone(check.objMap),
+		prepared:  prepared,
+		instances: make(map[logosInitInstance]*Func),
+		ordinals:  make(map[*syntax.Name]int),
+		uses:      make(map[*declInfo][]logosInitUse),
+	}
+	for _, generic := range check.LogosCtGenerics {
+		for ordinal, edge := range generic.Edges {
+			graph.ordinals[edge.Site] = ordinal
+		}
+	}
+	graph.rebindOrdinaryDecls()
+	if len(graph.instances) != 0 {
+		check.initOrderFor(graph.objects)
+	}
+	return
+}
+
+type logosInitInstance struct {
+	origin *Func
+	id     string
+}
+
+type logosInitUse struct {
+	origin *Func
+	site   *syntax.Name
+}
+
+type logosInitGraph struct {
+	check     *Checker
+	objects   map[Object]*declInfo
+	prepared  map[string]*LogosCtInst
+	instances map[logosInitInstance]*Func
+	ordinals  map[*syntax.Name]int
+	uses      map[*declInfo][]logosInitUse
+}
+
+func (g *logosInitGraph) rebindOrdinaryDecls() {
+	rewritten := make(map[*declInfo]*declInfo)
+	for _, obj := range g.check.objList {
+		original := g.check.objMap[obj]
+		decl, seen := rewritten[original]
+		if !seen {
+			decl = original
+			if deps := g.rebindUses(original, nil); deps != nil {
+				copy := *original
+				copy.deps = deps
+				decl = &copy
+			}
+			rewritten[original] = decl
+		}
+		g.objects[obj] = decl
+	}
+}
+
+func (g *logosInitGraph) ordinaryUses(decl *declInfo) []logosInitUse {
+	if len(decl.deps) == 0 {
+		return nil
+	}
+	if uses, ok := g.uses[decl]; ok {
+		return uses
+	}
+	var uses []logosInitUse
+	visit := func(n syntax.Node) bool {
+		if site, ok := n.(*syntax.Name); ok {
+			if fn, ok := g.check.Uses[site].(*Func); ok && decl.deps[fn] && fn.Signature().TypeParams().Len() != 0 {
+				uses = append(uses, logosInitUse{fn, site})
+			}
+		}
+		return true
+	}
+	for dep := range decl.deps {
+		fn, ok := dep.(*Func)
+		if !ok || fn.Signature().TypeParams().Len() == 0 {
+			continue
+		}
+		if decl.fdecl != nil && decl.fdecl.Body != nil {
+			syntax.Inspect(decl.fdecl.Body, visit)
+		}
+		if decl.vtyp != nil {
+			syntax.Inspect(decl.vtyp, visit)
+		}
+		if decl.init != nil {
+			syntax.Inspect(decl.init, visit)
+		}
+		break
+	}
+	g.uses[decl] = uses
+	return uses
+}
+
+func (g *logosInitGraph) useID(site *syntax.Name, children []string) string {
+	if id := g.check.LogosCtSiteKeys[site]; id != "" {
+		return id
+	}
+	if ordinal, ok := g.ordinals[site]; ok && ordinal < len(children) {
+		return children[ordinal]
+	}
+	return ""
+}
+
+func (g *logosInitGraph) rebindUses(decl *declInfo, children []string) map[Object]bool {
+	uses := g.ordinaryUses(decl)
+	var deps map[Object]bool
+	for _, use := range uses {
+		id := g.useID(use.site, children)
+		if g.prepared[id] != nil || g.check.LogosCtGraph[id] != nil {
+			deps = maps.Clone(decl.deps)
+			break
+		}
+	}
+	if deps == nil {
+		return nil
+	}
+	for _, use := range uses {
+		delete(deps, use.origin)
+	}
+	for _, use := range uses {
+		target := g.instance(use.origin, g.useID(use.site, children))
+		if target == nil {
+			target = use.origin
+		}
+		deps[target] = true
+	}
+	return deps
+}
+
+func (g *logosInitGraph) instance(origin *Func, id string) *Func {
+	original := g.check.objMap[origin]
+	if id == "" || original == nil {
+		return nil
+	}
+	key := logosInitInstance{origin, id}
+	if node := g.instances[key]; node != nil {
+		return node
+	}
+	prepared := g.prepared[id]
+	children := g.check.LogosCtGraph[id]
+	if prepared == nil && children == nil {
+		return nil
+	}
+	node := NewFunc(origin.Pos(), origin.Pkg(), origin.Name(), origin.Signature())
+	node.setOrder(uint32(len(g.objects) + 1))
+	g.instances[key] = node
+	decl := new(declInfo)
+	g.objects[node] = decl
+	if prepared != nil {
+		g.preparedBodyDeps(prepared, decl)
+	} else if deps := g.rebindUses(original, children); deps != nil {
+		decl.deps = deps
+	} else {
+		decl.deps = original.deps
+	}
+	return node
+}
+
+func (g *logosInitGraph) preparedBodyDeps(inst *LogosCtInst, decl *declInfo) {
+	info := inst.Info
+	var functions map[*Func]*syntax.BlockStmt
+	for _, helper := range inst.Helpers {
+		if fn, ok := helper.(*syntax.FuncDecl); ok {
+			if functions == nil {
+				functions = make(map[*Func]*syntax.BlockStmt)
+			}
+			functions[info.Defs[fn.Name].(*Func)] = fn.Body
+		}
+	}
+	bodies := []*syntax.BlockStmt{inst.Decl.Body}
+	visit := func(n syntax.Node) bool {
+		site, ok := n.(*syntax.Name)
+		if !ok {
+			return true
+		}
+		obj := info.Uses[site]
+		if fn, ok := obj.(*Func); ok {
+			if body := functions[fn]; body != nil {
+				bodies = append(bodies, body)
+				delete(functions, fn)
+				return true
+			}
+			origin := fn.Origin()
+			obj = origin
+			if target := g.instance(origin, info.LogosCtSiteKeys[site]); target != nil {
+				decl.addDep(target)
+				return true
+			}
+		}
+		if g.check.objMap[obj] != nil {
+			decl.addDep(obj)
+		}
+		return true
+	}
+	for i := 0; i < len(bodies); i++ {
+		syntax.Inspect(bodies[i], visit)
 	}
 }
 

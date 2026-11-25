@@ -1716,6 +1716,17 @@ func (e *evaluator) checkSize(extras ...Value) (int64, *Error) {
 	return total, nil
 }
 
+// ratBytes charges an exact rational for the bit lengths of its numerator
+// and denominator, rounded up to whole bytes, so evaluator growth in
+// exact values trips the value-size limit instead of hiding behind a
+// constant.
+func ratBytes(r *big.Rat) int64 {
+	if r == nil {
+		return 1
+	}
+	return int64((r.Num().BitLen() + r.Denom().BitLen() + 7) / 8)
+}
+
 func (e *evaluator) valueSize(v Value, seen map[any]bool) int64 {
 	switch {
 	case v.ival != nil:
@@ -1726,7 +1737,12 @@ func (e *evaluator) valueSize(v Value, seen map[any]bool) int64 {
 		}
 		return 8
 	case v.fval != nil:
-		return 16
+		if v.typ != nil && (v.typ.Kind == KFloat32 || v.typ.Kind == KFloat64) {
+			return max(8, ratBytes(v.fval))
+		}
+		return ratBytes(v.fval)
+	case v.cparts != nil:
+		return ratBytes(&v.cparts[0]) + ratBytes(&v.cparts[1])
 	case v.typ != nil && (v.typ.Kind == KFloat32 || v.typ.Kind == KFloat64):
 		return 8
 	case v.typ != nil && (v.typ.Kind == KComplex64 || v.typ.Kind == KComplex128 || v.typ.Kind == KUntypedComplex):

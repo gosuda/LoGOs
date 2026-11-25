@@ -9,12 +9,35 @@ logos build ./...
 logos run .
 cp stdout $WORK/run-before.txt
 cp ../outside/real.go $WORK/outside-real.orig
-logos next --fix
-stdout 'tasks in next_tasks.json'
-exists main.lgo
+cp main.go $WORK/main.orig
+
+# A symlinked source must be refused: renaming link.go would corrupt the
+# file outside the module, and the emitted patch must not describe it.
+! logos next --fix
+stderr 'link.go'
+cmp main.go $WORK/main.orig
+! exists main.lgo
 exists link.go
 ! exists link.lgo
 cmp ../outside/real.go $WORK/outside-real.orig
+! exists next_tasks.json
+logos run .
+cmp stdout $WORK/run-before.txt
+
+# A plan path that is a symlink must be refused: the patch's plan change
+# would have to be applied through the link into main.go, and --ai-patch
+# would write the plan through the link directly. --fix writes nothing
+# itself, so its refusal protects the emitted patch, not the files.
+rm link.go
+symlink next_tasks.json -> main.go
+! logos next --ai-patch
+stderr 'next_tasks.json'
+! logos next --fix
+stderr 'next_tasks.json'
+exists next_tasks.json
+cmp next_tasks.json $WORK/main.orig
+cmp main.go $WORK/main.orig
+! exists main.lgo
 
 -- m/go.mod --
 module example.com/nextsymlink
