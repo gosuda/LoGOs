@@ -35,7 +35,7 @@ Rule IDs the compiler reports:
 | `x := f()?` | Return zero values and the error when the call's final `error` is non-nil. |
 | `f()?` | Same, as a statement. |
 | `defer f()?` | Join a non-nil cleanup error into the result. |
-| `errdefer f()` | Run only on error return or panic. |
+| `errdefer f()` | Run on a non-nil error result, panic, or `runtime.Goexit`. |
 | `errdefer f()?` | As above, and join its error. |
 
 `?` ends an assignment, an expression statement, a `defer`, or an `errdefer`. The call returns `error` last; the function returns `error` last.

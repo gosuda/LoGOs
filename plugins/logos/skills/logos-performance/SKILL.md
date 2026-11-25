@@ -10,8 +10,6 @@ metadata:
 
 # Performance optimization
 
-The logos toolchain provides build-time and run-time optimization controls for .lgo packages and Go packages built by it.
-
 ## Procedure
 
 1. Measure baseline performance first. Save benchmark output with `go test -bench=. -count=6 > baseline.txt`.
@@ -110,13 +108,14 @@ Rules:
 
 ## Zero-allocation enforcement (M22)
 
-The `//logos:zeroalloc` directive asserts that a function causes zero heap allocations.
+The `//logos:zeroalloc` directive makes the compiler check for heap allocation sites in a function.
 
 Rules:
 
 * Place `//logos:zeroalloc` directly above a function declaration in `.lgo` or `.go` files (`test/logos/codegen/zeroalloc.lgo`).
 * If escape analysis detects any heap allocation, the build fails with `[perf::zeroalloc_violation] <func> allocates: <reason>`.
 * Violations are the allocation sites that escape analysis puts on the heap, including the function literals and inlined bodies it covers (`test/logos/codegen/zeroalloc_sites.lgo`). Run-time heap fallbacks (`append` past capacity, long string ops, map growth) are not reported.
+* The directive also checks callees unless it reads `//logos:zeroalloc local`. See `logos-doc/SPEC.md` Sec 17.2 for call and placement rules.
 * Empty slice literals and zero-size interface values are exempt and allocate zero heap bytes.
 
 ## Diagnostics
