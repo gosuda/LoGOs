@@ -1657,3 +1657,30 @@ func efBranchMixedPair(cond bool) {
 	}()
 	_ = err2
 }
+
+// A nil check inside the deferred literal discharges a read of a value
+// stored after the defer registers when the only store pairs them: the
+// check tests the error belonging to the only store.
+func efFieldErrCheckedInClosureAfterDefer() {
+	h := efHeld{}
+	defer func() {
+		if h.err == nil {
+			println(h.stats)
+		}
+	}()
+	h.stats, h.err = efFetchHeld()
+	_ = h.err
+}
+
+// Overwriting the paired error after the only store breaks the future
+// pairing: the check tests the replacement, so the read still fails.
+func efFieldErrOverwrittenAfterDefer() {
+	h := efHeld{}
+	defer func() {
+		if h.err == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+	h.stats, h.err = efFetchHeld()
+	h.err = nil
+}
