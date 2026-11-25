@@ -109,6 +109,68 @@ func logosOptionRepr(o *Option) Type {
 // writers erase options to this representation at the package boundary.
 func LogosOptionRepr(o *Option) Type { return logosOptionRepr(o) }
 
+// LogosRTPackage finds the transitive dependency logos/rt of pkg, or nil
+// when it is unreachable. The instantiated logos/rt.Option[E] written at
+// the export boundary resolves through the ordinary import graph, so no
+// source-level import is synthesized for it.
+func LogosRTPackage(pkg *Package) *Package {
+	if pkg == nil {
+		return nil
+	}
+	if pkg.Path() == "logos/rt" {
+		return pkg
+	}
+	seen := map[*Package]bool{pkg: true}
+	queue := []*Package{pkg}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		for _, imp := range p.Imports() {
+			if imp == nil || seen[imp] {
+				continue
+			}
+			if imp.Path() == "logos/rt" {
+				return imp
+			}
+			seen[imp] = true
+			queue = append(queue, imp)
+		}
+	}
+	return nil
+}
+
+// LogosOptionExportType reports the Go-facing type to write at the export
+// boundary for o: nil for nil-admitting payloads (the caller keeps the
+// bare payload erasure) and for wrapped options when rt is nil, and the
+// instantiated logos/rt.Option[E] for a wrapped option when rt names the
+// reachable logos/rt package. A nil result means the caller keeps the
+// layout struct shape from LogosOptionRepr.
+func LogosOptionExportType(rt *Package, o *Option, ctxt *Context) Type {
+	if o == nil || LogosOptionIsBare(o.Elem) {
+		return nil
+	}
+	if rt == nil {
+		return nil
+	}
+	obj := rt.Scope().Lookup("Option")
+	tn, ok := obj.(*TypeName)
+	if !ok || tn == nil {
+		return nil
+	}
+	orig, ok := tn.Type().(*Named)
+	if !ok || orig == nil || orig.TypeParams().Len() != 1 {
+		return nil
+	}
+	inst, err := Instantiate(ctxt, orig, []Type{o.Elem}, false)
+	if err != nil {
+		return nil
+	}
+	if _, ok := inst.(*Named); !ok || inst == Typ[Invalid] {
+		return nil
+	}
+	return inst
+}
+
 func logosWrapOption(t Type) *Option { return &Option{Elem: t} }
 
 func logosWrapOne(t Type) Type {
