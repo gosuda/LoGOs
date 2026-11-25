@@ -48,6 +48,35 @@ func logosClosedUnion(t Type) *_TypeSet {
 	return tset
 }
 
+// logosClosedUnionView returns the closed-union term set of t, seeing
+// through a const view (or readonly-descendants) qualifier to the
+// interface it qualifies. A type switch on a qualified interface reads
+// the same dynamic type as on the plain interface, so exhaustiveness
+// and member checks use the same terms. Callers that convert or assign
+// to a union keep logosClosedUnion: qualifying the target is a
+// different obligation from switching on a qualified source.
+func logosClosedUnionView(t Type) *_TypeSet {
+	if t == nil {
+		return nil
+	}
+	base, _ := logosViewBase(t)
+	return logosClosedUnion(base)
+}
+
+// logosAssertSource returns the interface a type assertion enumerates
+// methods over: a qualified source asserts through the interface it
+// views, which carries the method set the view itself does not expose
+// as an underlying interface. An unqualified source is unchanged.
+func (check *Checker) logosAssertSource(V Type) Type {
+	if check == nil || !check.conf.Logos {
+		return V
+	}
+	if base, qualified := logosViewBase(V); qualified {
+		return base
+	}
+	return V
+}
+
 // INVARIANT: a type switch is exhaustive over the values its operand can hold
 // at that point. A nil case is unreachable when the operand is a local or
 // parameter that narrowing has proven non-nil from an option whose absence
@@ -203,7 +232,7 @@ func (check *Checker) logosNonMemberAssert(e syntax.Expr, x *operand, T Type) bo
 			return true
 		}
 	}
-	tset := logosClosedUnion(x.typ())
+	tset := logosClosedUnionView(x.typ())
 	if tset == nil || isTypeParam(T) || logosMemberOf(T, tset) {
 		return false
 	}

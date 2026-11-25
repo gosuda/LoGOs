@@ -14,9 +14,12 @@ package proc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -147,23 +150,26 @@ func (t Term) Match(exited func(int), signaled func(os.Signal), stopped func(os.
 
 // Child is a spawned process.
 type Child struct {
-	mu       sync.Mutex
-	proc     *os.Process
-	pid      int
-	newGroup bool
-	waited   bool
-	waiting  bool
-	killed   bool
-	term     Term
-	waitErr  error
-	stdinW   *os.File
-	stdoutR  *os.File
-	stderrR  *os.File
+	mu          sync.Mutex
+	proc        *os.Process
+	pid         int
+	newGroup    bool
+	waited      bool
+	waiting     bool
+	killed      bool
+	groupKilled bool
+	term        Term
+	waitErr     error
+	stdinW      *os.File
+	stdoutR     *os.File
+	stderrR     *os.File
 }
 
-// Spawn starts path with args.
+// Spawn starts path with args. Parent pipe ends stay open on the
+// handle: drain them before Wait, then release them with Close.
+// Inherited and caller-supplied files are never closed.
 func Spawn(path string, args []string, opts Options) (*Child, error) {
-	resolved, err := resolvePath(path)
+	resolved, err := resolvePath(path, opts.Cwd)
 	if err != nil {
 		return nil, err
 	}
@@ -217,18 +223,40 @@ func (c *Child) Pid() int {
 }
 
 // StdinPipe returns the parent write end when stdin used PipeStdIO.
+// Close releases it.
 func (c *Child) StdinPipe() *os.File {
 	return c.stdinW
 }
 
 // StdoutPipe returns the parent read end when stdout used PipeStdIO.
+// Close releases it.
 func (c *Child) StdoutPipe() *os.File {
 	return c.stdoutR
 }
 
 // StderrPipe returns the parent read end when stderr used PipeStdIO.
+// Close releases it.
 func (c *Child) StderrPipe() *os.File {
 	return c.stderrR
+}
+
+// Close releases the parent ends of pipes opened for the child. It is
+// idempotent and reports nil on a handle with no pipes. Wait never
+// closes pipes, so a handle that outlives its output must be closed.
+func (c *Child) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var errs []error
+	for _, f := range []*os.File{c.stdinW, c.stdoutR, c.stderrR} {
+		if f == nil {
+			continue
+		}
+		if err := f.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	c.stdinW, c.stdoutR, c.stderrR = nil, nil, nil
+	return errors.Join(errs...)
 }
 
 // Kill terminates the child. It is idempotent.
@@ -252,14 +280,18 @@ func (c *Child) Kill() error {
 }
 
 // KillGroup terminates the child process group. It is idempotent.
-// Without NewProcessGroup it kills the single child.
+// Without NewProcessGroup it kills the single child. A leader-only
+// Kill never suppresses the group signal: group termination subsumes a
+// leader kill, so KillGroup signals the group unless the group itself
+// was already signalled or the child was reaped.
 func (c *Child) KillGroup() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.waited || c.killed {
+	if c.waited || c.groupKilled {
 		return nil
 	}
 	c.killed = true
+	c.groupKilled = true
 	if c.proc == nil {
 		return nil
 	}
@@ -280,6 +312,7 @@ func (c *Child) KillGroup() error {
 
 // Wait blocks until the child terminates and reports its Term.
 // It is idempotent. The context must be non-nil and should carry a deadline.
+// Wait never closes pipes; Close releases them.
 func (c *Child) Wait(ctx context.Context) (Term, error) {
 	if ctx == nil {
 		return Term{}, fmt.Errorf("proc: wait needs non-nil context")
@@ -322,15 +355,37 @@ func (c *Child) Wait(ctx context.Context) (Term, error) {
 	return term, waitErr
 }
 
-func resolvePath(path string) (string, error) {
+// resolvePath locates the executable for Spawn. Bare names use PATH.
+// An explicit relative path with a child directory set resolves against
+// that directory first: LookPath checks the parent directory, but the
+// child runs in its own, so ./tool must be looked up where it runs.
+func resolvePath(path string, cwd Cwd) (string, error) {
 	if path == "" {
 		return "", fmt.Errorf("proc: spawn needs non-empty path")
+	}
+	if cwd.HasPath && isExplicitRelative(path) {
+		if cand := filepath.Join(cwd.Path, path); isExecutableFile(cand) {
+			return cand, nil
+		}
 	}
 	resolved, err := exec.LookPath(path)
 	if err != nil {
 		return "", fmt.Errorf("proc: spawn %s: %w", path, err)
 	}
 	return resolved, nil
+}
+
+// isExplicitRelative reports whether path names a file relative to a
+// directory instead of through PATH lookup.
+func isExplicitRelative(path string) bool {
+	return strings.ContainsRune(path, '/') || strings.ContainsRune(path, filepath.Separator)
+}
+
+// isExecutableFile reports whether cand exists and is not a directory.
+// Execute permission itself is the kernel's verdict at spawn time.
+func isExecutableFile(cand string) bool {
+	fi, err := os.Stat(cand)
+	return err == nil && !fi.IsDir()
 }
 
 func cwdDir(c Cwd) string {

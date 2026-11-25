@@ -1,0 +1,73 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+env GOEXPERIMENT=
+
+cd repro
+
+# A type switch on a const view of a union value reads the dynamic
+# type without writing through the view, so it must compile and run.
+logos run .
+stdout '^text$'
+stdout '^text:x$'
+stdout '^blob:b:1$'
+
+-- repro/go.mod --
+module example.com/repro57fault
+
+go 1.27
+
+-- repro/main.lgo --
+package main
+
+import "fmt"
+
+type Value interface{ Text | Number }
+type Text struct{ Text string }
+type Number struct{ Number float64 }
+
+func kind(v const Value) string {
+	switch v.(type) {
+	case Text:
+		return "text"
+	case Number:
+		return "number"
+	default:
+		return "none"
+	}
+}
+
+func kindBound(v const Value) string {
+	switch u := v.(type) {
+	case Text:
+		return "text:" + u.Text
+	case Number:
+		return "number"
+	default:
+		return "none"
+	}
+}
+
+type Blob struct {
+	Name string
+	Tags []string
+}
+
+type Shape interface{ Text | Blob }
+
+func shapeName(s const Shape) string {
+	switch u := s.(type) {
+	case Text:
+		return "text:" + u.Text
+	case Blob:
+		return "blob:" + u.Name + ":" + fmt.Sprint(len(u.Tags))
+	default:
+		return "none"
+	}
+}
+
+func main() {
+	fmt.Println(kind(Text{Text: "x"}))
+	fmt.Println(kindBound(Text{Text: "x"}))
+	fmt.Println(shapeName(Blob{Name: "b", Tags: []string{"t"}}))
+}

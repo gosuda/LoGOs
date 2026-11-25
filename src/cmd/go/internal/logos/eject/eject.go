@@ -217,6 +217,14 @@ func ejectToDir(ctx context.Context, out string) {
 	opts := load.PackageOpts{AutoVCS: true}
 	patterns := []string{"all"}
 	if isEjectVariant() {
+		// The helper loads only the packages that own inactive files,
+		// but it still builds their test variants, so the module
+		// loader must resolve test dependencies of those packages.
+		// Without this, a test-only import (such as the sibling
+		// package an external test file imports) is missing from the
+		// loader's package set and the helper fails with
+		// "cannot find package".
+		opts.ModResolveTests = true
 		if packages := os.Getenv("LOGOSEJECT_PACKAGES"); packages != "" {
 			patterns = strings.Split(packages, "\n")
 		}
@@ -239,7 +247,7 @@ func ejectToDir(ctx context.Context, out string) {
 	if !isEjectVariant() {
 		variantOuts = stageInactiveVariantsIntoStaging(ctx, plan, staging)
 	}
-	writeEjectedTree(ctx, plan, staging, out, builds)
+	writeEjectedTree(ctx, plan, staging, out)
 	for _, dir := range variantOuts {
 		_ = os.RemoveAll(dir)
 		_ = os.RemoveAll(variantStatePath(dir))
@@ -735,9 +743,9 @@ func withoutEjectFlags(flags []string) []string {
 
 // writeEjectedTree assembles the output directory from copied sources,
 // compiler-emitted files, the support module, and rewritten go.mod files.
-// tests carries the test-variant builds whose test files are emitted, so
-// the support closure also covers logos/ packages their tests import.
-func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string, tests []testBuild) {
+// Test roots reach the support closure through plan.testRoots, which
+// ejectSupportRoots seeds from the arranged plan.
+func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string) {
 	abs, err := filepath.Abs(out)
 	if err != nil {
 		base.Fatalf("logos eject: %s: %v", out, err)

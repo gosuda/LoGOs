@@ -27,7 +27,7 @@ func assertFrozen(xs const []HolderFrozen) {
 }
 
 func switchFrozen(xs const []HolderFrozen) string {
-	switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	switch xs[0].S.(type) {
 	case Circle:
 		return "circle"
 	case Square:
@@ -40,7 +40,7 @@ func switchFrozen(xs const []HolderFrozen) string {
 }
 
 func exprFrozen(xs const []HolderFrozen) string {
-	return switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	return switch xs[0].S.(type) {
 	case Circle => "circle"
 	case Square => "square"
 	case nil => "nil"
