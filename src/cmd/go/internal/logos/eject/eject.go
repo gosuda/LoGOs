@@ -36,6 +36,7 @@ import (
 	"cmd/go/internal/load"
 	"cmd/go/internal/modload"
 	"cmd/go/internal/work"
+	"cmd/internal/logos/editmap"
 	"cmd/internal/sys"
 )
 
@@ -1019,6 +1020,15 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 		}
 		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw) {
 			used = true
+		}
+		// The compiler writes one edit-map sidecar per ejected file
+		// into staging; carry it to the output so the map can be
+		// checked against the sources. A file without a sidecar
+		// (plain Go, or an older staging layout) ejects unchanged.
+		if editRaw, editErr := os.ReadFile(filepath.Join(dest.staging, filepath.FromSlash(p.ImportPath), stem+".go"+editmap.Suffix)); editErr == nil {
+			if writeErr := os.WriteFile(filepath.Join(dest.dstRoot, rel, stem+".go"+editmap.Suffix), editRaw, 0666); writeErr != nil {
+				base.Fatalf("logos eject: %s", writeErr)
+			}
 		}
 	}
 	return used
