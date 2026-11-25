@@ -1,0 +1,118 @@
+package binary
+
+import (
+	"comptime"
+	stdbinary "encoding/binary"
+	"math"
+)
+
+func EncValue[T any](buf []byte, off *int, order Order, v T) error {
+	const if comptime.IsStruct[T]() {
+		return EncStruct[T](buf, off, order, v)
+	}
+	return EncNonStruct[T](buf, off, order, v)
+}
+
+//logos:allow(complexity::cognitive_overflow)
+func EncNonStruct[T any](buf []byte, off *int, order Order, v T) error {
+	const switch T {
+	case ~bool:
+		if bool(v) {
+			buf[*off] = 1
+		} else {
+			buf[*off] = 0
+		}
+		*off++
+	case ~int8:
+		buf[*off] = byte(int8(v))
+		*off++
+	case ~uint8:
+		buf[*off] = byte(uint8(v))
+		*off++
+	case ~int16:
+		order.PutUint16(buf[*off:], uint16(int16(v)))
+		*off += 2
+	case ~uint16:
+		order.PutUint16(buf[*off:], uint16(v))
+		*off += 2
+	case ~int32:
+		order.PutUint32(buf[*off:], uint32(int32(v)))
+		*off += 4
+	case ~uint32:
+		order.PutUint32(buf[*off:], uint32(v))
+		*off += 4
+	case ~int64:
+		order.PutUint64(buf[*off:], uint64(int64(v)))
+		*off += 8
+	case ~uint64:
+		order.PutUint64(buf[*off:], uint64(v))
+		*off += 8
+	case ~float32:
+		order.PutUint32(buf[*off:], math.Float32bits(float32(v)))
+		*off += 4
+	case ~float64:
+		order.PutUint64(buf[*off:], math.Float64bits(float64(v)))
+		*off += 8
+	case ~complex64:
+		c := complex64(v)
+		order.PutUint32(buf[*off:], math.Float32bits(real(c)))
+		*off += 4
+		order.PutUint32(buf[*off:], math.Float32bits(imag(c)))
+		*off += 4
+	case ~complex128:
+		c := complex128(v)
+		order.PutUint64(buf[*off:], math.Float64bits(real(c)))
+		*off += 8
+		order.PutUint64(buf[*off:], math.Float64bits(imag(c)))
+		*off += 8
+	case [4]uint8:
+		copy(buf[*off:], v[:])
+		*off += 4
+	case [4]bool:
+		for i := range v {
+			if v[i] {
+				buf[*off] = 1
+			} else {
+				buf[*off] = 0
+			}
+			*off++
+		}
+	case [3]int32:
+		for i := range v {
+			order.PutUint32(buf[*off:], uint32(v[i]))
+			*off += 4
+		}
+	case [4]int16:
+		for i := range v {
+			order.PutUint16(buf[*off:], uint16(v[i]))
+			*off += 2
+		}
+	case [7]byte:
+		copy(buf[*off:], v[:])
+		*off += 7
+	case [8]float32:
+		for i := range v {
+			order.PutUint32(buf[*off:], math.Float32bits(v[i]))
+			*off += 4
+		}
+	case any:
+		tmp, err := stdbinary.Append(nil, order, v)
+		if err != nil {
+			return err
+		}
+		copy(buf[*off:], tmp)
+		*off += len(tmp)
+		return nil
+	}
+	return nil
+}
+
+func EncStruct[T any](buf []byte, off *int, order Order, v T) error {
+	const for _, f := range comptime.Fields[T]() {
+		err := EncValue[f.Type](buf, off, order, v.[f])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}

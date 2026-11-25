@@ -903,6 +903,9 @@ var depsRules = `
 	NONE
 	< logos/ascii;
 
+	encoding/binary, errors, io, math, slices, sync
+	< logos/binary;
+
 	errors, fmt, io
 	< logos/io;
 
