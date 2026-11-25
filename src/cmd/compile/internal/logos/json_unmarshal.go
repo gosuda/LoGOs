@@ -414,7 +414,16 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 			if p, ok := unaliasConstView(c.typ).(*types2.Pointer); ok {
 				isPtr = true
 				elem := p.Elem()
-				if !spellableType(elem, js.holderPkg) {
+				// The checker may already have expanded an alias
+				// elsewhere, which would hide an accessible middle
+				// spelling (such as Public in Ptr = *Public over
+				// hidden). Resolve the element through the written
+				// alias chain instead, which never consults the
+				// expansion cache.
+				if w, ok := writtenPointedElem(c.typ); ok {
+					elem = w
+				}
+				if !spellableElem(elem, js.holderPkg) {
 					elem = unaliasConstView(elem)
 				}
 				sample = sourceTypeString(elem, js.qualify, js.holderPkg, js.cgoSource)
@@ -434,6 +443,53 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 		}
 	}
 	return uc, true
+}
+
+// writtenPointedElem returns the element of a pointer reached through
+// aliases as written, without consulting the alias expansion cache: type
+// checking may already have expanded an alias elsewhere, which would hide
+// an accessible middle spelling. A nil right-hand side or a non-pointer
+// shape reports false and the caller keeps the unaliased element.
+func writtenPointedElem(t types2.Type) (types2.Type, bool) {
+	for {
+		if a, ok := t.(*types2.Alias); ok {
+			rhs := a.Rhs()
+			if rhs == nil {
+				return nil, false
+			}
+			t = rhs
+			continue
+		}
+		if cv, ok := t.(*types2.ConstView); ok {
+			t = cv.Elem
+			continue
+		}
+		if p, ok := t.(*types2.Pointer); ok {
+			return p.Elem(), true
+		}
+		return nil, false
+	}
+}
+
+// spellableElem reports whether elem can be named from the holder package.
+// An alias is spelled by its own name, so only the alias name needs to be
+// accessible, including an instance's type arguments; anything else uses
+// the ordinary spelling check.
+func spellableElem(elem types2.Type, holderPkg *types2.Package) bool {
+	if a, ok := elem.(*types2.Alias); ok {
+		if a.Obj() == nil || !spellableObject(a.Obj(), holderPkg) {
+			return false
+		}
+		if args := a.TypeArgs(); args != nil {
+			for i := range args.Len() {
+				if !spellableType(args.At(i), holderPkg) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return spellableType(elem, holderPkg)
 }
 
 func (js *jsonStruct) unionLines(f *jsonField, field string) []string {
