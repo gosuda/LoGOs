@@ -1,0 +1,15 @@
+// errorcheck
+
+package p
+
+const func recordSize() int {
+	text := "0123456789abcdef"
+	for range 16 {
+		text += text
+	}
+	text = text[16:]
+	const weight = 1.0 / 0x1p128
+	return len(text)
+}
+
+const size = recordSize() // ERROR "\[comptime::const_too_large\]"
