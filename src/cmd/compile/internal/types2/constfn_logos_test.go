@@ -239,7 +239,7 @@ func TestLogosBuildFuncAnonymousParam(t *testing.T) {
 	obj := NewFunc(nopos, pkg, "F", sig)
 	pkg.Scope().Insert(obj)
 	bodies, consts := check.logosConstFuncBodies()
-	bodies[obj.name] = fd
+	bodies[logosConstFnKey(pkg.path, obj.name)] = fd
 	consts[fd] = true
 	call := func(args ...syntax.Expr) *syntax.CallExpr {
 		return &syntax.CallExpr{Fun: syntax.NewName(syntax.Pos{}, "F"), ArgList: args}

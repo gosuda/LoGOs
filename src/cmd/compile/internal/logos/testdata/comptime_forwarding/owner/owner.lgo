@@ -1,0 +1,44 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import "comptime"
+
+type Layout struct {
+	Kind     string
+	Size     int
+	BaseSize int
+}
+
+func Layouts[T any]() [4]Layout {
+	return layouts[T]()
+}
+
+func layouts[T any]() [4]Layout {
+	return [4]Layout{
+		Measure[T, T](),
+		Measure[*T, T](),
+		Measure[[]T, T](),
+		Measure[map[string][]T, T](),
+	}
+}
+
+func Measure[T, Base any]() Layout {
+	size := comptime.SizeOf[T]()
+	baseSize := comptime.SizeOf[Base]()
+	const if comptime.TypeOf[T]() == comptime.TypeOf[Base]() {
+		return Layout{Kind: "plain", Size: size, BaseSize: baseSize}
+	}
+	const if comptime.TypeOf[T]() == comptime.TypeOf[*Base]() {
+		return Layout{Kind: "pointer", Size: size, BaseSize: baseSize}
+	}
+	const if comptime.TypeOf[T]() == comptime.TypeOf[[]Base]() {
+		return Layout{Kind: "slice", Size: size, BaseSize: baseSize}
+	}
+	const if comptime.TypeOf[T]() == comptime.TypeOf[map[string][]Base]() {
+		return Layout{Kind: "map", Size: size, BaseSize: baseSize}
+	}
+	panic("layout received an unexpected type argument")
+}

@@ -44,12 +44,12 @@ func TestNextSprintfNilAndFormatterStayCalls(t *testing.T) {
 		}
 	})
 	t.Run("basicStringInt", func(t *testing.T) {
-		if n := stable(t, "func g(name string, n int) string { return fmt.Sprintf(\"hello %s %d\", name, n) }"); n != 1 {
+		if n := stable(t, "func g(name string, n int) string { return fmt.Sprintf(\"hello %s %d\", name, n) }\n\nfunc h() {\n\tfmt.Println(\"x\")\n}"); n != 1 {
 			t.Fatalf("basic string/int: got %d edits, want 1", n)
 		}
 	})
 	t.Run("boolV", func(t *testing.T) {
-		if n := stable(t, "func g(ok bool) string { return fmt.Sprintf(\"ok=%v\", ok) }"); n != 1 {
+		if n := stable(t, "func g(ok bool) string { return fmt.Sprintf(\"ok=%v\", ok) }\n\nfunc h() {\n\tfmt.Println(\"x\")\n}"); n != 1 {
 			t.Fatalf("bool %%v: got %d edits, want 1", n)
 		}
 	})

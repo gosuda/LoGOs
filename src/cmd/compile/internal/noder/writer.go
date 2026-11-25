@@ -12,6 +12,7 @@ import (
 	"internal/buildcfg"
 	"internal/pkgbits"
 	"log"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -74,6 +75,10 @@ type pkgWriter struct {
 	info                  *types2.Info
 	rangeFuncBodyClosures map[*syntax.FuncLit]bool // non-public information, e.g., which functions are closures range function bodies?
 
+	// logosExport caches the state for erasing inferred option types
+	// at the export boundary (see writer_hooks_logos.go).
+	logosExport *logosExportState
+
 	// Indices for previously written syntax and types2 things.
 
 	posBasesIdx map[*syntax.PosBase]index
@@ -97,7 +102,29 @@ type pkgWriter struct {
 	// cgoPragmas accumulates any //go:cgo_* pragmas that need to be
 	// passed through to cmd/link.
 	cgoPragmas [][]string
+
+	logosCtDefs     map[*types2.Func]*types2.LogosCtInst
+	logosCtOrder    []*types2.Func
+	logosCtHelpers  map[types2.Object]*types2.LogosCtInst
+	logosCtUnits    []logosCtHelperUnit
+	logosCtObjects  map[string]*types2.Func
+	logosCtGenerics map[logosCtOrigin]types2.LogosCtGeneric
+	logosCtOwner    *types2.Package
+	logosCtInfo     *types2.Info
 }
+
+type logosCtHelperUnit struct {
+	inst    *types2.LogosCtInst
+	objects []types2.Object
+}
+
+type logosCtOrigin struct {
+	path string
+	name string
+}
+
+// The normal dynamic instance form cannot contain this subdictionary index.
+const logosCtStaticInstance = 1<<31 - 1
 
 // newPkgWriter returns an initialized pkgWriter for the specified
 // package.
@@ -153,6 +180,11 @@ func (pw *pkgWriter) typeAndValue(x syntax.Expr) syntax.TypeAndValue {
 
 func (pw *pkgWriter) maybeTypeAndValue(x syntax.Expr) (syntax.TypeAndValue, bool) {
 	tv := x.GetTypeInfo()
+	if pw.logosCtOwner != nil {
+		if checked, ok := pw.info.Types[x]; ok {
+			tv = types2.LogosCtTypeAndValue(checked)
+		}
+	}
 
 	// If x is a generic function whose type arguments are inferred
 	// from assignment context, then we need to find its inferred type
@@ -224,6 +256,9 @@ type writerDict struct {
 	subdicts             []objInfo
 	rtypes               []typeInfo
 	itabs                []itabInfo
+	logosCtFuncs         map[int]typeInfo // subdictionary slots holding exact function values
+	logosCtOrdinals      map[*syntax.Name]int
+	logosCtSemanticSlots map[int]int
 }
 
 type itabInfo struct {
@@ -514,7 +549,7 @@ func (pw *pkgWriter) typIdx(typ types2.Type, dict *writerDict) typeInfo {
 	// bodies anyway. Otherwise, they can cause types.Sym collisions
 	// (e.g., "main.C" for both of the local type aliases in
 	// test/fixedbugs/issue50190.go).
-	typ = logosWriterNormalizeType(typ)
+	typ = logosWriterNormalizeType(typ, pw.logosExportState())
 
 	if idx, ok := pw.typsIdx[typ]; ok {
 		return typeInfo{idx: idx, derived: false}
@@ -551,6 +586,19 @@ func (pw *pkgWriter) typIdx(typ types2.Type, dict *writerDict) typeInfo {
 		}
 
 	case *types2.Named:
+		if origin, captures, explicit := types2.LogosCtLocalNamed(typ); origin != nil && (len(captures) != 0 || len(explicit) != 0 || types2.LogosCtLocalABIName(origin) != "") {
+			obj := origin.Obj()
+			if local := pw.logosCtLocalDecl(obj); local != nil {
+				obj = local
+			}
+			w.Code(pkgbits.TypeNamedCaptured)
+			w.obj(obj, explicit)
+			w.Len(len(captures))
+			for _, capture := range captures {
+				w.typ(capture)
+			}
+			break
+		}
 		w.Code(pkgbits.TypeNamed)
 		w.namedType(splitNamed(typ))
 
@@ -767,6 +815,7 @@ func (pw *pkgWriter) objIdx(obj types2.Object) index {
 	// TODO(mdempsky): Validate that obj is a global object (or a local
 	// defined type, which we hoist to global scope anyway).
 
+	obj = pw.logosLocalObj(obj)
 	if idx, ok := pw.objsIdx[obj]; ok {
 		return idx
 	}
@@ -775,10 +824,10 @@ func (pw *pkgWriter) objIdx(obj types2.Object) index {
 		derivedIdx: make(map[types2.Type]index),
 	}
 
-	if isDefinedType(obj) && obj.Pkg() == pw.curpkg {
-		decl, ok := pw.typDecls[obj.(*types2.TypeName)]
-		if !ok {
-			base.Fatalf("%v not in pw.typDecls", obj.(*types2.TypeName))
+	if name, ok := obj.(*types2.TypeName); ok && isDefinedType(obj) {
+		decl, found := pw.typDecls[name]
+		if obj.Pkg() == pw.curpkg && !found {
+			base.Fatalf("%v not in pw.typDecls", name)
 		}
 		dict.implicits = decl.implicits
 	}
@@ -840,7 +889,9 @@ func (pw *pkgWriter) objIdx(obj types2.Object) index {
 // doObj writes the RelocObj definition for obj to w, and the
 // RelocObjExt definition to wext.
 func (w *writer) doObj(wext *writer, obj types2.Object) pkgbits.CodeObj {
-	if obj.Pkg() != w.p.curpkg {
+	fn, _ := obj.(*types2.Func)
+	name, _ := obj.(*types2.TypeName)
+	if obj.Pkg() != w.p.curpkg && w.p.logosCtDefs[fn] == nil && w.p.logosCtHelpers[obj] == nil && w.p.typDecls[name].ctInstance == "" {
 		return pkgbits.ObjStub
 	}
 
@@ -967,6 +1018,26 @@ func (w *writer) objDict(obj types2.Object, dict *writerDict) {
 	// doesn't care about referenced functions.
 
 	w.dict = dict // TODO(mdempsky): This is a bit sketchy.
+	fn, _ := obj.(*types2.Func)
+	name, _ := obj.(*types2.TypeName)
+	concrete := w.p.logosCtDefs[fn] != nil || w.p.typDecls[name].ctInstance != ""
+	if fn != nil && w.p.logosCtHelpers[obj] != nil {
+		concrete = true
+	}
+	var generic types2.LogosCtGeneric
+	if fn != nil && fn.Pkg() == w.p.curpkg {
+		generic = w.p.logosCtGeneric(fn)
+	}
+	var named types2.LogosCtNamedTypeDefaults
+	if name != nil && name.Pkg() == w.p.curpkg && name.Parent() == w.p.curpkg.Scope() {
+		if w.p.logosCtInfo != nil {
+			named = w.p.logosCtInfo.LogosCtExportNamedDefaults[name.Name()]
+		}
+		if iface := w.p.info.LogosUnionTypes[name.Name()]; iface != nil {
+			named.RHS = iface
+		}
+	}
+	hasDefaults := len(named.Fields) != 0 || named.RHS != nil
 	w.Len(len(dict.implicits))
 
 	rtparams := objRecvTypeParams(obj)
@@ -1042,6 +1113,35 @@ func (w *writer) objDict(obj types2.Object, dict *writerDict) {
 		w.typInfo(info.iface)
 	}
 
+	template := generic.Decl != nil
+	if concrete || template || len(dict.logosCtFuncs) != 0 || len(dict.logosCtSemanticSlots) != 0 || len(generic.Edges) != 0 || hasDefaults {
+		w.Bool(concrete)
+		w.Bool(template)
+		w.Len(len(dict.logosCtFuncs))
+		for i := range dict.subdicts {
+			if sig, ok := dict.logosCtFuncs[i]; ok {
+				w.Len(i)
+				w.typInfo(sig)
+			}
+		}
+		w.Len(len(dict.logosCtSemanticSlots))
+		for i := range dict.subdicts {
+			if ordinal, ok := dict.logosCtSemanticSlots[i]; ok {
+				w.Len(i)
+				w.Len(ordinal)
+			}
+		}
+		w.logosCtWriteEdges(generic.Edges)
+		if template {
+			w.logosCtWriteTemplate(generic)
+		}
+		if hasDefaults {
+			w.logosCtWriteNamedDefaults(named.Fields)
+			if w.Bool(named.RHS != nil) {
+				(&logosCtEdgeWriter{writer: w}).semanticType(named.RHS)
+			}
+		}
+	}
 	assert(len(dict.derived) == nderived)
 }
 
@@ -1081,16 +1181,15 @@ func (w *writer) qualifiedIdent(obj types2.Object) {
 	w.Sync(pkgbits.SyncSym)
 
 	name := obj.Name()
-	if isDefinedType(obj) && obj.Pkg() == w.p.curpkg {
-		decl, ok := w.p.typDecls[obj.(*types2.TypeName)]
-		assert(ok)
-		if decl.gen != 0 {
-			// For local defined types, we embed a scope-disambiguation
-			// number directly into their name. types.SplitVargenSuffix then
-			// knows to look for this.
-			//
-			// TODO(mdempsky): Find a better solution; this is terrible.
-			name = fmt.Sprintf("%s·%v", name, decl.gen)
+	if typeName, ok := obj.(*types2.TypeName); ok && isDefinedType(obj) {
+		decl, found := w.p.typDecls[typeName]
+		assert(obj.Pkg() != w.p.curpkg || found)
+		if suffix := logosCtLocalABISuffix(decl); suffix != "" {
+			name += "·" + suffix
+		} else if named, ok := typeName.Type().(*types2.Named); ok {
+			if abi := types2.LogosCtLocalABIName(named); abi != "" {
+				name = abi
+			}
 		}
 	}
 
@@ -1156,6 +1255,7 @@ func (w *writer) funcExt(obj *types2.Func) {
 	if pragma&ir.Systemstack != 0 && pragma&ir.Nosplit != 0 {
 		w.p.errorf(decl, "go:nosplit and go:systemstack cannot be combined")
 	}
+	template := w.p.logosCtOrigin(obj)
 	wi := asWasmImport(decl.Pragma)
 	we := asWasmExport(decl.Pragma)
 
@@ -1182,7 +1282,7 @@ func (w *writer) funcExt(obj *types2.Func) {
 			// that here.
 			w.p.errorf(decl, "go:uintptrkeepalive requires go:nosplit")
 		}
-	} else {
+	} else if !template {
 		if base.Flag.Complete || decl.Name.Value == "init" {
 			// Linknamed functions are allowed to have no body. Hopefully
 			// the linkname target has a body. See issue 23311.
@@ -1194,6 +1294,29 @@ func (w *writer) funcExt(obj *types2.Func) {
 	}
 
 	sig, block := obj.Type().(*types2.Signature), decl.Body
+	if template {
+		block = nil
+	} else if edges := w.p.logosCtGeneric(obj).Edges; len(edges) != 0 {
+		w.dict.logosCtOrdinals = make(map[*syntax.Name]int, len(edges))
+		for ordinal, edge := range edges {
+			w.dict.logosCtOrdinals[edge.Site] = ordinal
+		}
+	}
+	if w.p.logosCtInfo != nil {
+		saved, owner := w.p.info, w.p.logosCtOwner
+		w.p.info = w.p.logosCtInfo
+		inst := w.p.logosCtDefs[obj]
+		if inst == nil {
+			inst = w.p.logosCtHelpers[obj]
+		}
+		if inst != nil {
+			w.p.info = inst.Info
+			w.p.logosCtOwner = inst.Pkg
+		} else {
+			w.p.logosCtOwner = nil
+		}
+		defer func() { w.p.info, w.p.logosCtOwner = saved, owner }()
+	}
 	body, closureVars := w.p.bodyIdx(sig, block, w.dict)
 	if len(closureVars) > 0 {
 		fmt.Fprintln(os.Stderr, "CLOSURE", closureVars)
@@ -1948,11 +2071,11 @@ func (w *writer) expr(expr syntax.Expr) {
 
 			w.Code(exprFuncInst)
 			w.pos(expr)
-			w.funcInst(obj, targs)
+			w.funcInst(obj, targs, inst.Type, expr)
 			return
 		}
 
-		if isGlobal(obj) {
+		if isGlobal(obj) || w.p.logosCtHelpers[obj] != nil || w.p.info.LogosCtGlobalRefs[obj] {
 			w.Code(exprGlobal)
 			w.obj(obj, nil)
 			return
@@ -2207,7 +2330,7 @@ func (w *writer) expr(expr syntax.Expr) {
 				obj := obj.(*types2.Func)
 
 				w.pos(fun)
-				w.funcInst(obj, asTypeSlice(inst.TypeArgs))
+				w.funcInst(obj, asTypeSlice(inst.TypeArgs), inst.Type, fun)
 				return
 			}
 
@@ -2311,14 +2434,54 @@ func (w *writer) recvExpr(expr *syntax.SelectorExpr, sel *types2.Selection) type
 }
 
 // funcInst writes a reference to an instantiated function.
-func (w *writer) funcInst(obj *types2.Func, targs []types2.Type) {
+func (w *writer) funcInst(obj *types2.Func, targs []types2.Type, sig types2.Type, expr syntax.Expr) {
+	var site *syntax.Name
+	var id string
+	if w.p.logosCtInfo != nil {
+		site = logosCtCalleeName(expr)
+		id = w.p.info.LogosCtSiteKeys[site]
+		if exact := w.p.logosCtObjects[id]; exact != nil {
+			w.Bool(false)
+			w.obj(exact, nil)
+			return
+		}
+	}
 	info := w.p.objInstIdx(obj, targs, w.dict)
+	if id != "" {
+		if _, ok := w.p.logosCtInfo.LogosCtGraph[id]; !ok {
+			w.p.fatalf(expr, "missing prepared comptime definition for %v", obj)
+		}
+		w.Bool(true)
+		w.Len(logosCtStaticInstance)
+		w.objInfo(info)
+		w.String(id)
+		return
+	}
 
-	// Type arguments list contains derived types; we can emit a static
-	// call to the shaped function, but need to dynamically compute the
-	// runtime dictionary pointer.
-	if w.Bool(info.anyDerived()) {
-		w.Len(w.dict.subdictIdx(info))
+	var ordinal int
+	var hasOrdinal bool
+	if w.dict != nil {
+		ordinal, hasOrdinal = w.dict.logosCtOrdinals[site]
+	}
+	if w.Bool(info.anyDerived() || hasOrdinal) {
+		var i int
+		if hasOrdinal {
+			i = len(w.dict.subdicts)
+			w.dict.subdicts = append(w.dict.subdicts, info)
+			if w.dict.logosCtSemanticSlots == nil {
+				w.dict.logosCtSemanticSlots = make(map[int]int)
+			}
+			w.dict.logosCtSemanticSlots[i] = ordinal
+		} else {
+			i = w.dict.subdictIdx(info)
+		}
+		if w.p.logosCtOrigin(obj) {
+			if w.dict.logosCtFuncs == nil {
+				w.dict.logosCtFuncs = make(map[int]typeInfo)
+			}
+			w.dict.logosCtFuncs[i] = w.p.typIdx(sig, w.dict)
+		}
+		w.Len(i)
 		return
 	}
 
@@ -2326,6 +2489,38 @@ func (w *writer) funcInst(obj *types2.Func, targs []types2.Type) {
 	// call with a statically reference to the respective runtime
 	// dictionary.
 	w.objInfo(info)
+}
+
+func logosCtCalleeName(expr syntax.Expr) *syntax.Name {
+	expr = syntax.Unparen(expr)
+	if expr, ok := expr.(*syntax.IndexExpr); ok {
+		return logosCtCalleeName(expr.X)
+	}
+	if expr, ok := expr.(*syntax.SelectorExpr); ok {
+		return expr.Sel
+	}
+	name, _ := expr.(*syntax.Name)
+	return name
+}
+
+func (pw *pkgWriter) logosCtOrigin(obj *types2.Func) bool {
+	return pw.logosCtGeneric(obj).Decl != nil
+}
+
+func (pw *pkgWriter) logosCtGeneric(obj *types2.Func) types2.LogosCtGeneric {
+	if pw.logosCtInfo == nil || obj.Pkg() == nil || obj.Signature().Recv() != nil || obj.Signature().TypeParams().Len() == 0 {
+		return types2.LogosCtGeneric{}
+	}
+	key := logosCtOrigin{obj.Pkg().Path(), obj.Name()}
+	if generic, ok := pw.logosCtGenerics[key]; ok {
+		return generic
+	}
+	var generic types2.LogosCtGeneric
+	if obj.Pkg().Path() != pw.curpkg.Path() && pw.logosCtInfo.LogosCtImport != nil {
+		generic, _ = pw.logosCtInfo.LogosCtImport(obj)
+	}
+	pw.logosCtGenerics[key] = generic
+	return generic
 }
 
 // methodExpr writes out a reference to the method selected by
@@ -2599,7 +2794,21 @@ func (w *writer) structElems(typ *types2.Struct, valuesOnly bool, elems []syntax
 		kv := elem.(*syntax.KeyValueExpr)
 		w.pos(kv.Key) // use position of Key rather than of elem (which has position of ':')
 		// TODO(gri): rather than doing this lookup again, perhaps the index should be recorded by types2
-		fld, index, _ := types2.LookupFieldOrMethod(typ, false, w.p.curpkg, kv.Key.(*syntax.Name).Value)
+		pkg := w.p.curpkg
+		key := kv.Key.(*syntax.Name)
+		var checked *types2.Var
+		if w.p.logosCtOwner != nil {
+			pkg = w.p.logosCtOwner
+			checked, _ = w.p.info.Uses[key].(*types2.Var)
+			if checked != nil {
+				pkg = checked.Pkg()
+			}
+		}
+		fld, index, _ := types2.LookupFieldOrMethod(typ, false, pkg, key.Value)
+		if checked != nil {
+			f, _ := fld.(*types2.Var)
+			base.Assertf(f != nil && f.Origin() == checked.Origin(), "lost checked field %v in comptime literal", checked)
+		}
 		if n := len(index); n > 1 {
 			// embedded field
 			w.Int(-n)
@@ -2783,7 +2992,8 @@ func (w *writer) op(op ir.Op) {
 
 type typeDeclGen struct {
 	*syntax.TypeDecl
-	gen int
+	gen        int
+	ctInstance string
 
 	// Implicit type parameters in scope at this type declaration.
 	implicits []*types2.TypeParam
@@ -2805,6 +3015,7 @@ type declCollector struct {
 	file       *fileImports
 	withinFunc bool
 	implicits  []*types2.TypeParam
+	ctInstance string
 }
 
 func (c *declCollector) withTParams(obj types2.Object) *declCollector {
@@ -2862,6 +3073,7 @@ func (c *declCollector) Visit(n syntax.Node) syntax.Visitor {
 			if c.withinFunc {
 				*c.typegen++
 				d.gen = *c.typegen
+				d.ctInstance = c.ctInstance
 			}
 		}
 
@@ -2938,6 +3150,72 @@ func (pw *pkgWriter) collectDecls(noders []*noder) {
 			}
 		}
 	}
+	if pw.info.LogosCtPrepared == nil && pw.info.LogosCtGenerics == nil && pw.info.LogosCtImport == nil {
+		return
+	}
+	pw.logosCtInfo = pw.info
+	pw.logosCtDefs = pw.info.LogosCtPrepared
+	pw.logosCtObjects = make(map[string]*types2.Func, len(pw.logosCtDefs))
+	pw.logosCtGenerics = make(map[logosCtOrigin]types2.LogosCtGeneric)
+	for obj, generic := range pw.info.LogosCtGenerics {
+		pw.logosCtGenerics[logosCtOrigin{obj.Pkg().Path(), obj.Name()}] = generic
+	}
+	for obj, inst := range pw.logosCtDefs {
+		if obj.Name() != inst.Sym || obj.Pkg().Path() != inst.Pkg.Path() || inst.Info.Defs[inst.Decl.Name] != obj {
+			pw.fatalf(inst.Decl, "invalid checked comptime definition for %v", obj)
+		}
+		id := inst.ID
+		if id == "" || pw.logosCtObjects[id] != nil {
+			pw.fatalf(inst.Decl, "duplicate or non-concrete comptime definition for %v", obj)
+		}
+		pw.logosCtObjects[id] = obj
+		pw.logosCtOrder = append(pw.logosCtOrder, obj)
+	}
+	slices.SortFunc(pw.logosCtOrder, func(a, b *types2.Func) int {
+		if c := strings.Compare(a.Pkg().Path(), b.Pkg().Path()); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Name(), b.Name())
+	})
+	for _, obj := range pw.logosCtOrder {
+		inst := pw.logosCtDefs[obj]
+		pw.info = inst.Info
+		var localTypegen int
+		collector := &declCollector{pw: pw, typegen: &localTypegen, file: &fileImports{}, ctInstance: inst.Sym}
+		syntax.Walk(inst.Decl, collector)
+		if len(inst.Helpers) != 0 {
+			unit := logosCtHelperUnit{inst: inst, objects: make([]types2.Object, 0, len(inst.Helpers))}
+			for _, helper := range inst.Helpers {
+				syntax.Walk(helper, collector)
+				pw.logosCtCollectHelper(&unit, helper)
+			}
+			pw.logosCtUnits = append(pw.logosCtUnits, unit)
+		}
+	}
+	pw.info = pw.logosCtInfo
+}
+
+func (pw *pkgWriter) logosCtCollectHelper(unit *logosCtHelperUnit, decl syntax.Decl) {
+	var names []*syntax.Name
+	switch decl := decl.(type) {
+	case *syntax.VarDecl:
+		names = decl.NameList
+	case *syntax.FuncDecl:
+		names = []*syntax.Name{decl.Name}
+	default:
+		pw.fatalf(decl, "unexpected checked comptime helper %T", decl)
+	}
+	for _, name := range names {
+		obj := unit.inst.Info.Defs[name]
+		if obj == nil || obj.Pkg() != unit.inst.Pkg || pw.logosCtHelpers[obj] != nil {
+			pw.fatalf(name, "invalid or duplicate checked comptime helper %s", name.Value)
+		}
+		if pw.logosCtHelpers == nil {
+			pw.logosCtHelpers = make(map[types2.Object]*types2.LogosCtInst)
+		}
+		pw.logosCtHelpers[obj] = unit.inst
+		unit.objects = append(unit.objects, obj)
+	}
 }
 
 func (pw *pkgWriter) checkPragmas(p syntax.Pragma, allowed ir.PragmaFlag, embedOK bool) {
@@ -2960,12 +3238,26 @@ func (pw *pkgWriter) checkPragmas(p syntax.Pragma, allowed ir.PragmaFlag, embedO
 }
 
 func (w *writer) pkgInit(noders []*noder) {
+	w.Len(len(w.p.logosCtOrder))
+	for _, obj := range w.p.logosCtOrder {
+		w.String(w.p.logosCtDefs[obj].ID)
+		w.obj(obj, nil)
+	}
+	var graph map[string][]string
+	if len(w.p.logosCtDefs) != 0 {
+		graph = w.p.logosCtInfo.LogosCtGraph
+	}
+	w.Len(len(graph))
+	for _, key := range slices.Sorted(maps.Keys(graph)) {
+		w.String(key)
+		w.Strings(graph[key])
+	}
 	w.Len(len(w.p.cgoPragmas))
 	for _, cgoPragma := range w.p.cgoPragmas {
 		w.Strings(cgoPragma)
 	}
 
-	w.pkgInitOrder()
+	w.initOrder(w.p.info.InitOrder)
 
 	w.Sync(pkgbits.SyncDecls)
 	for _, p := range noders {
@@ -2976,18 +3268,80 @@ func (w *writer) pkgInit(noders []*noder) {
 	w.Code(declEnd)
 
 	w.Sync(pkgbits.SyncEOF)
+	if w.p.logosCtInfo != nil {
+		maps := w.p.logosCtInfo.LogosCtExportConstMaps
+		if len(w.p.logosCtUnits)+len(maps) != 0 {
+			w.logosCtWriteHelpers()
+			if len(maps) != 0 {
+				w.Reloc(pkgbits.SectionMeta, w.logosCtWriteConstMaps(maps))
+			}
+		}
+	}
 }
 
-func (w *writer) pkgInitOrder() {
-	// TODO(mdempsky): Write as a function body instead?
-	w.Len(len(w.p.info.InitOrder))
-	for _, init := range w.p.info.InitOrder {
+func (w *writer) initOrder(order []*types2.Initializer) {
+	w.Len(len(order))
+	for _, init := range order {
 		w.Len(len(init.Lhs))
 		for _, v := range init.Lhs {
 			w.obj(v, nil)
 		}
 		w.expr(init.Rhs)
 	}
+}
+
+func (w *writer) logosCtWriteHelpers() {
+	units := w.p.logosCtUnits
+	saved, owner := w.p.info, w.p.logosCtOwner
+	defer func() { w.p.info, w.p.logosCtOwner = saved, owner }()
+	w.Len(len(units))
+	for _, unit := range units {
+		inst := unit.inst
+		w.p.info, w.p.logosCtOwner = inst.Info, inst.Pkg
+		w.String(inst.ID)
+		w.Len(len(unit.objects))
+		readonly := make(map[*types2.Var]bool, len(inst.Readonly))
+		for _, obj := range inst.Readonly {
+			base.Assertf(w.p.logosCtHelpers[obj] == inst, "readonly comptime object %v outside its unit", obj)
+			readonly[obj] = true
+		}
+		for _, obj := range unit.objects {
+			w.obj(obj, nil)
+			v, _ := obj.(*types2.Var)
+			w.Bool(readonly[v])
+		}
+	}
+	for _, unit := range units {
+		inst := unit.inst
+		w.p.info, w.p.logosCtOwner = inst.Info, inst.Pkg
+		for _, init := range inst.Info.InitOrder {
+			for _, v := range init.Lhs {
+				base.Assertf(w.p.logosCtHelpers[v] == inst, "comptime initializer for %v outside its unit", v)
+			}
+		}
+		w.initOrder(inst.Info.InitOrder)
+	}
+}
+
+func (w *writer) logosCtWriteConstMaps(rows map[string]types2.LogosCtConstMapExport) index {
+	table := w.p.newWriter(pkgbits.SectionMeta, pkgbits.SyncPrivate)
+	table.Len(len(rows))
+	scope := w.p.curpkg.Scope()
+	for _, name := range slices.Sorted(maps.Keys(rows)) {
+		mapInfo := rows[name]
+		row := w.p.newWriter(pkgbits.SectionMeta, pkgbits.SyncPrivate)
+		row.Len(mapInfo.Count)
+		row.Bool(mapInfo.Bearing)
+		for _, helper := range [...]string{mapInfo.Lookup, mapInfo.Materialize, mapInfo.Iterate} {
+			fn, ok := scope.Lookup(helper).(*types2.Func)
+			base.Assertf(ok && fn.Pkg() == w.p.curpkg && !fn.Exported(), "missing private owner function %s.%s for const map %s", w.p.curpkg.Path(), helper, name)
+			row.Reloc(pkgbits.SectionObj, w.p.objIdx(fn))
+		}
+		(&logosCtEdgeWriter{writer: row}).semanticType(mapInfo.Type)
+		table.String(name)
+		table.Reloc(pkgbits.SectionMeta, row.Flush())
+	}
+	return table.Flush()
 }
 
 func (w *writer) pkgDecl(decl syntax.Decl) {

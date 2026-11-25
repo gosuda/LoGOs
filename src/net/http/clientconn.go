@@ -27,6 +27,7 @@ type ClientConn struct {
 	lastAvailable    int
 	lastInFlight     int
 	lastClosed       bool
+	isHTTP2          bool
 }
 
 // newClientConner is the interface implemented by HTTP/2 transports to create new client conns.
@@ -117,6 +118,9 @@ func (t *Transport) NewClientConn(ctx context.Context, scheme, address string) (
 		// Handle x/net/http2.Transport.NewClientConn passing us a net.Conn
 		// to create a ClientConn from.
 		if cc, err := t.http2NewClientConnFromContext(ctx); err != errors.ErrUnsupported {
+			if err == nil {
+				cc.isHTTP2 = true
+			}
 			return cc, err
 		}
 	}
@@ -194,6 +198,7 @@ func (t *Transport) NewClientConn(ctx context.Context, scheme, address string) (
 			return nil, errors.New("http: NewClientConn returned something that is not a ClientConn")
 		}
 		cc.cc = gc
+		cc.isHTTP2 = pconn.isHTTP2
 		cc.lastAvailable = gc.Available()
 	} else {
 		// This is an HTTP/1 connection.
@@ -219,7 +224,7 @@ func (cc *ClientConn) Err() error {
 	return cc.cc.Err()
 }
 
-func validateClientConnRequest(req *Request) error {
+func (cc *ClientConn) validateRequest(req *Request) error {
 	if req.URL == nil {
 		return errors.New("http: nil Request.URL")
 	}
@@ -227,8 +232,9 @@ func validateClientConnRequest(req *Request) error {
 		return errors.New("http: nil Request.Header")
 	}
 	// Validate the outgoing headers.
-	if err := validateHeaders(req.Header); err != "" {
-		return fmt.Errorf("http: invalid header %s", err)
+	extendedConnect, invalid := validateHeaderFields(req.Header, req.Method)
+	if invalid != "" {
+		return fmt.Errorf("http: invalid header %s", invalid)
 	}
 	// Validate the outgoing trailers too.
 	if err := validateHeaders(req.Trailer); err != "" {
@@ -239,6 +245,9 @@ func validateClientConnRequest(req *Request) error {
 	}
 	if req.URL.Host == "" {
 		return errors.New("http: no Host in request URL")
+	}
+	if extendedConnect && !cc.isHTTP2 {
+		return errExtendedConnectRequiresHTTP2
 	}
 	return nil
 }
@@ -264,8 +273,9 @@ func (cc *ClientConn) RoundTrip(req *Request) (*Response, error) {
 		}
 		return nil, pinger.Ping(req.Context())
 	}
-	if err := validateClientConnRequest(req); err != nil {
+	if err := cc.validateRequest(req); err != nil {
 		cc.Release()
+		req.closeBody()
 		return nil, err
 	}
 	return cc.cc.RoundTrip(req)

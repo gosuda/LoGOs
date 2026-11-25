@@ -9,14 +9,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+
+	"cmd/go/internal/logos/hints"
 )
 
 type HintsFunc func(method string, params, hints json.RawMessage) (json.RawMessage, error)
 
 type HintsJSONFunc func(ctx context.Context, dir string, buffers map[string][]byte) (json.RawMessage, error)
 
-type CodeActionsFunc func(diags [][]byte, uri string, src []byte, rng json.RawMessage) (json.RawMessage, error)
+type CodeActionsFunc func(diags [][]byte, src []byte, rng json.RawMessage) ([]hints.CodeAction, error)
 
 func servesHints(method string) bool {
 	return method == "textDocument/inlayHint" || method == "textDocument/hover"
@@ -186,11 +189,7 @@ func (p *Proxy) mergeCodeActions(pend pending, result any) any {
 	if pend.fixHas && (!st.open || st.version != pend.fixVersion) {
 		return []any{}
 	}
-	lines, src := st.lines, st.src
-	if !st.current {
-		lines, src = nil, nil
-	}
-	if src == nil {
+	if !st.current || len(st.lines) == 0 {
 		return result
 	}
 	var req struct {
@@ -199,17 +198,20 @@ func (p *Proxy) mergeCodeActions(pend pending, result any) any {
 	if err := json.Unmarshal(pend.params, &req); err != nil {
 		return result
 	}
-	raw, err := p.opts.CodeActions(lines, pathURI(pend.path), src, req.Range)
+	actions, err := p.opts.CodeActions(st.lines, st.src, req.Range)
 	if err != nil {
 		p.logf("code actions for %s: %v", pend.path, err)
 		return result
 	}
-	extra, err := decode(raw)
-	if err != nil {
-		p.logf("code actions for %s: %v", pend.path, err)
+	if len(actions) == 0 {
 		return result
 	}
-	return appendList(result, extra)
+	base, _ := result.([]any)
+	base = slices.Grow(base, len(actions))
+	for i := range actions {
+		base = append(base, &actions[i])
+	}
+	return base
 }
 
 func (p *Proxy) docVersion(path string) (int, bool) {
@@ -238,7 +240,10 @@ func (p *Proxy) autofixObserve(path string) autofixState {
 		return autofixState{}
 	}
 	st := autofixState{version: doc.version, open: true}
-	if u == nil || u.diagVersions[path] != doc.version {
+	if u == nil {
+		return st
+	}
+	if version, ok := u.diagVersions[path]; !ok || version != doc.version {
 		return st
 	}
 	for _, d := range u.diags {

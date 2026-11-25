@@ -1148,7 +1148,15 @@ func TestRuntimeLockMetricsAndProfile(t *testing.T) {
 		// (to allow a STW to proceed) makes it harder to confirm that we're
 		// counting the correct number of contention events, since some locks
 		// will end up contended twice. Instead, disable the GC.
+		//
+		// SetGCPercent(-1) waits only for the mark phase of a cycle in
+		// progress. That cycle's mark termination then still flushes every
+		// P's caches, and with GOMAXPROCS=2 it holds the second P while it
+		// waits for a P whose worker holds the lock and spins for a partner
+		// that cannot run. Finish a whole cycle first, as
+		// TestSchedPauseMetrics does.
 		defer debug.SetGCPercent(debug.SetGCPercent(-1))
+		runtime.GC()
 
 		mus := make([]runtime.Mutex, 200)
 		var needContention atomic.Int64

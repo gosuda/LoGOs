@@ -1,0 +1,122 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+[!exec:sh] skip 'needs sh to check exit status'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOFLAGS=-buildvcs=false
+cd app
+
+logos conc run . ok
+! stderr .
+! stdout 'conc::'
+
+exec sh ../status.sh 7 logos conc run . exit7
+stderr '^exit status 7$'
+! stderr 'conc::'
+! stdout 'conc::'
+
+exec sh ../status.sh 7 logos conc run . finding exit7
+stdout '\[conc::lock_order_inversion\]'
+stderr '^exit status 7$'
+
+exec sh ../status.sh 1 logos conc run . finding ok
+stdout '\[conc::lock_order_inversion\]'
+! stderr '^exit status'
+
+exec sh ../status.sh 137 logos conc run . signal
+stderr '^signal: killed$'
+
+exec sh ../status.sh 1 logos run . exit7
+stderr '^exit status 7$'
+exec sh ../status.sh 1 go run ../plain.go
+stderr '^exit status 7$'
+
+# Use the script's logos for the nested run, before run prepends GOROOT/bin.
+exec sh -c 'tool=$(command -v logos) || exit 1; exec "$tool" conc run . nested "$tool"'
+stderr '^exit status 7$'
+
+-- status.sh --
+want=$1
+shift
+"$@"
+status=$?
+if [ "$status" -ne "$want" ]; then
+	printf 'exit code %s, want %s\n' "$status" "$want" >&2
+	exit 1
+fi
+-- plain.go --
+package main
+
+import "os"
+
+func main() { os.Exit(7) }
+-- app/go.mod --
+module example.com/exit
+
+go 1.27
+-- app/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"syscall"
+
+	"logos/sync"
+)
+
+var left, right sync.Locked[int]
+
+func forward() error {
+	left.WithLock(func(*int) {
+		right.WithLock(func(*int) {})
+	})
+	return nil
+}
+
+func invert(ctx context.Context) error {
+	go group (ctx) {
+		go forward()
+	}
+	right.WithLock(func(*int) {
+		left.WithLock(func(*int) {})
+	})
+	return nil
+}
+
+func main() {
+	switch os.Args[1] {
+	case "ok":
+		return
+	case "exit7":
+		os.Exit(7)
+	case "finding":
+		if err := invert(context.Background()); err != nil {
+			panic(err)
+		}
+		if os.Args[2] == "exit7" {
+			os.Exit(7)
+		}
+	case "signal":
+		if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
+			panic(err)
+		}
+	case "nested":
+		runNested(os.Args[2])
+	}
+}
+
+func runNested(logos string) {
+	cmd := exec.Command(logos, "run", ".", "exit7")
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 1 {
+			return
+		}
+		fmt.Fprintln(os.Stderr, err)
+	}
+	os.Exit(3)
+}

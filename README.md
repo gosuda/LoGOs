@@ -97,8 +97,6 @@ Output:
 
 ## Installation
 
-The source build in the quick start is the installation path shipped by this repository.
-
 - CI bootstraps the fork with upstream Go 1.27.4.
 - If `go` is not on `PATH`, or `command -v go` finds a LoGOs build instead of upstream Go, pass the upstream root directly: `GOROOT_BOOTSTRAP=/path/to/go`.
 - The build installs `bin/go` and `bin/logos` in the repository. Export `GOROOT`, `PATH`, and `GOTOOLCHAIN` in each shell that uses them.
@@ -108,13 +106,15 @@ The source build in the quick start is the installation path shipped by this rep
 
 Use `logos` on a LoGOs module the way you use `go` on a Go module: `logos mod init`, `logos build`, `logos run`, `logos test`, `logos list`, and `logos get` follow their Go counterparts.
 
-Five commands are specific to LoGOs:
+LoGOs adds these commands:
+
+- `logos conc run|test [conc flags]` runs a program or its tests under a monitor that reports lock order inversions, stalled group children, goroutine leaks, long lock holds, and unbounded groups.
 
 - `logos context <pkg>#<symbol>` prints one declaration and one level of signatures without function bodies.
 - `logos eject -o DIR` writes a standard Go copy of the main module.
 - `logos lint [build flags] [--pedantic] [--json-diagnostics] [packages]` runs compiler lints without writing binaries.
 - `logos lsp` serves the language server protocol over standard input and output through `gopls`.
-- `logos next [--fix | --ai-patch]` converts a Go module toward `.lgo` source; without a flag it prints only a diff.
+- `logos next [--fix | --ai-patch]` previews the conversion of a Go module to `.lgo` source as a diff; `--fix` prints a patch for you to apply, and no form of the command changes a source file.
 
 Module rules:
 

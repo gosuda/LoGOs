@@ -41,6 +41,28 @@ func TestArenaHeapSemantics(t *testing.T) {
 		}
 	})
 
+	t.Run("zero-region", func(t *testing.T) {
+		var r arena.Region
+		if r != (arena.Region{}) {
+			t.Fatalf("zero Region = %+v, want zero handle", r)
+		}
+		if got := arena.FixedUsed(r); got != 0 {
+			t.Errorf("FixedUsed(zero Region) = %d, want 0", got)
+		}
+		p := arena.New[int](r)
+		*p = 7
+		if *p != 7 {
+			t.Errorf("*p = %d, want 7: zero Region must allocate on the heap", *p)
+		}
+		s := arena.Make[int](r, 3)
+		if len(s) != 3 {
+			t.Fatalf("Make(zero Region, 3) has len %d, want 3", len(s))
+		}
+		if got := arena.Append(r, []int{1}, 2); !slices.Equal(got, []int{1, 2}) {
+			t.Errorf("Append(zero Region, [1], 2) = %v, want [1 2]", got)
+		}
+	})
+
 	t.Run("new", func(t *testing.T) {
 		r := arena.Open()
 		p1, p2 := arena.New[int](r), arena.New[int](r)

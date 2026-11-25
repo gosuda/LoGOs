@@ -103,6 +103,74 @@ func logosOptionRepr(o *Option) Type {
 	}, nil)
 }
 
+// LogosOptionRepr reports the lowered representation of an option type:
+// the bare payload for nil-admitting payloads, and struct{Value E;
+// Present bool} otherwise (the shape of logos/rt.Option[E]). Export
+// writers erase options to this representation at the package boundary.
+func LogosOptionRepr(o *Option) Type { return logosOptionRepr(o) }
+
+// LogosRTPackage finds the transitive dependency logos/rt of pkg, or nil
+// when it is unreachable. The instantiated logos/rt.Option[E] written at
+// the export boundary resolves through the ordinary import graph, so no
+// source-level import is synthesized for it.
+func LogosRTPackage(pkg *Package) *Package {
+	if pkg == nil {
+		return nil
+	}
+	if pkg.Path() == "logos/rt" {
+		return pkg
+	}
+	seen := map[*Package]bool{pkg: true}
+	queue := []*Package{pkg}
+	for len(queue) > 0 {
+		p := queue[0]
+		queue = queue[1:]
+		for _, imp := range p.Imports() {
+			if imp == nil || seen[imp] {
+				continue
+			}
+			if imp.Path() == "logos/rt" {
+				return imp
+			}
+			seen[imp] = true
+			queue = append(queue, imp)
+		}
+	}
+	return nil
+}
+
+// LogosOptionExportType reports the Go-facing type to write at the export
+// boundary for o: nil for nil-admitting payloads (the caller keeps the
+// bare payload erasure) and for wrapped options when rt is nil, and the
+// instantiated logos/rt.Option[E] for a wrapped option when rt names the
+// reachable logos/rt package. A nil result means the caller keeps the
+// layout struct shape from LogosOptionRepr.
+func LogosOptionExportType(rt *Package, o *Option, ctxt *Context) Type {
+	if o == nil || LogosOptionIsBare(o.Elem) {
+		return nil
+	}
+	if rt == nil {
+		return nil
+	}
+	obj := rt.Scope().Lookup("Option")
+	tn, ok := obj.(*TypeName)
+	if !ok || tn == nil {
+		return nil
+	}
+	orig, ok := tn.Type().(*Named)
+	if !ok || orig == nil || orig.TypeParams().Len() != 1 {
+		return nil
+	}
+	inst, err := Instantiate(ctxt, orig, []Type{o.Elem}, false)
+	if err != nil {
+		return nil
+	}
+	if _, ok := inst.(*Named); !ok || inst == Typ[Invalid] {
+		return nil
+	}
+	return inst
+}
+
 func logosWrapOption(t Type) *Option { return &Option{Elem: t} }
 
 func logosWrapOne(t Type) Type {
@@ -129,6 +197,10 @@ func (check *Checker) logosOptionAssign(x *operand, T Type, context string) bool
 	Vopt := logosAsOption(x.typ())
 	if Topt == nil && Vopt == nil {
 		return false
+	}
+	if Topt != nil && !x.isNil() && !Identical(x.typ(), T) && logosClosedUnion(Topt.Elem) != nil {
+		check.assignment(x, Topt.Elem, context)
+		return true
 	}
 	if isUntyped(x.typ()) {
 		if x.isNil() {
@@ -247,6 +319,20 @@ func (check *Checker) logosOptionIndirect(x *operand) bool {
 	return true
 }
 
+func (check *Checker) logosOptSelectDeferProj(e *syntax.OptSelectExpr) bool {
+	fp, ok := e.X.(*syntax.FieldProjExpr)
+	if !ok {
+		return false
+	}
+	_, obj := check.lookupScope(fp.Field.Value)
+	v, ok := obj.(*Var)
+	if !ok {
+		return false
+	}
+	info := check.logosFieldVars[v]
+	return info != nil && info.Generic && info.Struct == nil
+}
+
 func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKind {
 	var rx operand
 	check.expr(nil, &rx, e.X)
@@ -258,6 +344,12 @@ func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKi
 	check.logosUnnarrowOperand(&rx)
 	opt := logosAsOptionThroughConst(rx.typ())
 	if opt == nil {
+		if check.logosOptSelectDeferProj(e) {
+			x.mode_ = value
+			x.typ_ = &Option{Elem: logosComptimeAny}
+			x.expr = e
+			return expression
+		}
 		check.errorf(e, MissingFieldOrMethod, "%s ?. on non-option type %s", logosNotAnOption, rx.typ())
 		x.invalidate()
 		x.expr = e
@@ -326,6 +418,14 @@ func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKi
 	x.expr = e
 	return expression
 }
+func (check *Checker) logosCoalesceDeferLeft(e *syntax.CoalesceExpr) bool {
+	lx, ok := syntax.Unparen(e.X).(*syntax.CallExpr)
+	if !ok {
+		return false
+	}
+	fp, ok := syntax.Unparen(lx.Fun).(*syntax.OptSelectExpr)
+	return ok && check.logosOptSelectDeferProj(fp)
+}
 
 func (check *Checker) logosCoalesce(x *operand, e *syntax.CoalesceExpr) exprKind {
 	check.logosChainNestedTry(e.Y)
@@ -355,7 +455,11 @@ func (check *Checker) logosCoalesce(x *operand, e *syntax.CoalesceExpr) exprKind
 		return expression
 	}
 	x.mode_ = value
-	x.typ_ = opt.Elem
+	if check.logosCoalesceDeferLeft(e) {
+		x.typ_ = rx.typ()
+	} else {
+		x.typ_ = opt.Elem
+	}
 	x.expr = e
 	return expression
 }
@@ -378,6 +482,13 @@ func (check *Checker) logosOptionalCall(x *operand, call *syntax.CallExpr) bool 
 	opt := logosAsOption(x.typ())
 	if opt == nil {
 		return false
+	}
+	if fp, ok := syntax.Unparen(call.Fun).(*syntax.OptSelectExpr); ok && check.logosOptSelectDeferProj(fp) {
+		x.mode_ = value
+		x.typ_ = &Option{Elem: logosComptimeAny}
+		x.expr = call
+		check.hasCallOrRecv = true
+		return true
 	}
 	// A function field reached through `?.` on a const view carries the
 	// view's qualification; calling it mutates nothing, so read the

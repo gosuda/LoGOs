@@ -6,8 +6,8 @@ package conccmd
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"go/scanner"
 	"go/token"
 	"io"
 	"os"
@@ -133,6 +133,12 @@ func stalledReplacement(file string, line int) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	return receiveReplacement(data, line)
+}
+
+// receiveReplacement is stalledReplacement over the bytes of the file,
+// so a write can prove the edit again on the bytes it replaces.
+func receiveReplacement(data []byte, line int) (string, bool) {
 	lines := strings.Split(string(data), "\n")
 	if line < 1 || line > len(lines) {
 		return "", false
@@ -146,8 +152,8 @@ func stalledReplacement(file string, line int) (string, bool) {
 	if expr == "" || strings.ContainsAny(expr, " \t;") || strings.Contains(expr, "//") {
 		return "", false
 	}
-	ctx, exit, ok := enclosingChild(lines, line)
-	if !ok {
+	ctx, exit, header, ok := enclosingChild(lines, line)
+	if !ok || !receiveStatement(data, header, line, ctx) {
 		return "", false
 	}
 	indent := text[:len(text)-len(strings.TrimLeft(text, " \t"))]
@@ -171,15 +177,6 @@ func stalledReplacement(file string, line int) (string, bool) {
 	return b.String(), true
 }
 
-// enclosingChild returns the name of the context.Context parameter of
-// the function that holds the 1-based line and the statement that ends
-// the child on cancellation: "return" for a function without results
-// and "return ctx.Err()" for one whose only result is an error. Any
-// other shape — a blank or absent context, a context inside a nested
-// function type, or results that need values the fix cannot name — gets
-// no fix. Only a single-line func header counts; it stops at the
-// nearest header above the line, including a function literal, so a
-// context from an outer function is never taken.
 // headerEncloses reports whether the function header on lines[idx]
 // opens a body that still holds the wait on 1-based line: braces on
 // the lines between the header and the wait stay open. A literal that
@@ -236,10 +233,20 @@ func headerEncloses(lines []string, idx, line int) bool {
 	return depth > 0
 }
 
-func enclosingChild(lines []string, line int) (ctx, exit string, ok bool) {
+// enclosingChild returns the name of the context.Context parameter of
+// the function that holds the 1-based line, the statement that ends
+// the child on cancellation, and the 1-based line of the func header.
+// The statement is "return" for a function without results and
+// "return ctx.Err()" for one whose only result is an error. A blank or
+// absent context, a context inside a nested function type, or results
+// that need values the fix cannot name get no fix. Only a single-line
+// func header counts. The search stops at the nearest header above the
+// line, including a function literal, so a context from an outer
+// function is never taken.
+func enclosingChild(lines []string, line int) (ctx, exit string, header int, ok bool) {
 	for idx := line - 2; idx >= 0 && idx >= line-22; idx-- {
-		header := lines[idx]
-		if !strings.Contains(header, "func ") && !strings.Contains(header, "func(") {
+		text := lines[idx]
+		if !strings.Contains(text, "func ") && !strings.Contains(text, "func(") {
 			continue
 		}
 		// Only a header whose body still encloses the wait counts: a
@@ -248,10 +255,10 @@ func enclosingChild(lines []string, line int) (ctx, exit string, ok bool) {
 		if !headerEncloses(lines, idx, line) {
 			continue
 		}
-		ctx, exit, ok = childContext(header)
-		return ctx, exit, ok
+		ctx, exit, ok = childContext(text)
+		return ctx, exit, idx + 1, ok
 	}
-	return "", "", false
+	return "", "", 0, false
 }
 
 // childContext reads one func header line. It returns the context
@@ -352,99 +359,168 @@ func childContext(header string) (ctx, exit string, ok bool) {
 	return "", "", false
 }
 
-// applyStalledFixes writes the replacements, latest line first per file
-// so earlier lines keep their numbers. It returns one "file:line" per
-// write.
-func applyStalledFixes(fixes []stalledFix) []string {
-	slices.SortFunc(fixes, func(a, b stalledFix) int {
-		if a.file < b.file {
-			return -1
-		}
-		if a.file > b.file {
-			return 1
-		}
-		return b.line - a.line
-	})
-	var applied []string
-	var cur string
-	var lines []string
-	var pending []string
-	dirty := false
-	flush := func() {
-		if !dirty {
-			pending = nil
-			return
-		}
-		if err := writeFixedFile(cur, []byte(strings.Join(lines, "\n"))); err != nil {
-			fmt.Fprintf(os.Stderr, "logos conc: cannot fix %s: %v\n", cur, err)
-		} else {
-			applied = append(applied, pending...)
-		}
-		pending = nil
-		dirty = false
-	}
-	for _, f := range fixes {
-		if f.file != cur {
-			flush()
-			data, err := os.ReadFile(f.file)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "logos conc: cannot fix %s: %v\n", f.file, err)
-				cur = f.file
-				lines = nil
-				continue
-			}
-			cur = f.file
-			lines = strings.Split(string(data), "\n")
-		}
-		if f.line < 1 || f.line > len(lines) {
-			continue
-		}
-		lines[f.line-1] = f.replacement
-		dirty = true
-		pending = append(pending, fmt.Sprintf("%s:%d", f.file, f.line))
-	}
-	flush()
-	return applied
+// lineToken is one token of go/scanner and its 1-based line.
+type lineToken struct {
+	tok  token.Token
+	lit  string
+	line int
 }
 
-// writeFixedFile stages the new contents next to the file and renames
-// over it, so a failed write cannot leave the source truncated.
-func writeFixedFile(file string, data []byte) error {
-	// Rename over the resolved target, not the link itself: renaming
-	// onto a symlink path would replace the link with a regular file
-	// and leave the shared source unchanged.
-	if target, err := filepath.EvalSymlinks(file); err == nil {
-		file = target
+// receiveStatement proves with go/scanner tokens what the text checks
+// assume, so a comment or a literal cannot fake a token: the header on
+// 1-based line header is a func that declares ctx as context.Context,
+// the receive starts a statement on line and its operand ends the line,
+// and no statement between the two lines binds ctx again.
+func receiveStatement(src []byte, header, line int, ctx string) bool {
+	toks := scanLines(src, header, line)
+	w := slices.IndexFunc(toks, func(t lineToken) bool { return t.line == line })
+	if w < 1 || toks[w].tok != token.ARROW || !statementEnds(toks[:w]) {
+		return false
 	}
-	info, err := os.Stat(file)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(file), ".logosconc-fix-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	keep := false
-	defer func() {
-		if !keep {
-			_ = os.Remove(name)
+	return declaresContext(toks, header, ctx) && operandEndsLine(toks[w+1:], line) && !rebinds(toks[:w], ctx)
+}
+
+// scanLines returns the tokens of src on the 1-based lines first through
+// last, with the semicolons go/scanner inserts at line ends.
+func scanLines(src []byte, first, last int) []lineToken {
+	fset := token.NewFileSet()
+	file := fset.AddFile("", fset.Base(), len(src))
+	var s scanner.Scanner
+	s.Init(file, src, nil, 0)
+	var toks []lineToken
+	for {
+		pos, tok, lit := s.Scan()
+		if tok == token.EOF {
+			return toks
 		}
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		return errors.Join(err, tmp.Close())
+		line := file.Line(pos)
+		if line > last {
+			return toks
+		}
+		if line >= first {
+			toks = append(toks, lineToken{tok: tok, lit: lit, line: line})
+		}
 	}
-	if err := tmp.Chmod(info.Mode()); err != nil {
-		return errors.Join(err, tmp.Close())
+}
+
+// statementEnds reports whether the last of toks ends a statement or
+// opens a block or a case, so the next token starts a statement. The
+// ?? operator of loGo/s scans as two illegal tokens, and go/scanner
+// inserts a semicolon after it although the expression goes on.
+func statementEnds(toks []lineToken) bool {
+	n := len(toks)
+	switch toks[n-1].tok {
+	case token.LBRACE, token.COLON:
+		return true
+	case token.SEMICOLON:
+		return n < 3 || toks[n-2].tok != token.ILLEGAL || toks[n-3].tok != token.ILLEGAL
 	}
-	if err := tmp.Close(); err != nil {
-		return err
+	return false
+}
+
+// declaresContext reports whether the header line holds a func token
+// and, after it, ctx followed by context.Context.
+func declaresContext(toks []lineToken, header int, ctx string) bool {
+	sawFunc := false
+	for i := 0; i+3 < len(toks) && toks[i].line == header; i++ {
+		switch {
+		case toks[i].tok == token.FUNC:
+			sawFunc = true
+		case sawFunc && toks[i].tok == token.IDENT && toks[i].lit == ctx &&
+			toks[i+1].lit == "context" && toks[i+2].tok == token.PERIOD && toks[i+3].lit == "Context":
+			return true
+		}
 	}
-	if err := os.Rename(name, file); err != nil {
-		return err
+	return false
+}
+
+// operandEndsLine reports whether toks start with the operand of the
+// receive and the line ends right after it: names, selectors, calls and
+// index expressions on the one line, then the semicolon go/scanner
+// inserts at the line end.
+func operandEndsLine(toks []lineToken, line int) bool {
+	depth := 0
+	for i, t := range toks {
+		if t.line != line {
+			return false
+		}
+		switch t.tok {
+		case token.LPAREN, token.LBRACK:
+			depth++
+		case token.RPAREN, token.RBRACK:
+			depth--
+			if depth < 0 {
+				return false
+			}
+		case token.IDENT, token.PERIOD, token.INT, token.STRING, token.ARROW:
+		case token.COMMA:
+			if depth == 0 {
+				return false
+			}
+		case token.SEMICOLON:
+			return i > 0 && depth == 0 && t.lit == "\n"
+		default:
+			return false
+		}
 	}
-	keep = true
-	return nil
+	return false
+}
+
+// rebinds reports whether a var or const declaration, an assignment, or
+// a short variable declaration in toks gives name a new value.
+func rebinds(toks []lineToken, name string) bool {
+	depth, declDepth := 0, -1
+	for i, t := range toks {
+		switch t.tok {
+		case token.LPAREN, token.LBRACK, token.LBRACE:
+			depth++
+		case token.RPAREN, token.RBRACK, token.RBRACE:
+			depth--
+			if depth < declDepth {
+				declDepth = -1
+			}
+		case token.VAR, token.CONST:
+			declDepth = depth
+		case token.SEMICOLON:
+			if depth == declDepth {
+				declDepth = -1
+			}
+		case token.IDENT:
+			if t.lit == name && (declDepth >= 0 || assigned(toks, i)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// assigned reports whether the name at toks[i] is in the name list on
+// the left of = or := in a statement, an if, for or switch header, or a
+// select case. A list after "(" is a parameter list, as in
+// go group (ctx, limit = 8), and binds nothing.
+func assigned(toks []lineToken, i int) bool {
+	start := i
+	for start >= 2 && toks[start-1].tok == token.COMMA && toks[start-2].tok == token.IDENT {
+		start -= 2
+	}
+	end := i + 1
+	for end+1 < len(toks) && toks[end].tok == token.COMMA && toks[end+1].tok == token.IDENT {
+		end += 2
+	}
+	if end >= len(toks) {
+		return false
+	}
+	if t := toks[end].tok; t != token.DEFINE && t != token.ASSIGN {
+		return false
+	}
+	if start == 0 {
+		return true
+	}
+	switch toks[start-1].tok {
+	case token.SEMICOLON, token.LBRACE, token.COLON, token.FOR, token.IF, token.SWITCH, token.CASE:
+		return true
+	}
+	return false
 }
 
 // printStalledBrief prints one JSON object per fix to w without

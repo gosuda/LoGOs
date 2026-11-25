@@ -28,7 +28,6 @@ const (
 type cswCase struct {
 	syn  *syntax.ConstSwitchCase
 	kind cswKind
-	typ  types2.Type
 
 	spell otext
 
@@ -48,7 +47,6 @@ type cswLower struct {
 	stmt  *syntax.ConstSwitchStmt
 	start int
 	end   int
-	tag   types2.Type
 	cases []cswCase
 }
 
@@ -58,15 +56,31 @@ type cswRebind struct {
 	spell string
 }
 
-func (fc *funcLower) lowerConstSwitchStmt(s *syntax.ConstSwitchStmt) []syntax.Stmt {
-	c := newCswLower(fc, s)
-	if _, ok := c.tag.(*types2.TypeParam); ok {
-		return c.lowerRuntime()
-	}
-	return c.lowerFold()
+func (fl *fileLower) snapshotConstSwitchCases() {
+	var cases map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase
+	info := fl.pkg.info
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if stmt, ok := n.(syntax.Stmt); ok && info.LogosConstIfDead[stmt] {
+			return false
+		}
+		s, ok := n.(*syntax.ConstSwitchStmt)
+		if !ok {
+			return true
+		}
+		sel, static := types2.LogosConstSelectedCase(info, s)
+		if !static {
+			return true
+		}
+		if cases == nil {
+			cases = make(map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase)
+		}
+		cases[s] = sel
+		return true
+	})
+	fl.pkg.ctExp.switches = cases
 }
 
-func newCswLower(fc *funcLower, s *syntax.ConstSwitchStmt) *cswLower {
+func (fc *funcLower) lowerConstSwitchStmt(s *syntax.ConstSwitchStmt) []syntax.Stmt {
 	fl := fc.fl
 	c := &cswLower{
 		fc:    fc,
@@ -75,58 +89,64 @@ func newCswLower(fc *funcLower, s *syntax.ConstSwitchStmt) *cswLower {
 		stmt:  s,
 		start: fl.off(s.Pos()),
 		end:   fl.off(s.Rbrace) + 1,
-		tag:   checkedTypeOf(fl.pkg.info, s.Targ),
 	}
-	for i, syn := range s.Cases {
-		typ := checkedTypeOf(fl.pkg.info, syn.Type)
-		cs := cswCase{
-			syn:   syn,
-			kind:  cswExact,
-			typ:   typ,
-			spell: c.spell(fl.off(syn.Case), fl.off(syn.Colon)),
-			lo:    fl.off(syn.Colon) + 1,
-			hi:    fl.off(s.Rbrace),
-			sub:   fl.pkg.info.LogosConstCases[syn],
+	if sel, static := fl.pkg.ctExp.switches[s]; static {
+		if sel == nil {
+			c.replaceFolded(otext{})
+			return nil
 		}
-		cs.close = s.Rbrace
-		if i+1 < len(s.Cases) {
-			cs.hi = fl.off(s.Cases[i+1].Case)
-			cs.close = s.Cases[i+1].Case
-		}
-		if _, ok := reparseType(cs.spell.s); !ok {
-			// The case type spells LoGOs-only syntax (an option suffix):
-			// the respell sites emit this text into a plain recheck, so
-			// spell the checked type in its lowered plain form instead.
-			cs.spell = gen(fl.plainTypeSpell(typ))
-		}
-		switch {
-		case syn.Tilde:
-			cs.kind = cswTilde
-		default:
-			if _, ok := types2.Unalias(typ).Underlying().(*types2.Interface); ok {
-				cs.kind = cswIface
-			}
-		}
-		c.cases = append(c.cases, cs)
+		match := c.caseAt(slices.Index(s.Cases, sel))
+		return c.lowerFold(&match)
 	}
-	return c
+	if _, ok := types2.Unalias(checkedTypeOf(c.info, s.Targ)).(*types2.TypeParam); !ok {
+		base.Fatalf("logos: const switch at %s has no compile-time selection", s.Pos().String())
+	}
+	c.cases = make([]cswCase, len(s.Cases))
+	for i := range c.cases {
+		c.cases[i] = c.caseAt(i)
+	}
+	return c.lowerRuntime()
+}
+
+func (c *cswLower) caseAt(i int) cswCase {
+	fl, s := c.fl, c.stmt
+	syn := s.Cases[i]
+	typ := checkedTypeOf(c.info, syn.Type)
+	cs := cswCase{
+		syn:   syn,
+		kind:  cswExact,
+		spell: c.spell(fl.off(syn.Case), fl.off(syn.Colon)),
+		lo:    fl.off(syn.Colon) + 1,
+		hi:    fl.off(s.Rbrace),
+		close: s.Rbrace,
+		sub:   c.info.LogosConstCases[syn],
+	}
+	if i+1 < len(s.Cases) {
+		cs.hi = fl.off(s.Cases[i+1].Case)
+		cs.close = s.Cases[i+1].Case
+	}
+	if _, ok := reparseType(cs.spell.s); !ok {
+		// The case type spells LoGOs-only syntax (an option suffix):
+		// the respell sites emit this text into a plain recheck, so
+		// spell the checked type in its lowered plain form instead.
+		cs.spell = gen(fl.plainTypeSpell(typ))
+	}
+	if syn.Tilde {
+		cs.kind = cswTilde
+	} else if _, ok := types2.Unalias(typ).Underlying().(*types2.Interface); ok {
+		cs.kind = cswIface
+	}
+	return cs
 }
 
 func checkedTypeOf(info *types2.Info, e syntax.Expr) types2.Type {
-	var name *syntax.Name
-	switch e := e.(type) {
-	case *syntax.Name:
-		name = e
-	case *syntax.SelectorExpr:
-		name = e.Sel
-	}
-	if name != nil {
-		if tn, ok := info.Uses[name].(*types2.TypeName); ok {
-			return tn.Type()
-		}
-	}
 	if typ := info.TypeOf(e); typ != nil {
 		return typ
+	}
+	if sel, ok := e.(*syntax.SelectorExpr); ok {
+		if tn, ok := info.Uses[sel.Sel].(*types2.TypeName); ok {
+			return tn.Type()
+		}
 	}
 	base.Fatalf("logos: const switch type at %s has no checked type", e.Pos().String())
 	return nil
@@ -175,27 +195,22 @@ func typeEnd(src []byte, start, bound int) int {
 	return end
 }
 
-func (c *cswLower) lowerFold() []syntax.Stmt {
-	sel, static := types2.LogosConstSelectedCase(c.info, c.stmt)
-	if !static {
-		base.Fatalf("logos: const switch at %s has no compile-time selection", c.stmt.Pos().String())
-	}
-	var match *cswCase
-	for i := range c.cases {
-		if c.cases[i].syn == sel {
-			match = &c.cases[i]
-			break
-		}
-	}
-	if match == nil {
-		c.fc.deleteConstSpan(c.start, c.end)
-		return nil
-	}
+func (c *cswLower) lowerFold(match *cswCase) []syntax.Stmt {
 	stmts, text := c.caseBody(match, "")
 	block := closeAt(c.stmt.Pos(), stmts, c.stmt.Rbrace)
 	kept := span{match.lo, match.hi}
-	c.fl.addT(c.start, c.end, cat(leftoverComments(c.fl, span{c.start, c.end}, []span{kept}), gen("{"), text, gen("}")))
+	c.replaceFolded(cat(leftoverComments(c.fl, span{c.start, c.end}, []span{kept}), gen("{"), text, gen("}")))
 	return []syntax.Stmt{block}
+}
+
+func (c *cswLower) replaceFolded(text otext) {
+	whole := span{c.start, c.end}
+	if move := c.fl.moveAbove(whole); move != nil {
+		move.inner, _ = partitionSplices(move.inner, whole)
+	} else {
+		c.fl.dropInner(whole)
+	}
+	c.fl.addT(c.start, c.end, text)
 }
 
 func (c *cswLower) runs() [][]*cswCase {
@@ -623,13 +638,8 @@ func (c *cswLower) fixReboundDef(cs *cswCase, targets map[types2.Object]cswTarge
 		*pl = append(*pl, nil)
 		copy((*pl)[idx+1:], (*pl)[idx:])
 		(*pl)[idx] = decl
-		// An AssignStmt's Pos is its operator token, not its left side:
-		// splice before the statement's first token instead.
-		start := head.Pos()
-		if as, ok := head.(*syntax.AssignStmt); ok {
-			start = as.Lhs.Pos()
-		}
-		c.fl.addT(c.fl.off(start), c.fl.off(start), gen("var "+name+" "+spell+"\n"))
+		headStart := c.fl.off(syntax.StartPos(head))
+		c.fl.addT(headStart, headStart, gen("var "+name+" "+spell+"\n"))
 	}
 
 	defToAssign := func(lo, hi int) {

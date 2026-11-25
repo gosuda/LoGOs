@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"go/constant"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -21,6 +22,7 @@ type chainHoist struct {
 
 type chainOp struct {
 	method    string
+	call      *syntax.CallExpr
 	arg       syntax.Expr
 	argSpan   span
 	bodySpan  span
@@ -29,6 +31,7 @@ type chainOp struct {
 	isTry     bool
 	isBlk     bool
 	forms     []resultForm
+	resultT   types2.Type
 }
 
 type resultForm int
@@ -631,10 +634,19 @@ func isFusibleMethod(m string) bool {
 }
 
 func (fl *fileLower) decomposeChain(call *syntax.CallExpr) (ops []chainOp, base syntax.Expr, term chainOp, carrier *syntax.CallExpr) {
+	ops, base, term, carrier = fl.chainParts(call, fl.isChainCall)
+	for i := range ops {
+		fl.chainOpSpans(&ops[i])
+	}
+	fl.chainOpSpans(&term)
+	return
+}
+
+func (fl *fileLower) chainParts(call *syntax.CallExpr, isChain func(syntax.Expr) bool) (ops []chainOp, base syntax.Expr, term chainOp, carrier *syntax.CallExpr) {
 	rest := syntax.Expr(call)
 	carrier = call
 	if m := chainMethodOf(call); !isFusibleMethod(m) {
-		term = fl.chainOpOf(call, m)
+		term = fl.chainOpAST(call, m)
 		if sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr); ok {
 			rest = sel.X
 		}
@@ -642,14 +654,14 @@ func (fl *fileLower) decomposeChain(call *syntax.CallExpr) (ops []chainOp, base 
 	cur := rest
 	for {
 		c, ok := syntax.Unparen(cur).(*syntax.CallExpr)
-		if !ok || !fl.isChainCall(c) {
+		if !ok || !isChain(c) {
 			return ops, cur, term, carrier
 		}
 		m := chainMethodOf(c)
 		if !isFusibleMethod(m) {
 			return ops, cur, term, carrier
 		}
-		ops = append(ops, fl.chainOpOf(c, m))
+		ops = append(ops, fl.chainOpAST(c, m))
 		carrier = c
 		if sel, ok := syntax.Unparen(c.Fun).(*syntax.SelectorExpr); ok {
 			cur = sel.X
@@ -683,14 +695,12 @@ func (fl *fileLower) lambdaBodySpan(lam *syntax.LambdaExpr, arg span) span {
 	return span{start: start, end: arg.end}
 }
 
-func (fl *fileLower) chainOpOf(cur *syntax.CallExpr, method string) chainOp {
-	op := chainOp{method: method}
+func (fl *fileLower) chainOpAST(cur *syntax.CallExpr, method string) chainOp {
+	op := chainOp{method: method, call: cur}
 	if len(cur.ArgList) == 1 {
 		op.arg = cur.ArgList[0]
-		op.argSpan = fl.soleArgSpan(cur)
 		if lam, ok := syntax.Unparen(cur.ArgList[0]).(*syntax.LambdaExpr); ok {
 			op.lam = lam
-			op.bodySpan = fl.lambdaBodySpan(lam, op.argSpan)
 			op.isTry = types2.LogosLambdaTry(lam) != nil
 			_, op.isBlk = lam.Body.(*syntax.BlockStmt)
 		}
@@ -699,6 +709,16 @@ func (fl *fileLower) chainOpOf(cur *syntax.CallExpr, method string) chainOp {
 		op.forms = fl.mapForms(op)
 	}
 	return op
+}
+
+func (fl *fileLower) chainOpSpans(op *chainOp) {
+	if op.arg == nil {
+		return
+	}
+	op.argSpan = fl.soleArgSpan(op.call)
+	if op.lam != nil {
+		op.bodySpan = fl.lambdaBodySpan(op.lam, op.argSpan)
+	}
 }
 
 type localWrites struct {
@@ -1027,9 +1047,6 @@ func (fl *fileLower) preLowerCaptureInterps(root syntax.Node) {
 		delete(interpKinds, e)
 		need, _ := fl.lowerInterpExpr(e, kinds)
 		fl.interpNeedConv = fl.interpNeedConv || need
-		if len(e.Exprs) > 0 {
-			fl.interpNeedUnsafe = true
-		}
 	}
 }
 
@@ -1177,14 +1194,20 @@ func (ce *chainEmit) prepare() {
 }
 
 func (ce *chainEmit) capHint() (string, bool) {
-	if !ce.needOut() {
+	limit, ok := ce.capBound()
+	if !ok {
 		return "", false
 	}
-	if ce.term.method != "" {
-		return "", false
+	recv := "len(" + ce.cg.prefix + "_rcv)"
+	if limit < 0 {
+		return recv, true
 	}
-	if ce.cg.elemT == nil {
-		return "", false
+	return fmt.Sprintf("min(%d, %s)", limit, recv), true
+}
+
+func (ce *chainEmit) capBound() (int64, bool) {
+	if !ce.needOut() || ce.term.method != "" || ce.cg.elemT == nil {
+		return 0, false
 	}
 	filtered := false
 	bounded := true
@@ -1204,14 +1227,10 @@ func (ce *chainEmit) capHint() (string, bool) {
 			}
 		}
 	}
-	recv := "len(" + ce.cg.prefix + "_rcv)"
 	if !bounded || limit < 0 {
-		if filtered {
-			return "", false
-		}
-		return recv, true
+		return -1, !filtered
 	}
-	return fmt.Sprintf("min(%d, %s)", limit, recv), true
+	return limit, true
 }
 func (ce *chainEmit) constTake(e syntax.Expr) (int64, bool) {
 	if e == nil {
@@ -1292,6 +1311,9 @@ func (cg *chainGen) funcResult(op chainOp) types2.Type {
 }
 
 func (cg *chainGen) prodType(op chainOp) types2.Type {
+	if op.resultT != nil {
+		return op.resultT
+	}
 	if op.lam == nil {
 		return cg.funcResult(op)
 	}
@@ -2038,10 +2060,12 @@ func (ce *chainEmit) resultSpelling() string {
 
 func parseChainExprFrag(fl *fileLower, text string, pos syntax.Pos) syntax.Expr {
 	text = fl.settleMarks(gen(text)).s
-	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader("package logoschain\nvar _ = "+text+"\n"), nil, nil, 0)
+	src, marks := fl.expandConstMapFragment("package logoschain\nvar _ = " + text + "\n")
+	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader(src), nil, nil, 0)
 	if err != nil || len(f.DeclList) != 1 {
 		base.Fatalf("logos: cannot parse chain fragment %q: %v", text, err)
 	}
+	fl.bindConstMapFragment(f, src, marks)
 	vd, ok := f.DeclList[0].(*syntax.VarDecl)
 	if !ok {
 		base.Fatalf("logos: cannot parse chain fragment %q", text)
@@ -2081,10 +2105,12 @@ func normalizeChainPos(root syntax.Node, pos syntax.Pos) {
 
 func parseChainStmtFrag(fl *fileLower, text string, pos syntax.Pos) []syntax.Stmt {
 	text = fl.settleMarks(gen(text)).s
-	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader("package logoschain\nfunc _() {\n"+text+"\n}\n"), nil, nil, 0)
+	src, marks := fl.expandConstMapFragment("package logoschain\nfunc _() {\n" + text + "\n}\n")
+	f, err := syntax.Parse(syntax.NewFileBase("logos-chain"), strings.NewReader(src), nil, nil, 0)
 	if err != nil || len(f.DeclList) != 1 {
 		base.Fatalf("logos: cannot parse chain fragment %q: %v", text, err)
 	}
+	fl.bindConstMapFragment(f, src, marks)
 	fd, ok := f.DeclList[0].(*syntax.FuncDecl)
 	if !ok || fd.Body == nil {
 		base.Fatalf("logos: cannot parse chain fragment %q", text)
@@ -2120,5 +2146,961 @@ func defaultBasicType(t types2.Type) types2.Type {
 		return types2.Typ[types2.String]
 	default:
 		return types2.Typ[types2.Int]
+	}
+}
+
+type chainSyntaxLower struct {
+	expr         func(syntax.Expr) (syntax.Expr, []syntax.Stmt)
+	lambda       func(*syntax.LambdaExpr, *types2.Signature) *syntax.FuncLit
+	workerLambda func(*syntax.LambdaExpr, *types2.Signature) *syntax.FuncLit
+	fail         func(syntax.Expr) []syntax.Stmt
+	typeExpr     func(syntax.Pos, types2.Type) syntax.Expr
+	capture      bool
+}
+
+func (fl *fileLower) ctChainCall(e syntax.Expr) bool {
+	call, ok := syntax.Unparen(e).(*syntax.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok || sel.Sel == nil || !types2.LogosChainMethod(sel.Sel.Value) {
+		return false
+	}
+	info := fl.pkg.info
+	if info.TypeOf(call) == nil || info.Selections[sel] != nil || info.Types[sel.X].IsType() {
+		return false
+	}
+	recv := ctChainBaseType(parResult(info.TypeOf(sel.X)))
+	if _, ok := recv.(*types2.Slice); !ok {
+		return false
+	}
+	obj, _, _ := types2.LookupFieldOrMethod(recv, info.Types[sel.X].Addressable(), fl.pkg.tpkg, sel.Sel.Value)
+	return obj == nil
+}
+
+func ctChainBaseType(t types2.Type) types2.Type {
+	for {
+		switch u := types2.Unalias(t).(type) {
+		case *types2.ConstView:
+			t = u.Elem
+		case *types2.ReadonlyDescendants:
+			t = u.Elem
+		default:
+			return u
+		}
+	}
+}
+
+func ctChainElem(t types2.Type) types2.Type {
+	if s, ok := ctChainBaseType(parResult(t)).(*types2.Slice); ok {
+		return s.Elem()
+	}
+	return nil
+}
+
+func (fl *fileLower) lowerCtChain(call *syntax.CallExpr, lower chainSyntaxLower) (syntax.Expr, []syntax.Stmt) {
+	cg := &chainGen{fl: fl, pos: call.Pos(), prefix: fl.cswName("ctchain")}
+	ops, recv, term, _ := fl.chainParts(call, fl.ctChainCall)
+	slices.Reverse(ops)
+	if group, ok := syntax.Unparen(recv).(*syntax.CallExpr); ok && fl.isParStage(group) {
+		return cg.emitGroupChainSyntax(call, group, ops, term, lower)
+	}
+	if fl.ctParChain(recv) {
+		return cg.emitGroupTailSyntax(call, recv, ops, term, lower)
+	}
+	return cg.emitChainSyntax(recv, ops, term, fl.pkg.info.TypeOf(call), lower)
+}
+
+func (fl *fileLower) ctParChain(recv syntax.Expr) bool {
+	for {
+		call, ok := syntax.Unparen(recv).(*syntax.CallExpr)
+		if !ok {
+			return false
+		}
+		if fl.isParStage(call) {
+			return true
+		}
+		if !fl.ctChainCall(call) {
+			return false
+		}
+		recv = syntax.Unparen(call.Fun).(*syntax.SelectorExpr).X
+	}
+}
+
+func (cg *chainGen) emitChainSyntax(recv syntax.Expr, ops []chainOp, term chainOp, result types2.Type, lower chainSyntaxLower) (syntax.Expr, []syntax.Stmt) {
+	cg.elemT = ctChainElem(cg.fl.pkg.info.TypeOf(recv))
+	ce := newChainSyntax(cg, ops, term, result, lower)
+	ce.isTry = cg.runIsTry(ops, term)
+	recvExpr, recvPre := lower.expr(recv)
+	ce.bind("_rcv", recvExpr, recvPre, recv.Pos())
+	ce.bindArgs()
+	bindings, outer := ce.splitBindings()
+	body := append(bindings, ce.run(ce.name("_rcv"), false)...)
+	call := ce.invocation(body)
+	if !ce.isTry || lower.capture {
+		return call, outer
+	}
+	return ce.propagate(call, outer)
+}
+
+type chainSyntax struct {
+	chainEmit
+	lower    chainSyntaxLower
+	bindings []syntax.Stmt
+	outer    bool
+	outT     types2.Type
+	inTypes  []types2.Type
+	slots    []types2.Type
+	loop     *syntax.ForStmt
+}
+
+func newChainSyntax(cg *chainGen, ops []chainOp, term chainOp, result types2.Type, lower chainSyntaxLower) *chainSyntax {
+	ce := &chainSyntax{
+		chainEmit: chainEmit{cg: cg, ops: ops, term: term, elemT: cg.elemT, resultT: result},
+		lower:     lower,
+		outT:      cg.elemT,
+		inTypes:   make([]types2.Type, len(ops)+1),
+	}
+	for i := range ce.ops {
+		op := &ce.ops[i]
+		ce.inTypes[i] = ce.outT
+		if op.method == "map" {
+			op.resultT = cg.ctCallbackResult(*op)
+			ce.outT = op.resultT
+		}
+	}
+	ce.inTypes[len(ops)] = ce.outT
+	ce.term.resultT = cg.ctCallbackResult(ce.term)
+	return ce
+}
+
+func (cg *chainGen) ctCallbackResult(op chainOp) types2.Type {
+	if !takesFunc(op.method) || op.arg == nil {
+		return nil
+	}
+	switch op.method {
+	case "filter", "find", "any", "all", "count":
+		return types2.Typ[types2.Bool]
+	case "map":
+		t := cg.fl.pkg.info.TypeOf(op.call)
+		if elem := ctChainElem(t); elem != nil {
+			return elem
+		}
+		if sig, ok := t.(*types2.Signature); ok && sig.Params().Len() == 1 {
+			if yield, ok := sig.Params().At(0).Type().(*types2.Signature); ok && yield.Params().Len() == 1 {
+				return yield.Params().At(0).Type()
+			}
+		}
+	}
+	if op.lam == nil {
+		return cg.funcResult(op)
+	}
+	info := cg.fl.pkg.info
+	if body, ok := op.lam.Body.(syntax.Expr); ok {
+		body = syntax.Unparen(body)
+		if t, ok := body.(*syntax.TryExpr); ok {
+			if res, ok := info.TypeOf(t.X).(*types2.Tuple); ok && res.Len() == 2 {
+				return res.At(0).Type()
+			}
+		}
+		t := info.TypeOf(body)
+		if isUntypedBasic(t) {
+			return defaultBasicType(t)
+		}
+		return t
+	}
+	var result types2.Type
+	syntax.Inspect(op.lam.Body, func(n syntax.Node) bool {
+		if result != nil {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr, *syntax.GroupChild:
+			return false
+		case *syntax.ReturnStmt:
+			result = info.TypeOf(n.Results)
+			if isUntypedBasic(result) {
+				result = defaultBasicType(result)
+			}
+			return false
+		}
+		return true
+	})
+	return result
+}
+
+func (ce *chainSyntax) bind(suffix string, x syntax.Expr, pre []syntax.Stmt, pos syntax.Pos) {
+	ce.outer = ce.outer || len(pre) != 0
+	ce.bindings = append(ce.bindings, pre...)
+	ce.bindings = append(ce.bindings, defineOf(pos, []syntax.Expr{nameOf(pos, ce.cg.prefix+suffix)}, []syntax.Expr{x}))
+}
+
+func (ce *chainSyntax) splitBindings() (inner, outer []syntax.Stmt) {
+	if ce.outer || ce.lower.capture {
+		return nil, ce.bindings
+	}
+	return ce.bindings, nil
+}
+
+func (ce *chainSyntax) bindArgs() {
+	for i, op := range ce.ops {
+		key := strconv.Itoa(i)
+		if op.method == "take" || op.method == "drop" {
+			ce.bindBound("_n"+key, op.arg, 0)
+			continue
+		}
+		ce.bindCallback("_f"+key, op, ce.inTypes[i], op.isTry)
+	}
+	if ce.term.method == "get" {
+		ce.bindBound("_i", ce.term.arg, ^uint64(0))
+	} else if ce.term.arg != nil {
+		ce.bindCallback("_ft", ce.term, ce.outT, ce.term.isTry)
+	}
+}
+
+func (ce *chainSyntax) bindBound(suffix string, orig syntax.Expr, negative uint64) {
+	pos := orig.Pos()
+	if k, ok := typeConst(ce.cg.fl.pkg.info, syntax.Unparen(orig)); ok {
+		n, fits := constant.Uint64Val(k)
+		if !fits {
+			n = ^uint64(0)
+		}
+		if constant.Sign(k) < 0 {
+			n = negative
+		}
+		ce.bind(suffix, ce.uint64(litOf(pos, strconv.FormatUint(n, 10), syntax.IntLit)), nil, pos)
+		return
+	}
+	x, pre := ce.lower.expr(orig)
+	ce.outer = ce.outer || len(pre) != 0
+	ce.bindings = append(ce.bindings, pre...)
+	input := ce.name(suffix + "_input")
+	ce.bindings = append(ce.bindings, defineOf(pos, []syntax.Expr{input}, []syntax.Expr{x}))
+	ce.bindings = append(ce.bindings, ce.declare(suffix, ce.lower.typeExpr(pos, types2.Typ[types2.Uint64])))
+	ce.bindings = append(ce.bindings, ifElseOf(pos, nil, ce.op(syntax.Lss, ce.name(suffix+"_input"), ce.number(0)),
+		[]syntax.Stmt{ce.assign(ce.name(suffix), litOf(pos, strconv.FormatUint(negative, 10), syntax.IntLit))},
+		blockOf(pos, []syntax.Stmt{ce.assign(ce.name(suffix), ce.uint64(ce.name(suffix+"_input")))})))
+}
+
+func (ce *chainSyntax) bindCallback(suffix string, op chainOp, in types2.Type, throwing bool) {
+	x, pre := ce.lowerCallback(op, in, throwing)
+	ce.bind(suffix, x, pre, op.arg.Pos())
+}
+
+func (ce *chainSyntax) lowerCallback(op chainOp, in types2.Type, throwing bool) (syntax.Expr, []syntax.Stmt) {
+	if op.lam == nil {
+		return ce.lower.expr(op.arg)
+	}
+	return ce.lower.lambda(op.lam, ce.callbackSignature(op, in, throwing)), nil
+}
+
+func (ce *chainSyntax) callbackSignature(op chainOp, in types2.Type, throwing bool) *types2.Signature {
+	pos := op.lam.Pos()
+	pkg := ce.cg.fl.pkg.tpkg
+	if obj := ce.cg.fl.pkg.info.Defs[op.lam.Params[0]]; obj != nil {
+		in = obj.Type()
+	}
+	params := types2.NewTuple(types2.NewParam(pos, pkg, op.lam.Params[0].Value, in))
+	results := []*types2.Var{types2.NewParam(pos, pkg, "", op.resultT)}
+	if throwing {
+		results = append(results, types2.NewParam(pos, pkg, "", types2.Universe.Lookup("error").Type()))
+	}
+	return types2.NewSignatureType(nil, nil, nil, params, types2.NewTuple(results...), false)
+}
+
+func (ce *chainSyntax) name(suffix string) *syntax.Name {
+	return nameOf(ce.cg.pos, ce.cg.prefix+suffix)
+}
+
+func (ce *chainSyntax) builtin(name string) syntax.Expr {
+	return ce.cg.fl.ctBuiltin(ce.cg.pos, name)
+}
+
+func (ce *chainSyntax) typ(t types2.Type) syntax.Expr {
+	return ce.lower.typeExpr(ce.cg.pos, t)
+}
+
+func (ce *chainSyntax) number(n int) *syntax.BasicLit {
+	if n < 0 {
+		panic("logos: cannot form negative chain integer literal")
+	}
+	return litOf(ce.cg.pos, strconv.Itoa(n), syntax.IntLit)
+}
+
+func (ce *chainSyntax) op(op syntax.Operator, x, y syntax.Expr) *syntax.Operation {
+	return at(&syntax.Operation{Op: op, X: x, Y: y}, ce.cg.pos)
+}
+
+func (ce *chainSyntax) call(fn syntax.Expr, args ...syntax.Expr) *syntax.CallExpr {
+	return callOf(ce.cg.pos, fn, args)
+}
+
+func (ce *chainSyntax) rt(name string) syntax.Expr {
+	return ce.cg.fl.ctPkgSelector(ce.cg.pos, "logos/rt", name)
+}
+
+func (ce *chainSyntax) uint64(x syntax.Expr) syntax.Expr {
+	return ce.call(ce.typ(types2.Typ[types2.Uint64]), x)
+}
+
+func (ce *chainSyntax) index(x, i syntax.Expr) *syntax.IndexExpr {
+	return at(&syntax.IndexExpr{X: x, Index: i}, ce.cg.pos)
+}
+
+func (ce *chainSyntax) slice(x, lo, hi syntax.Expr) *syntax.SliceExpr {
+	return at(&syntax.SliceExpr{X: x, Index: [3]syntax.Expr{lo, hi}}, ce.cg.pos)
+}
+
+func (ce *chainSyntax) length(x syntax.Expr) syntax.Expr {
+	return ce.call(ce.builtin("len"), x)
+}
+
+func (ce *chainSyntax) assign(lhs, rhs syntax.Expr) *syntax.AssignStmt {
+	return assignOf(ce.cg.pos, []syntax.Expr{lhs}, []syntax.Expr{rhs})
+}
+
+func (ce *chainSyntax) define(suffix string, rhs syntax.Expr) *syntax.AssignStmt {
+	return defineOf(ce.cg.pos, []syntax.Expr{ce.name(suffix)}, []syntax.Expr{rhs})
+}
+
+func (ce *chainSyntax) declare(suffix string, typ syntax.Expr) *syntax.DeclStmt {
+	pos := ce.cg.pos
+	decl := at(&syntax.VarDecl{NameList: []*syntax.Name{ce.name(suffix)}, Type: typ}, pos)
+	return at(&syntax.DeclStmt{DeclList: []syntax.Decl{decl}}, pos)
+}
+
+func (ce *chainSyntax) stepCounter(suffix string, op syntax.Operator) *syntax.AssignStmt {
+	return at(&syntax.AssignStmt{Lhs: ce.name(suffix), Op: op}, ce.cg.pos)
+}
+
+func (ce *chainSyntax) cond(test syntax.Expr, body ...syntax.Stmt) *syntax.IfStmt {
+	return ifOf(ce.cg.pos, nil, test, body)
+}
+
+func (ce *chainSyntax) literal(params, results []*syntax.Field, body []syntax.Stmt) *syntax.FuncLit {
+	pos := ce.cg.pos
+	ft := at(&syntax.FuncType{ParamList: params, ResultList: results}, pos)
+	return at(&syntax.FuncLit{Type: ft, Body: blockOf(pos, body)}, pos)
+}
+
+func (ce *chainSyntax) field(name *syntax.Name, t syntax.Expr) *syntax.Field {
+	return at(&syntax.Field{Name: name, Type: t}, ce.cg.pos)
+}
+
+func (ce *chainSyntax) errorType() syntax.Expr {
+	return ce.typ(types2.Universe.Lookup("error").Type())
+}
+
+func (ce *chainSyntax) invocation(body []syntax.Stmt) *syntax.CallExpr {
+	return ce.call(ce.chainLiteral(body))
+}
+
+func (ce *chainSyntax) resultFields() []*syntax.Field {
+	results := []*syntax.Field{ce.field(nil, ce.typ(ce.resultT))}
+	if ce.isTry {
+		results = append(results, ce.field(nil, ce.errorType()))
+	}
+	return results
+}
+
+func (ce *chainSyntax) chainLiteral(body []syntax.Stmt) *syntax.FuncLit {
+	return ce.literal(nil, ce.resultFields(), body)
+}
+
+func (ce *chainSyntax) propagate(call syntax.Expr, pre []syntax.Stmt) (syntax.Expr, []syntax.Stmt) {
+	pos := ce.cg.pos
+	bind := defineOf(pos, []syntax.Expr{ce.name("_value"), ce.name("_err")}, []syntax.Expr{call})
+	check := ce.cond(ce.op(syntax.Neq, ce.name("_err"), ce.builtin("nil")), ce.lower.fail(ce.name("_err"))...)
+	return ce.name("_value"), append(pre, bind, check)
+}
+
+func (ce *chainSyntax) run(src syntax.Expr, grouped bool) []syntax.Stmt {
+	pos := ce.cg.pos
+	ce.ownership()
+	if len(ce.ops) == 0 && !grouped {
+		switch ce.term.method {
+		case "sum":
+			if !ce.integerSum() {
+				return ce.sum(src)
+			}
+		case "count":
+			if ce.term.arg == nil {
+				return []syntax.Stmt{ce.success(ce.length(src))}
+			}
+		}
+	}
+	var body []syntax.Stmt
+	if ce.collects() {
+		body = append(body, ce.outputDecl(grouped))
+	}
+	body = append(body, ce.resourcePrelude()...)
+	if grouped || ce.cg.runIsTry(ce.ops, ce.term) {
+		body = append(body, ce.declare("_zero", ce.typ(ce.resultT)))
+	}
+	switch ce.term.method {
+	case "count":
+		body = append(body, ce.define("_count", ce.number(0)))
+	case "sum":
+		if ce.integerSum() {
+			body = append(body, ce.declare("_total", ce.typ(ce.outT)))
+		}
+	case "get", "last":
+		if !ce.owns {
+			body = append(body, ce.declare("_selected", ce.typ(ce.resultT)))
+			if ce.term.method == "get" {
+				body = append(body, ce.define("_offset", ce.uint64(ce.number(0))))
+			}
+		}
+	}
+	for i, op := range ce.ops {
+		if op.method == "take" || op.method == "drop" {
+			body = append(body, ce.define("_c"+strconv.Itoa(i), ce.uint64(ce.number(0))))
+		}
+	}
+
+	var lhs syntax.Expr
+	if ce.needElem() {
+		lhs = listOf(pos, []syntax.Expr{nameOf(pos, "_"), ce.name("_elem")})
+	}
+	if grouped {
+		elem := syntax.Expr(ce.name("_elem"))
+		if lhs == nil {
+			elem = nameOf(pos, "_")
+		}
+		lhs = listOf(pos, []syntax.Expr{elem, ce.name("_sourceErr")})
+	}
+	ce.loop = at(&syntax.ForStmt{Init: at(&syntax.RangeClause{Lhs: lhs, Def: lhs != nil, X: src}, pos)}, pos)
+	ce.loop.Body = blockOf(pos, ce.iteration(grouped))
+	body = append(body, ce.loop)
+	return append(body, ce.finish()...)
+}
+
+func (ce *chainSyntax) iteration(grouped bool) []syntax.Stmt {
+	var body []syntax.Stmt
+	for i, op := range ce.ops {
+		if op.method != "take" {
+			continue
+		}
+		key := strconv.Itoa(i)
+		test := ce.op(syntax.Geq, ce.name("_c"+key), ce.name("_n"+key))
+		stop := []syntax.Stmt{ce.branch(syntax.Break)}
+		if grouped && ce.ownedIn {
+			owned := ce.op(syntax.Eql, ce.name("_sourceErr"), ce.builtin("nil"))
+			close := ce.cond(owned, ce.closeSyntax(ce.name("_elem"), ce.inTypes[0])...)
+			stop = append([]syntax.Stmt{close}, stop...)
+		}
+		body = append(body, ce.cond(test, stop...))
+	}
+	if grouped {
+		body = append(body, ce.callbackError("_sourceErr"))
+	}
+	if ce.ownedIn {
+		switch {
+		case ce.lastMap < 0:
+			body = append(body, ce.collect(ce.name("_elem")))
+		case ce.chainEmit.flight:
+			body = append(body, ce.setSlot(ce.name("_elem"), ce.inTypes[0])...)
+		}
+	}
+	cur := "_elem"
+	for i, op := range ce.ops {
+		key := strconv.Itoa(i)
+		switch op.method {
+		case "take":
+			body = append(body, ce.stepCounter("_c"+key, syntax.Add))
+		case "drop":
+			test := ce.op(syntax.Lss, ce.name("_c"+key), ce.name("_n"+key))
+			skip := append([]syntax.Stmt{ce.stepCounter("_c"+key, syntax.Add)}, ce.dropElement(cur, i)...)
+			body = append(body, ce.cond(test, skip...))
+		case "filter":
+			value, pre := ce.callbackValue("_f"+key, "_filter"+key, cur, op.isTry)
+			body = append(body, pre...)
+			body = append(body, ce.cond(ce.op(syntax.Not, value, nil), ce.dropElement(cur, i)...))
+		case "map":
+			if ce.chainEmit.flight && ce.ownBefore[i] {
+				body = append(body, ce.clearSlot(ce.inTypes[i])...)
+			}
+			mapped := "_map" + key
+			value, pre := ce.callbackValue("_f"+key, mapped, cur, op.isTry)
+			body = append(body, pre...)
+			if !op.isTry {
+				body = append(body, ce.define(mapped, value))
+			}
+			cur = mapped
+			if ce.chainEmit.flight && i < ce.lastMap && ce.ownBefore[i+1] {
+				body = append(body, ce.setSlot(ce.name(cur), ce.inTypes[i+1])...)
+			}
+			if ce.owns && i == ce.lastMap {
+				body = append(body, ce.collect(ce.name(cur)))
+			}
+		}
+	}
+	return append(body, ce.terminal(cur)...)
+}
+
+func (ce *chainSyntax) branch(tok syntax.Token) *syntax.BranchStmt {
+	return at(&syntax.BranchStmt{Tok: tok, Target: ce.loop}, ce.cg.pos)
+}
+
+func (ce *chainSyntax) collects() bool {
+	return ce.owns || ce.term.method == "" || ce.term.method == "sortBy" || (ce.term.method == "sum" && !ce.integerSum())
+}
+
+func (ce *chainSyntax) integerSum() bool {
+	b, ok := ctChainBaseType(ce.outT).(*types2.Basic)
+	return ok && b.Info()&types2.IsInteger != 0
+}
+
+func (ce *chainSyntax) outputDecl(grouped bool) syntax.Stmt {
+	t := types2.NewSlice(ce.outT)
+	if ce.term.method != "" || grouped {
+		return ce.declare("_out", ce.typ(t))
+	}
+	cap, ok := ce.chainEmit.capBound()
+	if !ok {
+		return ce.declare("_out", ce.typ(t))
+	}
+	hint := ce.length(ce.name("_rcv"))
+	if cap >= 0 {
+		n := litOf(ce.cg.pos, strconv.FormatInt(cap, 10), syntax.IntLit)
+		bound := ce.call(ce.builtin("min"), n, ce.uint64(hint))
+		hint = ce.call(ce.typ(types2.Typ[types2.Int]), bound)
+	}
+	return ce.define("_out", ce.call(ce.builtin("make"), ce.typ(t), ce.number(0), hint))
+}
+
+func (ce *chainSyntax) collect(value syntax.Expr) *syntax.AssignStmt {
+	return ce.assign(ce.name("_out"), ce.call(ce.builtin("append"), ce.name("_out"), value))
+}
+
+func (ce *chainSyntax) callbackValue(fn, dest, cur string, throwing bool) (syntax.Expr, []syntax.Stmt) {
+	call := ce.call(ce.name(fn), ce.name(cur))
+	if !throwing {
+		return call, nil
+	}
+	err := dest + "_err"
+	bind := defineOf(ce.cg.pos, []syntax.Expr{ce.name(dest), ce.name(err)}, []syntax.Expr{call})
+	return ce.name(dest), []syntax.Stmt{bind, ce.callbackError(err)}
+}
+
+func (ce *chainSyntax) callbackError(err string) *syntax.IfStmt {
+	body := ce.rollbackSyntax()
+	if ce.guarded() {
+		body = append(body, ce.done())
+	}
+	body = append(body, returnOf(ce.cg.pos, []syntax.Expr{ce.name("_zero"), ce.name(err)}))
+	return ce.cond(ce.op(syntax.Neq, ce.name(err), ce.builtin("nil")), body...)
+}
+
+func (ce *chainSyntax) success(value syntax.Expr) *syntax.ReturnStmt {
+	values := []syntax.Expr{value}
+	if ce.isTry {
+		values = append(values, ce.builtin("nil"))
+	}
+	return returnOf(ce.cg.pos, values)
+}
+
+func (ce *chainSyntax) option(value syntax.Expr) syntax.Expr {
+	if ce.bareOption() {
+		if value != nil {
+			return value
+		}
+		return ce.builtin("nil")
+	}
+	pos := ce.cg.pos
+	lit := at(&syntax.CompositeLit{Type: ce.typ(ce.resultT), Rbrace: pos}, pos)
+	if value != nil {
+		lit.NKeys = 2
+		lit.ElemList = []syntax.Expr{
+			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Value"), Value: value}, pos),
+			at(&syntax.KeyValueExpr{Key: nameOf(pos, "Present"), Value: ce.builtin("true")}, pos),
+		}
+	}
+	return lit
+}
+
+func (ce *chainSyntax) terminal(cur string) []syntax.Stmt {
+	var body []syntax.Stmt
+	switch ce.term.method {
+	case "sum":
+		if ce.integerSum() {
+			total := ce.op(syntax.Add, ce.name("_total"), ce.name(cur))
+			return []syntax.Stmt{ce.assign(ce.name("_total"), total)}
+		}
+	case "first":
+		return ce.hand(ce.lastIndex(), ce.option(ce.name(cur)))
+	case "last", "get":
+		if ce.owns {
+			return nil
+		}
+		use := ce.assign(ce.name("_selected"), ce.option(ce.name(cur)))
+		if ce.term.method == "last" {
+			return []syntax.Stmt{use}
+		}
+		test := ce.op(syntax.Eql, ce.name("_offset"), ce.name("_i"))
+		return []syntax.Stmt{ce.cond(test, use), ce.stepCounter("_offset", syntax.Add)}
+	case "find", "any", "all", "count":
+		if ce.term.arg == nil {
+			if ce.hasMap() && !ce.owns {
+				body = append(body, ce.assign(nameOf(ce.cg.pos, "_"), ce.name(cur)))
+			}
+			return append(body, ce.stepCounter("_count", syntax.Add))
+		}
+		ok, pre := ce.callbackValue("_ft", "_tested", cur, ce.term.isTry)
+		body = append(body, pre...)
+		var hit []syntax.Stmt
+		switch ce.term.method {
+		case "find":
+			hit = ce.hand(ce.lastIndex(), ce.option(ce.name(cur)))
+		case "any":
+			hit = ce.hand(nil, ce.builtin("true"))
+		case "all":
+			hit = ce.hand(nil, ce.builtin("false"))
+			ok = ce.op(syntax.Not, ok, nil)
+		case "count":
+			hit = []syntax.Stmt{ce.stepCounter("_count", syntax.Add)}
+		}
+		return append(body, ce.cond(ok, hit...))
+	}
+	if !ce.owns {
+		body = append(body, ce.collect(ce.name(cur)))
+	}
+	return body
+}
+
+func (ce *chainSyntax) finish() []syntax.Stmt {
+	switch ce.term.method {
+	case "find", "first":
+		return ce.hand(nil, ce.option(nil))
+	case "any":
+		return ce.hand(nil, ce.builtin("false"))
+	case "all":
+		return ce.hand(nil, ce.builtin("true"))
+	case "count":
+		return ce.hand(nil, ce.name("_count"))
+	case "last", "get":
+		return ce.finishSelection()
+	case "sum":
+		if ce.integerSum() {
+			return []syntax.Stmt{ce.success(ce.name("_total"))}
+		}
+		return ce.sum(ce.name("_out"))
+	case "sortBy":
+		return ce.sort()
+	}
+	out := ce.name("_out")
+	empty := ce.cond(ce.op(syntax.Eql, ce.length(ce.name("_out")), ce.number(0)), ce.assign(out, ce.builtin("nil")))
+	return append([]syntax.Stmt{empty}, ce.handSliceSyntax(ce.name("_out"))...)
+}
+
+func (ce *chainSyntax) lastIndex() syntax.Expr {
+	return ce.op(syntax.Sub, ce.length(ce.name("_out")), ce.number(1))
+}
+
+func (ce *chainSyntax) finishSelection() []syntax.Stmt {
+	if !ce.owns {
+		return []syntax.Stmt{ce.success(ce.name("_selected"))}
+	}
+	var miss syntax.Expr
+	index := func() syntax.Expr { return ce.lastIndex() }
+	if ce.term.method == "last" {
+		miss = ce.op(syntax.Eql, ce.length(ce.name("_out")), ce.number(0))
+	} else {
+		miss = ce.op(syntax.Geq, ce.name("_i"), ce.uint64(ce.length(ce.name("_out"))))
+		index = func() syntax.Expr { return ce.call(ce.typ(types2.Typ[types2.Int]), ce.name("_i")) }
+	}
+	absent := ce.cond(miss, ce.hand(nil, ce.option(nil))...)
+	return append([]syntax.Stmt{absent}, ce.hand(index(), ce.option(ce.index(ce.name("_out"), index())))...)
+}
+
+func (ce *chainSyntax) sum(src syntax.Expr) []syntax.Stmt {
+	pos := ce.cg.pos
+	sliceT := types2.NewSlice(ce.outT)
+	sig := at(&syntax.FuncType{ParamList: []*syntax.Field{ce.field(nil, ce.typ(sliceT))}, ResultList: []*syntax.Field{ce.field(nil, ce.typ(ce.outT))}}, pos)
+	sum := ce.name("_sum")
+	xs := "_items"
+	x := func() syntax.Expr { return ce.name(xs) }
+	short := func(n int, value syntax.Expr) *syntax.CaseClause {
+		return at(&syntax.CaseClause{Cases: ce.number(n), Body: []syntax.Stmt{returnOf(pos, []syntax.Expr{value})}, Colon: pos}, pos)
+	}
+	lo := ce.call(ce.name("_sum"), ce.slice(x(), nil, ce.name("_mid")))
+	hi := ce.call(ce.name("_sum"), ce.slice(x(), ce.name("_mid"), nil))
+	split := at(&syntax.CaseClause{Body: []syntax.Stmt{
+		ce.define("_mid", ce.op(syntax.Div, ce.length(x()), ce.number(2))),
+		returnOf(pos, []syntax.Expr{ce.op(syntax.Add, lo, hi)}),
+	}, Colon: pos}, pos)
+	sw := at(&syntax.SwitchStmt{Tag: ce.length(x()), Body: []*syntax.CaseClause{short(0, ce.number(0)), short(1, ce.index(x(), ce.number(0))), split}, Rbrace: pos}, pos)
+	lit := ce.literal([]*syntax.Field{ce.field(ce.name(xs), ce.typ(sliceT))}, []*syntax.Field{ce.field(nil, ce.typ(ce.outT))}, []syntax.Stmt{sw})
+	body := []syntax.Stmt{ce.declare("_sum", sig), ce.assign(sum, lit)}
+	return append(body, ce.handSliceSyntax(ce.call(ce.name("_sum"), src))...)
+}
+
+func (ce *chainSyntax) sort() []syntax.Stmt {
+	if !ce.term.isTry {
+		compare := func(x string) syntax.Expr { return ce.call(ce.name("_ft"), ce.name(x)) }
+		sort := ce.sortBy(ce.name("_out"), ce.outT, compare)
+		return append([]syntax.Stmt{sort}, ce.handSliceSyntax(ce.name("_out"))...)
+	}
+	pos := ce.cg.pos
+	length := func() syntax.Expr { return ce.length(ce.name("_out")) }
+	keys := ce.call(ce.builtin("make"), ce.typ(types2.NewSlice(ce.term.resultT)), length())
+	indices := ce.call(ce.builtin("make"), ce.typ(types2.NewSlice(types2.Typ[types2.Int])), length())
+	fetchKey := ce.call(ce.name("_ft"), ce.index(ce.name("_out"), ce.name("_i")))
+	bindKey := defineOf(pos, []syntax.Expr{ce.name("_key"), ce.name("_keyErr")}, []syntax.Expr{fetchKey})
+	readKeys := ce.rangeSyntax(ce.name("_i"), ce.name("_out"), []syntax.Stmt{
+		bindKey, ce.callbackError("_keyErr"), ce.assign(ce.index(ce.name("_keys"), ce.name("_i")), ce.name("_key")),
+		ce.assign(ce.index(ce.name("_indices"), ce.name("_i")), ce.name("_i")),
+	})
+	compare := func(x string) syntax.Expr { return ce.index(ce.name("_keys"), ce.name(x)) }
+	sort := ce.sortBy(ce.name("_indices"), types2.Typ[types2.Int], compare)
+	sorted := ce.call(ce.builtin("make"), ce.typ(types2.NewSlice(ce.outT)), length())
+	lhs := listOf(pos, []syntax.Expr{ce.name("_i"), ce.name("_from")})
+	order := ce.rangeSyntax(lhs, ce.name("_indices"), []syntax.Stmt{
+		ce.assign(ce.index(ce.name("_sorted"), ce.name("_i")), ce.index(ce.name("_out"), ce.name("_from"))),
+	})
+	body := []syntax.Stmt{ce.define("_keys", keys), ce.define("_indices", indices), readKeys, sort, ce.define("_sorted", sorted), order}
+	return append(body, ce.handSliceSyntax(ce.name("_sorted"))...)
+}
+
+func (ce *chainSyntax) rangeSyntax(lhs, src syntax.Expr, body []syntax.Stmt) *syntax.ForStmt {
+	pos := ce.cg.pos
+	return at(&syntax.ForStmt{Init: at(&syntax.RangeClause{Lhs: lhs, Def: lhs != nil, X: src}, pos), Body: blockOf(pos, body)}, pos)
+}
+
+func (ce *chainSyntax) sortBy(src syntax.Expr, t types2.Type, key func(string) syntax.Expr) syntax.Stmt {
+	pos := ce.cg.pos
+	params := []*syntax.Field{ce.field(ce.name("_a"), ce.typ(t)), ce.field(ce.name("_b"), ce.typ(t))}
+	result := []*syntax.Field{ce.field(nil, ce.typ(types2.Typ[types2.Int]))}
+	compare := ce.call(ce.rt("Compare"), key("_a"), key("_b"))
+	lit := ce.literal(params, result, []syntax.Stmt{returnOf(pos, []syntax.Expr{compare})})
+	return exprStmtOf(pos, ce.call(ce.rt("SliceStableFunc"), src, lit))
+}
+
+func (cg *chainGen) emitGroupChainSyntax(call, head *syntax.CallExpr, ops []chainOp, term chainOp, lower chainSyntaxLower) (syntax.Expr, []syntax.Stmt) {
+	group := cg.groupSyntax(head, ops, lower)
+	cg.elemT = group.stage.resT
+	result := parResult(cg.fl.pkg.info.TypeOf(call))
+	ce := newChainSyntax(cg, group.stage.post, term, result, lower)
+	ce.isTry, ce.ownedIn = true, group.stage.ownedOut
+	ce.bindings, ce.outer = group.bindings, group.outer
+	src := group.sequence()
+	ce.bindArgs()
+	bindings, outer := ce.splitBindings()
+	body := append(bindings, ce.run(src, true)...)
+	return ce.invocation(body), outer
+}
+
+func (cg *chainGen) emitGroupTailSyntax(call *syntax.CallExpr, recv syntax.Expr, ops []chainOp, term chainOp, lower chainSyntaxLower) (syntax.Expr, []syntax.Stmt) {
+	pos := cg.pos
+	cg.elemT = ctChainElem(cg.fl.pkg.info.TypeOf(recv))
+	result := parResult(cg.fl.pkg.info.TypeOf(call))
+	ce := newChainSyntax(cg, ops, term, result, lower)
+	ce.isTry = true
+	source, pre := lower.expr(recv)
+	bind := defineOf(pos, []syntax.Expr{ce.name("_rcv"), ce.name("_inputErr")}, []syntax.Expr{source})
+	ce.bindArgs()
+	body := ce.run(ce.name("_rcv"), false)
+	if lower.capture {
+		delay := at(&syntax.FuncType{ResultList: ce.resultFields()}, pos)
+		captureTail := ce.assign(ce.name("_delayed"), ce.chainLiteral(body))
+		runTail := ce.cond(ce.op(syntax.Eql, ce.name("_inputErr"), ce.builtin("nil")), append(ce.bindings, captureTail)...)
+		pre = append(pre, bind, ce.declare("_delayed", delay), runTail)
+		bail := ce.cond(ce.op(syntax.Neq, ce.name("_inputErr"), ce.builtin("nil")),
+			returnOf(pos, []syntax.Expr{ce.zero(result), ce.name("_inputErr")}))
+		return ce.invocation([]syntax.Stmt{bail, returnOf(pos, []syntax.Expr{ce.call(ce.name("_delayed"))})}), pre
+	}
+	if !ce.outer {
+		bail := ce.cond(ce.op(syntax.Neq, ce.name("_inputErr"), ce.builtin("nil")),
+			returnOf(pos, []syntax.Expr{ce.zero(result), ce.name("_inputErr")}))
+		prefix := append([]syntax.Stmt{bind, bail}, ce.bindings...)
+		return ce.invocation(append(prefix, body...)), pre
+	}
+	bindResult := assignOf(pos, []syntax.Expr{ce.name("_after"), ce.name("_inputErr")},
+		[]syntax.Expr{ce.invocation(body)})
+	runTail := ce.cond(ce.op(syntax.Eql, ce.name("_inputErr"), ce.builtin("nil")), append(ce.bindings, bindResult)...)
+	pre = append(pre, bind, ce.declare("_after", ce.typ(result)), runTail)
+	ret := returnOf(pos, []syntax.Expr{ce.name("_after"), ce.name("_inputErr")})
+	return ce.invocation([]syntax.Stmt{ret}), pre
+}
+
+type groupChainSyntax struct {
+	*chainSyntax
+	stage *parStage
+}
+
+func (cg *chainGen) groupSyntax(head *syntax.CallExpr, ops []chainOp, lower chainSyntaxLower) groupChainSyntax {
+	fl := cg.fl
+	group, unordered, elem, _ := fl.parHead(head)
+	recv := syntax.Unparen(group.Fun).(*syntax.SelectorExpr).X
+	limit := group.ArgList[1].(*syntax.KeyValueExpr).Value
+	cg.elemT = elem
+	n := 0
+	for n < len(ops) && (ops[n].method == "map" || ops[n].method == "filter") {
+		n++
+	}
+	ce := newChainSyntax(cg, ops[:n], chainOp{}, nil, lower)
+	stage := &parStage{
+		unordered: unordered, source: fl.parSourceOf(recv),
+		elemT: elem, resT: ce.outT, ctx: group.ArgList[0],
+		seg: ce.ops, segT: ce.inTypes[1:], post: ops[n:],
+	}
+	stage.ownership()
+	for _, arg := range []struct {
+		suffix string
+		node   syntax.Expr
+	}{
+		{suffix: "_source", node: recv},
+		{suffix: "_ctx", node: stage.ctx},
+		{suffix: "_limit", node: limit},
+	} {
+		x, pre := lower.expr(arg.node)
+		ce.bind(arg.suffix, x, pre, arg.node.Pos())
+	}
+	for i, op := range stage.seg {
+		if op.lam == nil {
+			ce.bindCallback("_worker"+strconv.Itoa(i), op, stage.inType(i), false)
+		}
+	}
+	return groupChainSyntax{chainSyntax: ce, stage: stage}
+}
+
+func (g groupChainSyntax) sequence() syntax.Expr {
+	pos := g.cg.pos
+	verb := "GroupSeq"
+	var src syntax.Expr = g.name("_source")
+	switch g.stage.source {
+	case parChan:
+		verb = "GroupChan"
+	case parSlice:
+		src = g.sliceSequence()
+	case parSeq:
+		src = g.call(g.sequenceType(), src)
+	}
+	if g.stage.unordered {
+		verb += "Unordered"
+	}
+	var discard string
+	switch t := ctChainBaseType(g.stage.resT); {
+	case !plainMethodSet(t):
+		discard = "CloseResultIfCloser"
+	case types2.Implements(t, closerInterface()):
+		discard = "CloseResult"
+	default:
+		discard = "LeaveResultOpen"
+	}
+	discardType := g.index(g.rt(discard), g.typ(g.stage.resT))
+	args := []syntax.Expr{g.typ(g.stage.elemT), g.typ(g.stage.resT), discardType}
+	fun := g.index(g.rt(verb), listOf(pos, args))
+	return g.call(fun, g.name("_ctx"), g.name("_limit"), src, g.worker())
+}
+
+func (g groupChainSyntax) sliceSequence() *syntax.FuncLit {
+	pos := g.cg.pos
+	yield := g.name("_yield")
+	value := g.name("_sourceElem")
+	params := g.sequenceType().ParamList
+	params[0].Name = yield
+	lhs := listOf(pos, []syntax.Expr{nameOf(pos, "_"), value})
+	sent := g.call(g.name("_yield"), g.name("_sourceElem"))
+	loop := g.rangeSyntax(lhs, g.name("_source"), []syntax.Stmt{
+		g.cond(g.op(syntax.Not, sent, nil), returnOf(pos, nil)),
+	})
+	return g.literal(params, nil, []syntax.Stmt{loop})
+}
+
+func (g groupChainSyntax) sequenceType() *syntax.FuncType {
+	pos := g.cg.pos
+	yield := at(&syntax.FuncType{
+		ParamList:  []*syntax.Field{g.field(nil, g.typ(g.stage.elemT))},
+		ResultList: []*syntax.Field{g.field(nil, g.typ(types2.Typ[types2.Bool]))},
+	}, pos)
+	return at(&syntax.FuncType{ParamList: []*syntax.Field{g.field(nil, yield)}}, pos)
+}
+
+func (g groupChainSyntax) worker() *syntax.FuncLit {
+	pos := g.cg.pos
+	params := []*syntax.Field{
+		g.field(nameOf(pos, parCtxName), g.rt("Context")),
+		g.field(g.name("_item"), g.typ(g.stage.elemT)),
+	}
+	results := []*syntax.Field{
+		g.field(nil, g.typ(g.stage.resT)),
+		g.field(nil, g.typ(types2.Typ[types2.Bool])),
+		g.field(nil, g.errorType()),
+	}
+	var body []syntax.Stmt
+	if alias, ok := plainContextName(g.stage.ctx); ok {
+		body = append(body, defineOf(pos, []syntax.Expr{nameOf(pos, alias)}, []syntax.Expr{nameOf(pos, parCtxName)}),
+			g.assign(nameOf(pos, "_"), nameOf(pos, alias)))
+	}
+	cur := "_item"
+	for i, op := range g.stage.seg {
+		key := strconv.Itoa(i)
+		fn := "_worker" + key
+		if op.lam != nil {
+			lit := g.lower.workerLambda(op.lam, g.callbackSignature(op, g.stage.inType(i), true))
+			body = append(body, g.define(fn, lit))
+		}
+		next := "_step" + key
+		value, stmts := g.workerCall(fn, next, cur, i)
+		body = append(body, stmts...)
+		if op.method == "filter" {
+			body = append(body, g.cond(g.op(syntax.Not, value, nil), g.workerDrop(i, cur)...))
+			continue
+		}
+		if op.lam == nil {
+			body = append(body, g.define(next, value))
+		}
+		cur = next
+	}
+	err := g.builtin("nil")
+	if logosMayBeCloser(g.stage.resT) && !g.stage.ownedOut {
+		err = g.rt("ErrNotOwned")
+	}
+	body = append(body, returnOf(pos, []syntax.Expr{g.name(cur), g.builtin("true"), err}))
+	return g.literal(params, results, body)
+}
+
+func (g groupChainSyntax) workerCall(fn, next, cur string, i int) (syntax.Expr, []syntax.Stmt) {
+	call := g.call(g.name(fn), g.name(cur))
+	op := g.stage.seg[i]
+	if op.lam == nil {
+		return call, nil
+	}
+	pos := g.cg.pos
+	err := next + "_err"
+	bind := defineOf(pos, []syntax.Expr{g.name(next), g.name(err)}, []syntax.Expr{call})
+	var fail []syntax.Stmt
+	in := g.stage.inType(i)
+	if op.method == "filter" && g.stage.owned[i] && logosMayBeCloser(in) {
+		fail = g.closeSyntax(g.name(cur), in)
+	}
+	fail = append(fail, returnOf(pos, []syntax.Expr{g.zero(g.stage.resT), g.builtin("false"), g.name(err)}))
+	check := g.cond(g.op(syntax.Neq, g.name(err), g.builtin("nil")), fail...)
+	return g.name(next), []syntax.Stmt{bind, check}
+}
+
+func (g groupChainSyntax) workerDrop(i int, cur string) []syntax.Stmt {
+	pos := g.cg.pos
+	st := g.stage
+	in := st.inType(i)
+	laterMap := parMapAfter(st.seg, i)
+	closes := st.owned[i] && logosMayBeCloser(in)
+	noErr := g.builtin("nil")
+	reject := func(value, err syntax.Expr) *syntax.ReturnStmt {
+		return returnOf(pos, []syntax.Expr{value, g.builtin("false"), err})
+	}
+	switch {
+	case closes && !laterMap:
+		return []syntax.Stmt{reject(g.name(cur), noErr)}
+	case closes:
+		return append(g.closeSyntax(g.name(cur), in), reject(g.zero(st.resT), g.rt("ErrNotOwned")))
+	case logosMayBeCloser(st.resT):
+		return []syntax.Stmt{reject(g.zero(st.resT), g.rt("ErrNotOwned"))}
+	case laterMap:
+		return []syntax.Stmt{reject(g.zero(st.resT), noErr)}
+	default:
+		return []syntax.Stmt{reject(g.name(cur), noErr)}
 	}
 }

@@ -355,3 +355,54 @@ func (h *groupHoist) closure(c *groupClosure, use groupClosureUse) syntax.Expr {
 	}
 	return listOf(pos, tempNodes(pos, values))
 }
+
+func (w ctWalker) groupCaptureSyntax(call *syntax.CallExpr) []syntax.Stmt {
+	pos := call.Pos()
+	fun, args := call.Fun, call.ArgList
+	builtin, conversion := typeFlagsOf(w.fl, fun)
+	static := builtin || conversion || w.groupStaticFunc(fun)
+	fun, pre := w.expr(fun)
+	if !static {
+		name := w.nextFun()
+		pre = append(pre, defineOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{fun}))
+		fun = nameOf(pos, name)
+	}
+	lowered := make([]syntax.Expr, 0, len(args))
+	for i, arg := range args {
+		class := argKind(w.funcLower, arg)
+		if w.groupStaticFunc(arg) {
+			class = argInline
+		}
+		typ := w.ctOptionTarget(call, arg, i)
+		var declared syntax.Expr
+		if class == argCapture {
+			if argType := w.groupDeclaredType(arg); argType != nil {
+				declared = w.fl.ctTypeExpr(pos, argType)
+			}
+		}
+		value, steps := w.checkedOperand(arg, typ)
+		pre = append(pre, steps...)
+		if class == argInline {
+			lowered = append(lowered, syntax.UnpackListExpr(value)...)
+			continue
+		}
+		if class == argMulti {
+			names := w.multiNames(arg)
+			pre = append(pre, defineOf(pos, tempNodes(pos, names), []syntax.Expr{value}))
+			lowered = append(lowered, tempNodes(pos, names)...)
+			continue
+		}
+		name := w.nextArg()
+		if declared != nil {
+			pre = append(pre,
+				typedVarDecl(pos, nameOf(pos, name), declared),
+				assignOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{value}),
+			)
+		} else {
+			pre = append(pre, defineOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{value}))
+		}
+		lowered = append(lowered, nameOf(pos, name))
+	}
+	call.Fun, call.ArgList = fun, lowered
+	return pre
+}

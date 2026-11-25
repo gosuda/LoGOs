@@ -1,0 +1,21 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import "comptime"
+
+type Shared struct{ N int }
+
+func Read[T any](index, key int) [3]uint64 {
+	const if comptime.IsStruct[T]() {
+		const samples = []uint64{13, 29, 41}
+		const table = map[int]uint64{
+			8: 101, 1: 31, 6: 73, 7: 89, 0: 19, 3: 47, 4: 59, 2: 37, 5: 61,
+		}
+		var materialized map[int]uint64 = table
+		return [3]uint64{samples[index], table[key] ?? 0, materialized[key] ?? 0}
+	}
+	return [3]uint64{}
+}

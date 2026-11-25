@@ -1,0 +1,70 @@
+// errorcheck
+
+// A type argument forwards a type parameter in every type form that holds
+// it, not only as the parameter itself or under a pointer, slice, array,
+// map, channel or instantiated named type. An exported function that
+// forwards through an option, a tuple, a struct, a function, an interface,
+// a const view or a generic alias is an exported forwarding function and
+// fails at compile time instead of reaching the comptime stub at run time
+// (SPEC 2.5, T-205).
+
+package p
+
+import "comptime"
+
+type Box[T any] struct {
+	V T
+}
+
+type Ref[T any] = *T
+
+func Names[T any]() string {
+	s := ""
+	const for _, f := range comptime.Fields[T]() {
+		s = s + f.Name
+	}
+	return s
+}
+
+func Kind[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return "struct"
+	}
+	return "other"
+}
+
+func Option[T any]() string {
+	return Kind[T?]() // ERROR "\[comptime::exported_forwarder\] exported function Option forwards type parameter T to comptime generic Kind; a caller in another package cannot instantiate it"
+}
+
+func BoxOption[T any]() string {
+	return Kind[Box[T?]]() // ERROR "\[comptime::exported_forwarder\] exported function BoxOption forwards type parameter T to comptime generic Kind"
+}
+
+func Tuple[T any]() string {
+	return Names[(a T, b int)]() // ERROR "\[comptime::exported_forwarder\] exported function Tuple forwards type parameter T to comptime generic Names"
+}
+
+func Struct[T any]() string {
+	return Names[struct{ A T }]() // ERROR "\[comptime::exported_forwarder\] exported function Struct forwards type parameter T to comptime generic Names"
+}
+
+func Result[K any, V any]() string {
+	return Kind[func(K) V]() // ERROR "\[comptime::exported_forwarder\] exported function Result forwards type parameter K to comptime generic Kind"
+}
+
+func Getter[T any]() string {
+	return Kind[interface{ Get() T }]() // ERROR "\[comptime::exported_forwarder\] exported function Getter forwards type parameter T to comptime generic Kind"
+}
+
+func View[T any]() string {
+	return Kind[const []T]() // ERROR "\[comptime::exported_forwarder\] exported function View forwards type parameter T to comptime generic Kind"
+}
+
+func Alias[T any]() string {
+	return Kind[Ref[T]]() // ERROR "\[comptime::exported_forwarder\] exported function Alias forwards type parameter T to comptime generic Kind"
+}
+
+func Concrete[T any]() string {
+	return Kind[struct{ A int }]()
+}

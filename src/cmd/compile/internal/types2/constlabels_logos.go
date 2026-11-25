@@ -9,12 +9,19 @@ import "cmd/compile/internal/syntax"
 func (check *Checker) logosConstBranches(all *Scope, b *block, lstmt *syntax.LabeledStmt, s syntax.Stmt) []*syntax.BranchStmt {
 	switch s := s.(type) {
 	case *syntax.ConstIfStmt:
-		jumps := check.blockBranches(all, b, lstmt, s.Then.List)
+		var jumps []*syntax.BranchStmt
+		if !check.logosDead(s.Then) {
+			jumps = check.blockBranches(all, b, lstmt, s.Then.List)
+		}
 		switch els := s.Else.(type) {
 		case *syntax.BlockStmt:
-			jumps = append(jumps, check.blockBranches(all, b, lstmt, els.List)...)
+			if !check.logosDead(els) {
+				jumps = append(jumps, check.blockBranches(all, b, lstmt, els.List)...)
+			}
 		case *syntax.ConstIfStmt:
-			jumps = append(jumps, check.logosConstBranches(all, b, lstmt, els)...)
+			if !check.logosDead(els) {
+				jumps = append(jumps, check.logosConstBranches(all, b, lstmt, els)...)
+			}
 		}
 		return jumps
 	case *syntax.ConstSwitchStmt:

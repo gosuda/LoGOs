@@ -1,0 +1,22 @@
+[!buildmode:shared] skip
+[!cgo] skip '-buildmode=shared requires external linking'
+[!GOOS:linux] skip
+
+# A shared link receives the module policy. A build-mode shared link
+# cannot complete: without installed package files the link has no
+# explicit runtime/cgo mapping and the linker refuses the implicit one,
+# so the build is expected to fail after printing the link command.
+! logos build -x -buildmode=shared .
+stderr '/link .* -buildmode=shared .* -logos\.cap=[^ ]+logos-cap\.json'
+
+-- go.mod --
+module example.com/shared
+
+go 1.27
+-- logos.toml --
+[capabilities]
+transitive_exec = "deny"
+-- shared.go --
+package shared
+
+func Answer() int { return 42 }

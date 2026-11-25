@@ -1,0 +1,24 @@
+// run
+
+package main
+
+import "comptime"
+
+func classify[T any]() string {
+	const switch T {
+	case int:
+		comptime.Error("integer case must stay silent")
+	case string:
+		return "string case"
+	}
+	return "no match"
+}
+
+func main() {
+	if got := classify[bool](); got != "no match" {
+		panic("unmatched switch: got " + got)
+	}
+	if got := classify[string](); got != "string case" {
+		panic("matched switch: got " + got)
+	}
+}

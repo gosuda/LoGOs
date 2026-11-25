@@ -1,0 +1,11 @@
+// run
+
+package main
+
+import "fmt"
+
+var quoted [len([1]string{$"{ "(" }"})]byte
+
+func main() {
+	fmt.Println(len(quoted), $"a{ "b" }c")
+}

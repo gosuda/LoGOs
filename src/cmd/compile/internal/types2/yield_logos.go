@@ -102,18 +102,28 @@ func (check *Checker) logosYieldForm(s syntax.Stmt) syntax.Stmt {
 	switch s := s.(type) {
 	case *syntax.ExprStmt:
 		if value, word, ok := syntax.YieldOperand(s.X); ok {
-			return syntax.NewYieldStmt(word, value)
+			return check.logosRecordYieldForm(s, syntax.NewYieldStmt(word, value))
 		}
 		return check.logosYieldReserved(s, s.X, s.X)
 	case *syntax.SendStmt:
 		if value, word, ok := syntax.YieldSendOperand(s); ok {
-			return syntax.NewYieldStmt(word, value)
+			return check.logosRecordYieldForm(s, syntax.NewYieldStmt(word, value))
 		}
 		return check.logosYieldReserved(s, s.Chan, s.Chan, s.Value)
 	case *syntax.AssignStmt:
 		return check.logosYieldReserved(s, syntax.UnpackListExpr(s.Lhs)[0], s.Lhs, s.Rhs)
 	}
 	return s
+}
+
+func (check *Checker) logosRecordYieldForm(original syntax.Stmt, yielded *syntax.YieldStmt) *syntax.YieldStmt {
+	if check.Info != nil && (check.logosCtSubst != nil || check.logosFieldBind != nil) {
+		if check.LogosYieldForms == nil {
+			check.LogosYieldForms = make(map[syntax.Stmt]*syntax.YieldStmt)
+		}
+		check.LogosYieldForms[original] = yielded
+	}
+	return yielded
 }
 
 func (check *Checker) logosYieldReserved(s syntax.Stmt, lead syntax.Expr, operands ...syntax.Expr) syntax.Stmt {

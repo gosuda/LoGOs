@@ -1,0 +1,151 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd plain
+logos run .
+cmp stdout ../want.txt
+cd ../interp
+logos run .
+cmp stdout ../want.txt
+cd ../quoted
+logos run .
+cmp stdout ../want.txt
+cd ../closer
+logos run .
+cmp stdout ../want.txt
+
+# Eject the controls first so they run even on a toolchain with the regression.
+cd ../plain
+logos eject -o out
+cd out
+go build -o count$GOEXE .
+exec ./count$GOEXE
+cmp stdout ../../want.txt
+
+cd ../../interp
+logos eject -o out
+cd out
+go build -o count$GOEXE .
+exec ./count$GOEXE
+cmp stdout ../../want.txt
+
+cd ../../quoted
+logos eject -o out
+cd out
+go build -o count$GOEXE .
+exec ./count$GOEXE
+cmp stdout ../../want.txt
+
+cd ../../closer
+logos eject -o out
+cd out
+go build -o count$GOEXE .
+exec ./count$GOEXE
+cmp stdout ../../want.txt
+
+-- want.txt --
+v 1
+-- plain/go.mod --
+module example.com/plain
+
+go 1.27
+-- plain/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Count[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+func one() int {
+	return Count[struct{ N [len([1]string{"("})]byte }]()
+}
+
+func main() { fmt.Println("v", one()) }
+-- interp/go.mod --
+module example.com/interp
+
+go 1.27
+-- interp/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Count[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+func one() int {
+	return Count[struct{ N [len([1]string{$"{ "x" }"})]byte }]()
+}
+
+func main() { fmt.Println("v", one()) }
+-- quoted/go.mod --
+module example.com/quoted
+
+go 1.27
+-- quoted/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Count[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+func one() int {
+	return Count[struct{ N [len([1]string{$"{ "(" }"})]byte }]()
+}
+
+func main() { fmt.Println("v", one()) }
+-- closer/go.mod --
+module example.com/closer
+
+go 1.27
+-- closer/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Count[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+func one() int {
+	return Count[struct{ N [len([1]string{$"{ ")" }"})]byte }]()
+}
+
+func main() { fmt.Println("v", one()) }
