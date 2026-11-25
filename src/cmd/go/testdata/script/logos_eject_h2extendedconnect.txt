@@ -1,3 +1,8 @@
+# Eject widens the opt-in: the fork enables extended CONNECT per server
+# while stock Go offers only the process-global GODEBUG=http2xconnect=1.
+# The rewritten call requires that setting and panics naming the server
+# otherwise, so ejected servers fail fast instead of serving without it.
+
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
@@ -16,7 +21,8 @@ go run .
 cmp stdout $WORK/native.txt
 env GODEBUG=
 ! exec go run .
-stderr 'extended CONNECT needs GODEBUG=http2xconnect=1'
+stderr 'needs GODEBUG=http2xconnect=1'
+stderr 'on server "srv"'
 env GODEBUG=http2xconnect=1
 exec go run .
 cmp stdout $WORK/native.txt

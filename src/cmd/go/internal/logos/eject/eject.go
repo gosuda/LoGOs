@@ -1370,7 +1370,13 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	}
 	edits, uses := ejectedImportEdits(data, fset, f)
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
-	edits = append(edits, h2ExtendedConnectEdits(fset, data, f)...)
+	h2edits := h2ExtendedConnectEdits(fset, data, f)
+	if off, overlap := h2OverlapOffset(edits, h2edits); overlap {
+		pos := fset.Position(token.Pos(fset.File(f.Pos()).Base() + off))
+		base.Errorf("logos eject: overlapping h2extendedconnect import edit at line %d: EnableHTTP2ExtendedConnect left unrewritten", pos.Line)
+		h2edits = nil
+	}
+	edits = append(edits, h2edits...)
 	out, ok := applyTextEdits(data, edits)
 	if !ok {
 		return nil, false, false

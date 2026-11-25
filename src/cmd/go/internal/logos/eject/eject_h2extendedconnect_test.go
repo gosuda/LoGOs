@@ -35,6 +35,35 @@ func enable(s *http.Server) {
 	if !strings.Contains(got, "_ = s") {
 		t.Errorf("receiver not preserved:\n%s", got)
 	}
+	if !strings.Contains(got, `\"s\"`) {
+		t.Errorf("panic does not name the server:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectSkipsOverlappingImportEdit(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+import "comptime"
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "")
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "http2xconnect=1") {
+		t.Errorf("overlapping rewrite applied:\n%s", got)
+	}
+	if strings.Contains(got, `"comptime"`) {
+		t.Errorf("non-overlapping import edit dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "s.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("skipped call lost:\n%s", got)
+	}
 }
 
 func TestH2ExtendedConnectKeepsExistingImports(t *testing.T) {
