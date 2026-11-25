@@ -109,13 +109,14 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 	if err != nil {
 		return err
 	}
-	goFiles := 0
+	goFiles, hasLogos := 0, false
 	var embeds []string
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || name[0] == '.' || name[0] == '_' {
 			continue
 		}
+		hasLogos = hasLogos || logosfile.Is(name)
 		if isSupportCopyFile(name) || p.vendored && isVendoredGoFile(name) || !p.vendored && isSupportLogosFile(name) {
 			if !entry.Type().IsRegular() {
 				return fmt.Errorf("Go source %s is not a regular file", name)
@@ -137,6 +138,11 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 		}
 	}
 	if goFiles == 0 {
+		if !p.vendored && hasLogos {
+			// Packages holding LoGOs sources are lowered from compiler
+			// staging by materializeGorootLogos after the support copy.
+			return nil
+		}
 		return fmt.Errorf("holds no Go sources")
 	}
 	if err := c.copyPackageEmbeds(p, embeds); err != nil {

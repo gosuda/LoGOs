@@ -885,7 +885,7 @@ var depsRules = `
 	FMT
 	< math/big/internal/asmgen;
 
-	unsafe
+	internal/abi, reflect, unsafe
 	< logos/arena;
 
 	iter, os, runtime, runtime/pprof, strconv, strings, sync, time, unicode/utf8, unsafe
@@ -902,6 +902,9 @@ var depsRules = `
 
 	NONE
 	< logos/ascii;
+
+	encoding/binary, errors, io, math, slices, sync
+	< logos/binary;
 
 	errors, fmt, io
 	< logos/io;

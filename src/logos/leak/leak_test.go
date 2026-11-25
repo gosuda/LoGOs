@@ -11,5 +11,5 @@ import (
 )
 
 func TestCheckPassesWithoutLeak(t *testing.T) {
-	defer leak.Check(t)
+	defer leak.Check(t)()
 }

@@ -1,0 +1,76 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run . 6
+stdout '^123 11 6 \[7 8 0 9 10 11\]$'
+cp stdout $WORK/native.txt
+! logos run . 6 exhaust
+stderr '^panic: arena: fixed region exhausted \(want 1, have 0\)$'
+
+logos eject -o out
+cd out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go run . 6
+cmp stdout $WORK/native.txt
+! exec env -u GOROOT $UPROOT1272/bin/go run . 6 exhaust
+stderr '^panic: arena: fixed region exhausted \(want 1, have 0\)$'
+
+-- m/go.mod --
+module example.com/arenadynamic
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+
+	"example.com/arenadynamic/fill"
+	"logos/arena"
+)
+
+func main() {
+	n, err := strconv.Atoi(os.Args[1])
+	if err != nil {
+		panic(err)
+	}
+	buf := make([]byte, n)
+	r := arena.OpenFixed(buf)
+	order, last := fill.Write(r)
+	fmt.Println(order, last, arena.FixedUsed(r), buf)
+	if len(os.Args) > 2 {
+		fill.Exhaust(r)
+	}
+}
+
+-- m/fill/fill.lgo --
+package fill
+
+import "logos/arena"
+
+//go:noinline
+func Write(r arena.Region) (int, byte) {
+	order := 0
+	mark := func(digit int) int {
+		order = 10*order + digit
+		return 2
+	}
+	p := arena.New[byte](r)
+	*p = 7
+	s := arena.Make[byte](r, mark(1))
+	s[0] = 8
+	s = arena.Append(r, arena.Append(r, s, byte(7+mark(2))), tail(mark(3))...)
+	return order, s[len(s)-1]
+}
+
+func tail(n int) []byte {
+	return []byte{10, 11}[:n]
+}
+
+func Exhaust(r arena.Region) {
+	arena.New[byte](r)
+}

@@ -60,6 +60,27 @@ cmp stdout $WORK/native-json.txt
 exec env -u GOROOT $UPROOT1272/bin/go run .
 cmp stdout $WORK/native-json.txt
 
+# A shipped .lgo package outside the fixed set is also materialized from
+# the real toolchain, with no fixture GOROOT. logos/expect lands under
+# rt/logos/ like every other non-runtime toolchain package.
+cd ../../r
+logos run .
+stdout '^count: 42$'
+cp stdout $WORK/native-real.txt
+logos eject -o out
+exists out/main.go
+exists out/_logos_deps/rt/go.mod
+exists out/_logos_deps/rt/logos/expect/expect.go
+! exists out/_logos_deps/rt/expect
+! exists out/_logos_deps/rt/logos/expect/expect_test.go
+! grep '^//go:build' out/_logos_deps/rt/logos/expect/expect.go
+grep 'gosuda/loGos/rt/logos/expect' out/main.go
+cd out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native-real.txt
+
 -- mkgoroot.go --
 package main
 
@@ -189,4 +210,22 @@ import (
 func main() {
 	d := ljson.DiagnosticsFor([]byte("{\n  \"a\": x}"), 9)
 	fmt.Println(d.Line, d.Column, d.Offset)
+}
+
+-- r/go.mod --
+module example.com/gorootdep
+
+go 1.27
+
+-- r/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/expect"
+)
+
+func main() {
+	fmt.Println(expect.FieldText("count", 42))
 }
