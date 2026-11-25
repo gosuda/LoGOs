@@ -23,6 +23,7 @@ import (
 
 	"golang.org/x/mod/module"
 
+	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/search"
 )
@@ -41,6 +42,7 @@ func copyEjectedSupport(src, staging, dst string, roots []string) error {
 	defer root.Close()
 	c := supportCopy{
 		src:          root,
+		srcDir:       src,
 		staging:      staging,
 		dst:          dst,
 		pending:      roots,
@@ -70,6 +72,7 @@ func copyEjectedSupport(src, staging, dst string, roots []string) error {
 
 type supportCopy struct {
 	src          *os.Root
+	srcDir       string
 	staging      string
 	dst          string
 	pending      []string
@@ -78,6 +81,29 @@ type supportCopy struct {
 	notices      map[string]bool
 	embedded     map[string]bool
 	format       []string
+}
+
+// absSrcDir returns the host path of one support source package.
+func (c *supportCopy) absSrcDir(p supportSourcePackage) string {
+	return filepath.Join(c.srcDir, filepath.FromSlash(p.src))
+}
+
+// readDir lists one support source package. Toolchain packages read the
+// effective directory, so an overlay-inserted LoGOs file is copied from
+// its lowered output and an overlay-deleted file is never requested from
+// staging. Vendored packages keep the rooted physical listing.
+func (c *supportCopy) readDir(p supportSourcePackage) ([]fs.DirEntry, error) {
+	if p.vendored {
+		return fs.ReadDir(c.src.FS(), p.src)
+	}
+	return fsys.ReadDir(c.absSrcDir(p))
+}
+
+// readOriginal reads one toolchain support source through the effective
+// filesystem, so overlay replacements govern ignore checks and inserted
+// files read their overlaid content.
+func (c *supportCopy) readOriginal(p supportSourcePackage, name string) ([]byte, error) {
+	return fsys.ReadFile(filepath.Join(c.absSrcDir(p), name))
 }
 
 type supportSourcePackage struct {
@@ -105,7 +131,7 @@ func ejectedSupportPackage(importPath string) (supportSourcePackage, error) {
 }
 
 func (c *supportCopy) copyPackage(p supportSourcePackage) error {
-	entries, err := fs.ReadDir(c.src.FS(), p.src)
+	entries, err := c.readDir(p)
 	if err != nil {
 		return err
 	}
@@ -174,7 +200,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 		outputName = logosStem(name) + ".go"
 		data, err = os.ReadFile(filepath.Join(c.staging, filepath.FromSlash(p.src), outputName))
 		if os.IsNotExist(err) {
-			original, readErr := c.src.ReadFile(src)
+			original, readErr := c.readOriginal(p, name)
 			if readErr != nil {
 				return nil, false, readErr
 			}
@@ -187,6 +213,11 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 		}
 	} else {
 		data, err = c.src.ReadFile(src)
+		if err != nil && !p.vendored && os.IsNotExist(err) {
+			// An overlay-inserted Go source has no physical file; the
+			// rooted read above stays the rule for ordinary assets.
+			data, err = c.readOriginal(p, name)
+		}
 		if err != nil {
 			return nil, false, err
 		}
