@@ -72,7 +72,7 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	var prepared *ctPreparedPackage
 	if info.LogosCtImport != nil && len(info.LogosCtInst) != 0 {
 		var err error
-		prepared, err = stageCtPreparedPackage(pkg, info)
+		prepared, err = stageCtPreparedPackage(pkg, info, files)
 		if err != nil {
 			base.Fatalf("%v", err)
 		}

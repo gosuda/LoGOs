@@ -1296,9 +1296,7 @@ A call of a comptime generic without explicit type arguments inside an expansion
 
 An exported forwarding function MUST fail with `[comptime::exported_forwarder]` at its first instantiation that forwards a type parameter, because a caller in another package cannot instantiate it. The message MUST name the function and the type parameter. The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. `logos eject` MUST refuse such a package with the same diagnostic. [T-205]
 
-A method of a generic type MUST NOT be a comptime generic. [T-205]
-
-A method of a generic type that uses `const for` over a type parameter MUST fail with `[comptime::generic_method]`. [T-205]
+A method with type parameters MAY be a comptime generic. Each instance is keyed by the receiver type arguments followed by the method type arguments, and it is checked in the defining package. Only a direct call with concrete type arguments instantiates it. [T-205]
 
 An expansion above the selected `max_comptime_ast_nodes` limit with default 4,096 nodes MUST fail with `[comptime::node_limit]`. [T-205][T-102]
 

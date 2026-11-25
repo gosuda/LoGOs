@@ -43,7 +43,7 @@ func (check *Checker) funcBody(decl *declInfo, name string, sig *Signature, body
 	defer check.logosPopFuncSig()
 	defer check.logosExitFunc() // logos M3-S4 hook.
 
-	if decl != nil && decl.fdecl != nil && check.conf.Logos && len(decl.fdecl.TParamList) > 0 {
+	if decl != nil && decl.fdecl != nil && check.conf.Logos && (len(decl.fdecl.TParamList) > 0 || sig.RecvTypeParams().Len() != 0) {
 		if LogosUsesComptime(decl.fdecl, decl.file) {
 			check.logosCtDeclCheck = true
 			defer func() { check.logosCtDeclCheck = false }()
@@ -52,7 +52,6 @@ func (check *Checker) funcBody(decl *declInfo, name string, sig *Signature, body
 		defer func() { check.logosCtTParamDecl = false }()
 	}
 	check.stmtList(0, body.List)
-	check.logosRejectGenericMethod(decl, body) // logos comptime hook: a method of a generic type cannot be a comptime generic.
 
 	if !check.logosCtDeclCheck && check.hasLabel && !check.conf.IgnoreBranchErrors {
 		check.labels(body)
