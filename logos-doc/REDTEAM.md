@@ -10,7 +10,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #6 | Block lambda return ambiguity inside map | M6 | test/logos/run/lambda.lgo; test/logos/run/chains.lgo (dblBlock, count with ?) | tested |
 | #7 | Non-nil pointer bypass via arrays maps JSON | M3, M11 | test/logos/run/json_unmarshal_test.lgo; src/internal/types/testdata/logos/nonnil_zero.lgo; src/internal/types/testdata/logos/map_index.lgo | tested |
 | #8 | Go functions returning nil into lgo | M3 | test/logos/run/platform.lgo | tested |
-| #9 | Comptime copy suffix corrupting debugger output | M7 | test/logos/redteam/attack_009_comptime_trace_names.lgo (executed 2026-11-08: the fixpoint strip in src/cmd/link/internal/ld/pcln_logos.go lands it; the fixture asserts the `·logosct<N>` and `_logosct<N>` suffixes absent and the base name present, and passes) | tested |
+| #9 | Comptime instance suffix corrupting debugger output | M7 | test/logos/redteam/attack_009_comptime_trace_names.lgo (executed 2026-11-23: the compiler marks each function whose name contains `.logosct.`, and src/cmd/link/internal/ld/pcln_logos.go strips each `.logosct.<64 hex>` segment from the pclntab name; the fixture asserts no `logosct` in trace and `FuncForPC` names and the base name present, and passes) | tested |
 | #10 | Exhaustive union switch bypassed via default | M9 | test/logos/lint/exhaustive_union_switch.lgo; src/cmd/go/testdata/script/logos_pedantic_lint.txt | tested |
 | #11 | Async preemption migrating G mid-arena use | M18 | test/logos/redteam/attack_011_preempt_arena_reachable.lgo | tested |
 | #12 | Inline bump allocator corrupting mark bits | M18 | test/logos/codegen/redteam12_bump_scan_guard.lgo | tested |
@@ -70,7 +70,7 @@ Rules: logos-doc/SPEC.md. Status values: planned, tested, satisfied upstream, bl
 | #71 | scan region dead pointers breaking barrier reuse | M18 | src/cmd/go/testdata/script/logos_redteam_71.txt (executed 2026-10-28: `go test cmd/go -run 'Script/^logos_redteam_71$'` passes, race leg included) | tested |
 | #72 | ViewAs interior pointer confusing collector scan | M7 | test/logos/run/viewas.lgo (GC keep-alive, need-have panic); src/logos/rt/viewas_test.go | tested |
 | #73 | Const-map seed search fails to terminate | M5 | test/logos/run/const_map.lgo; src/cmd/compile/internal/logos/constmap_test.go | tested |
-| #74 | base function names without the comptime-copy suffix in runtime.FuncForPC and in traces | M7 | test/logos/redteam/attack_009_comptime_trace_names.lgo | tested |
+| #74 | base function names without the comptime instance suffix in runtime.FuncForPC and in traces | M7 | test/logos/redteam/attack_009_comptime_trace_names.lgo | tested |
 | #75 | order dependent inference in nil switch arms | M2 | test/logos/redteam/attack_075_nil_arm_common_type | tested |
 | #76 | const for skipping checks on unrolled bodies | M7 | test/logos/compile/const_for_perfield.lgo; test/logos/compile/const_for_error.lgo; test/logos/run/const_for_lines.lgo | tested |
 | #77 | plain defer clearing error after errdefer | M9 | test/logos/lint/defer_erases_errdefer_state.lgo | tested |

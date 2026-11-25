@@ -1,0 +1,42 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"example.com/mixedfeatures/owner"
+)
+
+type Row struct {
+	First  *owner.Cell?
+	Middle *owner.Cell?
+	Last   *owner.Cell?
+}
+
+func sum[T any](row T, note func(string)) (int, error) {
+	return owner.Sum[T](row, note)
+}
+
+func printRun(label string, row Row) {
+	var trace []string
+	total, err := sum[Row](row, func(event string) {
+		trace = append(trace, event)
+	})
+	if err != nil {
+		fmt.Println(label, 0, err)
+	} else {
+		fmt.Println(label, total, err)
+	}
+	fmt.Println(strings.Join(trace, " "))
+}
+
+func main() {
+	row := Row{First: owner.NewCell("4"), Last: owner.NewCell("7")}
+	printRun("ok", row)
+	row.Middle = owner.NewCell("x")
+	printRun("bad", row)
+}

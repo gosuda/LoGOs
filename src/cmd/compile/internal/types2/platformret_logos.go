@@ -10,7 +10,12 @@ type LogosPlatformRet struct {
 	Value, Slot Type
 }
 
-func (check *Checker) logosPlatformReturn(x *operand, T Type, context string) {
+type resultSlot struct {
+	stmt  *syntax.ReturnStmt
+	index int
+}
+
+func (check *Checker) logosPlatformReturn(x *operand, T Type, context string, result resultSlot) {
 	if x == nil || !check.isLogosFile(x) || context != "return statement" || check.Info == nil {
 		return
 	}
@@ -24,5 +29,18 @@ func (check *Checker) logosPlatformReturn(x *operand, T Type, context string) {
 		check.Info.LogosPlatformRets = make(map[syntax.Pos][]LogosPlatformRet)
 	}
 	pos := syntax.StartPos(x.expr)
-	check.Info.LogosPlatformRets[pos] = append(check.Info.LogosPlatformRets[pos], LogosPlatformRet{Value: x.typ(), Slot: T})
+	fact := LogosPlatformRet{Value: x.typ(), Slot: T}
+	check.Info.LogosPlatformRets[pos] = append(check.Info.LogosPlatformRets[pos], fact)
+	if result.stmt == nil {
+		return
+	}
+	if check.Info.LogosPlatformRetSlots == nil {
+		check.Info.LogosPlatformRetSlots = make(map[*syntax.ReturnStmt]map[int]LogosPlatformRet)
+	}
+	slots := check.Info.LogosPlatformRetSlots[result.stmt]
+	if slots == nil {
+		slots = make(map[int]LogosPlatformRet)
+		check.Info.LogosPlatformRetSlots[result.stmt] = slots
+	}
+	slots[result.index] = fact
 }

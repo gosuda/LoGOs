@@ -53,13 +53,8 @@ type Hover struct {
 	Range    *Range        `json:"range,omitempty"`
 }
 
-type TextEdit struct {
-	Range   Range  `json:"range"`
-	NewText string `json:"newText"`
-}
-
-type WorkspaceEdit struct {
-	Changes map[string][]TextEdit `json:"changes"`
+type CodeActionDisabled struct {
+	Reason string `json:"reason"`
 }
 
 type LSPDiagnostic struct {
@@ -71,8 +66,8 @@ type LSPDiagnostic struct {
 }
 
 type CodeAction struct {
-	Title       string          `json:"title"`
-	Kind        string          `json:"kind,omitempty"`
-	Diagnostics []LSPDiagnostic `json:"diagnostics,omitempty"`
-	Edit        *WorkspaceEdit  `json:"edit,omitempty"`
+	Title       string             `json:"title"`
+	Kind        string             `json:"kind,omitempty"`
+	Diagnostics []LSPDiagnostic    `json:"diagnostics,omitempty"`
+	Disabled    CodeActionDisabled `json:"disabled"`
 }

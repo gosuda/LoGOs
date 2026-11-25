@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/netip"
+	"sync"
 	"time"
 )
 
@@ -25,8 +26,11 @@ type Conn struct {
 	config    *Config
 	testHooks connTestHooks
 	peerAddr  netip.AddrPort
-	localAddr netip.AddrPort
 	prng      *rand.Rand
+
+	// The connection loop owns writes to localAddr; concurrent readers hold localAddrMu.
+	localAddrMu sync.Mutex
+	localAddr   netip.AddrPort
 
 	msgc  chan any
 	donec chan struct{} // closed when conn loop exits
@@ -177,6 +181,8 @@ func (c *Conn) String() string {
 
 // LocalAddr returns the local network address, if known.
 func (c *Conn) LocalAddr() netip.AddrPort {
+	c.localAddrMu.Lock()
+	defer c.localAddrMu.Unlock()
 	return c.localAddr
 }
 

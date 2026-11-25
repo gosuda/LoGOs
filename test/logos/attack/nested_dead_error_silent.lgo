@@ -1,0 +1,34 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Inner struct {
+	X int
+}
+
+type Outer struct {
+	A Inner
+}
+
+func Count[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		const for _, g := range comptime.Fields[f.Type]() {
+			const if false {
+				comptime.Error("dead")
+			}
+			_ = g.Name
+			n++
+		}
+	}
+	return n
+}
+
+func main() {
+	fmt.Println(Count[Outer]())
+}

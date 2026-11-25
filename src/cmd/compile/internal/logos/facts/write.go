@@ -127,6 +127,24 @@ func eachExportedNamed(pkg *types2.Package, yield func(name string, named *types
 	}
 }
 
+func eachExportedAlias(pkg *types2.Package, yield func(name string, rhs types2.Type)) {
+	scope := pkg.Scope()
+	if scope == nil {
+		return
+	}
+	for _, name := range scope.Names() {
+		obj, ok := scope.Lookup(name).(*types2.TypeName)
+		if !ok || obj == nil || !obj.Exported() || !obj.IsAlias() {
+			continue
+		}
+		alias, ok := obj.Type().(*types2.Alias)
+		if !ok {
+			continue
+		}
+		yield(name, alias.Rhs())
+	}
+}
+
 func eachExportedVar(pkg *types2.Package, yield func(object string, v *types2.Var)) {
 	scope := pkg.Scope()
 	if scope == nil {

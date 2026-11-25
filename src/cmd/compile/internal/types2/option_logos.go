@@ -198,6 +198,10 @@ func (check *Checker) logosOptionAssign(x *operand, T Type, context string) bool
 	if Topt == nil && Vopt == nil {
 		return false
 	}
+	if Topt != nil && !x.isNil() && !Identical(x.typ(), T) && logosClosedUnion(Topt.Elem) != nil {
+		check.assignment(x, Topt.Elem, context)
+		return true
+	}
 	if isUntyped(x.typ()) {
 		if x.isNil() {
 			if Topt == nil {
@@ -315,6 +319,20 @@ func (check *Checker) logosOptionIndirect(x *operand) bool {
 	return true
 }
 
+func (check *Checker) logosOptSelectDeferProj(e *syntax.OptSelectExpr) bool {
+	fp, ok := e.X.(*syntax.FieldProjExpr)
+	if !ok {
+		return false
+	}
+	_, obj := check.lookupScope(fp.Field.Value)
+	v, ok := obj.(*Var)
+	if !ok {
+		return false
+	}
+	info := check.logosFieldVars[v]
+	return info != nil && info.Generic && info.Struct == nil
+}
+
 func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKind {
 	var rx operand
 	check.expr(nil, &rx, e.X)
@@ -326,6 +344,12 @@ func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKi
 	check.logosUnnarrowOperand(&rx)
 	opt := logosAsOptionThroughConst(rx.typ())
 	if opt == nil {
+		if check.logosOptSelectDeferProj(e) {
+			x.mode_ = value
+			x.typ_ = &Option{Elem: logosComptimeAny}
+			x.expr = e
+			return expression
+		}
 		check.errorf(e, MissingFieldOrMethod, "%s ?. on non-option type %s", logosNotAnOption, rx.typ())
 		x.invalidate()
 		x.expr = e
@@ -394,6 +418,14 @@ func (check *Checker) logosOptSelect(x *operand, e *syntax.OptSelectExpr) exprKi
 	x.expr = e
 	return expression
 }
+func (check *Checker) logosCoalesceDeferLeft(e *syntax.CoalesceExpr) bool {
+	lx, ok := syntax.Unparen(e.X).(*syntax.CallExpr)
+	if !ok {
+		return false
+	}
+	fp, ok := syntax.Unparen(lx.Fun).(*syntax.OptSelectExpr)
+	return ok && check.logosOptSelectDeferProj(fp)
+}
 
 func (check *Checker) logosCoalesce(x *operand, e *syntax.CoalesceExpr) exprKind {
 	check.logosChainNestedTry(e.Y)
@@ -423,7 +455,11 @@ func (check *Checker) logosCoalesce(x *operand, e *syntax.CoalesceExpr) exprKind
 		return expression
 	}
 	x.mode_ = value
-	x.typ_ = opt.Elem
+	if check.logosCoalesceDeferLeft(e) {
+		x.typ_ = rx.typ()
+	} else {
+		x.typ_ = opt.Elem
+	}
 	x.expr = e
 	return expression
 }
@@ -446,6 +482,13 @@ func (check *Checker) logosOptionalCall(x *operand, call *syntax.CallExpr) bool 
 	opt := logosAsOption(x.typ())
 	if opt == nil {
 		return false
+	}
+	if fp, ok := syntax.Unparen(call.Fun).(*syntax.OptSelectExpr); ok && check.logosOptSelectDeferProj(fp) {
+		x.mode_ = value
+		x.typ_ = &Option{Elem: logosComptimeAny}
+		x.expr = call
+		check.hasCallOrRecv = true
+		return true
 	}
 	// A function field reached through `?.` on a const view carries the
 	// view's qualification; calling it mutates nothing, so read the

@@ -423,6 +423,7 @@ func (check *Checker) collectParams(kind VarKind, list []*syntax.Field) (names [
 			params = append(params, par)
 			anonymous = true
 		}
+		check.logosCtKeepDeclaredType(params[len(params)-1], ftype)
 	}
 
 	if named && anonymous {
@@ -436,6 +437,9 @@ func (check *Checker) collectParams(kind VarKind, list []*syntax.Field) (names [
 	if variadic {
 		last := params[len(params)-1]
 		last.typ = &Slice{elem: last.typ}
+		if elem := check.logosCtAbstract[last]; elem != nil {
+			check.logosCtAbstract[last] = NewSlice(elem)
+		}
 		check.recordTypeAndValue(list[len(list)-1].Type, typexpr, last.typ, nil)
 	}
 

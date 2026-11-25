@@ -1,0 +1,94 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^present true 37$'
+stdout '^absent false -1$'
+stdout '^projected ada -1$'
+stdout '^projected unset 41$'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+
+-- m/go.mod --
+module example.com/optioncopy
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/optioncopy/owner"
+)
+
+type Row struct {
+	Score int?
+}
+
+type OptionRow struct {
+	Name  string?
+	Count int64?
+}
+
+func main() {
+	present := owner.CopyRow[Row](Row{Score: 37})
+	absent := owner.CopyRow[Row](Row{})
+	fmt.Println("present", present.Score != nil, present.Score ?? -1)
+	fmt.Println("absent", absent.Score != nil, absent.Score ?? -1)
+
+	named := OptionRow{Name: "ada"}
+	counted := OptionRow{Count: 41}
+	projectedName := projectOptions(&named)
+	projectedCount := projectOptions(&counted)
+	fmt.Println("projected", projectedName.Name ?? "unset", projectedName.Count ?? -1)
+	fmt.Println("projected", projectedCount.Name ?? "unset", projectedCount.Count ?? -1)
+}
+
+-- m/projection.lgo --
+package main
+
+import "example.com/optioncopy/owner"
+
+func projectOptions(row *OptionRow) OptionRow {
+	return owner.ProjectRow[OptionRow](row)
+}
+
+-- m/owner/owner.lgo --
+package owner
+
+import "comptime"
+
+func CopyRow[T any](row T) T {
+	var out T
+	const for _, f := range comptime.Fields[T]() {
+		out.[f] = CopyField[f.Type](row.[f])
+	}
+	return out
+}
+
+func CopyField[T any](field T) T {
+	const if comptime.IsStruct[T]() {
+		comptime.Error("CopyField requires a non-struct field")
+	}
+	return field
+}
+
+func ProjectRow[T any](row *(T)) T {
+	var out T
+	const for _, f := range comptime.Fields[T]() {
+		out.[f] = ReadField[f.Type](&row.[f])
+	}
+	return out
+}
+
+func ReadField[F any](field *(F)) F {
+	return *field
+}

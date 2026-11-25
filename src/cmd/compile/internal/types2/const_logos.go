@@ -102,6 +102,9 @@ func (check *Checker) logosConstAssign(x *operand, T Type, context string) bool 
 	if csrc0 := logosAsConstView(x.typ()); csrc0 == nil && logosAsConstView(T) == nil {
 		if qiface := logosQualifiedIface(T); qiface != nil && x.isValid() && !x.isNil() && T != nil {
 			if Vu := Unalias(x.typ()); Vu != nil && !isTypeParam(Vu) {
+				if tset := logosClosedUnion(T); tset != nil && !logosUnionAdmits(Vu, tset) {
+					return false
+				}
 				var cause string
 				ok := false
 				if Ti := logosPropertyInterface(T); Ti != nil {
@@ -1067,14 +1070,19 @@ func (check *Checker) logosLocalConstMapLen(obj *Const) (int64, bool) {
 }
 
 func (check *Checker) logosImportedConstMapLen(obj *Var) (int64, bool) {
-	if obj.Pkg() == nil || obj.Pkg() == check.pkg {
+	if obj.Pkg() == nil {
 		return 0, false
 	}
 	view := logosAsConstView(obj.Type())
 	if view == nil || !view.ConstMap {
 		return 0, false
 	}
-	if LogosImportedConstMapLen == nil {
+	if check.LogosCtImportConstMap != nil {
+		if row, ok := check.LogosCtImportConstMap(obj.Pkg().Path(), obj.Name()); ok && row.Binding == obj {
+			return int64(row.Count), true
+		}
+	}
+	if obj.Pkg() == check.pkg || LogosImportedConstMapLen == nil {
 		return 0, false
 	}
 	n, ok := LogosImportedConstMapLen(obj.Pkg().Path(), obj.Name())

@@ -1,0 +1,32 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"example.com/comptimeasan/left"
+	"example.com/comptimeasan/right"
+)
+
+func init() {
+	if left.Initial != [3]uint64{13, 19, 19} {
+		panic("left init read incorrect helper data")
+	}
+	if right.Initial != [3]uint64{29, 73, 73} {
+		panic("right init read incorrect helper data")
+	}
+}
+
+func main() {
+	if left.Read(2, 8) != [3]uint64{41, 101, 101} {
+		panic("left runtime read incorrect helper data")
+	}
+	if right.Read(0, 3) != [3]uint64{13, 47, 47} {
+		panic("right runtime read incorrect helper data")
+	}
+	if right.Read(1, 9) != [3]uint64{29, 0, 0} {
+		panic("right runtime read incorrect default for absent map key")
+	}
+	println("comptime ASan OK")
+}

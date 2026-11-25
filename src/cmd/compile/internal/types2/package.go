@@ -19,7 +19,8 @@ type Package struct {
 	cgo       bool   // uses of this package will be rewritten into uses of declarations from _cgo_gotypes.go
 	goVersion string // minimum Go version required for package (by Config.GoVersion, typically from go.mod)
 
-	logosDerived map[string]bool // logos M3-S5 hook: exported vars marked holding Go-derived values, exported as `derived` facts
+	logosDerived  map[string]bool // logos M3-S5 hook: exported vars marked holding Go-derived values, exported as `derived` facts
+	logosCtLocals logosCtLocalTypes
 }
 
 // NewPackage returns a new Package for the given package path and name.

@@ -1119,3 +1119,252 @@ func (fl *fileLower) spellTupleStruct(pos syntax.Pos, names []string, types []ty
 	}
 	return st, text.String()
 }
+
+func ctTupleShape(typ types2.Type) *types2.Struct {
+	if typ == nil {
+		return nil
+	}
+	switch t := compositeUnderlying(typ).(type) {
+	case *types2.LogosTuple:
+		st, _ := t.Underlying().(*types2.Struct)
+		return st
+	case *types2.Struct:
+		if tupleStructShaped(t) {
+			return t
+		}
+	}
+	return nil
+}
+
+func (w ctWalker) ctTupleExpr(e syntax.Expr) (syntax.Expr, []syntax.Stmt, bool) {
+	switch n := syntax.Unparen(e).(type) {
+	case *syntax.TupleType:
+		if typ := w.fl.pkg.info.TypeOf(n); typ != nil {
+			return w.fl.ctTypeExpr(n.Pos(), typ), nil, true
+		}
+		w.reject(n, "missing checked tuple type")
+		return e, nil, true
+	case *syntax.TupleLit:
+		shape := w.ctTupleShapeOf(e)
+		if shape == nil || shape.NumFields() != len(n.Elems) {
+			w.reject(n, "missing checked tuple literal shape")
+			return e, nil, true
+		}
+		pre := w.walkExprs(len(n.Elems), func(i int) *syntax.Expr {
+			return &n.Elems[i]
+		}, func(i int, _ syntax.Expr) types2.Type {
+			return shape.Field(i).Type()
+		})
+		return w.ctTupleComposite(n.Pos(), shape, n.Elems), pre, true
+	case *syntax.SelectorExpr:
+		info := w.fl.pkg.info
+		if e != n || w.fl.isTypeExpr(n.X) {
+			break
+		}
+		typ := info.TypeOf(n.X)
+		if typ == nil {
+			break
+		}
+		if _, native := compositeUnderlying(typ).(*types2.LogosTuple); !native && info.Selections[n] != nil {
+			break
+		}
+		if field := tupleSelectionName(typ, n.Sel.Value); field != n.Sel.Value {
+			n.Sel.Value = field
+			return n, w.expressions(&n.X), true
+		}
+	}
+	return e, nil, false
+}
+
+func (w ctWalker) ctTupleShapeOf(e syntax.Expr) *types2.Struct {
+	info := w.fl.pkg.info
+	for {
+		if shape := ctTupleShape(info.TypeOf(e)); shape != nil {
+			return shape
+		}
+		p, ok := e.(*syntax.ParenExpr)
+		if !ok {
+			return nil
+		}
+		e = p.X
+	}
+}
+
+func (w ctWalker) ctTupleComposite(pos syntax.Pos, shape *types2.Struct, vals []syntax.Expr) syntax.Expr {
+	for i, value := range vals {
+		field := nameOf(pos, shape.Field(i).Name())
+		vals[i] = at(&syntax.KeyValueExpr{Key: field, Value: value}, pos)
+	}
+	return at(&syntax.CompositeLit{
+		Type:     w.fl.ctTypeExpr(pos, shape),
+		ElemList: vals,
+		NKeys:    len(vals),
+		Rbrace:   pos,
+	}, pos)
+}
+
+func (w ctWalker) ctTupleAssign(s *syntax.AssignStmt) ([]syntax.Stmt, bool) {
+	if s.Op != syntax.Def && s.Op != 0 {
+		return nil, false
+	}
+	return w.ctTupleValues(s, &s.Rhs, len(syntax.UnpackListExpr(s.Lhs)))
+}
+
+func (w ctWalker) ctTupleVar(d *syntax.VarDecl) ([]syntax.Stmt, bool) {
+	return w.ctTupleValues(d, &d.Values, len(d.NameList))
+}
+
+func (w ctWalker) ctTupleStmt(s syntax.Stmt) ([]syntax.Stmt, syntax.Stmt, bool) {
+	ret, ok := s.(*syntax.ReturnStmt)
+	if !ok {
+		return nil, s, false
+	}
+	pre, handled := w.ctTupleValues(ret, &ret.Results, len(w.specs))
+	if !handled {
+		return nil, s, false
+	}
+	cleanup, next := w.cleanupReturn(ret)
+	return append(pre, cleanup...), next, true
+}
+
+func (w ctWalker) ctTupleSelect(clause *syntax.CommClause) bool {
+	as, ok := clause.Comm.(*syntax.AssignStmt)
+	if !ok || as.Rhs == nil {
+		return false
+	}
+	arity := len(syntax.UnpackListExpr(as.Lhs))
+	shape := w.ctTupleShapeOf(as.Rhs)
+	if shape == nil || shape.NumFields() != arity {
+		return false
+	}
+	pos := as.Pos()
+	name := w.nextArg()
+	clause.Comm = defineOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{as.Rhs})
+	as.Rhs = w.ctTupleFieldReads(as, as.Rhs, nameOf(pos, name), shape)
+	clause.Body = slices.Insert(clause.Body, 0, syntax.Stmt(as))
+	return true
+}
+
+func (w ctWalker) ctTupleValues(host syntax.Node, slot *syntax.Expr, arity int) ([]syntax.Stmt, bool) {
+	if *slot == nil || arity == 0 {
+		return nil, false
+	}
+	rhs := *slot
+	switch v := syntax.Unparen(rhs).(type) {
+	case *syntax.CallExpr:
+		if results, ok := w.fl.pkg.info.TypeOf(v).(*types2.Tuple); ok && results.Len() > 1 {
+			if arity != 1 {
+				return nil, false
+			}
+			shape := ctTupleShape(w.ctOptionTarget(host, rhs, 0))
+			if shape == nil || shape.NumFields() != results.Len() {
+				w.reject(host, "missing checked destination for packed call results")
+				return nil, true
+			}
+			pre := w.ctTupleSource(host, slot)
+			*slot = w.ctTuplePack(*slot, results, shape)
+			return pre, true
+		}
+	case *syntax.TupleLit:
+		if arity > 1 && len(v.Elems) == arity {
+			*slot = listOf(rhs.Pos(), v.Elems)
+			if assign, ok := host.(*syntax.AssignStmt); ok {
+				return w.assignValues(assign), true
+			}
+			return w.optionValues(host, slot), true
+		}
+	case *syntax.ListExpr:
+		return nil, false
+	}
+	if arity < 2 {
+		return nil, false
+	}
+	shape := w.ctTupleShapeOf(rhs)
+	if shape == nil || shape.NumFields() != arity {
+		return nil, false
+	}
+	return w.ctTupleUnpack(host, slot, shape), true
+}
+
+func (w ctWalker) ctTupleSource(host syntax.Node, rhs *syntax.Expr) []syntax.Stmt {
+	if s, ok := host.(*syntax.AssignStmt); ok && s.Op != syntax.Def {
+		var slots []*syntax.Expr
+		var keys map[*syntax.Expr]types2.Type
+		for _, lhs := range syntax.UnpackListExpr(s.Lhs) {
+			slots = append(slots, w.groupLvalueSlots(lhs)...)
+			keys = w.optionKeys(keys, lhs)
+		}
+		if len(slots) != 0 {
+			slots = append(slots, rhs)
+			return w.walkExprs(len(slots), func(i int) *syntax.Expr {
+				return slots[i]
+			}, func(i int, _ syntax.Expr) types2.Type {
+				return keys[slots[i]]
+			})
+		}
+	}
+	return w.expressions(rhs)
+}
+
+func (w ctWalker) ctTuplePack(rhs syntax.Expr, results *types2.Tuple, shape *types2.Struct) syntax.Expr {
+	pos := rhs.Pos()
+	params := make([]*syntax.Field, results.Len())
+	vals := make([]syntax.Expr, results.Len())
+	for i := range params {
+		name := w.nextArg()
+		typ := results.At(i).Type()
+		params[i] = at(&syntax.Field{Name: nameOf(pos, name), Type: w.fl.ctTypeExpr(pos, typ)}, pos)
+		vals[i] = w.ctOptionValueFrom(nameOf(pos, name), typ, shape.Field(i).Type())
+	}
+	t := at(&syntax.FuncType{
+		ParamList:  params,
+		ResultList: []*syntax.Field{at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, shape)}, pos)},
+	}, pos)
+	ret := returnOf(pos, []syntax.Expr{w.ctTupleComposite(pos, shape, vals)})
+	lit := at(&syntax.FuncLit{Type: t, Body: blockOf(pos, []syntax.Stmt{ret})}, pos)
+	return callOf(pos, lit, []syntax.Expr{rhs})
+}
+
+func (w ctWalker) ctTupleUnpack(host syntax.Node, slot *syntax.Expr, shape *types2.Struct) []syntax.Stmt {
+	rhs := *slot
+	pos := rhs.Pos()
+	// A plain variable can be selected directly. Other operands stay at the
+	// RHS evaluation site rather than moving ahead of assignment targets.
+	if id, ok := syntax.Unparen(rhs).(*syntax.Name); ok && w.fl.narrowTarget(id) == nil {
+		reads := w.ctTupleFieldReads(host, rhs, id, shape)
+		pre := w.ctTupleSource(host, slot)
+		*slot = reads
+		return pre
+	}
+	vals := make([]syntax.Expr, shape.NumFields())
+	param := w.nextArg()
+	results := make([]*syntax.Field, len(vals))
+	for i := range vals {
+		f := shape.Field(i)
+		target := w.ctOptionTarget(host, rhs, i)
+		access := selOf(pos, nameOf(pos, param), f.Name())
+		vals[i] = w.ctOptionValueFrom(access, f.Type(), target)
+		if vals[i] == access {
+			target = f.Type()
+		}
+		results[i] = at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, target)}, pos)
+	}
+	t := at(&syntax.FuncType{
+		ParamList:  []*syntax.Field{at(&syntax.Field{Name: nameOf(pos, param), Type: w.fl.ctTypeExpr(pos, shape)}, pos)},
+		ResultList: results,
+	}, pos)
+	lit := at(&syntax.FuncLit{Type: t, Body: blockOf(pos, []syntax.Stmt{returnOf(pos, vals)})}, pos)
+	pre := w.ctTupleSource(host, slot)
+	*slot = callOf(pos, lit, []syntax.Expr{*slot})
+	return pre
+}
+
+func (w ctWalker) ctTupleFieldReads(host syntax.Node, rhs syntax.Expr, id *syntax.Name, shape *types2.Struct) syntax.Expr {
+	pos := rhs.Pos()
+	vals := make([]syntax.Expr, shape.NumFields())
+	for i := range vals {
+		f := shape.Field(i)
+		vals[i] = w.ctOptionValueFrom(selOf(pos, id, f.Name()), f.Type(), w.ctOptionTarget(host, rhs, i))
+	}
+	return listOf(pos, vals)
+}

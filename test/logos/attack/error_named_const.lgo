@@ -1,0 +1,17 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+const errUnsupported = "unsupported"
+
+func Pick[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return "struct"
+	}
+	comptime.Error(errUnsupported)
+	return ""
+}
+
+var _ = Pick[int]() // ERROR "unsupported"

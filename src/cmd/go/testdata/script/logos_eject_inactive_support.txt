@@ -1,0 +1,38 @@
+[GOOS:windows] skip 'requires a non-Windows host'
+env GOPROXY=off
+env GOSUMDB=off
+env GOTOOLCHAIN=local
+env GOWORK=off
+
+cd m
+logos eject -o out
+exists out/platform_windows.go
+
+cd out
+env GOOS=windows
+env GOARCH=amd64
+env CGO_ENABLED=0
+go build -mod=readonly ./...
+
+-- m/go.mod --
+module example.com/inactivesupport
+
+go 1.27
+
+-- m/anchor.lgo --
+package inactivesupport
+
+-- m/platform_windows.lgo --
+package inactivesupport
+
+import "logos/sync"
+
+func PlatformValue() int {
+	var locked sync.Locked[int]
+	var result int
+	locked.WithLock(func(value *int) {
+		*value = 42
+		result = *value
+	})
+	return result
+}

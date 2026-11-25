@@ -7,7 +7,7 @@ context:
   add_dirs: []
 execution:
   prompt: |
-    The scaffold created ./migrateme, a small Go module with go test ./... passing. Migrate it to loGo/s with the inventory, baseline, convert, fix, and verify steps: save the Go baseline first, preview the conversion diff with logos next, apply automated file renames and ? rewrites with logos next --fix, and reach logos build ./... and logos test ./... exit 0 with the same tests passing.
+    The scaffold created ./migrateme, a small Go module with go test ./... passing. Migrate it to loGo/s with the inventory, baseline, convert, fix, and verify steps: save the Go baseline first, preview the conversion diff with logos next, save the patch that logos next --fix prints and apply it from the module root, convert the review tasks that the patch adds to next_tasks.json by hand (rewrite the readFirst error return to ?), and reach logos build ./... and logos test ./... exit 0 with the same tests passing.
   max_turns: 20
   timeout_seconds: 600
   allowed_tools: [Bash, Skill]
@@ -21,6 +21,6 @@ graders:
     min: 1
   - name: migrated-module-matches-baseline
     type: llm
-    criteria: A baseline go test ./... log exists from before conversion; logos next output is inspected; logos next --fix applies renames and ? rewrites; no .go file remains with tests as _test.lgo; logos build ./... and logos test ./... exit 0 with the same tests passing as the baseline.
+    criteria: A baseline go test ./... log exists from before conversion; logos next output is inspected; logos next --fix output is saved as a patch and applied from the module root, and logos next --fix itself changes no file; next_tasks.json is read and readFirst propagates the os.ReadFile error with ? instead of an explicit if err != nil return; no .go file remains and the tests are in main_test.lgo; logos build ./... and logos test ./... exit 0 with the same tests passing as the baseline.
     focus: last_message
 expected_outcome: Migrated loGo/s module matching the Go baseline via logos next.

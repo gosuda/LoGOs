@@ -1,0 +1,25 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Row struct {
+	A int `json:"a]b"`
+	B int `json:"a}b"`
+	C int `json:"a\"b"`
+}
+
+func Show[T any]() {
+	fmt.Println("x]y}z\"w")
+	const for _, f := range comptime.Fields[T]() {
+		fmt.Println(f.Tag.Get("json"))
+	}
+}
+
+func main() {
+	Show[Row]()
+}

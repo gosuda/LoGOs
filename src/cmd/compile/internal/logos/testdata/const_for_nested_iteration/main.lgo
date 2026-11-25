@@ -1,0 +1,44 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Pair struct {
+	First  int `group:"a"`
+	Second int `group:"b"`
+}
+
+type Record struct {
+	Left  Pair `group:"a"`
+	Right Pair `group:"b"`
+}
+
+func signedValues[T any](record T) [2][2]int {
+	var values [2][2]int
+	const for i, outer := range comptime.Fields[T]() {
+		pair := record.[outer]
+		const for j, inner := range comptime.Fields[outer.Type]() {
+			value := pair.[inner]
+			const if outer.Tag.Get("group") == inner.Tag.Get("group") {
+				values[i][j] = value
+			} else {
+				values[i][j] = -value
+			}
+		}
+	}
+	return values
+}
+
+func main() {
+	record := Record{
+		Left:  Pair{First: 11, Second: 17},
+		Right: Pair{First: 29, Second: 43},
+	}
+	fmt.Println(signedValues[Record](record))
+}

@@ -11,15 +11,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"internal/logosfile"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"cmd/go/internal/base"
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modload"
 	"cmd/go/internal/work"
@@ -30,17 +34,19 @@ var CmdNext = &base.Command{
 	UsageLine: "logos next [--fix | --ai-patch]",
 	Short:     "convert a Go module to a loGo/s module",
 	Long: `
-Next converts the whole Go module in the current directory to a loGo/s
-module: plain next prints a unified diff and changes nothing, next
---fix renames every Go file to .lgo and rewrites matched patterns,
-and next --ai-patch writes and prints next_tasks.json without
-renaming anything.
+Next previews verified Go-to-loGo/s rewrites in a unified diff without
+changing files. Next --fix checks a saved module snapshot with a staged
+loGo/s build and test compilation, then writes a unified patch to standard
+output. The patch deletes the original .go files, adds the .lgo files, and
+adds new tasks to next_tasks.json. It does not change module files, run
+tests, or fetch modules. Review the patch and apply it from the module root
+with git apply to retain the executable bit.
+Next --ai-patch writes and prints next_tasks.json without renaming sources.
 
-Matched patterns become ? checks, $"..." interpolations, and map
-chains through byte-span splicing: every comment and build line
-outside rewrites stays byte-identical. Imports of Go packages outside
-the module stay as written. Complex refactors stay unchanged and are
-listed in next_tasks.json for AI patching.
+Automatic rewrites are limited to unadorned fmt.Sprintf verbs for primitive
+values. Review tasks leave explicit error returns and append loops intact:
+? records a trace on failure, and chains can change slice capacity or nilness.
+Source files not checked in the active build require manual conversion.
 	`,
 }
 
@@ -48,9 +54,27 @@ var nextFix bool
 
 var nextAIPatch bool
 
+type nextTags []string
+
+func (v *nextTags) Set(s string) error {
+	if strings.Contains(s, " ") || strings.Contains(s, "'") {
+		return (*base.StringsFlag)(v).Set(s)
+	}
+	*v = nil
+	for tag := range strings.SplitSeq(s, ",") {
+		if tag != "" {
+			*v = append(*v, tag)
+		}
+	}
+	return nil
+}
+
+func (v *nextTags) String() string { return "<TagsFlag>" }
+
 func init() {
 	CmdNext.Flag.BoolVar(&nextFix, "fix", false, "")
 	CmdNext.Flag.BoolVar(&nextAIPatch, "ai-patch", false, "")
+	CmdNext.Flag.Var((*nextTags)(&cfg.BuildContext.BuildTags), "tags", "")
 	base.AddChdirFlag(&CmdNext.Flag)
 }
 
@@ -59,6 +83,8 @@ func Register(root *base.Command) {
 }
 
 type wireEdit struct {
+	Rule        string `json:"rule"`
+	FuncSig     string `json:"function_signature"`
 	StartLine   int    `json:"start_line"`
 	StartCol    int    `json:"start_col"`
 	EndLine     int    `json:"end_line"`
@@ -76,10 +102,11 @@ type wireTask struct {
 }
 
 type wireFile struct {
-	File  string     `json:"file"`
-	Sum   string     `json:"sha256"`
-	Edits []wireEdit `json:"edits"`
-	Tasks []wireTask `json:"tasks"`
+	File        string     `json:"file"`
+	Sum         string     `json:"sha256"`
+	Edits       []wireEdit `json:"edits"`
+	Tasks       []wireTask `json:"tasks"`
+	RenameIssue *wireTask  `json:"rename_issue"`
 }
 
 type wireReport struct {
@@ -104,17 +131,21 @@ type planTask struct {
 	VerifyCmd string   `json:"verification_cmd"`
 }
 
-type planFile struct {
-	Version string     `json:"version"`
-	Tasks   []planTask `json:"tasks"`
+const planVersion = "logos-next-1"
+
+type planFile[T planTask | json.RawMessage] struct {
+	Version string `json:"version"`
+	Tasks   []T    `json:"tasks"`
 }
 
 type fileWork struct {
-	rel   string
-	data  []byte
-	sum   string
-	edits []wireEdit
-	tasks []wireTask
+	data        []byte
+	sum         string
+	edits       []wireEdit
+	tasks       []wireTask
+	renameIssue *wireTask
+	reports     int
+	votes       map[wireEdit]int
 }
 
 func runNext(ctx context.Context, cmd *base.Command, args []string) {
@@ -129,30 +160,51 @@ func runNext(ctx context.Context, cmd *base.Command, args []string) {
 		base.Fatalf("logos next: no main module (run inside a module)")
 	}
 	moddir := filepath.Dir(gomod)
+	modload.ExplicitWriteGoMod = true
+	if nextFix {
+		if err := checkFixContext(moddir); err != nil {
+			base.Fatalf("logos next: %v", err)
+		}
+		cfg.GOPROXY, cfg.GONOPROXY, cfg.GOSUMDB, cfg.GOAUTH = "off", "none", "off", "off"
+	}
 	work := scanModule(ctx, moddir)
 	switch {
 	case nextFix:
-		work.writePlan(moddir)
-		work.apply(moddir)
+		if err := work.writePatch(ctx, moddir); err != nil {
+			base.Fatalf("logos next: %v", err)
+		}
 	case nextAIPatch:
-		work.writePlan(moddir)
-		fmt.Printf("%s", work.planData())
+		data := work.planData()
+		if err := writePlan(moddir, data); err != nil {
+			base.Fatalf("logos next: %v", err)
+		}
+		if _, err := os.Stdout.Write(data); err != nil {
+			base.Fatalf("logos next: writing plan to standard output: %v", err)
+		}
 	default:
 		work.printDiff()
 	}
 }
 
 type scanState struct {
-	files map[string]*fileWork
-	order []string
-	tasks []planTask
+	files    map[string]*fileWork
+	order    []string
+	tasks    []planTask
+	snapshot *moduleSnapshot
+	moddir   string
 }
 
 func scanModule(ctx context.Context, moddir string) *scanState {
+	var snapshot *moduleSnapshot
+	var snapshotErr error
+	if nextFix {
+		snapshot, snapshotErr = captureModule(moddir)
+	}
 	staging, err := os.MkdirTemp("", "logosnext")
 	if err != nil {
 		base.Fatalf("logos next: %v", err)
 	}
+	base.AtExit(func() { _ = os.RemoveAll(staging) })
 	defer func() {
 		if err := os.RemoveAll(staging); err != nil {
 			base.Errorf("logos next: %v", err)
@@ -164,20 +216,32 @@ func scanModule(ctx context.Context, moddir string) *scanState {
 	work.BuildInit(moduleLoader)
 	load.ArmLogosNext(sidecar)
 	defer load.DisarmLogosNext()
-	opts := load.PackageOpts{AutoVCS: true}
+	opts := load.PackageOpts{AutoVCS: !nextFix}
 	pkgs := load.PackagesAndErrors(moduleLoader, ctx, opts, []string{"all"})
 	load.CheckPackageErrors(pkgs)
 	roots := nextRoots(pkgs)
 	if len(roots) == 0 {
 		if hasLgoFiles(moddir) {
-			fmt.Println("logos next: already converted")
+			out := os.Stdout
+			if nextFix {
+				out = os.Stderr
+			}
+			fmt.Fprintln(out, "logos next: already converted")
 			base.Exit()
 		}
 		base.Fatalf("logos next: no Go packages to convert")
 	}
+	if snapshotErr != nil {
+		base.Fatalf("logos next: %v", snapshotErr)
+	}
+	if nextFix {
+		if err := checkStagePackages(roots); err != nil {
+			base.Fatalf("logos next: %v", err)
+		}
+	}
+	state := &scanState{files: map[string]*fileWork{}, snapshot: snapshot, moddir: moddir}
 	buildNextRoots(moduleLoader, ctx, roots)
 	buildNextTests(moduleLoader, ctx, opts, roots)
-	state := &scanState{files: map[string]*fileWork{}}
 	state.readSidecar(sidecar, moddir)
 	return state
 }
@@ -219,6 +283,9 @@ func nextRootKeep(p *load.Package) bool {
 func doBuild(b *work.Builder, moduleLoader *modload.Loader, ctx context.Context, roots []*load.Package) {
 	root := &work.Action{Mode: "go build"}
 	for _, p := range roots {
+		if p.IsTestOnly() && p.Internal.TestmainGo == nil {
+			continue
+		}
 		root.Deps = append(root.Deps, b.AutoAction(moduleLoader, work.ModeBuild, work.ModeBuild, p))
 	}
 	b.Do(ctx, root)
@@ -279,13 +346,24 @@ func buildNextTestMain(ctx context.Context, moduleLoader *modload.Loader, opts l
 }
 
 func (s *scanState) readSidecar(sidecar, moddir string) {
-	known := walkGoFiles(moddir)
+	var known map[string]string
+	if s.snapshot != nil {
+		known = make(map[string]string, len(s.snapshot.sources))
+		for rel := range s.snapshot.sources {
+			known[filepath.Join(moddir, rel)] = rel
+		}
+	} else {
+		known = walkGoFiles(moddir)
+	}
 	lines := readLines(sidecar)
 	byFile := map[string]*fileWork{}
 	for _, line := range lines {
 		var rep wireReport
 		if err := json.Unmarshal([]byte(line), &rep); err != nil {
 			base.Fatalf("logos next: bad sidecar: %v", err)
+		}
+		if rep.Version != "logos-next-scan-2" {
+			base.Fatalf("logos next: unsupported compiler scan version %q", rep.Version)
 		}
 		for _, f := range rep.Files {
 			rel, ok := known[filepath.Clean(f.File)]
@@ -294,43 +372,69 @@ func (s *scanState) readSidecar(sidecar, moddir string) {
 			}
 			w := byFile[rel]
 			if w == nil {
-				data, err := os.ReadFile(filepath.Join(moddir, rel))
-				if err != nil {
-					base.Fatalf("logos next: %v", err)
+				w = &fileWork{sum: f.Sum, votes: make(map[wireEdit]int)}
+				if s.snapshot != nil {
+					w.data = s.snapshot.sources[rel].data
+				} else {
+					data, err := os.ReadFile(filepath.Join(moddir, rel))
+					if err != nil {
+						base.Fatalf("logos next: %v", err)
+					}
+					w.data = data
 				}
-				sum := sha256.Sum256(data)
-				if hex.EncodeToString(sum[:]) != f.Sum {
-					base.Fatalf("logos next: %s changed during scan", rel)
-				}
-				w = &fileWork{rel: rel, data: data, sum: f.Sum}
 				byFile[rel] = w
 			}
-			w.edits = append(w.edits, f.Edits...)
+			if w.sum != f.Sum || !applySumOk(w.data, f.Sum) {
+				base.Fatalf("logos next: %s changed during scan", rel)
+			}
+			w.reports++
+			for _, edit := range dedupEdits(f.Edits) {
+				w.votes[edit]++
+			}
 			w.tasks = append(w.tasks, f.Tasks...)
+			if f.RenameIssue != nil {
+				w.renameIssue = f.RenameIssue
+				w.tasks = append(w.tasks, *f.RenameIssue)
+			}
 		}
 	}
 	for rel, w := range byFile {
-		w.edits = dedupEdits(w.edits)
-		checkOverlaps(rel, w.edits)
+		var candidates []wireEdit
+		for edit := range w.votes {
+			candidates = append(candidates, edit)
+		}
+		candidates = dedupEdits(candidates)
+		for _, e := range candidates {
+			if e.Rule == "sprintf-interp" && w.votes[e] == w.reports {
+				w.edits = append(w.edits, e)
+				continue
+			}
+			w.tasks = append(w.tasks, reviewTask(e))
+		}
+		checkSpans(rel, w.data, w.edits)
 		s.files[rel] = w
 		s.order = append(s.order, rel)
 	}
 	slices.Sort(s.order)
+	s.checkRenameOrder()
 	s.assignTasks()
+}
+
+func reviewTask(e wireEdit) wireTask {
+	instruction := "the replacement is not verified in every checked package variant"
+	return wireTask{
+		Category:    "ai-patch",
+		Rule:        e.Rule,
+		StartLine:   e.StartLine,
+		EndLine:     e.EndLine,
+		FuncSig:     e.FuncSig,
+		Instruction: instruction,
+	}
 }
 
 func walkGoFiles(moddir string) map[string]string {
 	known := map[string]string{}
-	err := filepath.WalkDir(moddir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if walkNextSkipDir(path, moddir) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
+	err := walkModuleFiles(moddir, func(path string, d os.DirEntry) error {
 		if !walkNextFileOK(path) {
 			return nil
 		}
@@ -342,15 +446,30 @@ func walkGoFiles(moddir string) map[string]string {
 	return known
 }
 
+func walkModuleFiles(moddir string, visit func(string, os.DirEntry) error) error {
+	return filepath.WalkDir(moddir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return visit(path, d)
+		}
+		if walkNextSkipDir(path, moddir) {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+}
+
 func walkNextSkipDir(path, moddir string) bool {
 	if path == moddir {
 		return false
 	}
 	dirname := filepath.Base(path)
-	if dirname == "vendor" || dirname == "testdata" || strings.HasPrefix(dirname, ".") {
+	if dirname == "vendor" || dirname == "testdata" || strings.HasPrefix(dirname, ".") || strings.HasPrefix(dirname, "_") {
 		return true
 	}
-	if st, err := os.Stat(filepath.Join(path, "go.mod")); err == nil && !st.IsDir() {
+	if st, err := os.Lstat(filepath.Join(path, "go.mod")); err == nil && st.Mode().IsRegular() {
 		return true
 	}
 	return false
@@ -452,13 +571,19 @@ func dedupEdits(edits []wireEdit) []wireEdit {
 	return out
 }
 
-func checkOverlaps(rel string, edits []wireEdit) {
-	for i := 1; i < len(edits); i++ {
-		prev := edits[i-1]
-		cur := edits[i]
-		if cur.StartLine < prev.EndLine || (cur.StartLine == prev.EndLine && cur.StartCol < prev.EndCol) {
+func checkSpans(rel string, data []byte, edits []wireEdit) {
+	starts := lineStartsOf(data)
+	last := 0
+	for _, e := range edits {
+		start := offsetOf(starts, len(data), e.StartLine, e.StartCol)
+		end := offsetOf(starts, len(data), e.EndLine, e.EndCol)
+		if start < 0 || end <= start {
+			base.Fatalf("logos next: rewrite out of range in %s at %d:%d", rel, e.StartLine, e.StartCol)
+		}
+		if start < last {
 			base.Fatalf("logos next: overlapping rewrites in %s", rel)
 		}
+		last = end
 	}
 }
 
@@ -468,7 +593,11 @@ func (s *scanState) assignTasks() {
 	for _, rel := range s.order {
 		w := s.files[rel]
 		slices.SortFunc(w.tasks, func(a, b wireTask) int {
-			return cmp.Or(cmp.Compare(a.StartLine, b.StartLine), cmp.Compare(a.EndLine, b.EndLine))
+			return cmp.Or(
+				cmp.Compare(a.StartLine, b.StartLine), cmp.Compare(a.EndLine, b.EndLine),
+				cmp.Compare(a.Rule, b.Rule), cmp.Compare(a.FuncSig, b.FuncSig),
+				cmp.Compare(a.Instruction, b.Instruction), cmp.Compare(a.Category, b.Category),
+			)
 		})
 		for _, t := range w.tasks {
 			task := planTask{
@@ -488,6 +617,58 @@ func (s *scanState) assignTasks() {
 			task.ID = fmt.Sprintf("next-%03d", n)
 			s.tasks = append(s.tasks, task)
 		}
+	}
+}
+
+func (s *scanState) checkRenameOrder() {
+	var all []string
+	if s.snapshot != nil {
+		for rel := range s.snapshot.sources {
+			all = append(all, rel)
+		}
+	} else {
+		for _, rel := range walkGoFiles(s.moddir) {
+			all = append(all, rel)
+		}
+	}
+	dirs := make(map[string][]string)
+	for _, rel := range all {
+		dir := filepath.Dir(rel)
+		dirs[dir] = append(dirs[dir], rel)
+	}
+	for _, dir := range slices.Sorted(maps.Keys(dirs)) {
+		s.checkDirOrder(dir, dirs[dir])
+	}
+}
+func (s *scanState) checkDirOrder(dir string, files []string) {
+	if len(files) < 2 {
+		return
+	}
+	byGo := slices.Clone(files)
+	slices.SortFunc(byGo, func(a, b string) int {
+		return cmp.Compare(filepath.Base(a), filepath.Base(b))
+	})
+	byLgo := slices.Clone(files)
+	slices.SortFunc(byLgo, func(a, b string) int {
+		return cmp.Compare(lgoName(filepath.Base(a)), lgoName(filepath.Base(b)))
+	})
+	if slices.Equal(byGo, byLgo) {
+		return
+	}
+	for _, rel := range files {
+		w := s.files[rel]
+		if w == nil || w.renameIssue != nil {
+			continue
+		}
+		issue := &wireTask{
+			Category:    "ai-patch",
+			Rule:        "rename-order",
+			StartLine:   1,
+			EndLine:     1,
+			Instruction: "renaming every file in this directory to .lgo changes the lexical file order the staged build presents; convert this package by hand",
+		}
+		w.renameIssue = issue
+		w.tasks = append(w.tasks, *issue)
 	}
 }
 
@@ -511,43 +692,161 @@ func lgoName(rel string) string {
 }
 
 func (s *scanState) planData() []byte {
-	plan := planFile{Version: "logos-next-1", Tasks: s.tasks}
-	if plan.Tasks == nil {
-		plan.Tasks = []planTask{}
+	data, err := encodePlan(s.tasks)
+	if err != nil {
+		base.Fatalf("logos next: %v", err)
+	}
+	return data
+}
+
+func encodePlan[T planTask | json.RawMessage](tasks []T) ([]byte, error) {
+	if tasks == nil {
+		tasks = []T{}
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(plan); err != nil {
-		base.Fatalf("logos next: %v", err)
+	if err := enc.Encode(planFile[T]{Version: planVersion, Tasks: tasks}); err != nil {
+		return nil, err
 	}
-	return buf.Bytes()
+	return buf.Bytes(), nil
 }
 
-func (s *scanState) writePlan(moddir string) {
-	if err := os.WriteFile(filepath.Join(moddir, "next_tasks.json"), s.planData(), 0666); err != nil {
-		base.Fatalf("logos next: %v", err)
+func mergePlan(before []byte, discovered []planTask) ([]byte, error) {
+	if !utf8.Valid(before) {
+		return nil, errors.New("invalid UTF-8")
 	}
+	tokens := json.NewDecoder(bytes.NewReader(before))
+	tokens.UseNumber()
+	if err := checkPlanJSON(tokens); err != nil {
+		return nil, err
+	}
+	if _, err := tokens.Token(); !errors.Is(err, io.EOF) {
+		return nil, errors.New("unexpected data after the plan")
+	}
+	var plan planFile[json.RawMessage]
+	dec := json.NewDecoder(bytes.NewReader(before))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&plan); err != nil {
+		return nil, err
+	}
+	if plan.Version != planVersion {
+		return nil, fmt.Errorf("unsupported plan version %q", plan.Version)
+	}
+	if plan.Tasks == nil {
+		return nil, errors.New("plan requires a tasks array")
+	}
+
+	ids := make(map[string]bool, len(plan.Tasks))
+	seen := make(map[planTask]bool, len(plan.Tasks))
+	for i, raw := range plan.Tasks {
+		var task planTask
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&task); err != nil {
+			return nil, fmt.Errorf("task %d: %w", i+1, err)
+		}
+		if strings.TrimSpace(task.ID) == "" || task.Category == "" || task.File == "" ||
+			task.Rule == "" || task.AiInstr == "" || task.VerifyCmd == "" ||
+			task.Span.Start < 1 || task.Span.End < task.Span.Start {
+			return nil, fmt.Errorf("task %d is missing required data or has an invalid span", i+1)
+		}
+		if ids[task.ID] {
+			return nil, fmt.Errorf("duplicate task ID %q", task.ID)
+		}
+		ids[task.ID] = true
+		task.ID = ""
+		seen[task] = true
+	}
+
+	oldCount := len(plan.Tasks)
+	nextID := 0
+	for _, task := range discovered {
+		task.ID = ""
+		if seen[task] {
+			continue
+		}
+		seen[task] = true
+		for {
+			nextID++
+			task.ID = fmt.Sprintf("next-%03d", nextID)
+			if !ids[task.ID] {
+				break
+			}
+		}
+		raw, err := json.Marshal(task)
+		if err != nil {
+			return nil, err
+		}
+		plan.Tasks = append(plan.Tasks, raw)
+	}
+	if len(plan.Tasks) == oldCount {
+		return before, nil
+	}
+	return encodePlan(plan.Tasks)
+}
+
+func checkPlanJSON(dec *json.Decoder) error {
+	token, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	if token == nil {
+		return errors.New("null is not supported in a plan")
+	}
+	var names map[string]bool
+	switch token {
+	case json.Delim('{'):
+		names = make(map[string]bool)
+	case json.Delim('['):
+	default:
+		return nil
+	}
+	for dec.More() {
+		if names != nil {
+			member, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			name, ok := member.(string)
+			if !ok || strings.ContainsFunc(name, func(r rune) bool { return r != '_' && (r < 'a' || r > 'z') }) {
+				return fmt.Errorf("unsupported JSON member %q", member)
+			}
+			if names[name] {
+				return fmt.Errorf("duplicate JSON member %q", name)
+			}
+			names[name] = true
+		}
+		if err := checkPlanJSON(dec); err != nil {
+			return err
+		}
+	}
+	_, err = dec.Token()
+	return err
 }
 
 func applyEdits(data []byte, edits []wireEdit) []byte {
+	if len(edits) == 0 {
+		return data
+	}
 	starts := lineStartsOf(data)
-	out := data
-	for i := len(edits) - 1; i >= 0; i-- {
-		e := edits[i]
+	size := len(data)
+	for _, e := range edits {
 		start := offsetOf(starts, len(data), e.StartLine, e.StartCol)
 		end := offsetOf(starts, len(data), e.EndLine, e.EndCol)
-		if start < 0 || end < start || end > len(out) {
-			base.Fatalf("logos next: rewrite out of range %d:%d-%d:%d", e.StartLine, e.StartCol, e.EndLine, e.EndCol)
-		}
-		part := make([]byte, 0, len(out)-(end-start)+len(e.Replacement))
-		part = append(part, out[:start]...)
-		part = append(part, e.Replacement...)
-		part = append(part, out[end:]...)
-		out = part
+		size += len(e.Replacement) - (end - start)
 	}
-	return out
+	out := make([]byte, 0, size)
+	last := 0
+	for _, e := range edits {
+		start := offsetOf(starts, len(data), e.StartLine, e.StartCol)
+		end := offsetOf(starts, len(data), e.EndLine, e.EndCol)
+		out = append(out, data[last:start]...)
+		out = append(out, e.Replacement...)
+		last = end
+	}
+	return append(out, data[last:]...)
 }
 
 func lineStartsOf(data []byte) []int {
@@ -571,51 +870,26 @@ func offsetOf(starts []int, size, line, col int) int {
 			end = size
 		}
 	}
-	off := starts[line-1] + col - 1
-	if off > end {
+	start := starts[line-1]
+	if col-1 > end-start {
 		return -1
 	}
-	return off
+	return start + col - 1
 }
 
 func applySumOk(data []byte, sum string) bool {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:]) == sum
 }
-func (s *scanState) apply(moddir string) {
-	known := walkGoFiles(moddir)
-	rels := slices.Sorted(maps.Values(known))
-	rewrites := 0
-	for _, rel := range rels {
-		abs := filepath.Join(moddir, rel)
-		data, err := os.ReadFile(abs)
-		if err != nil {
-			base.Fatalf("logos next: %v", err)
-		}
-		w := s.files[rel]
-		if w != nil && !applySumOk(data, w.sum) {
-			base.Fatalf("logos next: %s changed during apply", rel)
-		}
-		target := filepath.Join(moddir, lgoName(rel))
-		if w == nil || len(w.edits) == 0 {
-			if err := os.Rename(abs, target); err != nil {
-				base.Fatalf("logos next: %v", err)
-			}
-			continue
-		}
-		out := applyEdits(data, w.edits)
-		if err := os.WriteFile(target, out, 0666); err != nil {
-			base.Fatalf("logos next: %v", err)
-		}
-		if err := os.Remove(abs); err != nil {
-			base.Fatalf("logos next: %v", err)
-		}
-		rewrites += len(w.edits)
+
+func (s *scanState) reportTasks() {
+	for _, task := range s.tasks {
+		fmt.Fprintf(os.Stderr, "logos next: review only: %s at %s:%d: %s\n", task.Rule, task.File, task.Span.Start, task.AiInstr)
 	}
-	fmt.Printf("logos next: converted %d files with %d rewrites; %d tasks in next_tasks.json\n", len(rels), rewrites, len(s.tasks))
 }
 
 func (s *scanState) printDiff() {
+	s.reportTasks()
 	shown := false
 	for _, rel := range s.order {
 		w := s.files[rel]
