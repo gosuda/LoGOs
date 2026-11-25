@@ -505,7 +505,46 @@ type Plain struct {
 	Arr  [2]int            `json:"arr"`
 }
 
-type plainMirror Plain
+// plainMirror keeps the same keys as Plain but expresses the value-payload
+// option as a pointer, so the reflective oracle encodes the null-or-payload
+// form the static method must be byte-identical to (SPEC 10.1). NoGen keeps
+// the mirror on the reflective path.
+type plainMirror struct {
+	B    bool             `json:"b"`
+	I8   int8             `json:"i8"`
+	I64  int64            `json:"i64"`
+	U16  uint16           `json:"u16"`
+	U64  uint64           `json:"u64"`
+	F32  float32          `json:"f32"`
+	F64  float64          `json:"f64"`
+	S    string           `json:"s"`
+	PS   *string?         `json:"ps"`
+	PI   *int32?          `json:"pi"`
+	Opt  *int64?         `json:"opt"`
+	Strs []string         `json:"strs"`
+	Ints []int16          `json:"ints"`
+	Fls  []float64        `json:"fls"`
+	Raw  []byte           `json:"raw"`
+	Map  map[string]uint8 `json:"map"`
+	In   Profile         `json:"in"`
+	Arr  [2]int          `json:"arr"`
+	NoGen any            `json:"-"`
+}
+func mirrorOf(a Plain) plainMirror {
+	b := plainMirror{
+		B: a.B, I8: a.I8, I64: a.I64, U16: a.U16, U64: a.U64,
+		F32: a.F32, F64: a.F64, S: a.S, PS: a.PS, PI: a.PI,
+		Strs: a.Strs, Ints: a.Ints, Fls: a.Fls, Raw: a.Raw,
+		Map: a.Map, In: a.In, Arr: a.Arr,
+	}
+	if a.Opt != nil {
+		x := a.Opt ?? 0
+		b.Opt = &x
+	}
+	return b
+}
+
+
 
 type Quoted struct {
 	QI int64   `json:"qi,string"`
@@ -548,8 +587,8 @@ func samePlain(t *testing.T, doc []byte) {
 	if errA != nil && fmt.Sprintf("%T", errA) != fmt.Sprintf("%T", errB) {
 		t.Fatalf("%q: generated error %T, reflective error %T", doc, errA, errB)
 	}
-	if errA == nil && !reflect.DeepEqual(a, Plain(b)) {
-		t.Fatalf("%q: generated %+v, reflective %+v", doc, a, Plain(b))
+	if errA == nil && !reflect.DeepEqual(mirrorOf(a), b) {
+		t.Fatalf("%q: generated %+v, reflective %+v", doc, mirrorOf(a), b)
 	}
 }
 
@@ -565,8 +604,8 @@ func TestTypeErrorsKeepDecoding(t *testing.T) {
 		if errA == nil || errB == nil {
 			t.Fatalf("%s: want type errors, got %v / %v", doc, errA, errB)
 		}
-		if !reflect.DeepEqual(a, Plain(b)) {
-			t.Fatalf("%s: generated %+v, reflective %+v", doc, a, Plain(b))
+		if !reflect.DeepEqual(mirrorOf(a), b) {
+			t.Fatalf("%s: generated %+v, reflective %+v", doc, mirrorOf(a), b)
 		}
 	}
 }
@@ -634,14 +673,14 @@ func TestPrefilledTargetMatchesEncodingJSON(t *testing.T) {
 		`{"in":{"bio":null}}`, `{"in":{}}`, `{"ints":[1,2,3,4]}`, `{"ints":[]}`, `{"strs":null}`,
 	} {
 		a := prefilled()
-		b := plainMirror(prefilled())
+		b := mirrorOf(prefilled())
 		errA := json.Unmarshal([]byte(doc), &a)
 		errB := json.Unmarshal([]byte(doc), &b)
 		if errA != nil || errB != nil {
 			t.Fatalf("%s: errors %v / %v", doc, errA, errB)
 		}
-		if !reflect.DeepEqual(a, Plain(b)) {
-			t.Fatalf("%s: generated %+v, reflective %+v", doc, a, Plain(b))
+		if !reflect.DeepEqual(mirrorOf(a), b) {
+			t.Fatalf("%s: generated %+v, reflective %+v", doc, mirrorOf(a), b)
 		}
 	}
 }

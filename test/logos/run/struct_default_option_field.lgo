@@ -97,10 +97,10 @@ func checkJSON() {
 	// payload alone (SPEC 10.1); the absent retry payload is the zero
 	// Retry, not its default.
 	emptyJSON := `{"Timeout":10,"Retry":null}`
-	// Plain encoding/json has no rt.Option methods, so the reflective
-	// form keeps the {Value, Present} envelope; only the static method
-	// uses the null-or-payload form.
-	emptyReflective := `{"Timeout":10,"Retry":{"Value":{"Attempts":0},"Present":false}}`
+	// json.Marshal on Policy dispatches to the generated value-receiver
+	// MarshalJSON (SPEC 10.1), so it uses the null-or-payload form like the
+	// static call.
+	emptyReflective := `{"Timeout":10,"Retry":null}`
 	pb := mustJSON(p.MarshalJSON())
 	pj := mustJSON(json.Marshal(p))
 	checkBytes("json static empty", pb, []byte(emptyJSON))
@@ -109,7 +109,7 @@ func checkJSON() {
 	// A present option payload that is a composite literal applies its own
 	// field defaults (attempts 3), encoded as the payload alone.
 	presentJSON := `{"Timeout":10,"Retry":{"Attempts":3}}`
-	presentReflective := `{"Timeout":10,"Retry":{"Value":{"Attempts":3},"Present":true}}`
+	presentReflective := `{"Timeout":10,"Retry":{"Attempts":3}}`
 	q := Policy{Retry: Retry{}}
 	qb := mustJSON(q.MarshalJSON())
 	qj := mustJSON(json.Marshal(q))
