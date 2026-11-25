@@ -61,7 +61,7 @@ func checkFixContext(moddir string) error {
 			return fmt.Errorf("cannot verify the saved module with GOFLAGS flag %s", name)
 		}
 	}
-	if !slices.Equal(staged, []string(cfg.BuildContext.BuildTags)) {
+	if !slices.Equal(staged, cfg.BuildContext.BuildTags) {
 		return errors.New("scan tags do not match the staged build tags; pass -tags through GOFLAGS or convert by hand")
 	}
 	if modload.NewLoader().FindGoWork(base.Cwd()) != "" {
@@ -341,6 +341,7 @@ func (s *scanState) writePatch(ctx context.Context, moddir string) error {
 	}
 
 	out := bufio.NewWriter(os.Stdout)
+	var patch bytes.Buffer
 	for _, file := range files {
 		source := filepath.ToSlash(file.source)
 		target := lgoName(source)
@@ -348,23 +349,26 @@ func (s *scanState) writePatch(ctx context.Context, moddir string) error {
 		if file.before.info.Mode()&0o100 != 0 {
 			mode = 0o100755
 		}
-		fmt.Fprintf(out, "diff --git %s %s\ndeleted file mode %06o\n", gitPatchPath("a/"+source), gitPatchPath("b/"+source), mode)
-		out.Write(patchHunks(gitPatchPath("a/"+source), file.before.data, "/dev/null", nil))
-		fmt.Fprintf(out, "diff --git %s %s\nnew file mode %06o\n", gitPatchPath("a/"+target), gitPatchPath("b/"+target), mode)
-		out.Write(patchHunks("/dev/null", nil, gitPatchPath("b/"+target), file.data))
+		fmt.Fprintf(&patch, "diff --git %s %s\ndeleted file mode %06o\n", gitPatchPath("a/"+source), gitPatchPath("b/"+source), mode)
+		patch.Write(patchHunks(gitPatchPath("a/"+source), file.before.data, "/dev/null", nil))
+		fmt.Fprintf(&patch, "diff --git %s %s\nnew file mode %06o\n", gitPatchPath("a/"+target), gitPatchPath("b/"+target), mode)
+		patch.Write(patchHunks("/dev/null", nil, gitPatchPath("b/"+target), file.data))
 	}
 	if plan.info == nil {
-		fmt.Fprintf(out, "diff --git a/%s b/%s\nnew file mode 100644\n", planName, planName)
-		out.Write(patchHunks("/dev/null", nil, "b/"+planName, planData))
+		fmt.Fprintf(&patch, "diff --git a/%s b/%s\nnew file mode 100644\n", planName, planName)
+		patch.Write(patchHunks("/dev/null", nil, "b/"+planName, planData))
 	} else if hunks := patchHunks("a/"+planName, plan.data, "b/"+planName, planData); len(hunks) > 0 {
-		fmt.Fprintf(out, "diff --git a/%s b/%s\n", planName, planName)
-		out.Write(hunks)
+		fmt.Fprintf(&patch, "diff --git a/%s b/%s\n", planName, planName)
+		patch.Write(hunks)
+	}
+	if _, err := out.Write(patch.Bytes()); err != nil {
+		return fmt.Errorf("writing conversion patch: %w", err)
 	}
 	if err := out.Flush(); err != nil {
 		return fmt.Errorf("writing conversion patch: %w", err)
 	}
 	s.reportTasks()
-	fmt.Fprintf(os.Stderr, "logos next: patch for %d files with %d rewrites; %d scan tasks for %s\n", len(files), rewrites, len(s.tasks), planName)
+	_, _ = fmt.Fprintf(os.Stderr, "logos next: patch for %d files with %d rewrites; %d scan tasks for %s\n", len(files), rewrites, len(s.tasks), planName)
 	return nil
 }
 
@@ -587,7 +591,7 @@ func finishPublication(root *os.Root, staging string, failure, rollback error) e
 		if failure != nil {
 			return errors.Join(failure, err)
 		}
-		fmt.Fprintf(os.Stderr, "logos next: could not remove conversion staging directory: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "logos next: could not remove conversion staging directory: %v\n", err)
 	}
 	return failure
 }
@@ -602,7 +606,7 @@ func writePlan(moddir string, data []byte) (err error) {
 			if err != nil {
 				err = errors.Join(err, closeErr)
 			} else {
-				fmt.Fprintf(os.Stderr, "logos next: could not close module directory: %v\n", closeErr)
+				_, _ = fmt.Fprintf(os.Stderr, "logos next: could not close module directory: %v\n", closeErr)
 			}
 		}
 	}()

@@ -105,6 +105,9 @@ func Check(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fork ledger holds API the fork adds without a Go proposal.
+	// It loads with no approval number, like the grandfathered go1.txt.
+	checkFiles = append(checkFiles, filepath.Join(testenv.GOROOT(t), "api/logos.txt"))
 
 	var nextFiles []string
 	if v := runtime.Version(); strings.Contains(v, "devel") || strings.Contains(v, "beta") {
@@ -1150,7 +1153,7 @@ func (w *Walker) emitf(format string, args ...any) {
 
 func needApproval(filename string) bool {
 	name := filepath.Base(filename)
-	if name == "go1.txt" {
+	if name == "go1.txt" || name == "logos.txt" {
 		return false
 	}
 	minor := strings.TrimSuffix(strings.TrimPrefix(name, "go1."), ".txt")
