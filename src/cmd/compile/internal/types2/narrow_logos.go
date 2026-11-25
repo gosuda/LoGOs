@@ -1294,6 +1294,13 @@ type logosEFEffects struct {
 	created  map[logosEFKey]string
 	may      map[logosEFKey]logosEFKey
 	deferred *logosEFEffects
+	// lit names the deferred literal this summary describes, or nil.
+	// exit is that literal's exit state. Both are set only while the
+	// summary describes exactly one deferred call; merging a second
+	// call clears exit, and the consumer falls back to the
+	// order-unknown treatment.
+	lit  syntax.Node
+	exit *logosEFState
 }
 
 // writes reports whether the effects wrote a destination that overlaps k.
@@ -2961,6 +2968,16 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 		return p.expr(s, st)
 	}
 	d := &logosEFEffects{inside: outer.inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
+	// Name the deferred literal so its later call can keep the exit
+	// state on this summary. Anything else deferred leaves lit unset
+	// and the consumer falls back to the order-unknown treatment.
+	if call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr); ok {
+		if fun, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok {
+			d.lit = fun
+		} else if lam, ok := syntax.Unparen(call.Fun).(*syntax.LambdaExpr); ok {
+			d.lit = lam
+		}
+	}
 	p.eff = d
 	st = p.expr(s, st)
 	p.eff = outer
@@ -2980,6 +2997,9 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 	maps.Copy(outer.deferred.assigned, d.assigned)
 	maps.Copy(outer.deferred.created, d.created)
 	maps.Copy(outer.deferred.may, d.may)
+	// Several deferred calls land in unknown order: no single exit
+	// state describes them, so drop the precise one.
+	outer.deferred.exit = nil
 	return st
 }
 
@@ -3897,6 +3917,12 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 	if end != nil && eff.deferred != nil {
 		end = end.afterDeferred(eff.deferred)
 	}
+	if saved != nil && saved.lit == lit {
+		// The summary describes exactly this deferred literal: keep
+		// its exit state so afterDeferred can tell marks the literal
+		// still holds at return from ones it reset before returning.
+		saved.exit = end
+	}
 	before := st
 	for k := range eff.assigned {
 		if k.path == "" {
@@ -3941,20 +3967,42 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 
 // afterDeferred applies the writes of literals deferred inside a literal
 // to its exit state: they run when the literal returns, so a reset in its
-// body cannot hide them. A result a deferred literal writes loses its
-// pairing, and so does a result whose error it writes, because the order
-// in which several deferred writes land is unknown.
+// body cannot hide them. When the summary describes exactly one deferred
+// call, only marks the call still holds at return reach the later capture,
+// and a pairing the call's exit still holds survives; with several calls
+// the landing order is unknown, so every written key is marked and every
+// touched pairing still drops.
 func (s *logosEFState) afterDeferred(d *logosEFEffects) *logosEFState {
 	may := maps.Clone(s.may)
 	if may == nil {
 		may = make(map[logosEFKey]bool, len(d.may))
 	}
-	for k := range d.may {
-		may[k] = true
+	if exit := d.exit; exit != nil {
+		// A result the single deferred call reset before returning
+		// exports no mark: only the exit state's marks describe
+		// values a later capture can observe.
+		for k := range d.may {
+			if exit.may[k] {
+				may[k] = true
+			}
+		}
+	} else {
+		for k := range d.may {
+			may[k] = true
+		}
 	}
 	mayErr := maps.Clone(s.mayErr)
 	for k, ek := range s.mayErr {
 		if d.writes(k) || d.writes(ek) {
+			// A single deferred call whose exit still pairs the
+			// result with this error rewrites both together on every
+			// path, so the pairing survives; several calls land in
+			// unknown order and the pairing still drops.
+			if exit := d.exit; exit != nil {
+				if x, ok := exit.mayErr[k]; ok && x == ek {
+					continue
+				}
+			}
 			delete(mayErr, k)
 		}
 	}
