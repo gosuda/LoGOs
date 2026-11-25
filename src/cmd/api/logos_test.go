@@ -39,3 +39,28 @@ func TestLogosSupportPackageExcluded(t *testing.T) {
 		}
 	}
 }
+
+func TestLogosLedgerNeedsNoApproval(t *testing.T) {
+	if needApproval("api/logos.txt") {
+		t.Errorf("needApproval(api/logos.txt) = true, want false: the fork ledger carries no Go proposal number")
+	}
+	if !needApproval("api/go1.27.txt") {
+		t.Errorf("needApproval(api/go1.27.txt) = false, want true: release files keep their approval rule")
+	}
+}
+
+func TestLogosLedgerRejectsUnknownMethod(t *testing.T) {
+	features := []string{"pkg net/http, method (*Server) EnableHTTP2ExtendedConnect()"}
+	required := []string{
+		"pkg net/http, method (*Server) EnableHTTP2ExtendedConnect()",
+		"pkg net/http, method (*Server) NoSuchForkMethod()",
+	}
+	buf := new(strings.Builder)
+	if compareAPI(buf, features, required, nil) {
+		t.Errorf("compareAPI accepted a fork entry naming a method that does not exist")
+	}
+	const want = "-pkg net/http, method (*Server) NoSuchForkMethod()\n"
+	if buf.String() != want {
+		t.Errorf("compareAPI output differs\nGOT:\n%sWANT:\n%s", buf.String(), want)
+	}
+}
