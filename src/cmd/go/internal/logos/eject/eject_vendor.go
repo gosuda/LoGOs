@@ -142,7 +142,7 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 		if entry.IsDir() || name[0] == '.' || name[0] == '_' {
 			continue
 		}
-		if isSupportCopyFile(name) || p.vendored && isVendoredGoFile(name) || !p.vendored && isSupportLogosFile(name) {
+		if isSupportCopyFile(name) || p.vendored && isVendoredGoFile(name) || !p.vendored && isLoweredSupportFile(name) {
 			if !entry.Type().IsRegular() {
 				return fmt.Errorf("Go source %s is not a regular file", name)
 			}
@@ -176,6 +176,15 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 
 func isSupportLogosFile(name string) bool {
 	return logosfile.Is(name) && !strings.HasSuffix(logosStem(name), "_test")
+}
+
+// isLoweredSupportFile reports whether a LoGOs source belongs in the
+// support copy. The copy is the ejected form: a lowered file whose output
+// name the support copy would not keep as hand-written Go (such as a
+// *_runtime.go twin of a logosejected-selected file) stays out, exactly
+// like its hand-written counterpart.
+func isLoweredSupportFile(name string) bool {
+	return isSupportLogosFile(name) && isSupportCopyFile(logosStem(name)+".go")
 }
 
 func isVendoredGoFile(name string) bool {
