@@ -200,6 +200,9 @@ func (h *commonHandler) newHandleState(buf *buffer, freeBuf bool, sep string) ha
 	}
 	if h.opts.ReplaceAttr != nil {
 		s.groups = append(s.groups, h.groups[:h.nOpenGroups]...)
+		if s.groups == nil {
+			s.groups = []string{}
+		}
 	}
 	return s
 }
@@ -298,7 +301,7 @@ func sourceAttrValue(json bool, v slog.Value) (slog.Value, bool) {
 	if !ok {
 		return v, true
 	}
-	if src.Function == "" && src.File == "" && src.Line == 0 {
+	if src == nil || (src.Function == "" && src.File == "" && src.Line == 0) {
 		return v, false
 	}
 	if json {

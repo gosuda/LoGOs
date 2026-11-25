@@ -54,6 +54,9 @@ func (h *TextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 // WithGroup returns a new TextHandler with the given group appended.
 func (h *TextHandler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
 	return &TextHandler{common: h.common.withGroup(name)}
 }
 

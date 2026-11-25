@@ -58,6 +58,9 @@ func (h *JSONHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 // WithGroup returns a new JSONHandler with the given group appended.
 func (h *JSONHandler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
 	return &JSONHandler{common: h.common.withGroup(name)}
 }
 
@@ -114,7 +117,7 @@ func appendJSONAnyValue(s *handleState, a any) error {
 		s.appendString(err.Error())
 		return nil
 	}
-	if bs, ok := rtjson.ByteSliceOf(a); ok {
+	if bs, ok := a.([]byte); ok {
 		appendJSONBytes(s.buf, bs)
 		return nil
 	}
@@ -124,6 +127,10 @@ func appendJSONAnyValue(s *handleState, a any) error {
 // appendJSONBytes appends a []byte value as a quoted base64 string: the
 // same bytes encoding/json produces, without the pooled encoder.
 func appendJSONBytes(b *buffer, src []byte) {
+	if src == nil {
+		b.writeString("null")
+		return
+	}
 	b.writeByte('"')
 	*b = base64.StdEncoding.AppendEncode(b.bytes(), src)
 	b.writeByte('"')

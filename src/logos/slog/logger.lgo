@@ -8,6 +8,7 @@ import (
 	"context"
 	"log/slog"
 	"runtime"
+	"slices"
 	"time"
 )
 
@@ -30,6 +31,9 @@ func New(h slog.Handler) *Logger {
 
 // Enabled reports whether l handles records at the given level.
 func (l *Logger) Enabled(ctx context.Context, level slog.Level) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return l.handler.Enabled(ctx, level)
 }
 
@@ -41,11 +45,14 @@ func (l *Logger) Handler() slog.Handler {
 // With returns a Logger whose handler holds l's attributes followed by
 // attrs.
 func (l *Logger) With(attrs ...slog.Attr) *Logger {
-	return &Logger{handler: l.handler.WithAttrs(attrs)}
+	return &Logger{handler: l.handler.WithAttrs(slices.Clone(attrs))}
 }
 
 // WithGroup returns a Logger whose handler starts the named group.
 func (l *Logger) WithGroup(name string) *Logger {
+	if name == "" {
+		return l
+	}
 	return &Logger{handler: l.handler.WithGroup(name)}
 }
 

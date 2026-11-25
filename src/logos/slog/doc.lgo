@@ -32,7 +32,7 @@
 // NewLogLogger and every ...any entry point (Logger.Info and friends,
 // Record.Add, slog.Group with ...any) stay where they are in log/slog and
 // are intentionally absent here. Migrate Info(msg, args...) to
-// InfoAttrs(ctx, msg, slog.String(...), ...) or LogAttrs on a slog.Logger
+// InfoContext(ctx, msg, slog.String(...), ...) or LogAttrs on a slog.Logger
 // wrapping the twin handler; migrate Record.Add(args...) to AddAttrs;
 // migrate slog.Group(key, args...) to slog.GroupAttrs(key, attrs...).
 // ReplaceAttr, WithAttrs preformatting, WithGroup, AddSource, LogValuer

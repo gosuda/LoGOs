@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"net"
 	"runtime"
 	"strings"
 	"testing"
@@ -58,6 +59,21 @@ func (m twinRawJSON) MarshalJSON() ([]byte, error) {
 	}
 	return []byte(m), nil
 }
+
+type nilDetectHandler struct{ seenNil bool }
+
+func (h *nilDetectHandler) Enabled(ctx context.Context, _ slog.Level) bool {
+	if ctx == nil {
+		h.seenNil = true
+	}
+	return true
+}
+
+func (h *nilDetectHandler) Handle(_ context.Context, _ slog.Record) error { return nil }
+
+func (h *nilDetectHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+
+func (h *nilDetectHandler) WithGroup(_ string) slog.Handler { return h }
 
 type twinGroupValuer struct{ n int }
 
@@ -443,5 +459,106 @@ func TestTwinPanickingValuer(t *testing.T) {
 				t.Errorf("missing panic marker in %q", got)
 			}
 		})
+	}
+}
+
+func TestTwinReplaceAttrGroups(t *testing.T) {
+	replace := func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == "x" {
+			a.Key = "g=" + strings.Join(groups, ".")
+		}
+		return a
+	}
+	var twinBuf, origBuf bytes.Buffer
+	th := twinslog.NewJSONHandler(&twinBuf, &slog.HandlerOptions{ReplaceAttr: replace}).WithGroup("g")
+	oh := slog.NewJSONHandler(&origBuf, &slog.HandlerOptions{ReplaceAttr: replace}).WithGroup("g")
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Int("x", 1))
+	if err := th.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if err := oh.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if twinBuf.String() != origBuf.String() {
+		t.Errorf("ReplaceAttr groups differ:\n twin %q\n orig %q", twinBuf.String(), origBuf.String())
+	}
+}
+
+func TestTwinNilSource(t *testing.T) {
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Any("s", (*slog.Source)(nil)))
+	compareBoth(t, r, twinJSONPlain, origJSONPlain)
+	compareBoth(t, r, twinTextPlain, origTextPlain)
+}
+
+func TestTwinNetIPJSON(t *testing.T) {
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Any("ip", net.ParseIP("192.168.1.1")))
+	compareBoth(t, r, twinJSONPlain, origJSONPlain)
+}
+
+func TestTwinNilBytesJSON(t *testing.T) {
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Any("nilbs", []byte(nil)), slog.Any("empty", []byte{}))
+	compareBoth(t, r, twinJSONPlain, origJSONPlain)
+}
+
+func TestTwinEmptyWithGroup(t *testing.T) {
+	var buf bytes.Buffer
+	l := twinslog.New(twinslog.NewTextHandler(&buf, new(slog.HandlerOptions)))
+	if got := l.WithGroup(""); got != l {
+		t.Errorf("Logger.WithGroup(\"\") should return receiver")
+	}
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Int("a", 1))
+	var twinBuf, plainBuf bytes.Buffer
+	th := twinslog.NewJSONHandler(&twinBuf, new(slog.HandlerOptions)).WithGroup("")
+	ph := twinslog.NewJSONHandler(&plainBuf, new(slog.HandlerOptions))
+	if err := th.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if err := ph.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if twinBuf.String() != plainBuf.String() {
+		t.Errorf("empty WithGroup should be no-op:\n grouped %q\n plain %q", twinBuf.String(), plainBuf.String())
+	}
+	var twinTextBuf, plainTextBuf bytes.Buffer
+	tth := twinslog.NewTextHandler(&twinTextBuf, new(slog.HandlerOptions)).WithGroup("")
+	pth := twinslog.NewTextHandler(&plainTextBuf, new(slog.HandlerOptions))
+	if err := tth.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if err := pth.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if twinTextBuf.String() != plainTextBuf.String() {
+		t.Errorf("empty WithGroup text should be no-op:\n grouped %q\n plain %q", twinTextBuf.String(), plainTextBuf.String())
+	}
+}
+
+func TestTwinWithSliceAlias(t *testing.T) {
+	var buf bytes.Buffer
+	l := twinslog.New(twinslog.NewTextHandler(&buf, new(slog.HandlerOptions)))
+	attrs := []slog.Attr{slog.Int("a", 1)}
+	c := l.With(attrs...)
+	attrs[0] = slog.Int("a", 2)
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	if err := c.Handler().Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(buf.String())
+	if !strings.Contains(got, "a=1") {
+		t.Errorf("With should own its slice: got %q, want a=1", got)
+	}
+}
+
+func TestTwinEnabledNilContext(t *testing.T) {
+	dh := &nilDetectHandler{}
+	l := twinslog.New(dh)
+	_ = l.Enabled(nil, slog.LevelInfo)
+	if dh.seenNil {
+		t.Errorf("Enabled(nil) passed nil to handler, want Background")
 	}
 }
