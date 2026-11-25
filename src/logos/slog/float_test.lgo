@@ -1,0 +1,62 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"math"
+	"strings"
+	"testing"
+
+	rtjson "logos/rt/json"
+)
+
+// floatOracle formats f exactly like the JSON handler must: the same
+// bytes as encoding/json with HTML escaping disabled.
+func floatOracle(t *testing.T, f float64) string {
+	t.Helper()
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(f); err != nil {
+		t.Fatalf("oracle encode %v: %v", f, err)
+	}
+	return strings.TrimSpace(buf.String())
+}
+
+func TestTwinFloatFormat(t *testing.T) {
+	floats := []float64{
+		0, math.Copysign(0, -1), 1, -1, 0.1, 3.14159, -3.14159,
+		1.5, 100, 1000000, 10000000, 123456789.123456789,
+		1e21, -1e21, 1e22, 999999999999999900000,
+		1e-6, 0.000001, 0.0000001, 9.999999e-7, 1.23e-9,
+		5e-324, 2.2250738585072014e-308, math.MaxFloat64, -math.MaxFloat64,
+		2.5e-7, 123.456e-3, 1e20, 6.62607015e-34,
+	}
+	for _, f := range floats {
+		got := string(rtjson.AppendFloat(nil, f, 64))
+		want := floatOracle(t, f)
+		if got != want {
+			t.Errorf("AppendFloat(%v): got %s, want %s", f, got, want)
+		}
+	}
+}
+
+func TestTwinFloatError(t *testing.T) {
+	for _, f := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		err := rtjson.FloatErr(f, f, 64)
+		if err == nil {
+			t.Fatalf("FloatErr(%v) = nil", f)
+		}
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		if encErr := enc.Encode(f); encErr == nil {
+			t.Fatalf("oracle encode %v succeeded", f)
+		} else if err.Error() != encErr.Error() {
+			t.Errorf("FloatErr(%v) = %q, oracle %q", f, err.Error(), encErr.Error())
+		}
+	}
+}
