@@ -584,6 +584,8 @@ A `const func` MUST NOT perform I/O, spawn a goroutine, read a mutable package v
 
 The compiler MUST evaluate `const` composites and `const func` calls at compile time with target integer widths, a step limit from `max_ctfe_steps` with default 100,000, and a value cap of 1 MB. [T-201][T-102]
 
+A constant with an exact rational payload MUST charge the bit lengths of its numerator and denominator, rounded up to whole bytes, against the 1 MB value cap. A typed `float32` or `float64` value MUST charge at least eight bytes. [T-201]
+
 Compile-time assignments MUST preserve Go's operand evaluation order, destination identity, value-copy rules, and left-to-right store order. [T-201]
 The evaluation and assignment phases, including failures while evaluating a destination operand and failures while storing a result, MUST follow Go assignment semantics. [T-201]
 A two-value lookup on a nil map MUST return the element's zero value and `false`. [T-201]
