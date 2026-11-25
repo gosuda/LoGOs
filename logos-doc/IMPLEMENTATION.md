@@ -3481,9 +3481,9 @@ Anchor: Tony Hoare, David Parnas
 
 ### M18-S5 Comptime layout intrinsics
 Anchor: Tony Hoare, John Carmack, Edsger W. Dijkstra
-- Attack: `src/internal/types/testdata/logos/comptime_layout.lgo`: `[comptime.SizeOf[T]()]byte` compiles inside a comptime generic; a use outside a comptime expansion fails with `comptime::runtime_use`. `test/logos/run/comptime_layout.lgo`: for `int8`, `int64`, `string`, `*int`, `[0]*int`, `struct{ a int32; b []byte }`, `[4]float64`, and `struct{}`, SizeOf and AlignOf equal `unsafe.Sizeof` and `unsafe.Alignof`; HasPointers equals the hand-written table false, false, true, true, false, true, false, false.
+- Attack: `src/internal/types/testdata/logos/comptime_layout.lgo`: `[comptime.SizeOf[T]()]byte` compiles inside a comptime generic; a use outside a comptime expansion fails with `comptime::runtime_use`. `test/logos/run/comptime_layout.lgo`: for `int8`, `int64`, `string`, `*int`, `[0]*int`, `struct{ a int32; b []byte }`, `[4]float64`, and `struct{}`, SizeOf and AlignOf equal `unsafe.Sizeof` and `unsafe.Alignof`; HasPointers equals the hand-written table false, false, true, true, false, true, false, false. `comptime.HasUnexported[T]()`: true for same-package unexported, nested, blank, and array-element cases, false for exported-only and scalar types, usable in a `const if` per instantiation (`test/logos/run/comptime_hasunexported.lgo`); a runtime use fails with `comptime::runtime_use`.
 - Build: in the existing comptime type-checker files and the comptime expansion; each intrinsic is a compile-time-only untyped constant per instantiation (T-205).
-- Gate: testdir `logos` run and compile fixtures for `comptime_layout`; mutation probe on one intrinsic.
+- Gate: testdir `logos` run and compile fixtures for `comptime_layout` and `comptime_hasunexported`; mutation probe on one intrinsic.
 - Red-team rows: none.
 - Docs: P1-S3, P2.
 

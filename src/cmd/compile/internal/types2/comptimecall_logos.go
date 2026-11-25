@@ -61,7 +61,8 @@ func (check *Checker) logosComptimeCall(x *operand, call *syntax.CallExpr) bool 
 	case fname == "TypeOf" && check.logosTypeOfCall(x, call):
 		return true
 	case fname == "Fields", fname == "IsStruct", fname == "TypeOf",
-		fname == "SizeOf", fname == "AlignOf", fname == "HasPointers":
+		fname == "SizeOf", fname == "AlignOf", fname == "HasPointers",
+		fname == "HasUnexported":
 		check.errorf(syntax.StartPos(call), InvalidPkgUse, "[comptime::runtime_use] comptime.%s is compile-time only", fname)
 	// Invariant (deferred error): Error messages go out through a
 	// deferred check reading the checked constant, keeping per-line matching.
