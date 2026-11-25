@@ -144,6 +144,21 @@ func eachExportedAlias(pkg *types2.Package, yield func(name string, rhs types2.T
 		yield(name, alias.Rhs())
 	}
 }
+
+func eachExportedVar(pkg *types2.Package, yield func(object string, v *types2.Var)) {
+	scope := pkg.Scope()
+	if scope == nil {
+		return
+	}
+	for _, name := range scope.Names() {
+		obj, ok := scope.Lookup(name).(*types2.Var)
+		if !ok || obj == nil || !obj.Exported() {
+			continue
+		}
+		yield(name, obj)
+	}
+}
+
 func appendUnique[E comparable](s []E, e E) []E {
 	for _, have := range s {
 		if have == e {

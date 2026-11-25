@@ -1,0 +1,62 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+# Pin the default experiment set: the harness passes ambient GOEXPERIMENT
+# through, so an inherited nojsonv2 would fail the default run below.
+env GOEXPERIMENT=
+
+cd variants
+
+# With the default arena policy the helper appends logosarena to the
+# GOEXPERIMENT it receives. The selector must resolve candidates through
+# the same policy, so a candidate the helper cannot select is skipped
+# instead of matching.
+logos run .
+stdout '^variant arena$'
+
+logos eject -o out
+exists out/main.go
+exists out/a_v1.go
+exists out/a_v2.go
+grep 'goexperiment.logosarena' out/a_v1.go
+grep 'goexperiment.loopvar' out/a_v1.go
+grep 'goexperiment.logosarena' out/a_v2.go
+grep 'goexperiment.loopvar' out/a_v2.go
+
+# Plain go leaves the arena experiment off, so it selects the other
+# variant. Both selections prove both files were staged with working
+# constraints.
+cd out
+go build ./...
+go run .
+stdout '^variant loopvar-or-noarena$'
+env GOEXPERIMENT=logosarena
+go build ./...
+go run .
+stdout '^variant arena$'
+
+-- variants/go.mod --
+module example.com/arenavariant
+
+go 1.27
+
+-- variants/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println(which()) }
+
+-- variants/a_v1.lgo --
+//go:build !goexperiment.logosarena || goexperiment.loopvar
+
+package main
+
+func which() string { return "variant loopvar-or-noarena" }
+
+-- variants/a_v2.lgo --
+//go:build goexperiment.logosarena && !goexperiment.loopvar
+
+package main
+
+func which() string { return "variant arena" }

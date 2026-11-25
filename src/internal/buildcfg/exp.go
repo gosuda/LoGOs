@@ -157,6 +157,26 @@ func ParseGOEXPERIMENT(goos, goarch, goexp string) (*ExperimentFlags, error) {
 	return flags, nil
 }
 
+// KnownExperiment reports whether name is a GOEXPERIMENT flag the toolchain
+// accepts: one of the lower-cased goexperiment.Flags fields, or the regabi
+// alias. It mirrors exactly the names ParseGOEXPERIMENT recognizes. The eject
+// variant search uses it to keep unknown goexperiment tags out of synthesized
+// GOEXPERIMENT values; an unknown tag is simply absent (false) and stays a
+// fixed fact for the build-constraint matcher.
+func KnownExperiment(name string) bool {
+	if name == "regabi" {
+		return true
+	}
+	var flags goexperiment.Flags
+	rt := reflect.TypeOf(flags)
+	for i := 0; i < rt.NumField(); i++ {
+		if strings.ToLower(rt.Field(i).Name) == name {
+			return true
+		}
+	}
+	return false
+}
+
 // String returns the canonical GOEXPERIMENT string to enable this experiment
 // configuration. (Experiments in the same state as in the baseline are elided.)
 func (exp *ExperimentFlags) String() string {

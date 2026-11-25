@@ -180,6 +180,25 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 	if resets != 1 {
 		t.Fatalf("nested loop index reset is not one zero assign to the loop variable: %v", body[2])
 	}
+	var elemBase *ir.Name
+	for _, n := range body[:2] {
+		list := []ir.Node{n}
+		if b, ok := n.(*ir.BlockStmt); ok {
+			list = b.List
+		}
+		for _, m := range list {
+			as, ok := m.(*ir.AssignStmt)
+			if !ok {
+				continue
+			}
+			if xn, ok := as.X.(*ir.Name); ok && xn.Sym() != idx.Sym() {
+				elemBase = xn
+			}
+		}
+	}
+	if elemBase == nil {
+		t.Fatalf("no element base assign precedes the nested loop: %v", body[:2])
+	}
 	if bound, ok := eqLoopConst(t, cond.Y); !ok || bound != subs.Size() {
 		t.Fatalf("nested loop bound is not the whole array: %v", loop.Cond)
 	}
@@ -207,7 +226,7 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 	oneBody := func(n ir.Node) {
 		switch n.Op() {
 		case ir.OCALL, ir.OCALLFUNC:
-			ranges = append(ranges, eqLoopReadRange(t, n))
+			ranges = append(ranges, eqLoopReadRange(t, n, elemBase, idx))
 		case ir.OAS:
 		default:
 			t.Fatalf("nested loop body holds %v, want a field read: %v", n.Op(), loop.Body)
@@ -246,8 +265,10 @@ func TestInstrumentEqNestedSkipsLoop(t *testing.T) {
 
 // eqLoopReadRange reads the (offset, size) pair of one instrumented
 // read call: the address adds the field offset onto the element base
-// and the second argument is the compared byte count.
-func eqLoopReadRange(t *testing.T, n ir.Node) [2]int64 {
+// plus the loop index, and the second argument is the compared byte
+// count. An address without the index checks the first element on
+// every iteration, so the base and index must both remain.
+func eqLoopReadRange(t *testing.T, n ir.Node, elemBase, idx *ir.Name) [2]int64 {
 	t.Helper()
 	call, ok := n.(*ir.CallExpr)
 	if !ok || len(call.Args) != 2 {
@@ -258,7 +279,8 @@ func eqLoopReadRange(t *testing.T, n ir.Node) [2]int64 {
 		t.Fatalf("nested loop read size is not constant: %v", call.Args[1])
 	}
 	var off int64
-	for addr := call.Args[0]; addr.Op() == ir.OADD; {
+	addr := call.Args[0]
+	for addr.Op() == ir.OADD {
 		bin, ok := addr.(*ir.BinaryExpr)
 		if !ok {
 			t.Fatalf("nested loop read address is not an addition: %v", call.Args[0])
@@ -269,6 +291,15 @@ func eqLoopReadRange(t *testing.T, n ir.Node) [2]int64 {
 		}
 		off += c
 		addr = bin.X
+	}
+	sum, ok := addr.(*ir.BinaryExpr)
+	if !ok || sum.Op() != ir.OADD {
+		t.Fatalf("nested loop read address %v is not the element base plus the loop index", call.Args[0])
+	}
+	x, xok := sum.X.(*ir.Name)
+	y, yok := sum.Y.(*ir.Name)
+	if !xok || !yok || x.Sym() != elemBase.Sym() || y.Sym() != idx.Sym() {
+		t.Fatalf("nested loop read address %v is not the element base %v plus the loop index %v", call.Args[0], elemBase, idx)
 	}
 	return [2]int64{off, size}
 }

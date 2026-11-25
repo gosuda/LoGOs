@@ -18,9 +18,11 @@ import "unsafe"
 // The zero Region is the heap: every function treats a zero handle as an
 // ordinary heap allocation, so a Region that outlives its owner block keeps
 // heap semantics.
+// The fixed handle is nil in heap mode and set by OpenFixed.
 type Region struct {
-	h   unsafe.Pointer
-	gen uintptr
+	h     unsafe.Pointer
+	gen   uintptr
+	fixed fixedRef
 }
 
 // Open opens a new region and returns its handle. Close happens at the end
@@ -28,11 +30,26 @@ type Region struct {
 func Open() Region { return Region{} }
 
 // New allocates a zeroed T and returns its address.
-func New[T any](r Region) *T { return new(T) }
+func New[T any](r Region) *T {
+	if r.fixed != nil {
+		return fixedNew[T](r)
+	}
+	return new(T)
+}
 
 // Make allocates a slice of n zeroed T elements. It panics like make for a
 // negative n.
-func Make[T any](r Region, n int) []T { return make([]T, n) }
+func Make[T any](r Region, n int) []T {
+	if r.fixed != nil {
+		return fixedMake[T](r, n)
+	}
+	return make([]T, n)
+}
 
 // Append appends the values v to s, growing s as append does.
-func Append[T any](r Region, s []T, v ...T) []T { return append(s, v...) }
+func Append[T any](r Region, s []T, v ...T) []T {
+	if r.fixed != nil {
+		return fixedAppend(r, s, v)
+	}
+	return append(s, v...)
+}

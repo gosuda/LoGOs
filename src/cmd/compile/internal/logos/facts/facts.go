@@ -925,7 +925,7 @@ func validStep(s string) bool {
 		return isDigits(s[1:])
 	case 'F', 'M':
 		return isIdent(s[1:])
-	case 'D', 'E', 'K', 'O':
+	case 'D', 'E', 'K', 'O', 'V':
 		return len(s) == 1
 	}
 	return false
