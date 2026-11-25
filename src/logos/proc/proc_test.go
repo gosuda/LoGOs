@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -689,6 +690,35 @@ func TestSpawnResolvesRelativeCwd(t *testing.T) {
 	if !term.IsSuccess() {
 		t.Fatalf("term = %+v, want success", term)
 	}
+}
+
+// Pipe accessors must not race with cleanup. Close clears the pipe fields
+// under a lock, so retrieving a pipe concurrently must take the same lock.
+func TestPipeConcurrentAccess(t *testing.T) {
+	opts := defaultOpts()
+	opts.Stdin = logosproc.PipeStdIO()
+	opts.Stdout = logosproc.PipeStdIO()
+	opts.Stderr = logosproc.PipeStdIO()
+	c := spawnSelf(t, "block", opts)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				_ = c.StdinPipe()
+				_ = c.StdoutPipe()
+				_ = c.StderrPipe()
+			}
+		}()
+	}
+	for j := 0; j < 50; j++ {
+		_ = c.Close()
+	}
+	wg.Wait()
+	_ = c.Kill()
+	_, _ = waitDeadline(t, c)
+	_ = c.Close()
 }
 
 // Wait never closes pipes: the parent ends stay readable after Wait and

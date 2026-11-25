@@ -225,18 +225,24 @@ func (c *Child) Pid() int {
 // StdinPipe returns the parent write end when stdin used PipeStdIO.
 // Close releases it.
 func (c *Child) StdinPipe() *os.File {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.stdinW
 }
 
 // StdoutPipe returns the parent read end when stdout used PipeStdIO.
 // Close releases it.
 func (c *Child) StdoutPipe() *os.File {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.stdoutR
 }
 
 // StderrPipe returns the parent read end when stderr used PipeStdIO.
 // Close releases it.
 func (c *Child) StderrPipe() *os.File {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.stderrR
 }
 
