@@ -1869,12 +1869,12 @@ func copyDataFile(src, dst string) (bool, error) {
 }
 
 // rewriteEjectedGo rewrites one compiler-emitted file to the ejected
-// import paths. Compiler output must parse; anything else is a loud
-// failure, never a silent copy.
+// import paths. Compiler output must rewrite cleanly; anything else is a
+// loud failure naming the file, never a silent copy.
 func rewriteEjectedGo(data []byte, name string) ([]byte, bool) {
 	fixed, uses, ok := remapEjectedFile(data, siteNamespace(logosStem(name)))
 	if !ok {
-		base.Fatalf("logos eject: cannot parse ejected file for %s", name)
+		base.Fatalf("logos eject: cannot rewrite ejected file for %s", name)
 	}
 	return fixed, uses
 }
@@ -1934,10 +1934,11 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	edits, uses := ejectedImportEdits(data, fset, f)
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
 	h2edits := h2ExtendedConnectEdits(fset, data, f)
-	if off, overlap := h2OverlapOffset(edits, h2edits); overlap {
-		pos := fset.Position(token.Pos(fset.File(f.Pos()).Base() + off))
-		base.Errorf("logos eject: overlapping h2extendedconnect import edit at line %d: EnableHTTP2ExtendedConnect left unrewritten", pos.Line)
-		h2edits = nil
+	if _, overlap := h2OverlapOffset(edits, h2edits); overlap {
+		// An overlap is a remap failure, not a command-wide error: the
+		// data path preserves the original bytes, and callers that
+		// require a successful rewrite report it with the file name.
+		return nil, false, false
 	}
 	edits = append(edits, h2edits...)
 	out, ok := applyTextEdits(data, edits)

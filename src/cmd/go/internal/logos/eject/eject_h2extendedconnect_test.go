@@ -5,6 +5,8 @@
 package eject
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,19 +52,39 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
-	if !ok {
-		t.Fatal("remapEjectedFile failed")
+	// An overlap is a remap failure, not a partial rewrite: the data
+	// path preserves the original bytes and no command-wide exit status
+	// is set inside remapEjectedFile.
+	if _, _, ok := remapEjectedFile([]byte(in), ""); ok {
+		t.Fatal("overlapping rewrite reported success")
 	}
-	got := string(out)
-	if strings.Contains(got, "http2xconnect=1") {
-		t.Errorf("overlapping rewrite applied:\n%s", got)
+}
+
+func TestCopyDataFilePreservesOverlappingFixture(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+import "comptime"
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	dir := t.TempDir()
+	src := filepath.Join(dir, "connect.go")
+	dst := filepath.Join(dir, "out", "connect.go")
+	if err := os.WriteFile(src, []byte(in), 0666); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(got, `"comptime"`) {
-		t.Errorf("non-overlapping import edit dropped:\n%s", got)
+	if _, err := copyDataFile(src, dst); err != nil {
+		t.Fatalf("copyDataFile failed: %v", err)
 	}
-	if !strings.Contains(got, "s.EnableHTTP2ExtendedConnect()") {
-		t.Errorf("skipped call lost:\n%s", got)
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != in {
+		t.Fatalf("overlapping fixture rewritten:\n%s", got)
 	}
 }
 
