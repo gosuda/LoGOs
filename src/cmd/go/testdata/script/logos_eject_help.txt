@@ -1,0 +1,48 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# logos help eject states the go directive rule the eject writer
+# applies and allows DIR inside the source tree. It must not claim that
+# every ejected tree builds with Go 1.27.2 or that eject never writes
+# into the source tree.
+logos help eject
+stdout 'DIR/go.mod keeps the go'
+stdout 'directive of the main module, which logos mod init sets to the'
+stdout 'satisfies every go directive in it'
+stdout 'Eject leaves the source tree unchanged apart from DIR,'
+stdout 'which may lie inside it'
+! stdout '1\.27\.2 or newer toolchain'
+! stdout 'never writes'
+
+# The rule the help states: DIR/go.mod and the support module keep the
+# main module's go directive, and DIR lies inside the module here.
+cd m
+logos run .
+stdout '^5$'
+logos eject -o out
+grep '^go 1\.27\.3$' out/go.mod
+grep '^go 1\.27\.3$' out/_logos_deps/rt/go.mod
+! exists out/out
+cd out
+go run .
+stdout '^5$'
+
+-- m/go.mod --
+module example.com/ejecthelp
+
+go 1.27.3
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+func reader() *strings.Reader {
+	return strings.NewReader("hello")
+}
+
+func main() {
+	fmt.Println(reader().Len())
+}
