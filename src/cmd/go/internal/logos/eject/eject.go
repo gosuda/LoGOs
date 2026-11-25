@@ -1368,7 +1368,12 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 		}
 	}
 	search := func(goosCands, goarchCands []string) (variantCtx, bool) {
-		combos := experimentCombinations(expKnown)
+		try := func(experiment string) (variantCtx, bool) {
+			return searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, experiment, customUniq, uniqMention)
+		}
+		if vc, ok := try(cfg.RawGOEXPERIMENT); ok {
+			return vc, true
+		}
 		// Prefer a jsonv2-enabled helper when the guard allows one. The
 		// helper lowering is frozen into the ejected tree; a nojsonv2
 		// lowering carries no MarshalJSONTo/UnmarshalJSONFrom, so the
@@ -1376,24 +1381,25 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 		// loopvar would silently lose the v2 methods. A jsonv2 lowering
 		// splits into v1 plus a jsonv2-gated extra file and covers all
 		// branches. Raw stays first; only the synthesized entries reorder.
-		if len(combos) > 1 && slices.Contains(expKnown, "jsonv2") {
-			rest := slices.Clone(combos[1:])
-			slices.SortStableFunc(rest, func(a, b string) int {
-				ha, hb := comboEnablesJSONv2(a), comboEnablesJSONv2(b)
-				switch {
-				case ha == hb:
-					return 0
-				case ha && !hb:
-					return -1
-				default:
-					return 1
+		// Candidates stream one mask at a time instead of materializing
+		// all 2^n overrides up front, and the platform fallback below
+		// reuses the same stream instead of rebuilding a stored list.
+		preferJSONv2 := slices.Contains(expKnown, "jsonv2")
+		for pass := 0; pass < 2; pass++ {
+			if pass == 1 && !preferJSONv2 {
+				break
+			}
+			for mask := range 1 << len(expKnown) {
+				combo := experimentCombo(cfg.RawGOEXPERIMENT, expKnown, mask)
+				if combo == cfg.RawGOEXPERIMENT {
+					continue
 				}
-			})
-			combos = append([]string{combos[0]}, rest...)
-		}
-		for _, experiment := range combos {
-			if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, experiment, customUniq, uniqMention); ok {
-				return vc, true
+				if preferJSONv2 && comboEnablesJSONv2(combo) == (pass == 1) {
+					continue
+				}
+				if vc, ok := try(combo); ok {
+					return vc, true
+				}
 			}
 		}
 		return variantCtx{}, false
@@ -1443,45 +1449,35 @@ func comboEnablesJSONv2(combo string) bool {
 	return true
 }
 
-// experimentCombinations lists the GOEXPERIMENT values to try for files
-// mentioning experiment tags, host value first. Later entries set every
-// mentioned experiment explicitly, one combination at a time, so a helper
-// runs with a real GOEXPERIMENT value instead of a synthesized user tag.
-func experimentCombinations(mentioned []string) []string {
-	raw := cfg.RawGOEXPERIMENT
-	if len(mentioned) == 0 {
-		return []string{raw}
-	}
-	out := []string{raw}
-	for mask := range 1 << len(mentioned) {
-		var keep []string
-		if raw != "" {
-			for item := range strings.SplitSeq(raw, ",") {
-				drop := false
-				for _, name := range mentioned {
-					if item == name || item == "no"+name {
-						drop = true
-						break
-					}
-				}
-				if !drop {
-					keep = append(keep, item)
+// experimentCombo renders one GOEXPERIMENT candidate for files mentioning
+// experiment tags: the host value with every mentioned experiment set
+// explicitly for this mask, so a helper runs with a real GOEXPERIMENT
+// value instead of a synthesized user tag. Callers stream masks in order
+// and skip the host duplicate instead of materializing all 2^n values.
+func experimentCombo(raw string, mentioned []string, mask int) string {
+	var keep []string
+	if raw != "" {
+		for item := range strings.SplitSeq(raw, ",") {
+			drop := false
+			for _, name := range mentioned {
+				if item == name || item == "no"+name {
+					drop = true
+					break
 				}
 			}
-		}
-		for i, name := range mentioned {
-			if mask&(1<<i) != 0 {
-				keep = append(keep, name)
-			} else {
-				keep = append(keep, "no"+name)
+			if !drop {
+				keep = append(keep, item)
 			}
 		}
-		combo := strings.Join(keep, ",")
-		if combo != raw {
-			out = append(out, combo)
+	}
+	for i, name := range mentioned {
+		if mask&(1<<i) != 0 {
+			keep = append(keep, name)
+		} else {
+			keep = append(keep, "no"+name)
 		}
 	}
-	return out
+	return strings.Join(keep, ",")
 }
 
 func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags []string, experiment string, customUniq, mentioned []string) (variantCtx, bool) {
