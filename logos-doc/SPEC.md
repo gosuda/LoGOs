@@ -121,6 +121,7 @@ The output MUST NOT emit `_logos_errors` imports [T-0.3].
 Among support imports, lowered files before eject MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases. Ejected files MUST spell those support imports as `_logos_rt "github.com/gosuda/loGos/rt"` and `_logos_json "github.com/gosuda/loGos/rt/json"` (the eject rewrite in `src/cmd/go/internal/logos/eject/eject.go:supportPathEdit`).
 The tool MUST write ejected files only inside DIR, and it MUST NOT change the source tree outside DIR; DIR MAY be inside the source tree [T-0.3].
 Ejected code MUST build with an upstream Go 1.27.2 toolchain [T-0.3].
+The tool MUST refuse a standard-library selector with no upstream spelling at its source location with `portability::fork_stdlib_api`, instead of writing output that upstream Go rejects [T-0.3].
 A Go package that imports a LoGOs package MUST see each exported declaration with the Go-facing signature that `logos eject` emits for it [T-0.3][R-U2].
 The output MUST NOT emit colliding helper imports. [T-0.3]
 

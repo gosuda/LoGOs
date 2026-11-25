@@ -334,6 +334,10 @@ recheck:
 		}
 		logosEjectCtInstances(pkg, info, files)
 	}
+	// logos eject verifier: fork-only standard-library selectors have no
+	// upstream spelling and must fail here, at their source location,
+	// before logos eject writes any output (SPEC T-0.3).
+	logos.VerifyEjectStdlib(pkg, info)
 	logos.LogosClearErasedAnonReadonly()
 	for _, path := range info.LogosCtImports {
 		if _, err := importer.Import(path); err != nil {
