@@ -20,6 +20,7 @@ import (
 	"go/token"
 	"internal/buildcfg"
 	"internal/logosfile"
+	"internal/syslist"
 	"io/fs"
 	"maps"
 	"os"
@@ -999,37 +1000,28 @@ func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte, taken map[str
 // the Go tool still reads the last suffix elements. Go matches only the
 // trailing elements: foo_linux_jsonv2.go has no platform rule, while
 // foo_jsonv2_linux.go stays linux-only and foo_jsonv2_test.go stays a
-// test file.
+// test file. The platform suffix is read with the same rule the go
+// command applies to file names, so every known GOOS and GOARCH counts,
+// including ones the eject ownership lists do not name (wasip1).
 func jsonv2ExtraStem(stem string) string {
-	test := false
 	base := stem
-	if strings.HasSuffix(base, "_test") {
+	test := false
+	if rest, ok := strings.CutSuffix(base, "_test"); ok {
+		base = rest
 		test = true
-		base = strings.TrimSuffix(base, "_test")
 	}
 	platform := ""
-	for _, goarch := range ownedGoarchTags {
-		if !strings.HasSuffix(base, "_"+goarch) {
-			continue
-		}
-		matched := "_" + goarch
-		for _, goos := range ownedGoosTags {
-			if strings.HasSuffix(base, "_"+goos+"_"+goarch) {
-				matched = "_" + goos + "_" + goarch
-				break
-			}
-		}
-		platform = matched
-		base = strings.TrimSuffix(base, matched)
-		break
-	}
-	if platform == "" {
-		for _, goos := range ownedGoosTags {
-			if strings.HasSuffix(base, "_"+goos) {
-				platform = "_" + goos
-				base = strings.TrimSuffix(base, platform)
-				break
-			}
+	parts := strings.Split(base, "_")
+	if n := len(parts); n >= 3 && syslist.KnownOS[parts[n-2]] && syslist.KnownArch[parts[n-1]] {
+		platform = "_" + parts[n-2] + "_" + parts[n-1]
+		base = strings.Join(parts[:n-2], "_")
+	} else if n := len(parts); n >= 1 {
+		if syslist.KnownOS[parts[n-1]] {
+			platform = "_" + parts[n-1]
+			base = strings.Join(parts[:n-1], "_")
+		} else if syslist.KnownArch[parts[n-1]] {
+			platform = "_" + parts[n-1]
+			base = strings.Join(parts[:n-1], "_")
 		}
 	}
 	out := base + "_jsonv2" + platform
