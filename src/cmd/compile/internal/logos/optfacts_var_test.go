@@ -61,3 +61,56 @@ var Value = GetOpt(false)
 		t.Fatalf("CloneWithOverlays did not restore the var option, got %s", v.Type())
 	}
 }
+
+func clonedVar(t *testing.T, pkg *types2.Package, name string) *types2.Var {
+	t.Helper()
+	obj := pkg.Scope().Lookup(name)
+	v, ok := obj.(*types2.Var)
+	if !ok {
+		t.Fatalf("cloned %s is not a var: %T", name, obj)
+	}
+	return v
+}
+
+func namedFieldOption(t *testing.T, v *types2.Var) *types2.Option {
+	t.Helper()
+	named, ok := types2.Unalias(v.Type()).(*types2.Named)
+	if !ok {
+		t.Fatalf("var %s type is %T, want an instantiated named type", v.Name(), v.Type())
+	}
+	u, ok := named.Underlying().(*types2.Struct)
+	if !ok {
+		t.Fatalf("var %s underlying is %T, want a struct", v.Name(), named.Underlying())
+	}
+	if u.NumFields() != 1 {
+		t.Fatalf("var %s has %d fields, want 1", v.Name(), u.NumFields())
+	}
+	return optAsOption(u.Field(0).Type())
+}
+
+// An option fact for one generic instantiation must not leak into the
+// shared origin: Box[int].Value stays int while Box[int?].Value is
+// restored as an option on that variable only.
+func TestCloneWithOverlaysGenericInstanceOption(t *testing.T) {
+	const src = `package overlaytest
+
+type Box[T any] struct {
+	Value T
+}
+
+var Optional Box[int?]
+
+var Plain Box[int]
+`
+	lowered, opts, _ := checkLoweredForOverlay(t, src)
+	if !hasPath(opts, "Optional", "V.FValue") {
+		t.Fatalf("missing var option fact Optional V.FValue in %v", opts)
+	}
+	cloned := CloneWithOverlays(lowered, opts, nil)
+	if opt := namedFieldOption(t, clonedVar(t, cloned, "Optional")); opt == nil {
+		t.Fatal("CloneWithOverlays did not restore Optional.Value as an option")
+	}
+	if opt := namedFieldOption(t, clonedVar(t, cloned, "Plain")); opt != nil {
+		t.Fatalf("CloneWithOverlays leaked the option into Plain.Value, got %s", opt)
+	}
+}
