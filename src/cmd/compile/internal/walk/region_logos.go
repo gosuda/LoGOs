@@ -555,6 +555,44 @@ func (p *logosRegionLowering) lowerSite(call *ir.CallExpr, op ir.LogosRegionOp) 
 	if r == nil {
 		return call
 	}
+	if r.Class == ir.PPARAM {
+		return p.lowerDynamicRegionSite(call, op)
+	}
+	return p.lowerPlacedSite(call, op, r)
+}
+
+// A region parameter can carry a fixed or zero handle instead of a lifetime token.
+// Stage the arguments for order before either branch uses them.
+func (p *logosRegionLowering) lowerDynamicRegionSite(call *ir.CallExpr, op ir.LogosRegionOp) ir.Node {
+	pos := call.Pos()
+	args := call.Args[ir.LogosRegionArgBase(call):]
+	init := ir.TakeInit(call)
+	for i, arg := range args {
+		if arg.Op() == ir.OLITERAL || arg.Op() == ir.ONIL {
+			continue
+		}
+		temp := typecheck.TempAt(pos, p.fn, arg.Type())
+		init.Append(typecheck.Stmt(ir.NewAssignStmt(pos, temp, arg)))
+		args[i] = temp
+	}
+	r := args[0].(*ir.Name)
+	result := typecheck.TempAt(pos, p.fn, call.Type())
+	var placed ir.Nodes
+	saved := p.init
+	p.init = &placed
+	allocated := p.lowerPlacedSite(call, op, r)
+	p.init = saved
+	if app, ok := allocated.(*ir.CallExpr); ok && app.Op() == ir.OAPPEND {
+		app.Args = slices.Clone(app.Args)
+	}
+	placed.Append(typecheck.Stmt(ir.NewAssignStmt(pos, result, allocated)))
+	portable := typecheck.Stmt(ir.NewAssignStmt(pos, result, call))
+	noToken := ir.NewBinaryExpr(pos, ir.OEQ, p.regionDot(r, 0, pos), typecheck.NodNil())
+	init.Append(typecheck.Stmt(ir.NewIfStmt(pos, noToken, []ir.Node{portable}, placed)))
+	return ir.InitExpr(init, result)
+}
+
+func (p *logosRegionLowering) lowerPlacedSite(call *ir.CallExpr, op ir.LogosRegionOp, r *ir.Name) ir.Node {
 	pos := call.Pos()
 	h := p.regionDot(r, 0, pos)
 	g := p.regionDot(r, 1, pos)

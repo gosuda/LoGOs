@@ -1558,8 +1558,8 @@ Under plain `go`, only `GOEXPERIMENT=logosarena` MUST enable it. [T-301.1][R-U1]
 
 Placement regions [T-301.2]:
 The std package `logos/arena` MUST provide `Open() Region`, `New[T any](r Region) *T`, `Make[T any](r Region, n int) []T`, and `Append[T any](r Region, s []T, v ...T) []T`. [T-301.2]
-Without `GOEXPERIMENT=logosarena`, these MUST behave exactly as `Region{}`, `new(T)`, `make([]T, n)`, and `append(s, v...)`. [T-301.2]
-Under `logos` with `[build] arena` true, each call MUST resolve at compile time, per type argument, to the noscan region when `comptime.HasPointers[T]()` would be false, and to the scan region otherwise. [T-301.2]
+Without `GOEXPERIMENT=logosarena`, `Open()` MUST behave as `Region{}`. Allocations with this handle MUST behave as `new(T)`, `make([]T, n)`, and `append(s, v...)`, respectively. [T-301.2]
+Under `logos` with `[build] arena` true, each allocation in a lifetime region MUST resolve at compile time, per type argument, to the noscan region when `comptime.HasPointers[T]()` would be false, and to the scan region otherwise. [T-301.2]
 Constant-size noscan objects of at most 512 bytes MUST use the inline bump sequence on amd64 in non-race builds; other targets call the region slow path. [T-301.2]
 `Open` MUST make a region owned by the innermost enclosing block. [T-301.2]
 Exit from that block MUST release the region's objects, and inside a loop body each iteration MUST release them. [T-301.2]
@@ -1569,13 +1569,14 @@ Otherwise the object MUST go on the heap, and `perf::arena_fallback` MUST name t
 A store of a region pointer into a region object whose owner block is the same as, or nested inside, the owner block of the stored pointer's region MUST NOT count as an escape. A store into an object of an enclosing region MUST count as an escape. [T-301.2]
 In a LoGOs package, a `Region` that is stored outside a local variable, returned, sent on a channel, captured by a `go` statement, or captured by an escaping closure MUST fail with `correctness::region_escape`. [T-301.2]
 This return restriction includes bare returns of named results containing a `Region`, directly or through a local holder binding. Returning ordinary values computed using a region does not itself return the region. [T-301.2]
-In a Go package, passing an `r` to a callee is allowed. With `GOEXPERIMENT=logosarena` placement through that region follows the same escape rule as in a LoGOs package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap; a use that would fail with `correctness::region_escape` in a LoGOs package falls back to the heap instead. Under `logos lint` that fallback is reported as `perf::arena_fallback`, naming the call and the escaping flow; `logos build` and plain `go` report no rule ID. Without the experiment every `logos/arena` call behaves as its heap equivalent. [T-301.2][R-U1]
+In a Go package, passing an `r` to a callee is allowed. With `GOEXPERIMENT=logosarena` placement through a lifetime region follows the same escape rule as in a LoGOs package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap; a use that would fail with `correctness::region_escape` in a LoGOs package falls back to the heap instead. Under `logos lint` that fallback is reported as `perf::arena_fallback`, naming the call and the escaping flow; `logos build` and plain `go` report no rule ID. [T-301.2][R-U1]
 A `go group` child MAY read a parent-region object through a const view. [T-301.2]
 A non-const capture MUST count as an escape of that object. [T-301.2]
-`logos eject` MUST lower `arena.Open()` to `_logos_rt.Region{}`, `arena.New[T](r)` to `new(T)`, `arena.Make[T](r, n)` to `make([]T, n)`, and `arena.Append[T](r, s, v...)` to `append(s, v...)`. [T-301.2]
+`logos eject` MUST retain the arena API calls and use the portable implementation in the support module. Ordinary lifetime regions MUST use heap storage in that implementation, and calls MUST preserve the region operand and evaluate all arguments in Go order. [T-301.2]
+`OpenFixed(buf []byte) Region` MUST use the supplied buffer in both native and ejected code, regardless of `GOEXPERIMENT=logosarena`. `FixedUsed(r Region) int` MUST report the bytes consumed, including alignment padding, or zero for a non-fixed handle. [T-301.2]
+A nonempty fixed-region allocation of a pointer-bearing type MUST panic without consuming storage. An allocation that cannot fit MUST panic with `arena: fixed region exhausted (want N, have M)` and MUST NOT fall back to the heap. Requests for zero-size types and empty appends MUST NOT consume the buffer. [T-301.2]
 `logos/rt` MUST provide `type Region = arena.Region`. [T-301.2]
 The shared support module MUST carry the `arena` package. [T-301.2]
-The eject MUST append `_ = r` after each local Region declaration. [T-301.2]
 The toolchain MUST NOT ship the upstream `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
 
 Comptime and escape analysis:
