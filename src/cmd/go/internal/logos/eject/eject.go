@@ -709,15 +709,205 @@ func ejectPackageNames(p *load.Package, plan *ejectPlan) ([]string, map[string]b
 
 func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte) bool {
 	fixed, uses := rewriteEjectedGo(raw, name)
+	mainBytes, extraBytes := splitJSONv2File(fixed)
 	dst := filepath.Join(dstRoot, rel, stem+".go")
 	if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
-	if err := os.WriteFile(dst, fixed, 0666); err != nil {
+	if err := os.WriteFile(dst, mainBytes, 0666); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 	queueEjectGofmt(dst)
+	if extraBytes != nil {
+		extraDst := filepath.Join(dstRoot, rel, jsonv2ExtraStem(stem)+".go")
+		if err := os.WriteFile(extraDst, extraBytes, 0666); err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+		queueEjectGofmt(extraDst)
+	}
 	return uses
+}
+
+// jsonv2ExtraStem inserts _jsonv2 before any platform or test suffix so
+// the Go tool still reads the last suffix elements. Go matches only the
+// trailing elements: foo_linux_jsonv2.go has no platform rule, while
+// foo_jsonv2_linux.go stays linux-only and foo_jsonv2_test.go stays a
+// test file.
+func jsonv2ExtraStem(stem string) string {
+	test := false
+	base := stem
+	if strings.HasSuffix(base, "_test") {
+		test = true
+		base = strings.TrimSuffix(base, "_test")
+	}
+	platform := ""
+	for _, goarch := range ownedGoarchTags {
+		if !strings.HasSuffix(base, "_"+goarch) {
+			continue
+		}
+		matched := "_" + goarch
+		for _, goos := range ownedGoosTags {
+			if strings.HasSuffix(base, "_"+goos+"_"+goarch) {
+				matched = "_" + goos + "_" + goarch
+				break
+			}
+		}
+		platform = matched
+		base = strings.TrimSuffix(base, matched)
+		break
+	}
+	if platform == "" {
+		for _, goos := range ownedGoosTags {
+			if strings.HasSuffix(base, "_"+goos) {
+				platform = "_" + goos
+				base = strings.TrimSuffix(base, platform)
+				break
+			}
+		}
+	}
+	out := base + "_jsonv2" + platform
+	if test {
+		out += "_test"
+	}
+	return out
+}
+
+// splitJSONv2File moves experiment-dependent JSONv2 methods into a separate
+// file constrained to goexperiment.jsonv2. The compiler lowers a .lgo file
+// once under the helper context, so an ejected file that keeps the source
+// original guard (for example goexperiment.jsonv2 || goexperiment.loopvar)
+// would otherwise carry MarshalJSONTo/UnmarshalJSONFrom and their
+// encoding/json/jsontext import into a context where jsontext has no
+// buildable files. The main file keeps the type and the v1 methods with the
+// original guard; the extra file holds only the v2 methods with the
+// original guard narrowed by jsonv2.
+func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
+	if !bytes.Contains(fixed, []byte("encoding/json/jsontext")) {
+		return fixed, nil
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", fixed, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		return fixed, nil
+	}
+	type span struct{ s, e int }
+	var moved []span
+	var movedText [][]byte
+	offset := func(p token.Pos) int {
+		return fset.Position(p).Offset
+	}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name == nil {
+			continue
+		}
+		if fn.Name.Name != "MarshalJSONTo" && fn.Name.Name != "UnmarshalJSONFrom" {
+			continue
+		}
+		s, e := offset(fn.Pos()), offset(fn.End())
+		if s < 0 || e <= s || e > len(fixed) {
+			return fixed, nil
+		}
+		moved = append(moved, span{s, e})
+		movedText = append(movedText, bytes.TrimRight(fixed[s:e], "\n"))
+	}
+	if len(moved) == 0 {
+		return fixed, nil
+	}
+	// Original go:build expression from the leading comments.
+	origExpr := ""
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			if expr, ok := strings.CutPrefix(c.Text, "//go:build "); ok {
+				// Only the header constraint before the package clause
+				// selects this file; comments inside the body are not it.
+				if fset.Position(c.Pos()).Line < fset.Position(f.Package).Line {
+					origExpr = strings.TrimSpace(expr)
+					break
+				}
+			}
+		}
+		if origExpr != "" {
+			break
+		}
+	}
+	// Remove the moved declarations from the main file, from the end so
+	// earlier offsets stay valid.
+	main := bytes.Clone(fixed)
+	for i := len(moved) - 1; i >= 0; i-- {
+		s, e := moved[i].s, moved[i].e
+		// Extend to the end of the line so no half-line remains.
+		for e < len(main) && main[e] != '\n' {
+			e++
+		}
+		if e < len(main) {
+			e++
+		}
+		main = append(main[:s], main[e:]...)
+	}
+	// Drop the jsontext import from the main file when nothing left uses it.
+	if !bytes.Contains(main, []byte("_logos_jsontext.")) {
+		lines := bytes.SplitAfter(main, []byte("\n"))
+		var kept [][]byte
+		for _, ln := range lines {
+			if bytes.Contains(ln, []byte("encoding/json/jsontext")) {
+				continue
+			}
+			kept = append(kept, ln)
+		}
+		main = bytes.Join(kept, nil)
+	}
+	// Imports for the extra file: every import whose alias is used by the
+	// moved declarations.
+	joinedMoved := bytes.Join(movedText, []byte("\n"))
+	var extraImports []string
+	for _, decl := range f.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			imp, ok := spec.(*ast.ImportSpec)
+			if !ok {
+				continue
+			}
+			alias := ""
+			if imp.Name != nil {
+				alias = imp.Name.Name
+			} else {
+				path := strings.Trim(imp.Path.Value, "\"")
+				alias = path[strings.LastIndex(path, "/")+1:]
+			}
+			if alias == "_" || alias == "." {
+				continue
+			}
+			if bytes.Contains(joinedMoved, []byte(alias+".")) {
+				impPath := strings.TrimSpace(imp.Path.Value)
+				extraImports = append(extraImports, "import "+alias+" "+impPath)
+			}
+		}
+	}
+	var extra bytes.Buffer
+	if origExpr == "" {
+		extra.WriteString("//go:build goexperiment.jsonv2\n")
+	} else {
+		extra.WriteString("//go:build (" + origExpr + ") && goexperiment.jsonv2\n")
+	}
+	extra.WriteString("\npackage " + f.Name.Name + "\n\n")
+	for _, ln := range extraImports {
+		extra.WriteString(ln + "\n")
+	}
+	if len(extraImports) > 0 {
+		extra.WriteString("\n")
+	}
+	for i, txt := range movedText {
+		extra.Write(txt)
+		extra.WriteString("\n")
+		if i+1 < len(movedText) {
+			extra.WriteString("\n")
+		}
+	}
+	return main, extra.Bytes()
 }
 
 // emitPackageGoFiles writes the compiler-emitted Go files of one loGo/s
@@ -912,7 +1102,30 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 		}
 	}
 	search := func(goosCands, goarchCands []string) (variantCtx, bool) {
-		for _, experiment := range experimentCombinations(expKnown) {
+		combos := experimentCombinations(expKnown)
+		// Prefer a jsonv2-enabled helper when the guard allows one. The
+		// helper lowering is frozen into the ejected tree; a nojsonv2
+		// lowering carries no MarshalJSONTo/UnmarshalJSONFrom, so the
+		// jsonv2 branches of a disjunctive guard such as !jsonv2 ||
+		// loopvar would silently lose the v2 methods. A jsonv2 lowering
+		// splits into v1 plus a jsonv2-gated extra file and covers all
+		// branches. Raw stays first; only the synthesized entries reorder.
+		if len(combos) > 1 && slices.Contains(expKnown, "jsonv2") {
+			rest := slices.Clone(combos[1:])
+			slices.SortStableFunc(rest, func(a, b string) int {
+				ha, hb := comboEnablesJSONv2(a), comboEnablesJSONv2(b)
+				switch {
+				case ha == hb:
+					return 0
+				case ha && !hb:
+					return -1
+				default:
+					return 1
+				}
+			})
+			combos = append([]string{combos[0]}, rest...)
+		}
+		for _, experiment := range combos {
 			if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, experiment, customUniq, uniqMention); ok {
 				return vc, true
 			}
@@ -944,6 +1157,24 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 		}
 	}
 	return search(goosCands, goarchCands)
+}
+
+// comboEnablesJSONv2 reports whether a synthesized GOEXPERIMENT value
+// enables jsonv2. An absent jsonv2 means the toolchain default, which
+// enables it.
+func comboEnablesJSONv2(combo string) bool {
+	if combo == "" {
+		return true
+	}
+	for item := range strings.SplitSeq(combo, ",") {
+		if item == "jsonv2" {
+			return true
+		}
+		if item == "nojsonv2" {
+			return false
+		}
+	}
+	return true
 }
 
 // experimentCombinations lists the GOEXPERIMENT values to try for files
