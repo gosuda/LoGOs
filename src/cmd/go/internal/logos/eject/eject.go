@@ -935,13 +935,14 @@ func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
 			// LoGOs sources need lowering from staging here.
 			continue
 		}
+		taken := ejectOutputStems(rec.Dir)
 		for _, name := range names {
 			stem := logosStem(name)
 			raw, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(path), stem+".go"))
 			if err != nil {
 				base.Fatalf("logos eject: missing ejected output for %s: the ejected tree references it but no build lowered it", filepath.Join(rec.Dir, name))
 			}
-			writeLoweredFile(dst, ".", stem, name, raw)
+			writeLoweredFile(dst, ".", stem, name, raw, taken)
 		}
 		for _, cand := range ejectedSupportRefs(dst) {
 			if !done[cand] {
@@ -973,9 +974,9 @@ func ejectPackageNames(p *load.Package, plan *ejectPlan) ([]string, map[string]b
 	return names, ignoredSet
 }
 
-func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte) bool {
+func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte, taken map[string]bool) bool {
 	fixed, uses := rewriteEjectedGo(raw, name)
-	mainBytes, extraBytes := splitJSONv2File(fixed)
+	mainBytes, extraBytes, extraStem := splitJSONv2File(fixed, stem, taken)
 	dst := filepath.Join(dstRoot, rel, stem+".go")
 	if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
 		base.Fatalf("logos eject: %v", err)
@@ -985,7 +986,7 @@ func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte) bool {
 	}
 	queueEjectGofmt(dst)
 	if extraBytes != nil {
-		extraDst := filepath.Join(dstRoot, rel, jsonv2ExtraStem(stem)+".go")
+		extraDst := filepath.Join(dstRoot, rel, extraStem+".go")
 		if err := os.WriteFile(extraDst, extraBytes, 0666); err != nil {
 			base.Fatalf("logos eject: %v", err)
 		}
@@ -1038,30 +1039,40 @@ func jsonv2ExtraStem(stem string) string {
 	return out
 }
 
-// splitJSONv2File moves experiment-dependent JSONv2 methods into a separate
-// file constrained to goexperiment.jsonv2. The compiler lowers a .lgo file
-// once under the helper context, so an ejected file that keeps the source
-// original guard (for example goexperiment.jsonv2 || goexperiment.loopvar)
-// would otherwise carry MarshalJSONTo/UnmarshalJSONFrom and their
-// encoding/json/jsontext import into a context where jsontext has no
-// buildable files. The main file keeps the type and the v1 methods with the
-// original guard; the extra file holds only the v2 methods with the
-// original guard narrowed by jsonv2.
-func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
+// splitJSONv2File moves the compiler-generated JSONv2 streaming methods
+// (MarshalJSONTo and UnmarshalJSONFrom) into a separate file constrained
+// to goexperiment.jsonv2. The compiler lowers a .lgo file once under the
+// helper context, so an ejected file that keeps the source original guard
+// (for example goexperiment.jsonv2 || goexperiment.loopvar) would
+// otherwise carry those methods and their encoding/json/jsontext import
+// into a context where jsontext has no buildable files. Only generated
+// methods move: a handwritten MarshalJSONTo or UnmarshalJSONFrom keeps
+// its user-chosen signature names and stays in the main file, where it
+// remains visible without the jsonv2 experiment. Generated methods are
+// recognized by the _logos_-prefixed receiver and parameter names the
+// lowering emits plus the _logos_jsontext parameter type.
+//
+// The main file keeps the type and the v1 methods with the original
+// guard; the extra file holds only the generated v2 methods with the
+// original guard narrowed by jsonv2. The returned extraStem is the stem
+// of the companion file, chosen so it cannot collide with a stem the
+// directory already emits: taken holds every output stem and is updated
+// with the chosen one.
+func splitJSONv2File(fixed []byte, stem string, taken map[string]bool) (mainBytes []byte, extraBytes []byte, extraStem string) {
 	if !bytes.Contains(fixed, []byte("encoding/json/jsontext")) {
-		return fixed, nil
+		return fixed, nil, ""
 	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", fixed, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
-		return fixed, nil
+		return fixed, nil, ""
 	}
 	type span struct{ s, e int }
-	var moved []span
-	var movedText [][]byte
 	offset := func(p token.Pos) int {
 		return fset.Position(p).Offset
 	}
+	var moved []span
+	var movedText [][]byte
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name == nil {
@@ -1072,13 +1083,23 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 		}
 		s, e := offset(fn.Pos()), offset(fn.End())
 		if s < 0 || e <= s || e > len(fixed) {
-			return fixed, nil
+			return fixed, nil, ""
+		}
+		body := fixed[s:e]
+		// Generated signatures name the receiver _logos_v and the codec
+		// parameter _logos_enc or _logos_dec; handwritten methods keep the
+		// names the user wrote and never use the _logos_ prefix.
+		if !bytes.Contains(body, []byte("_logos_jsontext.")) {
+			continue
+		}
+		if !bytes.Contains(body, []byte("_logos_enc")) && !bytes.Contains(body, []byte("_logos_dec")) {
+			continue
 		}
 		moved = append(moved, span{s, e})
 		movedText = append(movedText, bytes.TrimRight(fixed[s:e], "\n"))
 	}
 	if len(moved) == 0 {
-		return fixed, nil
+		return fixed, nil, ""
 	}
 	// Original go:build expression from the leading comments.
 	origExpr := ""
@@ -1097,39 +1118,128 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 			break
 		}
 	}
-	// Remove the moved declarations from the main file, from the end so
-	// earlier offsets stay valid.
-	main := bytes.Clone(fixed)
-	for i := len(moved) - 1; i >= 0; i-- {
-		s, e := moved[i].s, moved[i].e
-		// Extend to the end of the line so no half-line remains.
-		for e < len(main) && main[e] != '\n' {
+	// Declarations leave the main file; each cut swallows one trailing
+	// newline and one preceding blank line so no doubled blank line
+	// remains. The cut never runs past the newline: a declaration that
+	// shares the line stays in the main file.
+	var cuts []span
+	for _, m := range moved {
+		s, e := m.s, m.e
+		if e < len(fixed) && fixed[e] == '\n' {
 			e++
 		}
-		if e < len(main) {
-			e++
+		if s >= 2 && fixed[s-1] == '\n' && fixed[s-2] == '\n' {
+			s--
 		}
-		main = append(main[:s], main[e:]...)
+		cuts = append(cuts, span{s, e})
 	}
-	// Drop the jsontext import from the main file when nothing left uses it.
-	if !bytes.Contains(main, []byte("_logos_jsontext.")) {
-		lines := bytes.SplitAfter(main, []byte("\n"))
-		var kept [][]byte
-		for _, ln := range lines {
-			if bytes.Contains(ln, []byte("encoding/json/jsontext")) {
-				continue
-			}
-			kept = append(kept, ln)
+	mainDecls := bytes.Clone(fixed)
+	for i := len(cuts) - 1; i >= 0; i-- {
+		mainDecls = append(mainDecls[:cuts[i].s], mainDecls[cuts[i].e:]...)
+	}
+	// Package identifiers still referenced by the remaining declarations.
+	usedNames := map[string]bool{}
+	{
+		rfset := token.NewFileSet()
+		if rf, rerr := parser.ParseFile(rfset, "", mainDecls, parser.SkipObjectResolution); rerr == nil {
+			ast.Inspect(rf, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok {
+					if id, ok := sel.X.(*ast.Ident); ok {
+						usedNames[id.Name] = true
+					}
+				}
+				return true
+			})
 		}
-		main = bytes.Join(kept, nil)
 	}
-	// Imports for the extra file: every import whose alias is used by the
-	// moved declarations.
-	joinedMoved := bytes.Join(movedText, []byte("\n"))
-	var extraImports []string
+	// Import specs: local name, path, and the spec node for companion
+	// emission.
+	type impSpec struct {
+		local string
+		path  string
+		spec  *ast.ImportSpec
+	}
+	var specs []impSpec
+	var importDecls []*ast.GenDecl
 	for _, decl := range f.Decls {
 		gen, ok := decl.(*ast.GenDecl)
 		if !ok || gen.Tok != token.IMPORT {
+			continue
+		}
+		importDecls = append(importDecls, gen)
+		for _, spec := range gen.Specs {
+			imp, ok := spec.(*ast.ImportSpec)
+			if !ok {
+				continue
+			}
+			local := ""
+			if imp.Name != nil {
+				local = imp.Name.Name
+			} else {
+				p, err := strconv.Unquote(imp.Path.Value)
+				if err != nil {
+					continue
+				}
+				local = p[strings.LastIndex(p, "/")+1:]
+			}
+			pp, _ := strconv.Unquote(imp.Path.Value)
+			specs = append(specs, impSpec{local: local, path: pp, spec: imp})
+		}
+	}
+	// Imports the moved declarations reference, for the companion file.
+	movedUsed := map[string]bool{}
+	{
+		mfset := token.NewFileSet()
+		movedSrc := "package p\n\n" + string(bytes.Join(movedText, []byte("\n\n")))
+		if mf, merr := parser.ParseFile(mfset, "", movedSrc, parser.SkipObjectResolution); merr == nil {
+			ast.Inspect(mf, func(n ast.Node) bool {
+				if sel, ok := n.(*ast.SelectorExpr); ok {
+					if id, ok := sel.X.(*ast.Ident); ok {
+						movedUsed[id.Name] = true
+					}
+				}
+				return true
+			})
+		}
+	}
+	// Drop from the main file every import spec whose local name no
+	// remaining declaration uses; blank and dot imports always stay.
+	var allCuts = append([]span{}, cuts...)
+	for _, gen := range importDecls {
+		live, dead := 0, 0
+		for _, spec := range gen.Specs {
+			imp, ok := spec.(*ast.ImportSpec)
+			if !ok {
+				continue
+			}
+			local := ""
+			if imp.Name != nil {
+				local = imp.Name.Name
+			} else {
+				p, err := strconv.Unquote(imp.Path.Value)
+				if err != nil {
+					continue
+				}
+				local = p[strings.LastIndex(p, "/")+1:]
+			}
+			if local == "_" || local == "." || usedNames[local] {
+				live++
+			} else {
+				dead++
+			}
+		}
+		if dead == 0 {
+			continue
+		}
+		if live == 0 {
+			s, e := offset(gen.Pos()), offset(gen.End())
+			for e < len(fixed) && fixed[e] != '\n' {
+				e++
+			}
+			if e < len(fixed) {
+				e++
+			}
+			allCuts = append(allCuts, span{s, e})
 			continue
 		}
 		for _, spec := range gen.Specs {
@@ -1137,28 +1247,96 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 			if !ok {
 				continue
 			}
-			alias := ""
+			local := ""
 			if imp.Name != nil {
-				alias = imp.Name.Name
+				local = imp.Name.Name
 			} else {
-				path := strings.Trim(imp.Path.Value, "\"")
-				alias = path[strings.LastIndex(path, "/")+1:]
+				p, err := strconv.Unquote(imp.Path.Value)
+				if err != nil {
+					continue
+				}
+				local = p[strings.LastIndex(p, "/")+1:]
 			}
-			if alias == "_" || alias == "." {
+			if local == "_" || local == "." || usedNames[local] {
 				continue
 			}
-			if bytes.Contains(joinedMoved, []byte(alias+".")) {
-				impPath := strings.TrimSpace(imp.Path.Value)
-				extraImports = append(extraImports, "import "+alias+" "+impPath)
+			s, e := offset(imp.Pos()), offset(imp.End())
+			for e < len(fixed) && (fixed[e] == ' ' || fixed[e] == '\t') {
+				e++
 			}
+			if e < len(fixed) && fixed[e] == ',' {
+				e++
+			}
+			for e < len(fixed) && fixed[e] != '\n' {
+				e++
+			}
+			if e < len(fixed) {
+				e++
+			}
+			allCuts = append(allCuts, span{s, e})
 		}
 	}
-	var extra bytes.Buffer
-	if origExpr == "" {
-		extra.WriteString("//go:build goexperiment.jsonv2\n")
-	} else {
-		extra.WriteString("//go:build (" + origExpr + ") && goexperiment.jsonv2\n")
+	slices.SortFunc(allCuts, func(a, b span) int { return a.s - b.s })
+	merged := allCuts[:0]
+	for _, c := range allCuts {
+		if len(merged) > 0 && c.s <= merged[len(merged)-1].e {
+			if c.e > merged[len(merged)-1].e {
+				merged[len(merged)-1].e = c.e
+			}
+			continue
+		}
+		merged = append(merged, c)
 	}
+	main := bytes.Clone(fixed)
+	for i := len(merged) - 1; i >= 0; i-- {
+		main = append(main[:merged[i].s], main[merged[i].e:]...)
+	}
+	// Companion imports: the specs whose local name the moved text uses.
+	specByLocal := map[string]impSpec{}
+	for _, sp := range specs {
+		if sp.local == "_" || sp.local == "." {
+			continue
+		}
+		specByLocal[sp.local] = sp
+	}
+	var extraImportNames []string
+	for local := range movedUsed {
+		if _, ok := specByLocal[local]; ok {
+			extraImportNames = append(extraImportNames, local)
+		}
+	}
+	slices.Sort(extraImportNames)
+	var extraImports []string
+	for _, local := range extraImportNames {
+		sp := specByLocal[local]
+		alias := ""
+		if sp.spec.Name != nil {
+			alias = sp.spec.Name.Name + " "
+		}
+		extraImports = append(extraImports, "import "+alias+strconv.Quote(sp.path))
+	}
+	// Choose a companion stem no emitted file already owns.
+	extraStem = jsonv2ExtraStem(stem)
+	for taken[extraStem] {
+		extraStem = jsonv2ExtraStem(extraStem)
+	}
+	taken[extraStem] = true
+	var extra bytes.Buffer
+	// A companion for a file that imports "C" is cgo code however it is
+	// named, so narrow its guard with cgo too. Without this the go tool
+	// selects the companion for disabled-cgo builds while excluding the
+	// file that defines its receiver types.
+	guard := "goexperiment.jsonv2"
+	if origExpr != "" {
+		guard = "(" + origExpr + ") && " + guard
+	}
+	for _, sp := range specs {
+		if sp.path == "C" {
+			guard += " && cgo"
+			break
+		}
+	}
+	extra.WriteString("//go:build " + guard + "\n")
 	extra.WriteString("\npackage " + f.Name.Name + "\n\n")
 	for _, ln := range extraImports {
 		extra.WriteString(ln + "\n")
@@ -1173,7 +1351,7 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 			extra.WriteString("\n")
 		}
 	}
-	return main, extra.Bytes()
+	return main, extra.Bytes(), extraStem
 }
 
 // emitPackageGoFiles writes the compiler-emitted Go files of one loGo/s
@@ -1227,6 +1405,7 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 	names, ignoredSet := ejectPackageNames(p, plan)
 	used := false
 	seen := make(map[string]bool, len(names))
+	taken := ejectOutputStems(p.Dir)
 	for _, name := range names {
 		if seen[name] || !logosfile.Is(name) {
 			continue
@@ -1239,11 +1418,37 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 				continue
 			}
 		}
-		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw) {
+		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw, taken) {
 			used = true
 		}
 	}
 	return used
+}
+
+// ejectOutputStems lists the output file stems one package directory can
+// produce: every .go file keeps its stem (copied verbatim) and every
+// .lgo file lowers to logosStem(name). jsonv2 companions must not take
+// a stem this set already holds.
+func ejectOutputStems(dir string) map[string]bool {
+	stems := map[string]bool{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return stems
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if logosfile.Is(name) {
+			stems[logosStem(name)] = true
+			continue
+		}
+		if strings.HasSuffix(name, ".go") {
+			stems[strings.TrimSuffix(name, ".go")] = true
+		}
+	}
+	return stems
 }
 
 // isEjectVariant reports whether this eject runs as an inactive-variant
