@@ -1,0 +1,53 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^h2 extended connect ready$'
+cp stdout $WORK/native.txt
+logos eject -o out
+exists out/main.go
+! grep 'EnableHTTP2ExtendedConnect' out/main.go
+grep 'http2xconnect=1' out/main.go
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+cmp stdout $WORK/native.txt
+env GODEBUG=
+! exec go run .
+stderr 'extended CONNECT needs GODEBUG=http2xconnect=1'
+env GODEBUG=http2xconnect=1
+exec go run .
+cmp stdout $WORK/native.txt
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ..
+
+-- m/go.mod --
+module example.com/h2xconnect
+
+go 1.27
+
+-- m/main.lgo --
+
+// Command h2xconnectdemo exercises eject of the extended-connect opt-in.
+package main
+
+import (
+	"crypto/tls"
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	srv := &http.Server{
+		Addr:      "127.0.0.1:0",
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13},
+		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+	}
+	srv.EnableHTTP2ExtendedConnect()
+	fmt.Println("h2 extended connect ready")
+}

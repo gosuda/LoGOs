@@ -1370,6 +1370,7 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	}
 	edits, uses := ejectedImportEdits(data, fset, f)
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
+	edits = append(edits, h2ExtendedConnectEdits(fset, data, f)...)
 	out, ok := applyTextEdits(data, edits)
 	if !ok {
 		return nil, false, false
