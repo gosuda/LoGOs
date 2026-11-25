@@ -1,36 +1,42 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+env GOEXPERIMENT=
 
-cd m
-logos eject -o ../control
-exists ../control/p/p_test.go
-! exists ../control/p/extra_test.go
+cd repro
 
-cp ../extra_test.lgo p/extra_test.lgo
-logos test -count=1 -tags=eject_extra ./p
-logos eject -o ../variant
-exists ../variant/p/p_test.go
-exists ../variant/p/extra_test.go
-cd ../variant
-exec env -u GOROOT $UPROOT1272/bin/go test -count=1 -tags=eject_extra -v ./p
-stdout '^--- PASS: TestValue '
+# The external test imports its sibling package, and the inactive
+# //go:build engines test file forces a variant eject under
+# tags=engines. The variant helper must resolve the test-only import;
+# before the fix it failed with "cannot find package" and eject
+# exited 1.
+logos eject -o out
+exists out/p/p.go
+exists out/p/p_test.go
+exists out/p/engines_test.go
+exists out/helper/helper.go
+grep '^//go:build engines' out/p/engines_test.go
 
--- m/go.mod --
+cd out
+go test ./...
+exec env -u GOROOT $UPROOT1272/bin/go test ./...
+
+-- repro/go.mod --
 module example.com/ejectrepro
 
 go 1.27
 
--- m/p/p.lgo --
+-- repro/p/p.lgo --
 package p
 
 const Value = 1
 
--- m/helper/helper.lgo --
+-- repro/helper/helper.lgo --
 package helper
 
 const Value = 1
 
--- m/p/p_test.lgo --
+-- repro/p/p_test.lgo --
 package p_test
 
 import (
@@ -46,7 +52,7 @@ func TestValue(t *testing.T) {
 	}
 }
 
--- extra_test.lgo --
-//go:build eject_extra
+-- repro/p/engines_test.lgo --
+//go:build engines
 
 package p_test

@@ -885,7 +885,7 @@ var depsRules = `
 	FMT
 	< math/big/internal/asmgen;
 
-	unsafe
+	internal/abi, reflect, unsafe
 	< logos/arena;
 
 	iter, os, runtime, runtime/pprof, strconv, strings, sync, time, unicode/utf8, unsafe
@@ -903,11 +903,11 @@ var depsRules = `
 	crypto/tls, net/http, log/slog, runtime/debug, golang.org/x/net/http/httpguts, golang.org/x/net/quic
 	< logos/net/http;
 
-	encoding/binary, errors, io, math, sync
-	< logos/binary;
-
 	NONE
 	< logos/ascii;
+
+	encoding/binary, errors, io, math, slices, sync
+	< logos/binary;
 
 	errors, fmt, io
 	< logos/io;

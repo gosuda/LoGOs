@@ -1,0 +1,100 @@
+// run
+
+package main
+
+import "fmt"
+
+type Value interface{ Text | Number }
+type Text struct{ Text string }
+type Number struct{ Number float64 }
+
+func kind(v const Value) string {
+	switch v.(type) {
+	case Text:
+		return "text"
+	case Number:
+		return "number"
+	default:
+		return "none"
+	}
+}
+
+func kindBound(v const Value) string {
+	switch u := v.(type) {
+	case Text:
+		return "text:" + u.Text
+	case Number:
+		return "number"
+	default:
+		return "none"
+	}
+}
+
+type Blob struct {
+	Name string
+	Tags []string
+}
+
+type Shape interface{ Text | Blob }
+
+func shapeName(s const Shape) string {
+	switch u := s.(type) {
+	case Text:
+		return "text:" + u.Text
+	case Blob:
+		return "blob:" + u.Name + ":" + fmt.Sprint(len(u.Tags))
+	default:
+		return "none"
+	}
+}
+
+func shapeKind(s const Shape) string {
+	return switch s.(type) {
+	case Text => "text"
+	case Blob => "blob"
+	default => "none"
+	}
+}
+
+type Holder struct {
+	S  Shape
+	ID int
+}
+
+func holderKind(xs const []Holder) string {
+	switch xs[0].S.(type) {
+	case Text:
+		return "text"
+	case Blob:
+		return "blob"
+	default:
+		return "none"
+	}
+}
+
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		failed = true
+		fmt.Println("FAIL", name+": got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func main() {
+	check("param", kind(Text{Text: "x"}), "text")
+	check("param-number", kind(Number{Number: 1.5}), "number")
+	check("bound", kindBound(Text{Text: "x"}), "text:x")
+	check("bound-number", kindBound(Number{Number: 1.5}), "number")
+	check("ref", shapeName(Blob{Name: "b", Tags: []string{"t"}}), "blob:b:1")
+	check("ref-text", shapeName(Text{Text: "x"}), "text:x")
+	check("expr", shapeKind(Blob{Name: "b"}), "blob")
+	check("expr-text", shapeKind(Text{Text: "x"}), "text")
+	check("field", holderKind([]Holder{{S: Text{Text: "x"}}}), "text")
+	check("field-blob", holderKind([]Holder{{S: Blob{Name: "b"}}}), "blob")
+	if failed {
+		panic("const view type switch failed")
+	}
+}

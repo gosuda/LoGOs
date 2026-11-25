@@ -141,7 +141,9 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 	}
 	if goFiles == 0 {
 		if !p.vendored && hasLogos {
-			return fmt.Errorf("holds only .lgo files, which eject does not lower")
+			// Packages holding LoGOs sources are lowered from compiler
+			// staging by materializeGorootLogos after the support copy.
+			return nil
 		}
 		return fmt.Errorf("holds no Go sources")
 	}

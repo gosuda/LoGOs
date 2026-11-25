@@ -24,26 +24,30 @@ func TestTwinVarint(t *testing.T) {
 	us := []uint64{0, 1, 2, 10, 20, 63, 64, 65, 127, 128, 129, 255, 256, 300,
 		1<<32 - 1, 1 << 32, 1<<63 - 1, 1 << 63, 1<<64 - 1}
 	for _, x := range us {
-		buf := make([]byte, tbinary.MaxVarintLen64)
-		n := tbinary.PutUvarint(buf, x)
-		on := obinary.PutUvarint(buf, x)
+		tbuf := make([]byte, tbinary.MaxVarintLen64)
+		obuf := make([]byte, obinary.MaxVarintLen64)
+		n := tbinary.PutUvarint(tbuf, x)
+		on := obinary.PutUvarint(obuf, x)
 		if n != on {
 			t.Fatalf("PutUvarint(%d): twin=%d orig=%d", x, n, on)
 		}
-		y, m := tbinary.Uvarint(buf[:n])
-		oy, om := obinary.Uvarint(buf[:n])
+		if string(tbuf[:n]) != string(obuf[:on]) {
+			t.Fatalf("PutUvarint(%d): bytes differ twin=%x orig=%x", x, tbuf[:n], obuf[:on])
+		}
+		y, m := tbinary.Uvarint(tbuf[:n])
+		oy, om := obinary.Uvarint(obuf[:on])
 		if y != oy || m != om || y != x {
 			t.Fatalf("Uvarint(%d): twin=(%d,%d) orig=(%d,%d)", x, y, m, oy, om)
 		}
 		if got := tbinary.AppendUvarint([]byte("prefix"), x); string(got) != string(obinary.AppendUvarint([]byte("prefix"), x)) {
 			t.Fatalf("AppendUvarint(%d) differs", x)
 		}
-		ry, err := tbinary.ReadUvarint(bytes.NewReader(buf[:n]))
+		ry, err := tbinary.ReadUvarint(bytes.NewReader(tbuf[:n]))
 		if err != nil {
 			t.Fatalf("ReadUvarint(%d): twin err %v", x, err)
 			return
 		}
-		oy2, oerr := obinary.ReadUvarint(bytes.NewReader(buf[:n]))
+		oy2, oerr := obinary.ReadUvarint(bytes.NewReader(obuf[:n]))
 		if oerr != nil {
 			t.Fatalf("ReadUvarint(%d): orig err %v", x, oerr)
 			return
@@ -54,26 +58,30 @@ func TestTwinVarint(t *testing.T) {
 	}
 	ss := []int64{-1 << 63, -1<<63 + 1, -1, 0, 1, 2, 10, 63, 64, 127, 128, 255, 256, 1<<63 - 1}
 	for _, x := range ss {
-		buf := make([]byte, tbinary.MaxVarintLen64)
-		n := tbinary.PutVarint(buf, x)
-		on := obinary.PutVarint(buf, x)
+		tbuf := make([]byte, tbinary.MaxVarintLen64)
+		obuf := make([]byte, obinary.MaxVarintLen64)
+		n := tbinary.PutVarint(tbuf, x)
+		on := obinary.PutVarint(obuf, x)
 		if n != on {
 			t.Fatalf("PutVarint(%d): twin=%d orig=%d", x, n, on)
 		}
-		y, m := tbinary.Varint(buf[:n])
-		oy, om := obinary.Varint(buf[:n])
+		if string(tbuf[:n]) != string(obuf[:on]) {
+			t.Fatalf("PutVarint(%d): bytes differ twin=%x orig=%x", x, tbuf[:n], obuf[:on])
+		}
+		y, m := tbinary.Varint(tbuf[:n])
+		oy, om := obinary.Varint(obuf[:on])
 		if y != oy || m != om || y != x {
 			t.Fatalf("Varint(%d): twin=(%d,%d) orig=(%d,%d)", x, y, m, oy, om)
 		}
 		if got := tbinary.AppendVarint([]byte("prefix"), x); string(got) != string(obinary.AppendVarint([]byte("prefix"), x)) {
 			t.Fatalf("AppendVarint(%d) differs", x)
 		}
-		ry, err := tbinary.ReadVarint(bytes.NewReader(buf[:n]))
+		ry, err := tbinary.ReadVarint(bytes.NewReader(tbuf[:n]))
 		if err != nil {
 			t.Fatalf("ReadVarint(%d): twin err %v", x, err)
 			return
 		}
-		oy2, oerr := obinary.ReadVarint(bytes.NewReader(buf[:n]))
+		oy2, oerr := obinary.ReadVarint(bytes.NewReader(obuf[:n]))
 		if oerr != nil {
 			t.Fatalf("ReadVarint(%d): orig err %v", x, oerr)
 			return

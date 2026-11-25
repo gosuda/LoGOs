@@ -123,6 +123,16 @@ type RUnexported struct {
 	b int32
 }
 
+type RZeroWidth struct {
+	A      uint16
+	marker struct{}
+	B      uint16
+}
+
+type RAppendWord struct {
+	Word uint32
+}
+
 func checkAppendBytes(t *testing.T, name string, order Order, ob, tb []byte, oerr, terr error) {
 	t.Helper()
 	if oerr != nil {
@@ -781,6 +791,21 @@ func TestTwinSize(t *testing.T) {
 	}
 }
 
+func TestTwinRecordSize(t *testing.T) {
+	digest := struct{ Digest [32]byte }{[32]byte{1, 2, 3, 31: 4}}
+	words := struct{ Words [2]uint16 }{[2]uint16{705, 902}}
+	if n, want := Size(digest), obinary.Size(digest); n != want {
+		t.Errorf("digest size: got %d, want %d", n, want)
+	}
+	if n, want := Size(words), obinary.Size(words); n != want {
+		t.Errorf("words size: got %d, want %d", n, want)
+	}
+	invalid := struct{ Words [0]string }{}
+	if n := Size(invalid); n != -1 {
+		t.Errorf("unsupported element type: got %d, want -1", n)
+	}
+}
+
 func TestTwinEncodeSizes(t *testing.T) {
 	orders := []Order{BigEndian, LittleEndian}
 	for _, order := range orders {
@@ -931,6 +956,56 @@ func TestTwinUnexported(t *testing.T) {
 	}
 }
 
+func TestTwinDecodeUnexportedZeroWidth(t *testing.T) {
+	defer func() {
+		if p := recover(); p != nil {
+			t.Errorf("decoding a zero-width field panicked: %v", p)
+		}
+	}()
+	encoded := []byte{1, 2, 3, 4}
+	var want RZeroWidth
+	if _, err := obinary.Decode(encoded, BigEndian, &want); err != nil {
+		t.Fatal(err)
+		return
+	}
+	var decoded, streamed RZeroWidth
+	n, err := Decode(encoded, BigEndian, &decoded)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if err := ReadInto(bytes.NewReader(encoded), BigEndian, &streamed); err != nil {
+		t.Fatal(err)
+		return
+	}
+	if n != len(encoded) || decoded != want || streamed != want {
+		t.Fatalf("zero-width field: decoded %+v (%d bytes), read %+v, want %+v", decoded, n, streamed, want)
+	}
+}
+
+func TestTwinDecodeAnyHolder(t *testing.T) {
+	var word uint16
+	var holder any = &word
+	n, err := Decode([]byte{1, 2}, BigEndian, &holder)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if n != 2 || word != 0x0102 {
+		t.Fatalf("any holder decode: got %04x after %d bytes", word, n)
+	}
+	word = 0
+	r := bytes.NewReader([]byte{3, 4})
+	holder = &word
+	if err := ReadInto(r, BigEndian, &holder); err != nil {
+		t.Fatal(err)
+		return
+	}
+	if r.Len() != 0 || word != 0x0304 {
+		t.Fatalf("any holder read: got %04x with %d bytes left", word, r.Len())
+	}
+}
+
 func TestTwinShortStream(t *testing.T) {
 	data, err := Append(nil, BigEndian, rS)
 	if err != nil {
@@ -993,6 +1068,44 @@ func TestTwinEncodeDecodeAllocs(t *testing.T) {
 		t.Fatalf("twin Decode allocated %v", allocs)
 	}
 	t.Logf("twin Decode allocs: 0")
+}
+
+func TestTwinAppendAmortizedGrowth(t *testing.T) {
+	const records = 128
+	var scalar, structure []byte
+	var scalarGrowths, structGrowths int
+	for i := range records {
+		word := uint32(i)
+		next, err := Append(scalar, BigEndian, word)
+		if err != nil {
+			t.Fatal(err)
+			return
+		}
+		if cap(next) != cap(scalar) {
+			scalarGrowths++
+		}
+		scalar = next
+		next, err = Append(structure, BigEndian, RAppendWord{word})
+		if err != nil {
+			t.Fatal(err)
+			return
+		}
+		if cap(next) != cap(structure) {
+			structGrowths++
+		}
+		structure = next
+	}
+	if scalarGrowths >= records/4 || structGrowths >= records/4 {
+		t.Fatalf("fixed-width appends grew %d times (scalar) and %d times (struct) for %d records", scalarGrowths, structGrowths, records)
+	}
+	if len(scalar) != records*4 || !bytes.Equal(scalar, structure) {
+		t.Fatalf("append did not preserve the output: scalar len=%d, struct len=%d", len(scalar), len(structure))
+	}
+	for i := range records {
+		if got := obinary.BigEndian.Uint32(scalar[i*4:]); got != uint32(i) {
+			t.Fatalf("record %d contains %d", i, got)
+		}
+	}
 }
 
 func TestTwinNativeEndian(t *testing.T) {

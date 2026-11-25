@@ -7,9 +7,15 @@ stdout '^1 2 3 4 5 6 7$'
 cp stdout $WORK/native.txt
 logos eject -o out
 exists out/main.go
-! exec grep -n 'logos/arena' out/oneline.go out/first.go out/ungrouped.go out/only.go out/comment.go out/linecomment.go out/kept.go
+grep -count=1 'gosuda/loGos/rt/arena' out/oneline.go
+grep -count=1 'gosuda/loGos/rt/arena' out/first.go
+grep -count=1 'gosuda/loGos/rt/arena' out/ungrouped.go
+grep -count=1 'gosuda/loGos/rt/arena' out/only.go
+grep -count=1 'gosuda/loGos/rt/arena' out/comment.go
+grep -count=1 'gosuda/loGos/rt/arena' out/linecomment.go
+grep -count=1 'gosuda/loGos/rt/arena' out/kept.go
 grep '/\* arena \*/' out/ungrouped.go
-grep '/\* *arena *\*/' out/linecomment.go
+grep '// arena' out/linecomment.go
 grep '// format' out/comment.go
 grep '/\* region \*/ // arena' out/comment.go
 cd out
