@@ -1,0 +1,126 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos test -count=1 -v .
+stdout '^--- PASS: TestLocalOptions '
+stdout '^--- PASS: TestForeignOptions '
+logos eject -o out
+cd out
+go test -count=1 -v .
+stdout '^--- PASS: TestLocalOptions '
+stdout '^--- PASS: TestForeignOptions '
+exists $UPROOT1274/bin/go
+exec env -u GOROOT $UPROOT1274/bin/go test -count=1 -v .
+stdout '^--- PASS: TestLocalOptions '
+stdout '^--- PASS: TestForeignOptions '
+
+-- m/go.mod --
+module example.com/optionfields
+
+go 1.27
+
+-- m/fields.lgo --
+package fields
+
+import (
+	"comptime"
+
+	"example.com/optionfields/label"
+)
+
+type ForeignRow struct {
+	Label label.Text?
+}
+
+func CopyFields[T any](row, out T) T {
+	const for _, f := range comptime.Fields[T]() {
+		out.[f] = ReadField[f.Type](&row.[f])
+	}
+	return out
+}
+
+func CopyThroughProjection[T any](row, out T) T {
+	const if !comptime.IsStruct[T]() {
+		comptime.Error("expected a struct")
+	}
+	return CopyProjected[T](row, out)
+}
+
+func CopyProjected[T any](row, out T) T {
+	const for _, f := range comptime.Fields[T]() {
+		out.[f] = ReadProjection[T, f.Type](&row, func(e *T) *f.Type { return &e.[f] })
+	}
+	return out
+}
+
+func ReadField[F any](field *F) F {
+	return *field
+}
+
+func ReadProjection[T, F any](row *T, project func(*T) *F) F {
+	return *project(row)
+}
+
+-- m/label/label.lgo --
+package label
+
+type Text string
+
+-- m/fields_test.lgo --
+package fields_test
+
+import (
+	"testing"
+
+	"example.com/optionfields"
+)
+
+type localRow struct {
+	Note  string?
+	Cell  *(string?)
+	Link  *int?
+	Array [1](string?)
+}
+
+func TestLocalOptions(t *testing.T) {
+	var cell string? = "cell"
+	link := 37
+	row := localRow{Note: "note", Cell: &cell, Link: &link, Array: [1](string?){"array"}}
+	var otherCell string? = "other cell"
+	otherLink := 73
+	dst := localRow{
+		Note:  "other note",
+		Cell:  &otherCell,
+		Link:  &otherLink,
+		Array: [1](string?){"other array"},
+	}
+	checkLocal(t, fields.CopyFields[localRow](row, dst), &cell, &link)
+	checkLocal(t, fields.CopyThroughProjection[localRow](row, dst), &cell, &link)
+}
+
+func checkLocal(t *testing.T, got localRow, cell *(string?), link *int) {
+	t.Helper()
+	if (got.Note ?? "") != "note" || (got.Array[0] ?? "") != "array" {
+		t.Errorf("lost option payload: %+v", got)
+	}
+	if got.Cell != cell {
+		t.Error("pointer to option no longer refers to the caller's field")
+	}
+	fallback := 0
+	if (got.Link ?? &fallback) != link {
+		t.Error("option of pointer no longer contains the caller's pointer")
+	}
+}
+
+func TestForeignOptions(t *testing.T) {
+	row := fields.ForeignRow{Label: "foreign"}
+	got := fields.CopyThroughProjection[fields.ForeignRow](row, fields.ForeignRow{Label: "other"})
+	if (got.Label ?? "") != "foreign" {
+		t.Errorf("lost named option payload: %+v", got)
+	}
+	got = fields.CopyFields[fields.ForeignRow](fields.ForeignRow{}, fields.ForeignRow{Label: "other"})
+	if got.Label != nil {
+		t.Errorf("missing option became present: %+v", got)
+	}
+}

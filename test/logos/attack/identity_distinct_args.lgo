@@ -1,0 +1,30 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"reflect"
+)
+
+func Touch[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return 1
+	}
+	return 0
+}
+
+type Left struct {
+	N int
+}
+
+type Right struct {
+	N int
+}
+
+func main() {
+	a := reflect.ValueOf(Touch[Left]).Pointer()
+	b := reflect.ValueOf(Touch[Right]).Pointer()
+	fmt.Println(a == b)
+}

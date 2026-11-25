@@ -1,0 +1,33 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type A struct {
+	N int
+}
+
+type B struct {
+	N int
+}
+
+func BuildA[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n + BuildB[B]()
+}
+
+func BuildB[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n + BuildA[A]()
+}
+
+var _ = BuildA[A]() // ERROR "comptime::circular_instantiation\] A -> B -> A"

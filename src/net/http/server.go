@@ -3201,6 +3201,7 @@ type Server struct {
 	disableKeepAlives atomic.Bool
 	nextProtoOnce     sync.Once // guards setupHTTP2_* init
 	nextProtoErr      error     // result of http2.ConfigureServer if used
+	h2ExtendedConnect atomic.Bool
 
 	mu            sync.Mutex
 	listeners     map[*net.Listener]struct{}
@@ -3212,6 +3213,16 @@ type Server struct {
 	h3            *http3ServerHandler
 
 	listenerGroup sync.WaitGroup
+}
+
+// EnableHTTP2ExtendedConnect enables extended CONNECT (RFC 8441) for the
+// server's built-in HTTP/2 implementation. Call it before serving.
+// It does not enable HTTP/2 itself.
+//
+// Only call this method if the handler supports extended CONNECT. The handler
+// can read the requested protocol from the ":protocol" key in [Request.Header].
+func (s *Server) EnableHTTP2ExtendedConnect() {
+	s.h2ExtendedConnect.Store(true)
 }
 
 // Close immediately closes all active net.Listeners and any

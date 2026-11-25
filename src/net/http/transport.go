@@ -575,8 +575,13 @@ func (t *Transport) useRegisteredProtocol(req *Request) bool {
 // for this request if the Request's URL scheme requires one,
 // or nil for the normal case of using the Transport.
 func (t *Transport) alternateRoundTripper(req *Request) RoundTripper {
+	rt, _ := t.lookupAlternateRoundTripper(req)
+	return rt
+}
+
+func (t *Transport) lookupAlternateRoundTripper(req *Request) (rt RoundTripper, isHTTP2 bool) {
 	if !t.useRegisteredProtocol(req) {
-		return nil
+		return nil, false
 	}
 	if req.URL.Scheme == "https" && t.h2Config != nil && t.h2Config.ExternalRoundTrip() {
 		// This Transport has been configured to use an x/net/http2 Transport
@@ -585,27 +590,41 @@ func (t *Transport) alternateRoundTripper(req *Request) RoundTripper {
 		//
 		// The ClientConnPool API is deprecated, but we're doing our best here
 		// to continue supporting any users who are using it.
-		return t.h2Config
+		return t.h2Config, true
 	}
 	altProto, _ := t.altProto.Load().(map[string]RoundTripper)
-	return altProto[req.URL.Scheme]
+	return altProto[req.URL.Scheme], false
 }
 
 func validateHeaders(hdrs Header) string {
+	_, invalid := validateHeaderFields(hdrs, "")
+	return invalid
+}
+
+func validateHeaderFields(hdrs Header, method string) (extendedConnect bool, invalid string) {
 	for k, vv := range hdrs {
+		if k == ":protocol" && method == MethodConnect {
+			if len(vv) != 1 || !isToken(vv[0]) {
+				return false, `field value for ":protocol"`
+			}
+			extendedConnect = true
+			continue
+		}
 		if !httpguts.ValidHeaderFieldName(k) {
-			return fmt.Sprintf("field name %q", k)
+			return false, fmt.Sprintf("field name %q", k)
 		}
 		for _, v := range vv {
 			if !httpguts.ValidHeaderFieldValue(v) {
 				// Don't include the value in the error,
 				// because it may be sensitive.
-				return fmt.Sprintf("field value for %q", k)
+				return false, fmt.Sprintf("field value for %q", k)
 			}
 		}
 	}
-	return ""
+	return extendedConnect, ""
 }
+
+var errExtendedConnectRequiresHTTP2 = errors.New("net/http: extended CONNECT requires HTTP/2")
 
 // roundTrip implements a RoundTripper over HTTP.
 func (t *Transport) roundTrip(req *Request) (_ *Response, err error) {
@@ -623,11 +642,14 @@ func (t *Transport) roundTrip(req *Request) (_ *Response, err error) {
 	}
 	scheme := req.URL.Scheme
 	isHTTP := scheme == "http" || scheme == "https"
+	var extendedConnect bool
 	if isHTTP {
 		// Validate the outgoing headers.
-		if err := validateHeaders(req.Header); err != "" {
+		var invalid string
+		extendedConnect, invalid = validateHeaderFields(req.Header, req.Method)
+		if invalid != "" {
 			req.closeBody()
-			return nil, fmt.Errorf("net/http: invalid header %s", err)
+			return nil, fmt.Errorf("net/http: invalid header %s", invalid)
 		}
 
 		// Validate the outgoing trailers too.
@@ -640,7 +662,8 @@ func (t *Transport) roundTrip(req *Request) (_ *Response, err error) {
 	origReq := req
 	req = setupRewindBody(req)
 
-	if altRT := t.alternateRoundTripper(req); altRT != nil {
+	// A RoundTripper registered for a URL scheme need not use HTTP/2.
+	if altRT, isHTTP2 := t.lookupAlternateRoundTripper(req); altRT != nil && (!extendedConnect || isHTTP2) {
 		if resp, err := altRT.RoundTrip(req); err != ErrSkipAltProtocol {
 			return resp, err
 		}
@@ -715,6 +738,13 @@ func (t *Transport) roundTrip(req *Request) (_ *Response, err error) {
 		if err != nil {
 			req.closeBody()
 			return nil, err
+		}
+		if extendedConnect && !pconn.isHTTP2 {
+			if pconn.alt == nil {
+				t.putOrCloseIdleConn(pconn)
+			}
+			req.closeBody()
+			return nil, errExtendedConnectRequiresHTTP2
 		}
 
 		var resp *Response
@@ -1880,7 +1910,7 @@ func (t *Transport) dialConn(ctx context.Context, cm connectMethod, isClientConn
 		if err != nil {
 			return nil, err
 		}
-		return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: rt}, nil
+		return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: rt, isHTTP2: true}, nil
 	}
 
 	if cm.scheme() == "https" && t.hasCustomTLSDialer() {
@@ -2062,7 +2092,7 @@ func (t *Transport) dialConn(ctx context.Context, cm connectMethod, isClientConn
 		if isClientConn {
 			cc, err := t.http2NewClientConn(pconn.conn, internalStateHook)
 			if err == nil {
-				return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: cc, isClientConn: true}, nil
+				return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: cc, isClientConn: true, isHTTP2: true}, nil
 			}
 			if err != errors.ErrUnsupported {
 				return nil, err
@@ -2070,7 +2100,7 @@ func (t *Transport) dialConn(ctx context.Context, cm connectMethod, isClientConn
 		} else {
 			rt, err := t.http2AddConn(cm.targetScheme, cm.targetAddr, pconn.conn)
 			if err == nil {
-				return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: rt}, nil
+				return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: rt, isHTTP2: true}, nil
 			}
 			if err != errors.ErrUnsupported {
 				return nil, err
@@ -2089,7 +2119,7 @@ func (t *Transport) dialConn(ctx context.Context, cm connectMethod, isClientConn
 			pconn.conn.Close()
 			return nil, err
 		}
-		return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: alt, isClientConn: true}, nil
+		return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: alt, isClientConn: true, isHTTP2: true}, nil
 	}
 
 	if unencryptedHTTP2 {
@@ -2102,7 +2132,7 @@ func (t *Transport) dialConn(ctx context.Context, cm connectMethod, isClientConn
 			// pconn.conn was closed by next (http2configureTransports.upgradeFn).
 			return nil, e.RoundTripErr()
 		}
-		return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: alt}, nil
+		return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: alt, isHTTP2: true}, nil
 	}
 
 	if s := pconn.tlsState; s != nil && s.NegotiatedProtocolIsMutual && s.NegotiatedProtocol != "" {
@@ -2113,7 +2143,7 @@ func (t *Transport) dialConn(ctx context.Context, cm connectMethod, isClientConn
 				// pconn.conn was closed by next (http2configureTransports.upgradeFn).
 				return nil, e.RoundTripErr()
 			}
-			return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: alt}, nil
+			return &persistConn{t: t, cacheKey: pconn.cacheKey, alt: alt, isHTTP2: s.NegotiatedProtocol == "h2"}, nil
 		}
 	}
 
@@ -2256,8 +2286,9 @@ type persistConn struct {
 	closech      chan struct{}       // closed when conn closed
 	availch      chan struct{}       // ClientConn only: contains a value when conn is usable
 	isProxy      bool
-	sawEOF       bool  // whether we've seen EOF from conn; owned by readLoop
-	isClientConn bool  // whether this is a ClientConn (outside any pool)
+	sawEOF       bool // whether we've seen EOF from conn; owned by readLoop
+	isClientConn bool // whether this is a ClientConn (outside any pool)
+	isHTTP2      bool
 	readLimit    int64 // bytes allowed to be read; owned by readLoop
 	// writeErrCh passes the request write error (usually nil)
 	// from the writeLoop goroutine to the readLoop which passes

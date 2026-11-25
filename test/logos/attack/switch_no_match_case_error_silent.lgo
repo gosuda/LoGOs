@@ -1,0 +1,21 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func F[T any]() string {
+	const switch T {
+	case int:
+		comptime.Error("int unsupported")
+		return "int"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(F[string]())
+}

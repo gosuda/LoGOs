@@ -14,9 +14,9 @@ import (
 
 const yieldParam = "_logos_yield"
 
-func (fc *funcLower) generatorTarget() ([]types2.Type, bool) {
+func (fc *funcLower) generatorTarget() *types2.TypeList {
 	if len(fc.specs) != 1 {
-		return nil, false
+		return nil
 	}
 	// The spec result type resolves through the function's signature, so a
 	// lambda whose FuncType was rebuilt synthetically still detects as a
@@ -25,28 +25,97 @@ func (fc *funcLower) generatorTarget() ([]types2.Type, bool) {
 	if typ == nil {
 		typ = fc.fl.pkg.info.TypeOf(fc.ft.ResultList[0].Type)
 	}
+	return yieldTypeArgs(typ)
+}
+
+func yieldTypeArgs(typ types2.Type) *types2.TypeList {
 	named, ok := types2.Unalias(typ).(*types2.Named)
 	if !ok {
-		return nil, false
+		return nil
 	}
 	obj := named.Obj()
 	if obj == nil || obj.Pkg() == nil || obj.Pkg().Path() != "iter" {
-		return nil, false
+		return nil
 	}
 	args := named.TypeArgs()
-	switch obj.Name() {
-	case "Seq":
-		if args.Len() != 1 {
-			return nil, false
-		}
-		return []types2.Type{args.At(0)}, true
-	case "Seq2":
-		if args.Len() != 2 {
-			return nil, false
-		}
-		return []types2.Type{args.At(0), args.At(1)}, true
+	if obj.Name() == "Seq" && args.Len() == 1 || obj.Name() == "Seq2" && args.Len() == 2 {
+		return args
 	}
-	return nil, false
+	return nil
+}
+
+type ctYieldFrame struct {
+	callback string
+	args     *types2.TypeList
+}
+
+func (w ctWalker) ctYieldFunction(sig *types2.Signature) bool {
+	if sig == nil || sig.Results().Len() != 1 {
+		return false
+	}
+	args := yieldTypeArgs(sig.Results().At(0).Type())
+	if args.Len() == 0 {
+		return false
+	}
+	fl, pos := w.fl, w.body.Pos()
+	params := make([]*syntax.Field, args.Len())
+	for i := range params {
+		params[i] = at(&syntax.Field{Type: fl.ctTypeExpr(pos, args.At(i))}, pos)
+	}
+	callback := w.ctYieldName()
+	yield := at(&syntax.Field{
+		Name: nameOf(pos, callback),
+		Type: at(&syntax.FuncType{
+			ParamList:  params,
+			ResultList: []*syntax.Field{at(&syntax.Field{Type: fl.ctBuiltin(pos, "bool")}, pos)},
+		}, pos),
+	}, pos)
+	body := *w.body
+	ft := at(&syntax.FuncType{ParamList: []*syntax.Field{yield}}, pos)
+	frame := newFuncLower(fl, ft, nil, &body)
+	frame.ctYield = &ctYieldFrame{callback: callback, args: args}
+	fl.ctFunction(ft, nil, &body)
+	lit := at(&syntax.FuncLit{Type: ft, Body: &body}, pos)
+	w.body.List = []syntax.Stmt{returnOf(pos, []syntax.Expr{lit})}
+	return true
+}
+
+func (w ctWalker) ctYieldName() string {
+	for {
+		name := w.fl.cswName("ctyield")
+		used := false
+		syntax.Inspect(w.body, func(n syntax.Node) bool {
+			if id, ok := n.(*syntax.Name); ok && id.Value == name {
+				used = true
+			}
+			return !used
+		})
+		if !used {
+			return name
+		}
+	}
+}
+
+func (w ctWalker) ctYieldStmt(s *syntax.YieldStmt) ([]syntax.Stmt, syntax.Stmt) {
+	frame := w.ctYield
+	if frame == nil {
+		w.reject(s, "missing generator callback for checked yield")
+		return nil, s
+	}
+	pos, end := s.Pos(), syntax.EndPos(s)
+	args := syntax.UnpackListExpr(s.Value)
+	pre := w.walkExprs(len(args), func(i int) *syntax.Expr { return &args[i] }, func(i int, _ syntax.Expr) types2.Type {
+		return frame.args.At(i)
+	})
+	call := callOf(pos, nameOf(pos, frame.callback), args)
+	cond := at(&syntax.Operation{Op: syntax.Not, X: call}, pos)
+	exits, ret := w.cleanupReturn(returnOf(pos, nil))
+	branch := ifOf(pos, nil, cond, append(exits, ret))
+	branch.Then.Rbrace = end
+	if len(pre) == 0 {
+		return nil, branch
+	}
+	return nil, blockEndingAt(pos, end, append(pre, branch))
 }
 
 func (fc *funcLower) yieldQualifier(p *types2.Package) string {
@@ -60,15 +129,16 @@ func (fc *funcLower) yieldQualifier(p *types2.Package) string {
 }
 
 func (fc *funcLower) lowerYield() bool {
-	targs, ok := fc.generatorTarget()
-	if !ok {
+	targs := fc.generatorTarget()
+	if targs.Len() == 0 {
 		return false
 	}
 	fl := fc.fl
 	pos := fc.body.Pos()
-	spellings := make([]string, len(targs))
-	natives := make([]syntax.Expr, len(targs))
-	for i, targ := range targs {
+	spellings := make([]string, targs.Len())
+	natives := make([]syntax.Expr, targs.Len())
+	for i := range targs.Len() {
+		targ := targs.At(i)
 		if fl.asOption(targ) != nil {
 			// An optional element (`int?`) has no plain-Go spelling: the
 			// yield callback parameter must spell the lowered option.
@@ -175,15 +245,15 @@ func (fc *funcLower) lowerYieldStmt(s *syntax.YieldStmt) syntax.Stmt {
 	fl := fc.fl
 	pos := s.Pos()
 	vals := syntax.UnpackListExpr(s.Value)
-	targs, _ := fc.generatorTarget()
+	targs := fc.generatorTarget()
 	args := make([]syntax.Expr, len(vals))
 	var texts []otext
 	texts = append(texts, gen("if !"+yieldParam+"("))
 	for i, v := range vals {
 		var val syntax.Expr
 		head, tail := "", ""
-		if i < len(targs) {
-			var t types2.Type = targs[i]
+		if i < targs.Len() {
+			t := targs.At(i)
 			if fl.asOption(t) != nil {
 				// An optional element yield (`iter.Seq[int?]`) must wrap the
 				// member value into the option the callback accepts.

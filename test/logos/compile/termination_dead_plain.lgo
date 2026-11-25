@@ -1,0 +1,36 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Pair struct {
+	A int
+	B string
+}
+
+func afterIf() int {
+	const if true {
+		return 1
+	}
+	comptime.Error("after const if") // ERROR "\[comptime::error\] after const if"
+	return 0
+}
+
+func afterFor() string {
+	const for _, f := range comptime.Fields[Pair]() {
+		return f.Name
+	}
+	comptime.Error("after const for") // ERROR "\[comptime::error\] after const for"
+	return ""
+}
+
+func laterField() int {
+	const for _, f := range comptime.Fields[Pair]() {
+		const if f.Index == 1 {
+			comptime.Error("later field") // ERROR "\[comptime::error\] later field"
+		}
+		return f.Index
+	}
+	return -1
+}

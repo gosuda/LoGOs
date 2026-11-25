@@ -160,7 +160,7 @@ func (s *Schedule) staticcopy(l *ir.Name, loff int64, rn *ir.Name, typ *types.Ty
 		staticdata.InitAddr(l, loff, staticdata.FuncLinksym(rn))
 		return true
 	}
-	if rn.Class != ir.PEXTERN || rn.Sym().Pkg != types.LocalPkg {
+	if l.LogosCtGlobal() || rn.Class != ir.PEXTERN || rn.Sym().Pkg != types.LocalPkg {
 		return false
 	}
 	if rn.Defn == nil {
@@ -360,8 +360,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		switch r.X.Op() {
 		case ir.OARRAYLIT, ir.OSLICELIT, ir.OMAPLIT, ir.OSTRUCTLIT:
 			// Init pointer.
-			a := StaticName(r.X.Type())
-			logosMarkTemp(a, l)
+			a := logosStaticTemp(l, loff, r.X.Type())
 
 			s.Temps[r] = a
 			staticdata.InitAddr(l, loff, a.Linksym())
@@ -373,7 +372,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		//dump("not static ptrlit", r);
 
 	case ir.OSTR2BYTES:
-		if disableGlobalAddrs {
+		if disableGlobalAddrs || l.LogosCtGlobal() {
 			return false
 		}
 		r := r.(*ir.ConvExpr)
@@ -381,6 +380,11 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			sval := ir.StringVal(r.X)
 			staticdata.InitSliceBytes(l, loff, sval)
 			return true
+		}
+
+	case ir.OSLICE3:
+		if l.LogosCtGlobal() && l.Readonly() {
+			return s.logosStaticSlice(l, loff, r.(*ir.SliceExpr))
 		}
 
 	case ir.OSLICELIT:
@@ -392,7 +396,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		// Init slice.
 		ta := types.NewArray(r.Type().Elem(), r.Len)
 		ta.SetNoalg(true)
-		a := logosBackingArray(l, loff, ta)
+		a := logosBackingName(l, loff, ta)
 		s.Temps[r] = a
 		staticdata.InitSlice(l, loff, a.Linksym(), r.Len)
 		// Fall through to init underlying array.
@@ -421,7 +425,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 		break
 
 	case ir.OCLOSURE:
-		if disableGlobalAddrs {
+		if disableGlobalAddrs || l.LogosCtGlobal() {
 			return false
 		}
 		r := r.(*ir.ClosureExpr)
@@ -491,8 +495,7 @@ func (s *Schedule) StaticAssign(l *ir.Name, loff int64, r ir.Node, typ *types.Ty
 			assign(base.Pos, l, loff+int64(types.PtrSize), val)
 		} else {
 			// Construct temp to hold val, write pointer to temp into n.
-			a := StaticName(val.Type())
-			logosMarkTemp(a, l)
+			a := logosStaticTemp(l, loff+int64(types.PtrSize), val.Type())
 			s.Temps[val] = a
 			assign(base.Pos, a, 0, val)
 			staticdata.InitAddr(l, loff+int64(types.PtrSize), a.Linksym())

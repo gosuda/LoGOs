@@ -11,8 +11,11 @@ import (
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 	"fmt"
+	"go/constant"
 	"go/token"
 	"slices"
+	"strconv"
+	"strings"
 )
 
 type ctfeResult struct {
@@ -28,6 +31,7 @@ type groupedMoveState struct {
 	fileTails  map[*syntax.Group]syntax.Decl
 	blockTails map[*syntax.DeclStmt]syntax.Stmt
 	inserted   map[syntax.Node]bool
+	frozen     map[*syntax.ConstDecl]syntax.Expr
 }
 
 func (fl *fileLower) lowerCTFE() {
@@ -41,6 +45,7 @@ func (fl *fileLower) lowerCTFE() {
 		fileTails:  map[*syntax.Group]syntax.Decl{},
 		blockTails: map[*syntax.DeclStmt]syntax.Stmt{},
 		inserted:   map[syntax.Node]bool{},
+		frozen:     map[*syntax.ConstDecl]syntax.Expr{},
 	}
 	fl.lowerCTFEFileList(gst)
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -96,9 +101,14 @@ func (fl *fileLower) ctfeUnspelled(obj *types2.Const, v ctfe.Value, init syntax.
 
 func (fl *fileLower) lowerCTFEFileList(gst *groupedMoveState) {
 	list := &fl.file.DeclList
+	fl.freezeCompositeConstGroups(*list, gst)
 	for i := 0; i < len(*list); i++ {
 		cd, ok := (*list)[i].(*syntax.ConstDecl)
 		if !ok {
+			continue
+		}
+		if values := gst.frozen[cd]; values != nil {
+			cd.Values = values
 			continue
 		}
 		r, ok := fl.ctfeLookup(cd)
@@ -161,9 +171,14 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 		if !ok {
 			continue
 		}
+		fl.freezeCompositeConstGroups(ds.DeclList, gst)
 		for j := 0; j < len(ds.DeclList); j++ {
 			cd, ok := ds.DeclList[j].(*syntax.ConstDecl)
 			if !ok {
+				continue
+			}
+			if values := gst.frozen[cd]; values != nil {
+				cd.Values = values
 				continue
 			}
 			r, ok := fl.ctfeLookup(cd)
@@ -209,6 +224,141 @@ func (fl *fileLower) lowerCTFEBlock(b *syntax.BlockStmt, gst *groupedMoveState) 
 	}
 }
 
+func (fl *fileLower) freezeCompositeConstGroups(list []syntax.Decl, gst *groupedMoveState) {
+	for i := 0; i < len(list); {
+		cd, ok := list[i].(*syntax.ConstDecl)
+		if !ok || cd.Group == nil {
+			i++
+			continue
+		}
+		_, end := groupRun(&list, i, cd.Group)
+		group := list[i:end]
+		i = end
+		composite := func(d syntax.Decl) bool {
+			spec := d.(*syntax.ConstDecl)
+			if len(spec.NameList) != 1 {
+				return false
+			}
+			obj, _ := fl.pkg.info.Defs[spec.NameList[0]].(*types2.Const)
+			return fl.pkg.info.LogosCTFE[obj].IsComposite()
+		}
+		if !slices.ContainsFunc(group, composite) {
+			continue
+		}
+		var inits []syntax.Expr
+		for _, d := range group {
+			spec := d.(*syntax.ConstDecl)
+			if values := syntax.UnpackListExpr(spec.Values); len(values) != 0 {
+				inits = values
+			}
+			if !composite(d) {
+				gst.frozen[spec] = fl.freezeConstSpec(spec, inits)
+			}
+		}
+	}
+}
+
+func (fl *fileLower) freezeConstSpec(cd *syntax.ConstDecl, inits []syntax.Expr) syntax.Expr {
+	values := make([]syntax.Expr, len(cd.NameList))
+	var ejectValues []syntax.Expr
+	for i, name := range cd.NameList {
+		obj, ok := fl.pkg.info.Defs[name].(*types2.Const)
+		if !ok || obj.Val() == nil || obj.Val().Kind() == constant.Unknown {
+			return nil
+		}
+		e := constExactExpr(name.Pos(), obj.Val())
+		b, _ := obj.Type().Underlying().(*types2.Basic)
+		if b == nil {
+			return nil
+		}
+		switch {
+		case b.Kind() == types2.UntypedRune:
+			e = at(&syntax.Operation{Op: syntax.Add, X: litOf(name.Pos(), "'\\x00'", syntax.RuneLit), Y: e}, name.Pos())
+		case b.Info()&types2.IsUntyped == 0 && cd.Type == nil:
+			text, ok := fl.spellLowered(obj.Type())
+			if ok {
+				typ, ok := typeExprAt(text, name.Pos())
+				if !ok {
+					base.Errorf("%s: cannot write type %s of grouped constant %s", name.Pos().String(), obj.Type(), name.Value)
+					return nil
+				}
+				e = callOf(name.Pos(), typ, []syntax.Expr{e})
+				break
+			}
+			native, eject, ok := fl.ownedScalarBridge(obj, inits[i], e, name.Pos())
+			if !ok {
+				base.Errorf("%s: cannot preserve type %s of grouped constant %s", name.Pos().String(), obj.Type(), name.Value)
+				return nil
+			}
+			if ejectValues == nil {
+				ejectValues = slices.Clone(values)
+			}
+			ejectValues[i] = eject
+			e = native
+		}
+		values[i] = e
+		if ejectValues != nil && ejectValues[i] == nil {
+			ejectValues[i] = e
+		}
+	}
+	var start, end int
+	prefix := ""
+	if old := syntax.UnpackListExpr(cd.Values); len(old) != 0 {
+		start = fl.off(syntax.StartPos(old[0]))
+		end = fl.endOff(old[len(old)-1])
+	} else {
+		last := cd.NameList[len(cd.NameList)-1]
+		start = fl.off(last.Pos()) + len(last.Value)
+		end = start
+		prefix = " = "
+	}
+	if ejectValues == nil {
+		ejectValues = values
+	}
+	fl.add(start, end, prefix+renderExpr(listOf(cd.Pos(), ejectValues)))
+	return listOf(cd.Pos(), values)
+}
+
+func constExactExpr(pos syntax.Pos, v constant.Value) syntax.Expr {
+	switch v.Kind() {
+	case constant.Bool:
+		op := syntax.Eql
+		if !constant.BoolVal(v) {
+			op = syntax.Neq
+		}
+		return at(&syntax.Operation{Op: op, X: litOf(pos, "0", syntax.IntLit), Y: litOf(pos, "0", syntax.IntLit)}, pos)
+	case constant.String:
+		return litOf(pos, v.ExactString(), syntax.StringLit)
+	case constant.Int:
+		return constExactNumber(pos, v.ExactString(), syntax.IntLit)
+	case constant.Float:
+		text := v.ExactString()
+		if numerator, denominator, ok := strings.Cut(text, "/"); ok {
+			x := constExactNumber(pos, numerator+".0", syntax.FloatLit)
+			y := litOf(pos, denominator+".0", syntax.FloatLit)
+			return at(&syntax.ParenExpr{X: at(&syntax.Operation{Op: syntax.Div, X: x, Y: y}, pos)}, pos)
+		}
+		if !strings.ContainsAny(text, ".pPeE") {
+			text += ".0"
+		}
+		return constExactNumber(pos, text, syntax.FloatLit)
+	case constant.Complex:
+		re := constExactExpr(pos, constant.Real(v))
+		im := constExactExpr(pos, constant.Imag(v))
+		imaginary := at(&syntax.Operation{Op: syntax.Mul, X: im, Y: litOf(pos, "1i", syntax.ImagLit)}, pos)
+		return at(&syntax.ParenExpr{X: at(&syntax.Operation{Op: syntax.Add, X: re, Y: imaginary}, pos)}, pos)
+	}
+	base.Fatalf("logos: invalid checked constant value %v", v)
+	return nil
+}
+
+func constExactNumber(pos syntax.Pos, value string, kind syntax.LitKind) syntax.Expr {
+	if abs, negative := strings.CutPrefix(value, "-"); negative {
+		return at(&syntax.Operation{Op: syntax.Sub, X: litOf(pos, abs, kind)}, pos)
+	}
+	return litOf(pos, value, kind)
+}
+
 func (fl *fileLower) hoistBlockConstData(cd *syntax.ConstDecl, r ctfeResult) ctfeResult {
 	if r.keepCall || !r.val.IsComposite() || !rodataStaticValue(r.val) || !ctfeBearsSlice(r.val.Type(), 0) {
 		return r
@@ -243,6 +393,199 @@ func ctfeBearsSlice(t *ctfe.Type, depth int) bool {
 		}
 	}
 	return false
+}
+
+func (w ctWalker) ctConstDecl(cd *syntax.ConstDecl) ([]syntax.Stmt, bool) {
+	info := w.fl.pkg.info
+	if cd.Group == nil && !slices.ContainsFunc(cd.NameList, func(name *syntax.Name) bool {
+		obj, _ := info.Defs[name].(*types2.Const)
+		_, folded := info.LogosCTFE[obj]
+		return folded
+	}) {
+		return nil, false
+	}
+	list := make([]syntax.Stmt, 0, len(cd.NameList))
+	for _, name := range cd.NameList {
+		obj, ok := info.Defs[name].(*types2.Const)
+		if !ok {
+			w.reject(name, "missing checked constant declaration")
+			return nil, true
+		}
+		if value, ok := info.LogosCTFE[obj]; ok && value.IsComposite() {
+			list = append(list, w.ctCompositeDecl(name, obj, value)...)
+			continue
+		}
+		list = append(list, w.ctScalarDecl(name, obj))
+	}
+	return list, true
+}
+
+func (w ctWalker) ctCompositeDecl(name *syntax.Name, obj *types2.Const, v ctfe.Value) []syntax.Stmt {
+	if name.Value == "_" {
+		return nil
+	}
+	pos := name.Pos()
+	if _, isMap := compositeUnderlying(obj.Type()).(*types2.Map); isMap {
+		w.ctMapConstant(obj, v, pos)
+		return nil
+	}
+	value, err := w.ctConstValue(v, obj.Type(), pos)
+	if err != nil {
+		w.reject(name, err.Error())
+		return nil
+	}
+	if rodataStaticValue(v) && ctfeBearsSlice(v.Type(), 0) {
+		value = w.ctConstData(value, pos)
+	}
+	decl := at(&syntax.VarDecl{NameList: []*syntax.Name{name}, Values: value}, pos)
+	use := assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{nameOf(pos, obj.Name())})
+	return []syntax.Stmt{at(&syntax.DeclStmt{DeclList: []syntax.Decl{decl}}, pos), use}
+}
+
+func (w ctWalker) ctScalarDecl(name *syntax.Name, obj *types2.Const) syntax.Stmt {
+	pos := name.Pos()
+	b, ok := obj.Type().Underlying().(*types2.Basic)
+	if !ok || obj.Val() == nil || obj.Val().Kind() == constant.Unknown {
+		w.reject(name, "missing exact scalar const value")
+		return at(&syntax.EmptyStmt{}, pos)
+	}
+	var typ syntax.Expr
+	source := types2.Type(b)
+	if b.Info()&types2.IsUntyped == 0 {
+		var kind types2.BasicKind
+		switch info := b.Info(); {
+		case info&types2.IsBoolean != 0:
+			kind = types2.UntypedBool
+		case info&types2.IsInteger != 0:
+			kind = types2.UntypedInt
+		case info&types2.IsFloat != 0:
+			kind = types2.UntypedFloat
+		case info&types2.IsComplex != 0:
+			kind = types2.UntypedComplex
+		case info&types2.IsString != 0:
+			kind = types2.UntypedString
+		default:
+			w.reject(name, "invalid scalar const type")
+			return at(&syntax.EmptyStmt{}, pos)
+		}
+		source = types2.Typ[kind]
+		typ = w.fl.ctTypeExpr(pos, obj.Type())
+	}
+	value := nameOf(pos, "_logos_ct_value")
+	w.fl.ct.bindUse(value, types2.NewConst(pos, nil, value.Value, source, obj.Val()))
+	decl := at(&syntax.ConstDecl{NameList: []*syntax.Name{name}, Type: typ, Values: value}, pos)
+	return at(&syntax.DeclStmt{DeclList: []syntax.Decl{decl}}, pos)
+}
+
+func (w ctWalker) ctConstData(value syntax.Expr, pos syntax.Pos) syntax.Expr {
+	name := w.ctConstName()
+	decl := at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, name)}, Values: value}, pos)
+	w.fl.constDecls = append(w.fl.constDecls, decl)
+	w.fl.rodataVars = append(w.fl.rodataVars, rodataVar{vd: decl})
+	return nameOf(pos, name)
+}
+
+func (w ctWalker) ctConstName() string {
+	name := fmt.Sprintf("_logos_const_%x_%d", w.fl.ct.instanceName, w.fl.pkg.localConstSeq)
+	w.fl.pkg.localConstSeq++
+	return name
+}
+
+func (w ctWalker) ctConstScalar(v ctfe.Value, pos syntax.Pos) (syntax.Expr, error) {
+	e, err := v.Expr(pos)
+	if name, ok := e.(*syntax.Name); ok {
+		e = w.fl.ctBuiltin(pos, name.Value)
+	}
+	return e, err
+}
+
+func (w ctWalker) ctConstValue(v ctfe.Value, typ types2.Type, pos syntax.Pos) (syntax.Expr, error) {
+	if v.IsNilValue() {
+		return callOf(pos, w.fl.ctTypeExpr(pos, typ), []syntax.Expr{w.fl.ctBuiltin(pos, "nil")}), nil
+	}
+	under := compositeUnderlying(typ)
+	switch u := under.(type) {
+	case *types2.Basic:
+		e, err := w.ctConstScalar(v, pos)
+		if err != nil {
+			return nil, err
+		}
+		return callOf(pos, w.fl.ctTypeExpr(pos, typ), []syntax.Expr{e}), nil
+	case *types2.Struct:
+		return w.ctConstStruct(v, typ, u, pos)
+	case *types2.Array:
+		return w.ctConstArray(v.Elems(), typ, u.Elem(), pos)
+	case *types2.Slice:
+		backing, lo, length, limit, ok := v.SliceHeader()
+		if !ok {
+			return nil, fmt.Errorf("missing checked const slice contents")
+		}
+		if !v.SliceNeedsBacking() {
+			return w.ctConstArray(backing[lo:lo+length], typ, u.Elem(), pos)
+		}
+		lit, err := w.ctConstArray(backing[lo:limit], typ, u.Elem(), pos)
+		if err != nil {
+			return nil, err
+		}
+		return at(&syntax.SliceExpr{
+			X: lit, Full: true,
+			Index: [3]syntax.Expr{ctConstNumber(pos, 0), ctConstNumber(pos, uint64(length)), ctConstNumber(pos, uint64(limit-lo))},
+		}, pos), nil
+	case *types2.Map:
+		keys, vals := v.MapEntries()
+		elems := make([]syntax.Expr, len(keys))
+		for i, key := range keys {
+			k, err := w.ctConstValue(key, u.Key(), pos)
+			if err != nil {
+				return nil, err
+			}
+			item, err := w.ctConstValue(vals[i], u.Elem(), pos)
+			if err != nil {
+				return nil, err
+			}
+			elems[i] = at(&syntax.KeyValueExpr{Key: k, Value: item}, pos)
+		}
+		return at(&syntax.CompositeLit{Type: w.fl.ctTypeExpr(pos, typ), ElemList: elems, NKeys: len(elems), Rbrace: pos}, pos), nil
+	}
+	return nil, fmt.Errorf("cannot materialize checked const value of type %s", typ)
+}
+
+func (w ctWalker) ctConstStruct(v ctfe.Value, typ types2.Type, st *types2.Struct, pos syntax.Pos) (syntax.Expr, error) {
+	fields := v.Fields()
+	if len(fields) != st.NumFields() {
+		return nil, fmt.Errorf("missing checked const fields for %s", typ)
+	}
+	elems := make([]syntax.Expr, 0, len(fields))
+	for i, val := range fields {
+		field := st.Field(i)
+		if field.Name() == "_" {
+			continue
+		}
+		e, err := w.ctConstValue(val, field.Type(), pos)
+		if err != nil {
+			return nil, err
+		}
+		elems = append(elems, at(&syntax.KeyValueExpr{Key: nameOf(pos, field.Name()), Value: e}, pos))
+	}
+	lit := at(&syntax.CompositeLit{Type: w.fl.ctTypeExpr(pos, typ), ElemList: elems, NKeys: len(elems), Rbrace: pos}, pos)
+	w.fl.ct.bindOwnedLiteral(lit)
+	return lit, nil
+}
+
+func (w ctWalker) ctConstArray(values []ctfe.Value, typ, elem types2.Type, pos syntax.Pos) (syntax.Expr, error) {
+	elems := make([]syntax.Expr, len(values))
+	for i, v := range values {
+		e, err := w.ctConstValue(v, elem, pos)
+		if err != nil {
+			return nil, err
+		}
+		elems[i] = e
+	}
+	return at(&syntax.CompositeLit{Type: w.fl.ctTypeExpr(pos, typ), ElemList: elems, Rbrace: pos}, pos), nil
+}
+
+func ctConstNumber(pos syntax.Pos, n uint64) syntax.Expr {
+	return litOf(pos, strconv.FormatUint(n, 10), syntax.IntLit)
 }
 
 func (fl *fileLower) moveGroupedVar(cd *syntax.ConstDecl, i int, list *[]syntax.Decl, r ctfeResult, indent string, gst *groupedMoveState) int {
@@ -327,7 +670,11 @@ func (fl *fileLower) blockVarOffset(b *syntax.BlockStmt, at int, gst *groupedMov
 		if gst.inserted[b.List[k]] {
 			continue
 		}
-		return fl.lineStart(b.List[k]), true
+		line := fl.lineStart(b.List[k])
+		if line <= fl.off(syntax.StartPos(b.List[at])) {
+			return fl.off(syntax.StartPos(b.List[k])), true
+		}
+		return line, true
 	}
 	return 0, false
 }

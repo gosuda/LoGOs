@@ -15,3 +15,7 @@ var signalsToIgnore = []os.Signal{os.Interrupt}
 // SignalTrace is the signal to send to make a Go program
 // crash with a stack trace (no such signal in this case).
 var SignalTrace os.Signal = nil
+
+func signalExitCode(*os.ProcessState) int {
+	return -1
+}

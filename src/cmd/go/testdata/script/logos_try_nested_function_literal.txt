@@ -1,0 +1,167 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^nested try callbacks ok$'
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+stdout '^nested try callbacks ok$'
+
+-- m/go.mod --
+module example.com/nestedtry
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+var (
+	inner = errors.New("inner failure")
+	outer = errors.New("outer failure")
+)
+
+type counts struct {
+	calls int
+	steps int
+}
+
+func step(c *counts) error {
+	c.steps++
+	return inner
+}
+
+func invoke(c *counts, callback func() error) error {
+	c.calls++
+	return callback()
+}
+
+func forwarded(c *counts) error {
+	invoke(c, func() error {
+		step(c)?
+		panic("forwarded callback continued")
+	})?
+	return outer
+}
+
+func consume(c *counts, callback func() (int, error), failure error) (int, error) {
+	c.calls++
+	_, err := callback()
+	if !errors.Is(err, inner) {
+		panic(fmt.Sprintf("callback returned %v, want inner failure", err))
+	}
+	return 7, failure
+}
+
+func assigned(c *counts, failure error) (int, error) {
+	value := consume(c, func() (int, error) {
+		step(c)?
+		return 99, nil
+	}, failure)?
+	return value, nil
+}
+
+func assignedTarget() error {
+	type slot struct {
+		value int
+	}
+	var dst slot
+	var c counts
+	order := ""
+	target := func(callback func() error) *slot {
+		order += "T"
+		if err := callback(); !errors.Is(err, inner) {
+			panic(fmt.Sprintf("target callback returned %v", err))
+		}
+		return &dst
+	}
+	value := func() (int, error) {
+		order += "R"
+		return len(order), nil
+	}
+	target(func() error {
+		order += "C"
+		step(&c)?
+		panic("target callback continued")
+	}).value = value()?
+	if order != "TCR" || dst.value != 3 || c.steps != 1 {
+		panic(fmt.Sprintf("assignment: order=%q, value=%d, steps=%d", order, dst.value, c.steps))
+	}
+	for i := 0; i < 1; target(func() error {
+		order += "C"
+		step(&c)?
+		panic("post target callback continued")
+	}).value = value()? {
+		i++
+	}
+	if order != "TCRTCR" || dst.value != 6 || c.steps != 2 {
+		panic(fmt.Sprintf("loop post: order=%q, value=%d, steps=%d", order, dst.value, c.steps))
+	}
+	return nil
+}
+
+func returned(c *counts) error {
+	return invoke(c, func() error {
+		step(c)?
+		panic("returned callback continued")
+	})
+}
+
+func deferred(c *counts) error {
+	defer invoke(c, func() error {
+		step(c)?
+		panic("deferred callback continued")
+	})?
+	return nil
+}
+
+func errDeferred(c *counts) error {
+	errdefer invoke(c, func() error {
+		step(c)?
+		panic("error cleanup callback continued")
+	})?
+	return outer
+}
+
+func main() {
+	if err := assignedTarget(); err != nil {
+		panic(err)
+	}
+	once := counts{calls: 1, steps: 1}
+	for _, test := range []struct {
+		name string
+		run func(*counts) error
+		includesOuter bool
+	}{
+		{"forwarded", forwarded, false},
+		{"returned", returned, false},
+		{"deferred", deferred, false},
+		{"errdefer", errDeferred, true},
+	} {
+		var c counts
+		err := test.run(&c)
+		if !errors.Is(err, inner) || errors.Is(err, outer) != test.includesOuter || c != once {
+			panic(fmt.Sprintf("%s: error=%v, counts=%+v", test.name, err, c))
+		}
+	}
+	var succeeded counts
+	value, err := assigned(&succeeded, nil)
+	if err != nil {
+		panic(err)
+	}
+	if value != 7 || succeeded != once {
+		panic(fmt.Sprintf("assignment success: value=%d, counts=%+v", value, succeeded))
+	}
+	var failed counts
+	if _, err := assigned(&failed, outer); !errors.Is(err, outer) || errors.Is(err, inner) || failed != once {
+		panic(fmt.Sprintf("assignment failure: error=%v, counts=%+v", err, failed))
+	}
+	fmt.Println("nested try callbacks ok")
+}

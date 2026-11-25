@@ -674,6 +674,17 @@ func (g *overlayGraph) route(t types2.Type, steps []string, q qualKind) {
 	if t == nil || len(steps) == 0 {
 		return
 	}
+	if steps[0] == "O" {
+		// Root marker for a dropped top-level option; it selects no node
+		// of the decoded base. Descend through a present option, else skip
+		// the marker so deeper steps still mark nested declarations.
+		if o := optAsOption(t); o != nil {
+			g.route(o.Elem, steps[1:], q)
+			return
+		}
+		g.route(t, steps[1:], q)
+		return
+	}
 	switch n := t.(type) {
 	case *types2.Named:
 		if n.Obj().Pkg() != g.orig {
@@ -2350,6 +2361,28 @@ func wrapAtQual(pkg *types2.Package, t types2.Type, steps []string, q qualKind) 
 	}
 	if t == nil {
 		return t
+	}
+	if steps[0] == "O" && q == qualOption {
+		// Root marker for an alias right-hand side whose top-level option
+		// the general export drops. The decoded base has no option node,
+		// so the marker cannot navigate: with no further steps it restores
+		// the option around the root (idempotent when present), otherwise
+		// it descends into an already-restored option or skips itself on
+		// the bare base so deeper steps still apply.
+		if o := optAsOption(t); o != nil {
+			if len(steps) == 1 {
+				return t
+			}
+			elem := wrapAtQual(pkg, o.Elem, steps[1:], q)
+			if elem == o.Elem {
+				return t
+			}
+			return &types2.Option{Elem: elem}
+		}
+		if len(steps) == 1 {
+			return applyQual(t, q)
+		}
+		return wrapAtQual(pkg, t, steps[1:], q)
 	}
 	if o := optAsOption(t); o != nil {
 		if len(steps) == 0 {

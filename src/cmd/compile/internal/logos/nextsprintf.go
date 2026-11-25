@@ -12,7 +12,24 @@ import (
 	"cmd/compile/internal/types2"
 )
 
+type sprintfEvent struct {
+	call     *syntax.CallExpr
+	pkg      *types2.PkgName
+	start    int
+	end      int
+	trailing string
+	rep      string
+	eligible bool
+}
+
 func (s *nextScan) sprintfFile(f *syntax.File) {
+	type fmtUses struct {
+		refs         int
+		eligible     int
+		lastEligible *syntax.CallExpr
+	}
+	var events []sprintfEvent
+	var uses map[*types2.PkgName]fmtUses
 	syntax.Inspect(f, func(n syntax.Node) bool {
 		call, ok := n.(*syntax.CallExpr)
 		if !ok {
@@ -20,6 +37,10 @@ func (s *nextScan) sprintfFile(f *syntax.File) {
 		}
 		if s.insideLines(int(call.Pos().Line())) {
 			return false
+		}
+		pkg := s.sprintfPkg(call)
+		if pkg == nil {
+			return true
 		}
 		if rep, ok := s.sprintf(call); ok {
 			start, ok := s.startOf(call)
@@ -34,17 +55,61 @@ func (s *nextScan) sprintfFile(f *syntax.File) {
 			if blocked {
 				return false
 			}
-			s.emit(start, end, rep+trailing)
+			events = append(events, sprintfEvent{call: call, pkg: pkg, start: start, end: end, trailing: trailing, rep: rep, eligible: true})
+			if uses == nil {
+				uses = make(map[*types2.PkgName]fmtUses)
+			}
+			use := uses[pkg]
+			use.eligible++
+			use.lastEligible = call
+			uses[pkg] = use
 			return false
 		}
+		events = append(events, sprintfEvent{call: call, pkg: pkg})
 		return true
+	})
+	if len(uses) > 0 {
+		syntax.Inspect(f, func(n syntax.Node) bool {
+			name, ok := n.(*syntax.Name)
+			if !ok {
+				return true
+			}
+			pkg, ok := s.info.Uses[name].(*types2.PkgName)
+			if !ok {
+				return true
+			}
+			if use, tracked := uses[pkg]; tracked {
+				use.refs++
+				uses[pkg] = use
+			}
+			return true
+		})
+	}
+	for _, ev := range events {
+		if !ev.eligible {
+			s.sprintfTask(ev.call, "the fmt.Sprintf call cannot be rewritten automatically; convert it by hand")
+			continue
+		}
+		use := uses[ev.pkg]
+		if use.refs == use.eligible && use.lastEligible == ev.call {
+			s.sprintfTask(ev.call, "fmt.Sprintf is the file's last fmt use; convert it by hand and drop the fmt import if it becomes unused")
+			continue
+		}
+		s.emitInterpolation(ev.start, ev.end, ev.rep+ev.trailing)
+	}
+}
+
+func (s *nextScan) sprintfTask(call *syntax.CallExpr, instruction string) {
+	s.tasks = append(s.tasks, NextTask{
+		Category:    "ai-patch",
+		Rule:        nextRuleSprintf,
+		StartLine:   int(call.Pos().Line()),
+		EndLine:     int(syntax.EndPos(call).Line()),
+		Instruction: instruction,
 	})
 }
 
 func (s *nextScan) sprintf(call *syntax.CallExpr) (string, bool) {
-	if !s.sprintfCallee(call) {
-		return "", false
-	}
 	cooked, ok := sprintfCooked(call)
 	if !ok {
 		return "", false
@@ -60,23 +125,23 @@ func (s *nextScan) sprintf(call *syntax.CallExpr) (string, bool) {
 	return buildInterp(items, srcs), true
 }
 
-func (s *nextScan) sprintfCallee(call *syntax.CallExpr) bool {
+func (s *nextScan) sprintfPkg(call *syntax.CallExpr) *types2.PkgName {
 	fun, ok := call.Fun.(*syntax.SelectorExpr)
 	if !ok {
-		return false
+		return nil
 	}
 	if fun.Sel.Value != "Sprintf" {
-		return false
+		return nil
 	}
 	base, ok := fun.X.(*syntax.Name)
 	if !ok {
-		return false
+		return nil
 	}
 	pkg, ok := s.info.Uses[base].(*types2.PkgName)
-	if !ok {
-		return false
+	if !ok || pkg.Imported().Path() != "fmt" {
+		return nil
 	}
-	return pkg.Imported().Path() == "fmt"
+	return pkg
 }
 
 func sprintfCooked(call *syntax.CallExpr) (string, bool) {
@@ -184,7 +249,7 @@ func parseVerbs(cooked string) ([]verbItem, bool) {
 			lit.WriteByte('%')
 			continue
 		}
-		if c == 's' || c == 'd' || c == 'v' {
+		if c == 's' || c == 'd' || c == 'v' || c == 't' {
 			flush(c)
 			continue
 		}
@@ -197,9 +262,11 @@ func parseVerbs(cooked string) ([]verbItem, bool) {
 func verbKind(verb byte, kind types2.LogosInterpKind) bool {
 	switch verb {
 	case 's':
-		return kind == types2.LogosInterpString || kind == types2.LogosInterpBytes
+		return kind == types2.LogosInterpString
 	case 'd':
 		return kind == types2.LogosInterpInt || kind == types2.LogosInterpUint
+	case 't':
+		return kind == types2.LogosInterpBool
 	case 'v':
 		return kind == types2.LogosInterpString || kind == types2.LogosInterpInt || kind == types2.LogosInterpUint || kind == types2.LogosInterpBool
 	}

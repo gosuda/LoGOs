@@ -1,0 +1,162 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# lib -> mid -> main. mid.Render is exported and passes its type parameter
+# to the comptime generic lib.Kind inside an option, and mid.Layout reaches
+# lib.Names inside a tuple through the unexported forwarding function
+# layout. A caller in another package cannot instantiate either, so mid
+# fails at compile time at the forwarding site, logos eject refuses with the
+# same text, and nothing reaches the comptime stub at run time (SPEC 2.5,
+# T-205).
+cd w
+! logos build ./...
+stderr 'mid[/\\]mid.lgo:6:\d+: \[comptime::exported_forwarder\] exported function Render forwards type parameter T to comptime generic Kind; a caller in another package cannot instantiate it'
+stderr 'mid[/\\]mid.lgo:10:\d+: \[comptime::exported_forwarder\] exported function Layout forwards type parameter T to forwarding function layout; a caller in another package cannot instantiate it'
+! stderr 'panic'
+! logos eject -o out
+stderr 'mid[/\\]mid.lgo:6:\d+: \[comptime::exported_forwarder\] exported function Render forwards type parameter T to comptime generic Kind; a caller in another package cannot instantiate it'
+! exists out
+
+# Unexported forwarding functions that pass their type parameter inside an
+# option, a tuple and a struct expand per instantiation, natively and in
+# ejected code, and both print the same.
+cd ../u
+logos run .
+stdout '^other struct AB true$'
+cp stdout $WORK/native.txt
+logos eject -o out
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+exists $UPROOT1274/bin/go
+exec env -u GOROOT $UPROOT1274/bin/go build ./...
+exec env -u GOROOT $UPROOT1274/bin/go run .
+cmp stdout $WORK/native.txt
+
+-- w/go.mod --
+module example.com/fwdforms
+
+go 1.27
+
+-- w/lib/lib.lgo --
+package lib
+
+import "comptime"
+
+func Kind[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return "struct"
+	}
+	return "other"
+}
+
+func Names[T any]() string {
+	s := ""
+	const for _, f := range comptime.Fields[T]() {
+		s = s + f.Name
+	}
+	return s
+}
+
+-- w/mid/mid.lgo --
+package mid
+
+import "example.com/fwdforms/lib"
+
+func Render[T any]() string {
+	return lib.Kind[T?]()
+}
+
+func Layout[T any]() string {
+	return layout[T]()
+}
+
+func layout[T any]() string {
+	return lib.Names[(a T, b int)]()
+}
+
+-- w/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/fwdforms/mid"
+)
+
+type P struct {
+	A int
+}
+
+func main() {
+	fmt.Println(mid.Render[P](), mid.Layout[int]())
+}
+
+-- u/go.mod --
+module example.com/fwdlocal
+
+go 1.27
+
+-- u/lib/lib.lgo --
+package lib
+
+import "comptime"
+
+func Kind[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return "struct"
+	}
+	return "other"
+}
+
+func Names[T any]() string {
+	s := ""
+	const for _, f := range comptime.Fields[T]() {
+		s = s + f.Name
+	}
+	return s
+}
+
+-- u/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/fwdlocal/lib"
+)
+
+type P struct {
+	A int
+}
+
+func option[T any]() string {
+	return lib.Kind[T?]()
+}
+
+func tuple[T any]() string {
+	return lib.Kind[(a T, b int)]()
+}
+
+func names[T any]() string {
+	return lib.Names[struct {
+		A T
+		B []T
+	}]()
+}
+
+func main() {
+	fmt.Println(option[P](), tuple[int](), names[string](), hold(P{A: 1}))
+}
+
+-- u/hold.lgo --
+package main
+
+import "example.com/fwdlocal/lib"
+
+func hold[T any](v T) bool {
+	var x T? = v
+	_ = lib.Kind[T?]()
+	return x != nil
+}

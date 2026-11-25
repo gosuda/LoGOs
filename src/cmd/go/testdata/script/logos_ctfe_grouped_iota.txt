@@ -1,0 +1,64 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^const groups ok$'
+cp stdout $WORK/native.txt
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $WORK/native.txt
+
+-- m/go.mod --
+module example.com/constgroups
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import "fmt"
+
+type count int
+
+const (
+	_ = iota
+	fileSlice = []int{7, 8}
+	fileIndex = iota
+	fileNext
+	fileTyped count = iota
+	fileTypedNext
+	fileRune = 'A' + iota
+	fileRuneNext
+)
+
+func ordinary() {
+	const (
+		first = iota
+		localSlice = []int{9}
+		index = iota
+		next
+	)
+	if first != 0 || index != 2 || next != 3 || localSlice[0] != 9 {
+		panic("ordinary const group")
+	}
+}
+
+func main() {
+	if fileIndex != 2 || fileNext != 3 || fileTyped != 4 || fileTypedNext != 5 || fileRune != 'G' || fileRuneNext != 'H' {
+		panic("file const group")
+	}
+	if fileSlice[0] != 7 || fileSlice[1] != 8 {
+		panic("file composite")
+	}
+	if fmt.Sprintf("%T %T %T %T", fileIndex, fileNext, fileRune, fileRuneNext) != "int int int32 int32" {
+		panic("file inferred types")
+	}
+	if fmt.Sprintf("%T %T", fileTyped, fileTypedNext) != "main.count main.count" {
+		panic("file named types")
+	}
+	ordinary()
+	fmt.Println("const groups ok")
+}

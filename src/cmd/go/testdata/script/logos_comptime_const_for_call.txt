@@ -1,0 +1,108 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A comptime generic called inside a concrete const for of an ordinary
+# function, nested const for and function literal included, runs its
+# native instance and ejects to a renamed call of the printed instance.
+
+cd m
+cp ../want.txt $WORK/want.txt
+
+logos run .
+cmp stdout $WORK/want.txt
+
+logos eject -o out
+exists out/main.go
+exists out/kinds/kinds.go
+! grep '"comptime"' out/main.go
+! grep 'kind\[' out/main.go
+! grep 'kinds\.Kind\[' out/main.go
+grep 'kind_logosct[0-9]+\(' out/main.go
+grep 'Kind_logosct[0-9]+\(' out/main.go
+
+cd out
+go run .
+cmp stdout $WORK/want.txt
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+
+-- want.txt --
+Port leaf leaf
+Sub struct struct
+  A A;B; leaf
+  B A;B; leaf
+Tags leaf leaf
+lit A leaf
+lit B leaf
+-- m/go.mod --
+module example.com/ctforcall
+
+go 1.27
+-- m/kinds/kinds.lgo --
+package kinds
+
+import "comptime"
+
+func Kind[F any](dst *F) string {
+	const if comptime.IsStruct[F]() {
+		return "struct"
+	} else {
+		return "leaf"
+	}
+}
+-- m/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"strings"
+
+	"example.com/ctforcall/kinds"
+)
+
+type Inner struct {
+	A int
+	B string
+}
+
+type Cfg struct {
+	Port int
+	Sub  Inner
+	Tags []string
+}
+
+func kind[F any](dst *F) string {
+	const if comptime.IsStruct[F]() {
+		return "struct"
+	} else {
+		return "leaf"
+	}
+}
+
+func describe[T any]() string {
+	var b strings.Builder
+	const for _, f := range comptime.Fields[T]() {
+		b.WriteString(f.Name + ";")
+	}
+	return b.String()
+}
+
+func main() {
+	var c Cfg
+	var in Inner
+	const for _, f := range comptime.Fields[Cfg]() {
+		fmt.Println(f.Name, kind[f.Type](&c.[f]), kinds.Kind[f.Type](&c.[f]))
+		const if comptime.IsStruct[f.Type]() {
+			const for _, g := range comptime.Fields[f.Type]() {
+				fmt.Println(" ", g.Name, describe[Inner](), kind[g.Type](&in.[g]))
+			}
+		}
+	}
+	fn := func() {
+		const for _, f := range comptime.Fields[Inner]() {
+			fmt.Println("lit", f.Name, kind[f.Type](&in.[f]))
+		}
+	}
+	fn()
+}

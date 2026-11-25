@@ -1,0 +1,71 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+[!exec:patch] skip 'patch unavailable'
+
+cd m
+
+cp main.go $WORK/main.orig
+cp hidden.go $WORK/hidden.orig
+
+# With -tags=omit the scanner and the staged build agree: hidden.go is
+# outside the active build, so --fix must refuse rather than rename it.
+env GOFLAGS=-tags=omit
+! logos next --fix
+stderr 'hidden.go'
+cmp main.go $WORK/main.orig
+cmp hidden.go $WORK/hidden.orig
+! exists main.lgo
+! exists hidden.lgo
+! exists next_tasks.json
+
+# A -tags flag that reaches only the scan, not the staged build, must refuse:
+# the child sees GOFLAGS alone, so CLI tags would validate nothing.
+env GOFLAGS=
+! logos next --fix -tags=omit
+stderr 'tags'
+cmp main.go $WORK/main.orig
+cmp hidden.go $WORK/hidden.orig
+! exists main.lgo
+! exists hidden.lgo
+! exists next_tasks.json
+
+# Without the tag every source is checked. --fix emits a patch and changes
+# nothing. hidden.go converts without a single line changing, so the patch
+# must still carry its rename: without it the applied tree would lose
+# Hidden and stop building.
+logos next --fix
+cp stdout $WORK/fix.patch
+! grep '^logos next' $WORK/fix.patch
+! exists main.lgo
+! exists hidden.lgo
+! exists next_tasks.json
+cmp main.go $WORK/main.orig
+cmp hidden.go $WORK/hidden.orig
+grep 'hidden\.lgo' $WORK/fix.patch
+
+exec patch --batch --fuzz=0 -p1 -i $WORK/fix.patch
+! exists main.go
+! exists hidden.go
+exists main.lgo
+exists hidden.lgo
+exists next_tasks.json
+cmp hidden.lgo $WORK/hidden.orig
+
+logos build ./...
+logos test ./...
+
+-- m/go.mod --
+module example.com/nexttags
+
+go 1.27
+-- m/main.go --
+package sample
+
+func Answer() int { return 42 }
+-- m/hidden.go --
+//go:build !omit
+
+package sample
+
+func Hidden() int { return 7 }

@@ -200,7 +200,7 @@ func unified(m posMap, noders []*noder) {
 	target := typecheck.Target
 
 	localPkgReader = newPkgReader(pkgbits.NewPkgDecoder(types.LocalPkg.Path, data))
-	readPackage(localPkgReader, types.LocalPkg, true)
+	readPackage(localPkgReader, types.LocalPkg, true, nil)
 
 	r := localPkgReader.newReader(pkgbits.SectionMeta, pkgbits.PrivateRootIdx, pkgbits.SyncPrivate)
 	r.pkgInit(types.LocalPkg, target)
@@ -409,7 +409,7 @@ func freePackage(pkg *types2.Package) {
 // localStub indicates whether pr is reading the stub export data for
 // the local package, as opposed to relocated export data for an
 // import.
-func readPackage(pr *pkgReader, importpkg *types.Pkg, localStub bool) {
+func readPackage(pr *pkgReader, importpkg *types.Pkg, localStub bool, ct *logosCtImportState) {
 	{
 		r := pr.newReader(pkgbits.SectionMeta, pkgbits.PublicRootIdx, pkgbits.SyncPublic)
 
@@ -435,6 +435,9 @@ func readPackage(pr *pkgReader, importpkg *types.Pkg, localStub bool) {
 			path, name, code := r.p.PeekObj(idx)
 			if code != pkgbits.ObjStub {
 				objReader[types.NewPkg(path, "").Lookup(name)] = pkgReaderIndex{pr, idx, nil, nil, nil}
+			}
+			if ct != nil && code == pkgbits.ObjFunc {
+				ct.record(pr, idx, path, name)
 			}
 		}
 
@@ -463,6 +466,13 @@ func readPackage(pr *pkgReader, importpkg *types.Pkg, localStub bool) {
 		}
 
 		r.Sync(pkgbits.SyncEOF)
+		r.readLogosCtObjects()
+		if ct != nil && pr.logosCtConstMaps != 0 {
+			if ct.constMaps == nil {
+				ct.constMaps = make(map[string]logosCtImportObject)
+			}
+			ct.constMaps[importpkg.Path] = logosCtImportObject{pr: pr, idx: pr.logosCtConstMaps}
+		}
 	}
 }
 
@@ -520,10 +530,14 @@ func writeUnifiedExport(out io.Writer) {
 
 		r.Sync(pkgbits.SyncEOF)
 	}
+	l.relocLogosCtTargets(localPkgReader)
 
 	{
 		var idxs []index
-		for _, idx := range l.decls {
+		for sym, idx := range l.decls {
+			if l.logosCtDecls[sym] {
+				continue
+			}
 			idxs = append(idxs, idx)
 		}
 		slices.Sort(idxs)
@@ -574,6 +588,7 @@ func writeUnifiedExport(out io.Writer) {
 		}
 
 		w.Sync(pkgbits.SyncEOF)
+		l.writeLogosCtTargets(w)
 		w.Flush()
 	}
 

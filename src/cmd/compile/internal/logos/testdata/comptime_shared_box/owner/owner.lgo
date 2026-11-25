@@ -1,0 +1,26 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package owner
+
+import (
+	"comptime"
+	"fmt"
+)
+
+// Probe materializes a const map over a type declared in its body. The
+// materialized map is one per instance, so a write through one call shows
+// in every later call of the same instance, whichever package makes it.
+func Probe[T any](write int) (int, string) {
+	const if !comptime.IsStruct[T]() {
+		comptime.Error("Probe requires a struct type argument")
+	}
+	type Local int
+	const table = map[Local]int{1: 10, 2: 20}
+	var materialized map[Local]int = table
+	if write > 0 {
+		materialized[1] = write
+	}
+	return materialized[1] ?? -1, fmt.Sprintf("%p", materialized)
+}

@@ -1,0 +1,15 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package capture
+
+import "example.com/localidentity/probe"
+
+func Measure[T any]() (int, any) {
+	type record struct{ Value T }
+	type stamp struct{}
+	size, _ := probe.Measure[record](record{})
+	_, token := probe.Measure[stamp](stamp{})
+	return size, token
+}

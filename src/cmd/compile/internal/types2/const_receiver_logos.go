@@ -900,6 +900,9 @@ func (s *logosRecvScan) block(list []syntax.Stmt) {
 }
 
 func (s *logosRecvScan) stmt(st syntax.Stmt) {
+	if s.check.logosDead(st) {
+		return // dead `const if` branch: never walked
+	}
 	switch st := st.(type) {
 	case nil:
 		return

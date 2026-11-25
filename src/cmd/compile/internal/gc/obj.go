@@ -156,7 +156,7 @@ func dumpGlobal(n *ir.Name) {
 	if n.Class == ir.PFUNC {
 		return
 	}
-	if n.Sym().Pkg != types.LocalPkg {
+	if n.Sym().Pkg != types.LocalPkg && !n.LogosCtGlobal() {
 		return
 	}
 	types.CalcSize(n.Type())
@@ -256,6 +256,10 @@ func ggloblnod(nam *ir.Name) {
 	if nam.Type() != nil && !nam.Type().HasPointers() {
 		flags |= obj.NOPTR
 	}
+	prepared := nam.LogosCtGlobal()
+	if prepared {
+		flags |= obj.DUPOK
+	}
 	size := nam.Type().Size()
 	linkname := nam.Sym().Linkname
 	name := nam.Sym().Name
@@ -265,16 +269,15 @@ func ggloblnod(nam *ir.Name) {
 		saveType = s.Type
 	}
 
-	// We've skipped linkname'd globals's instrument, so we can skip them here as well.
-	if base.Flag.ASan && linkname == "" && pkginit.InstrumentGlobalsMap[name] != nil {
-		// Write the new size of instrumented global variables that have
-		// trailing redzones into object file.
-		rzSize := pkginit.GetRedzoneSizeForGlobal(size)
-		sizeWithRZ := rzSize + size
-		base.Ctxt.Globl(s, sizeWithRZ, flags)
-	} else {
-		base.Ctxt.Globl(s, size, flags)
+	if base.Flag.ASan {
+		if prepared {
+			s.Align = int16(max(nam.Type().Alignment(), pkginit.ASanGlobalAlignment))
+		}
+		if prepared || linkname == "" && pkginit.InstrumentGlobalsMap[name] == nam {
+			size += pkginit.GetRedzoneSizeForGlobal(size)
+		}
 	}
+	base.Ctxt.Globl(s, size, flags)
 	if nam.Libfuzzer8BitCounter() {
 		s.Type = objabi.SLIBFUZZER_8BIT_COUNTER
 	}

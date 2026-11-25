@@ -1,0 +1,16 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+func Pick[T any]() string {
+	const switch T {
+	case int:
+		return "int"
+	}
+	comptime.Error("unsupported")
+	return ""
+}
+
+var _ = Pick[string]() // ERROR "unsupported"

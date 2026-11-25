@@ -5,6 +5,7 @@
 package logos
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -14,15 +15,21 @@ func TestNextShadowedZeroNamesStayTasks(t *testing.T) {
 	t.Run("universeFalse", func(t *testing.T) {
 		body := call + "func g(v bool) (bool, error) {\n\tif err := op(); err != nil {\n\t\treturn false, err\n\t}\n\treturn v, nil\n}"
 		edits, tasks := scanSnippet(t, imp, "package p\n\n"+body+"\n")
-		if len(edits) != 1 || len(tasks) != 0 {
-			t.Fatalf("universe false: edits=%d tasks=%d, want 1, 0", len(edits), len(tasks))
+		if len(edits) != 0 || len(tasks) != 1 || tasks[0].Rule != "err-return" {
+			t.Fatalf("universe false: edits=%d tasks=%d, want 0 edits and one err-return task", len(edits), len(tasks))
+		}
+		if !strings.Contains(tasks[0].Instruction, "keep explicit error propagation") {
+			t.Fatalf("universe false: instruction %q", tasks[0].Instruction)
 		}
 	})
 	t.Run("universeNil", func(t *testing.T) {
 		body := call + "func h(v *int) (*int, error) {\n\tif err := op(); err != nil {\n\t\treturn nil, err\n\t}\n\treturn v, nil\n}"
 		edits, tasks := scanSnippet(t, imp, "package p\n\n"+body+"\n")
-		if len(edits) != 1 || len(tasks) != 0 {
-			t.Fatalf("universe nil: edits=%d tasks=%d, want 1, 0", len(edits), len(tasks))
+		if len(edits) != 0 || len(tasks) != 1 || tasks[0].Rule != "err-return" {
+			t.Fatalf("universe nil: edits=%d tasks=%d, want 0 edits and one err-return task", len(edits), len(tasks))
+		}
+		if !strings.Contains(tasks[0].Instruction, "keep explicit error propagation") {
+			t.Fatalf("universe nil: instruction %q", tasks[0].Instruction)
 		}
 	})
 	t.Run("shadowedFalse", func(t *testing.T) {
