@@ -1,0 +1,51 @@
+# Eject vendors exactly the transitive closure of logos/ packages: a
+# module importing logos/ascii only gets ascii (plus the always-present
+# logos/rt and its logos/arena dependency) and nothing else, and the
+# ejected tree builds under plain go.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+
+go run .
+stdout '^true true$'
+cp stdout $WORK/gorun.txt
+
+logos run .
+cmp stdout $WORK/gorun.txt
+
+logos eject -o out
+exists out/main.go
+exists out/_logos_deps/rt/go.mod
+exists out/_logos_deps/rt/region.go
+exists out/_logos_deps/rt/ascii/ascii.go
+exists out/_logos_deps/rt/arena/arena.go
+! exists out/_logos_deps/rt/enum
+! exists out/_logos_deps/rt/proc
+! exists out/_logos_deps/rt/sync
+! exists out/_logos_deps/rt/json
+grep 'gosuda/loGos/rt/ascii' out/main.go
+
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/gorun.txt
+cd ..
+
+-- m/go.mod --
+module example.com/asciiclosure
+
+go 1.27
+
+-- m/main.go --
+package main
+
+import (
+	"fmt"
+
+	"logos/ascii"
+)
+
+func main() {
+	fmt.Println(ascii.EqualFold("Hello", "hello"), ascii.HasPrefixFold("Hello, world", "hello"))
+}

@@ -227,7 +227,7 @@ func ejectToDir(ctx context.Context, out string) {
 	if !isEjectVariant() {
 		variantOuts = stageInactiveVariantsIntoStaging(ctx, plan, staging)
 	}
-	writeEjectedTree(ctx, plan, staging, out)
+	writeEjectedTree(ctx, plan, staging, out, builds)
 	for _, dir := range variantOuts {
 		_ = os.RemoveAll(dir)
 		_ = os.RemoveAll(variantStatePath(dir))
@@ -673,7 +673,9 @@ func withoutEjectFlags(flags []string) []string {
 
 // writeEjectedTree assembles the output directory from copied sources,
 // compiler-emitted files, the support module, and rewritten go.mod files.
-func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string) {
+// tests carries the test-variant builds whose test files are emitted, so
+// the support closure also covers logos/ packages their tests import.
+func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string, tests []testBuild) {
 	abs, err := filepath.Abs(out)
 	if err != nil {
 		base.Fatalf("logos eject: %s: %v", out, err)
@@ -1758,6 +1760,17 @@ var ejectedBuildLines = [][]byte{
 	[]byte("// +build logosejected"),
 	[]byte("//go:build !logosconc"),
 }
+
+// copySupportPackage copies the Go sources of one support package directory
+// without descending into subdirectories: every subdirectory is a separate
+// package the closure names explicitly when the ejected tree needs it.
+// Files are rewritten to the ejected import paths and formatted by the
+// gofmt pass. A package holding only .lgo files stops the eject: eject
+// lowers user .lgo packages through the compiler into staging, but
+// support packages ride from GOROOT source and have no such lowering.
+
+// stripEjectedBuildTag removes ejected build lines, so the support copy
+// compiles under plain go with no tags set.
 
 // stripEjectedBuildTag removes the ejectedBuildLines, so the support
 // copy compiles under plain go with every set of tags.
