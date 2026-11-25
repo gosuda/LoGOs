@@ -114,3 +114,48 @@ var Plain Box[int]
 		t.Fatalf("CloneWithOverlays leaked the option into Plain.Value, got %s", opt)
 	}
 }
+
+// A variable of a defined option type keeps the declaration's type: the
+// option lives on the named declaration (restored from its O fact), so
+// the variable must not gain a second option around it. The anonymous
+// option around a named payload still wraps as before.
+func TestCloneWithOverlaysDefinedOptionVar(t *testing.T) {
+	const src = `package overlaytest
+
+type MaybeInt int?
+
+var Default MaybeInt
+
+type User struct {
+	Name string
+}
+
+var Current User?
+`
+	lowered, opts, _ := checkLoweredForOverlay(t, src)
+	if !hasPath(opts, "MaybeInt", "O") {
+		t.Fatalf("missing declaration option fact MaybeInt O in %v", opts)
+	}
+	if !hasPath(opts, "Default", "V") {
+		t.Fatalf("missing var option fact Default V in %v", opts)
+	}
+	cloned := CloneWithOverlays(lowered, opts, nil)
+	dflt := clonedVar(t, cloned, "Default")
+	if _, ok := types2.Unalias(dflt.Type()).(*types2.Option); ok {
+		t.Fatalf("CloneWithOverlays wrapped Default in a second option, got %s", dflt.Type())
+	}
+	if optAsOption(dflt.Type()) == nil {
+		t.Fatalf("CloneWithOverlays lost the defined option on Default, got %s", dflt.Type())
+	}
+	decl, ok := cloned.Scope().Lookup("MaybeInt").(*types2.TypeName)
+	if !ok {
+		t.Fatalf("cloned MaybeInt is not a type name: %T", cloned.Scope().Lookup("MaybeInt"))
+	}
+	if !types2.Identical(dflt.Type(), decl.Type()) {
+		t.Fatalf("Default %s does not match its declaration %s", dflt.Type(), decl.Type())
+	}
+	cur := clonedVar(t, cloned, "Current")
+	if _, ok := types2.Unalias(cur.Type()).(*types2.Option); !ok {
+		t.Fatalf("CloneWithOverlays did not restore Current as an option, got %s", cur.Type())
+	}
+}

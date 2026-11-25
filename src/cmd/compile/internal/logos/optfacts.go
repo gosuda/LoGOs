@@ -2934,6 +2934,14 @@ func toOption(t types2.Type) types2.Type {
 		return o
 	}
 	if n, ok := types2.Unalias(t).(*types2.Named); ok {
+		if u := n.Underlying(); u != nil {
+			if _, ok := u.(*types2.Option); ok {
+				// A defined option type already carries its option on its
+				// declaration (restored from its O fact). Wrapping it again
+				// would give the importer a foreign extra option.
+				return t
+			}
+		}
 		if obj := n.Obj(); obj != nil && obj.Name() == "Option" && obj.Pkg() != nil && obj.Pkg().Path() == "logos/rt" {
 			if targs := n.TypeArgs(); targs != nil && targs.Len() == 1 {
 				return &types2.Option{Elem: targs.At(0)}
