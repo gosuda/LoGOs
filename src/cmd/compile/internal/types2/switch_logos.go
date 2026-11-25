@@ -132,7 +132,9 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 			} else if IsInterface(x.typ()) {
 				sx = &x
 			} else if check.conf.Logos && logosQualifiedInterface(x.typ()) {
-				check.error(&x, InvalidTypeSwitch, "cannot use type switch on value with readonly descendants")
+				// Same rule as the statement form: a type switch reads
+				// the dynamic type without writing through the view.
+				sx = &x
 			} else {
 				check.errorf(&x, InvalidTypeSwitch, "%s is not an interface", &x)
 			}
@@ -149,7 +151,7 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 		T := check.caseTypes(sx, syntax.UnpackListExpr(arm.Cases), seen)
 		check.openScope(arm, "case")
 		if lhs != nil {
-			obj := newVar(LocalVar, lhs.Pos(), check.pkg, lhs.Value, T)
+			obj := newVar(LocalVar, lhs.Pos(), check.pkg, lhs.Value, logosSwitchCaseView(sx, T))
 			check.declare(check.scope, nil, obj, arm.Arrow)
 			check.recordImplicit(arm, obj)
 			lhsVars = append(lhsVars, obj)
@@ -179,7 +181,7 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 
 func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[Type]syntax.Expr, nilExcused bool) {
 	var misses []string
-	if tset := logosClosedUnion(sx.typ()); tset != nil {
+	if tset := logosClosedUnionView(sx.typ()); tset != nil {
 		for _, term := range tset.terms {
 			if !check.logosCovers(term.typ, seen) {
 				misses = append(misses, TypeString(term.typ, check.qualifier))
@@ -201,6 +203,11 @@ func (check *Checker) logosCovers(member Type, seen map[Type]syntax.Expr) bool {
 	for c := range seen {
 		if c == nil {
 			continue
+		}
+		// A case written with an explicit view (`case const T`) covers
+		// the member it views.
+		if cv := logosAsConstView(c); cv != nil {
+			c = cv.Elem
 		}
 		if Identical(member, c) {
 			return true
