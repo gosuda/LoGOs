@@ -1124,6 +1124,9 @@ func (s *logosEFState) detach(errV *Var) *logosEFState {
 }
 
 func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
+	if st == nil {
+		return nil
+	}
 	if p.assigns == nil {
 		p.collectAssigns()
 	}
@@ -1294,6 +1297,10 @@ type logosEFEffects struct {
 	created  map[logosEFKey]string
 	may      map[logosEFKey]logosEFKey
 	deferred *logosEFEffects
+	// stored holds the exit pairings of created stores, with their
+	// guards intact, for an inlining caller to adopt: a deferred body
+	// that runs at return leaves results the caller must check.
+	stored map[logosEFKey]logosEFEntry
 }
 
 // writes reports whether the effects wrote a destination that overlaps k.
@@ -1322,28 +1329,33 @@ func (k logosEFKey) overlaps(w logosEFKey) bool {
 }
 
 type logosEFPass struct {
-	check         *Checker
-	body          *syntax.BlockStmt
-	seen          map[syntax.Pos]bool
-	spines        map[syntax.Pos]bool
-	ctx           *logosEFCtx
-	eff           *logosEFEffects
-	assigns       map[logosEFKey][]syntax.Expr
-	addr          map[*Var]bool
-	initialized   map[*Var]bool
-	declared      map[*Var]bool
-	tracked       map[logosEFKey]string
-	storeErr      map[logosEFKey][]*Var
-	storeErrKey   map[logosEFKey][]logosEFKey
-	sliced        map[logosEFKey]bool
-	storePos      map[logosEFKey][]syntax.Pos
-	inLoop        map[logosEFKey]bool
-	loopFresh     map[*syntax.ForStmt]map[*Var]bool
-	loopMaybe     map[*syntax.ForStmt]map[*Var]bool
-	loopTuple     map[*syntax.ForStmt]map[logosEFKey]bool
-	reenter       map[*syntax.ForStmt]bool
-	runsOnce      map[*syntax.ForStmt]bool
-	loopDepth     int
+	check       *Checker
+	body        *syntax.BlockStmt
+	seen        map[syntax.Pos]bool
+	spines      map[syntax.Pos]bool
+	ctx         *logosEFCtx
+	eff         *logosEFEffects
+	assigns     map[logosEFKey][]syntax.Expr
+	addr        map[*Var]bool
+	initialized map[*Var]bool
+	declared    map[*Var]bool
+	tracked     map[logosEFKey]string
+	storeErr    map[logosEFKey][]*Var
+	storeErrKey map[logosEFKey][]logosEFKey
+	sliced      map[logosEFKey]bool
+	storePos    map[logosEFKey][]syntax.Pos
+	inLoop      map[logosEFKey]bool
+	loopFresh   map[*syntax.ForStmt]map[*Var]bool
+	loopMaybe   map[*syntax.ForStmt]map[*Var]bool
+	loopTuple   map[*syntax.ForStmt]map[logosEFKey]bool
+	reenter     map[*syntax.ForStmt]bool
+	runsOnce    map[*syntax.ForStmt]bool
+	loopDepth   int
+	// deferredBody names the deferred summary a deferred literal body
+	// reports to: later hands a deferred body's exit pairings to the
+	// summary for the inlining caller to adopt. It is empty except
+	// while a deferred body runs.
+	deferredBody  map[syntax.Node]*logosEFEffects
 	carve         map[syntax.Node]*logosEFState
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
 	trackedByRoot map[*Var][]logosEFKey
@@ -2521,6 +2533,12 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 		return st
 	}
 	syntax.Inspect(n, func(x syntax.Node) bool {
+		if st == nil {
+			// A subexpression with no normal continuation (for example a
+			// directly invoked literal that panics) leaves no state to
+			// check the rest against: the remainder is unreachable.
+			return false
+		}
 		switch x := x.(type) {
 		case *syntax.Name:
 			p.read(x, st)
@@ -2544,6 +2562,43 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 					return false
 				}
 			}
+		case *syntax.CoalesceExpr:
+			// The fallback runs only when the option is absent: join the
+			// path that skips it with the path that runs it, so a store
+			// in the fallback cannot hide an unchecked result.
+			st = p.expr(x.X, st)
+			if st == nil {
+				return false
+			}
+			st = logosEFJoin(st, p.expr(x.Y, st))
+			return false
+		case *syntax.SwitchExpr:
+			// Arms run exclusively: every arm starts from the tagged
+			// state and the exits join, so a store in one arm cannot hide
+			// an unchecked result from another.
+			if x.Init != nil {
+				st = p.stmt(x.Init, st)
+				if st == nil {
+					return false
+				}
+			}
+			if x.Tag != nil {
+				st = p.expr(x.Tag, st)
+				if st == nil {
+					return false
+				}
+			}
+			var out *logosEFState
+			for _, arm := range x.Arms {
+				as := st
+				if arm.Cases != nil {
+					as = p.expr(arm.Cases, as)
+				}
+				as = p.expr(arm.Body, as)
+				out = logosEFJoin(out, as)
+			}
+			st = out
+			return false
 		case *syntax.Operation:
 			if x.Y == nil || (x.Op != syntax.AndAnd && x.Op != syntax.OrOr) {
 				return true
@@ -2974,6 +3029,29 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 	outer := p.eff
 	call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
 	if !ok {
+		// A ?-deferred literal call still defers its body: the callee
+		// and arguments run now, the body runs at exit.
+		if inner, lit := unwrapDeferredCall(s.Call); lit != nil && lit.Body != nil &&
+			(s.Tok == syntax.Defer || s.Tok == syntax.Go) {
+			if _, isLam := syntax.Unparen(inner.Fun).(*syntax.LambdaExpr); !isLam {
+				if s.DeferAt != nil {
+					st = p.expr(s.DeferAt, st)
+					if st == nil {
+						return nil
+					}
+				}
+				for _, arg := range inner.ArgList {
+					st = p.expr(arg, st)
+					if st == nil {
+						return nil
+					}
+				}
+				if s.Tok == syntax.Go {
+					return p.later(lit, lit.Body, st)
+				}
+				return p.deferredFunBody(outer, lit, st)
+			}
+		}
 		if outer == nil || s.Tok != syntax.Defer {
 			return p.expr(s, st)
 		}
@@ -2997,6 +3075,12 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 		maps.Copy(outer.deferred.assigned, d.assigned)
 		maps.Copy(outer.deferred.created, d.created)
 		maps.Copy(outer.deferred.may, d.may)
+		if len(d.stored) > 0 {
+			if outer.deferred.stored == nil {
+				outer.deferred.stored = make(map[logosEFKey]logosEFEntry, len(d.stored))
+			}
+			maps.Copy(outer.deferred.stored, d.stored)
+		}
 		return st
 	}
 	funU := syntax.Unparen(call.Fun)
@@ -3025,16 +3109,31 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 		maps.Copy(outer.deferred.assigned, d.assigned)
 		maps.Copy(outer.deferred.created, d.created)
 		maps.Copy(outer.deferred.may, d.may)
+		if len(d.stored) > 0 {
+			if outer.deferred.stored == nil {
+				outer.deferred.stored = make(map[logosEFKey]logosEFEntry, len(d.stored))
+			}
+			maps.Copy(outer.deferred.stored, d.stored)
+		}
 		return st
 	}
 	if _, isLit := funU.(*syntax.FuncLit); !isLit {
 		st = p.expr(funU, st)
+		if st == nil {
+			return nil
+		}
 	}
 	if s.DeferAt != nil {
 		st = p.expr(s.DeferAt, st)
+		if st == nil {
+			return nil
+		}
 	}
 	for _, arg := range call.ArgList {
 		st = p.expr(arg, st)
+		if st == nil {
+			return nil
+		}
 	}
 	lit, isLit := funU.(*syntax.FuncLit)
 	if !isLit || lit.Body == nil {
@@ -3044,13 +3143,25 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 		st = p.later(lit, lit.Body, st)
 		return st
 	}
+	return p.deferredFunBody(outer, lit, st)
+}
+
+// deferredFunBody runs the body of a deferred literal call at exit under a
+// deferred summary merged into the outer effects. The caller evaluates the
+// callee and arguments first: they run now with ordinary effects.
+func (p *logosEFPass) deferredFunBody(outer *logosEFEffects, lit *syntax.FuncLit, st *logosEFState) *logosEFState {
 	var inside map[*Var]bool
 	if outer != nil {
 		inside = outer.inside
 	}
 	d := &logosEFEffects{inside: inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
 	p.eff = d
+	if p.deferredBody == nil {
+		p.deferredBody = make(map[syntax.Node]*logosEFEffects)
+	}
+	p.deferredBody[lit] = d
 	st = p.later(lit, lit.Body, st)
+	delete(p.deferredBody, lit)
 	p.eff = outer
 	if outer == nil {
 		return st
@@ -3071,7 +3182,52 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 	maps.Copy(outer.deferred.assigned, d.assigned)
 	maps.Copy(outer.deferred.created, d.created)
 	maps.Copy(outer.deferred.may, d.may)
+	if len(d.stored) > 0 {
+		if outer.deferred.stored == nil {
+			outer.deferred.stored = make(map[logosEFKey]logosEFEntry, len(d.stored))
+		}
+		maps.Copy(outer.deferred.stored, d.stored)
+	}
 	return st
+}
+
+// unwrapDeferredCall separates the immediately evaluated callee and
+// arguments of a deferred call from the literal body that waits for exit.
+// TryExpr (?-calls) wraps the call; a direct literal call needs no
+// unwrapping. Any other shape reports nil: only an immediately invoked
+// literal can run where a deferred body must wait.
+func unwrapDeferredCall(call syntax.Expr) (*syntax.CallExpr, *syntax.FuncLit) {
+	inner := call
+	for {
+		t, ok := syntax.Unparen(inner).(*syntax.TryExpr)
+		if !ok {
+			break
+		}
+		inner = t.X
+	}
+	c, ok := syntax.Unparen(inner).(*syntax.CallExpr)
+	if !ok {
+		return nil, nil
+	}
+	lit, ok := syntax.Unparen(c.Fun).(*syntax.FuncLit)
+	if !ok {
+		return nil, nil
+	}
+	return c, lit
+}
+
+// deferredStmtCall analyzes a scope defer or errdefer statement with the
+// same split a defer statement uses: the callee and arguments run now,
+// the literal body runs at exit under a deferred summary.
+func (p *logosEFPass) deferredStmtCall(call syntax.Expr, st *logosEFState) *logosEFState {
+	inner, lit := unwrapDeferredCall(call)
+	if lit == nil || lit.Body == nil {
+		return p.expr(call, st)
+	}
+	if _, isLam := syntax.Unparen(inner.Fun).(*syntax.LambdaExpr); isLam {
+		return p.expr(call, st)
+	}
+	return p.deferredFunBody(p.eff, lit, st)
 }
 
 func (p *logosEFPass) logosStmt(s syntax.Stmt, st *logosEFState) *logosEFState {
@@ -3080,6 +3236,13 @@ func (p *logosEFPass) logosStmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 		return p.stmt(s.Body, p.expr(s.Limit, p.expr(s.Ctx, st)))
 	case *syntax.GroupChild:
 		return p.later(s.Body, s.Body, st)
+	case *syntax.ScopeDeferStmt:
+		// A scope defer runs at scope exit, not at the statement: the
+		// callee and arguments run now, the body runs later.
+		return p.deferredStmtCall(s.Call, st)
+	case *syntax.ErrdeferStmt:
+		// An errdefer runs on the error path, not at the statement.
+		return p.deferredStmtCall(s.Call, st)
 	case *syntax.ConstIfStmt:
 		st = p.expr(s.Cond, st)
 		return logosEFJoin(p.stmt(s.Then, st), p.stmt(s.Else, st))
@@ -3194,6 +3357,11 @@ func (p *logosEFPass) decls(s *syntax.DeclStmt, st *logosEFState) *logosEFState 
 			continue
 		}
 		st = p.expr(vd.Values, st)
+		if st == nil {
+			// A value with no normal continuation leaves nothing to
+			// declare or track: the rest is unreachable.
+			return nil
+		}
 		names := logosEFNames(vd)
 		for _, name := range names {
 			if v := p.varOf(name); v != nil {
@@ -3237,12 +3405,9 @@ func (p *logosEFPass) assign(s *syntax.AssignStmt, st *logosEFState) *logosEFSta
 	lhs := syntax.UnpackListExpr(s.Lhs)
 	rhs := syntax.UnpackListExpr(s.Rhs)
 	plain := s.Op == 0 || s.Op == syntax.Def
-	for i, r := range rhs {
-		if s.Op == 0 && len(lhs) == len(rhs) && logosEFBlank(lhs[i]) && p.isBlankable(r) {
-			continue
-		}
-		st = p.expr(r, st)
-	}
+	// Calls run in lexical left-to-right order, so a destination call
+	// reads before a right-hand call resets: check the destination reads
+	// first, then the right-hand side.
 	for _, l := range lhs {
 		if !(plain && s.Rhs != nil && logosEFIsName(l)) {
 			if plain && s.Rhs != nil {
@@ -3250,6 +3415,18 @@ func (p *logosEFPass) assign(s *syntax.AssignStmt, st *logosEFState) *logosEFSta
 			} else {
 				st = p.expr(l, st)
 			}
+			if st == nil {
+				return nil
+			}
+		}
+	}
+	for i, r := range rhs {
+		if s.Op == 0 && len(lhs) == len(rhs) && logosEFBlank(lhs[i]) && p.isBlankable(r) {
+			continue
+		}
+		st = p.expr(r, st)
+		if st == nil {
+			return nil
 		}
 	}
 	for _, l := range lhs {
@@ -3347,6 +3524,11 @@ func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState 
 			}
 		}
 		st = p.expr(r, st)
+		if st == nil {
+			// A result with no normal continuation never reaches the
+			// caller: it contributes no exit.
+			return nil
+		}
 	}
 	p.ctx.exit = logosEFJoin(p.ctx.exit, st)
 	return nil
@@ -3423,6 +3605,9 @@ func (p *logosEFPass) rangeAssign(rc *syntax.RangeClause, st *logosEFState) *log
 			st = p.dropDest(st, l)
 		} else {
 			st = p.expr(l, st)
+			if st == nil {
+				return nil
+			}
 		}
 	}
 	return st
@@ -3497,6 +3682,10 @@ func (p *logosEFPass) switchStmt(s *syntax.SwitchStmt, label string, st *logosEF
 }
 
 func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, tagKey logosEFKey, e syntax.Expr, miss *logosEFState, written *logosEFEffects) (hit, rest *logosEFState) {
+	if miss == nil {
+		// The tag has no normal continuation: no case runs.
+		return nil, nil
+	}
 	switch {
 	case tag == nil:
 		return p.cond(e, miss)
@@ -3986,8 +4175,34 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 	p.eff = eff
 	end := p.run(lit.Body, st)
 	p.eff = saved
-	if end != nil && eff.deferred != nil {
+	if end == nil {
+		// A panic the literal recovers lets the call return: keep the
+		// conservative continuation instead of marking the caller dead.
+		if p.litCanRecover(lit) {
+			return p.later(lit, lit.Body, st)
+		}
+		return nil
+	}
+	if eff.deferred != nil {
 		end = end.afterDeferred(eff.deferred)
+		for k, e := range eff.deferred.stored {
+			// A deferred tuple store leaves a result the caller can
+			// read: restore its pairing so the caller must check its
+			// error, as if the store ran inline.
+			if _, ok := end.m[k]; !ok {
+				end = end.set(k, e)
+			}
+		}
+		for k, errName := range eff.deferred.created {
+			// A deferred store with no exit pairing (the deferred body
+			// never returns) may still have run: keep an entry nothing
+			// discharges.
+			if _, ok := end.m[k]; !ok {
+				if _, ok := eff.deferred.stored[k]; !ok {
+					end = end.set(k, logosEFEntry{name: errName, pos: lit.Body.Pos()})
+				}
+			}
+		}
 	}
 	if saved != nil {
 		for k := range eff.assigned {
@@ -4010,8 +4225,76 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 	return end
 }
 
+// litCanRecover reports whether running lit can return after a panic: a
+// call lit defers recovers, either directly in a deferred literal or in a
+// literal that literal defers again. A deferred named function may also
+// recover, but deferred named calls keep the conservative path, so only
+// literal bodies matter here.
+func (p *logosEFPass) litCanRecover(lit *syntax.FuncLit) bool {
+	if lit.Body == nil {
+		return false
+	}
+	if bodyHasDirectRecover(p, lit.Body) {
+		return true
+	}
+	hit := false
+	syntax.Inspect(lit.Body, func(n syntax.Node) bool {
+		if hit {
+			return false
+		}
+		var call syntax.Expr
+		switch n := n.(type) {
+		case *syntax.CallStmt:
+			if n.Tok != syntax.Defer {
+				return true
+			}
+			call = n.Call
+		case *syntax.ScopeDeferStmt:
+			call = n.Call
+		case *syntax.ErrdeferStmt:
+			call = n.Call
+		default:
+			return true
+		}
+		_, inner := unwrapDeferredCall(call)
+		if inner != nil && inner.Body != nil && p.litCanRecover(inner) {
+			hit = true
+		}
+		return true
+	})
+	return hit
+}
+
+// bodyHasDirectRecover reports whether body calls the recover builtin
+// outside any nested literal: such a call runs as part of the body, so a
+// body running as a deferred call observes a panic. Calls inside a nested
+// literal do not count unless that literal is itself deferred, which the
+// caller checks separately.
+func bodyHasDirectRecover(p *logosEFPass, body *syntax.BlockStmt) bool {
+	hit := false
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if hit {
+			return false
+		}
+		switch n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		}
+		if c, ok := n.(*syntax.CallExpr); ok {
+			if f, ok := syntax.Unparen(c.Fun).(*syntax.Name); ok {
+				if b, ok := p.check.Uses[f].(*Builtin); ok && b.Name() == "recover" {
+					hit = true
+					return false
+				}
+			}
+		}
+		return true
+	})
+	return hit
+}
+
 func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEFState) *logosEFState {
-	if body == nil {
+	if body == nil || st == nil {
 		return st
 	}
 	inside := p.defsIn(lit)
@@ -4025,6 +4308,39 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 		}
 	}
 	end := p.run(body, p.lateCaptures(in, lit, inside))
+	if end != nil && len(eff.created) > 0 {
+		// Keep the exit pairings of created stores, with their guards
+		// intact, for an inlining caller to adopt. Keys the literal
+		// defines stay local.
+		var dstored map[logosEFKey]logosEFEntry
+		if eff.deferred != nil {
+			dstored = eff.deferred.stored
+		}
+		for k := range eff.created {
+			if inside[k.root] {
+				continue
+			}
+			e, ok := end.m[k]
+			if !ok {
+				e, ok = dstored[k]
+			}
+			if !ok {
+				continue
+			}
+			if eff.stored == nil {
+				eff.stored = make(map[logosEFKey]logosEFEntry, len(eff.created))
+			}
+			eff.stored[k] = e
+		}
+	}
+	if d, ok := p.deferredBody[lit]; ok && len(eff.stored) > 0 {
+		// The body runs at return: hand its exit pairings to the
+		// deferred summary for the inlining caller to adopt.
+		if d.stored == nil {
+			d.stored = make(map[logosEFKey]logosEFEntry, len(eff.stored))
+		}
+		maps.Copy(d.stored, eff.stored)
+	}
 	p.eff = saved
 	if end != nil && eff.deferred != nil {
 		end = end.afterDeferred(eff.deferred)
@@ -4091,7 +4407,40 @@ func (s *logosEFState) afterDeferred(d *logosEFEffects) *logosEFState {
 			delete(mayErr, k)
 		}
 	}
-	return &logosEFState{m: s.m, may: may, mayErr: mayErr}
+	m := s.m
+	cloned := false
+	clone := func() {
+		if !cloned {
+			m = maps.Clone(s.m)
+			cloned = true
+		}
+	}
+	for k, e := range s.m {
+		if d.writes(k) {
+			// A deferred write replaces the value, so the pairing
+			// describes an overwritten value: drop it, proven or not.
+			clone()
+			delete(m, k)
+			continue
+		}
+		if e.proven {
+			continue
+		}
+		if e.err != nil && d.writes(logosEFKey{root: e.err}) {
+			// A deferred write replaces the guarding error, so no check
+			// can validate the value: keep an entry nothing discharges.
+			clone()
+			m[k] = logosEFEntry{name: e.name, pos: e.pos}
+			continue
+		}
+		if e.errKey != (logosEFKey{}) && d.writes(e.errKey) {
+			// A deferred write breaks a seeding agreement the same way.
+			clone()
+			e.errKey = logosEFKey{}
+			m[k] = e
+		}
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErr}
 }
 
 // literalPairings joins the caller's error pairings, held in before, with
