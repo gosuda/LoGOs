@@ -5,8 +5,59 @@
 package ctfe
 
 import (
+	"strings"
 	"testing"
 )
+
+func TestInferredFloatArrayChargesTypeFloor(t *testing.T) {
+	inferredFill := strings.Repeat("x, ", 32)
+	inferredSrc := "package p\nfunc FloatArray() int { x := 0.0\nvar a [32]float64 = [32]float64{" + inferredFill + "}\nfor i := 0; i < 4; i++ { a = a }\nif a[0] == 0.0 { return 1 }\nreturn 0 }"
+	inferred := constSpec{
+		src:    inferredSrc,
+		rtypes: []*Type{BasicType("int")},
+		name:   "FloatArray",
+		call:   "FloatArray()",
+	}
+	explicitFill := strings.Repeat("float64(0.0), ", 32)
+	explicitSrc := "package p\nfunc FloatArrayExplicit() int { var a [32]float64 = [32]float64{" + explicitFill + "}\nfor i := 0; i < 4; i++ { a = a }\nif a[0] == 0.0 { return 1 }\nreturn 0 }"
+	explicit := constSpec{
+		src:    explicitSrc,
+		rtypes: []*Type{BasicType("int")},
+		name:   "FloatArrayExplicit",
+		call:   "FloatArrayExplicit()",
+	}
+	wide := Config{MaxSteps: 100000, MaxValueBytes: 1 << 20, WordSize: 8}
+	v, _, err := evalConstFunc(t, wide, inferred)
+	if err != nil {
+		t.Fatalf("FloatArray: %v", err)
+	}
+	mustInt(t, v, 1, "FloatArray")
+	v, _, err = evalConstFunc(t, wide, explicit)
+	if err != nil {
+		t.Fatalf("FloatArrayExplicit: %v", err)
+	}
+	mustInt(t, v, 1, "FloatArrayExplicit")
+	tight := Config{MaxSteps: 100000, MaxValueBytes: 128, WordSize: 8}
+	for _, spec := range []struct {
+		name string
+		spec constSpec
+	}{
+		{"FloatArray", inferred},
+		{"FloatArrayExplicit", explicit},
+	} {
+		_, _, err := evalConstFunc(t, tight, spec.spec)
+		if err == nil {
+			t.Fatalf("%s with 128-byte cap succeeded, want CodeTooLarge", spec.name)
+		}
+		cerr, ok := err.(*Error)
+		if !ok {
+			t.Fatalf("%s with 128-byte cap: %v, want CodeTooLarge", spec.name, err)
+		}
+		if cerr.Code != CodeTooLarge {
+			t.Fatalf("%s code = %d, want %d", spec.name, cerr.Code, CodeTooLarge)
+		}
+	}
+}
 
 func TestStepChargeScalesWithLiveBytes(t *testing.T) {
 	cfg := Config{MaxSteps: 100, MaxValueBytes: 1 << 20, WordSize: 8}

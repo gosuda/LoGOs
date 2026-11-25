@@ -730,7 +730,7 @@ func (fl *fileLower) adoptRegion(text otext, owner syntax.Pos, parsed *syntax.Po
 		if c.n == 0 {
 			continue
 		}
-		fl.srcMap.chunks = append(fl.srcMap.chunks, chunk{out: r.start + c.out, orig: c.orig, n: c.n})
+		fl.srcMap.chunks = append(fl.srcMap.chunks, chunk{out: r.start + c.out, orig: c.orig, place: r.start + c.out, n: c.n})
 	}
 	fl.start = lineStarts(fl.src)
 	fl.regions = append(fl.regions, r)

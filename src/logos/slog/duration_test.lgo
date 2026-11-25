@@ -1,0 +1,48 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog_test
+
+import (
+	"bytes"
+	"context"
+	"log/slog"
+	"strings"
+	"testing"
+	"time"
+
+	twinslog "logos/slog"
+)
+
+// TestTwinDurationFormat renders durations through the twin text handler
+// and requires the field to equal Duration.String. The handler is fixed
+// (no ReplaceAttr, fixed time), so only the duration rendering varies.
+func TestTwinDurationFormat(t *testing.T) {
+	durations := []time.Duration{
+		0, 1, -1, 999, -999,
+		1500, -1500, 999999, -999999,
+		1000 * 999, 123456789, -123456789,
+		time.Second, -time.Second, 90 * time.Minute, -90 * time.Minute,
+		25 * time.Hour, time.Hour + 30*time.Minute + 45*time.Second + 123456789*time.Nanosecond,
+		time.Duration(1<<63 - 1), time.Duration(-1 << 63),
+		1500 * time.Nanosecond, 1500000 * time.Nanosecond,
+	}
+	for _, d := range durations {
+		var buf bytes.Buffer
+		h := twinslog.NewTextHandler(&buf, new(slog.HandlerOptions))
+		r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+		r.AddAttrs(slog.Duration("d", d))
+		if err := h.Handle(context.Background(), r); err != nil {
+			t.Fatal(err)
+		}
+		line := strings.TrimSuffix(buf.String(), "\n")
+		field := line[strings.LastIndex(line, " ")+1:]
+		if !strings.HasPrefix(field, "d=") {
+			t.Fatalf("duration %d: no d= field in %q", int64(d), line)
+		}
+		if got := field[len("d="):]; got != d.String() {
+			t.Errorf("duration %d: got %q, want %q", int64(d), got, d.String())
+		}
+	}
+}
