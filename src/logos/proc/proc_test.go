@@ -659,6 +659,38 @@ func TestSpawnResolvesRelativeAgainstCwd(t *testing.T) {
 	}
 }
 
+// A relative child directory must not apply twice. The probe runs in the
+// parent, the child resolves in Dir, so the launch path must be absolute;
+// otherwise Dir applies to an already-joined relative path.
+func TestSpawnResolvesRelativeCwd(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "tools"), 0755); err != nil {
+		t.Fatalf("mkdir tools: %v", err)
+	}
+	self, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatalf("read self: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tools", "tool"), self, 0755); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+	t.Chdir(root)
+	opts := defaultOpts()
+	opts.Cwd = logosproc.PathCwd("tools")
+	opts.Env = childEnv("exit0", nil, true)
+	c, err := logosproc.Spawn("./tool", nil, opts)
+	if err != nil {
+		t.Fatalf("spawn ./tool in relative child dir: %v", err)
+	}
+	term, err := waitDeadline(t, c)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !term.IsSuccess() {
+		t.Fatalf("term = %+v, want success", term)
+	}
+}
+
 // Wait never closes pipes: the parent ends stay readable after Wait and
 // Close releases them exactly once. Planted fault: Wait leaves the parent
 // ends open with no defined owner, so descriptors leak by default.

@@ -365,6 +365,9 @@ func resolvePath(path string, cwd Cwd) (string, error) {
 	}
 	if cwd.HasPath && isExplicitRelative(path) {
 		if cand := filepath.Join(cwd.Path, path); isExecutableFile(cand) {
+			if abs, err := filepath.Abs(cand); err == nil {
+				return abs, nil
+			}
 			return cand, nil
 		}
 	}
