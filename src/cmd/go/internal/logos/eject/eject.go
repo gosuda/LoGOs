@@ -233,6 +233,8 @@ func ejectToDir(ctx context.Context, out string) {
 	load.CheckPackageErrors(pkgs)
 	plan := arrangeEjectPlan(pkgs)
 	builds := collectTestBuilds(moduleLoader, ctx, opts, plan)
+	discoverGoImportLogos(moduleLoader, ctx, opts, plan)
+	plan.gorootLogos = collectGorootLogos(plan.provenance)
 	makeEjectStagingDirs(plan, staging, builds)
 	buildEjectRoots(moduleLoader, ctx, phaseOneRoots(plan))
 	if len(builds) > 0 {
