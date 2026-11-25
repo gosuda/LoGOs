@@ -238,3 +238,20 @@ func filesNeverRebind(items []*os.File) {
 		_ = ws
 	}
 }
+
+func tildeOption[T any](v T) {
+	_ = v
+	const switch T {
+	case ~ /* ERROR "comptime::tilde_not_basic" */ int64? :
+	}
+}
+
+func duplicateOption[T any](v T) {
+	_ = v
+	const switch T {
+	case int64?:
+		return
+	case int64 /* ERROR "comptime::unreachable_case" */ ? :
+		return
+	}
+}

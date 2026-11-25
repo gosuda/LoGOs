@@ -493,6 +493,7 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 				emit = check.subst(pos, v.Type(), makeSubstMap([]*TypeParam{tpar}, []Type{info.typ}), nil, check.context())
 			}
 			shadowVar := NewVar(v.Pos(), v.Pkg(), v.Name(), sub)
+			shadowVar.SetKind(v.Kind())
 			if alt := check.scope.Insert(shadowVar); alt != nil {
 				continue
 			}
