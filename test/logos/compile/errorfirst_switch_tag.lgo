@@ -55,3 +55,68 @@ func efSwitchTagStaleRewrite() {
 		}()
 	}
 }
+
+func efSwitchFetchAt(i int) (int, error) {
+	return i, nil
+}
+
+// A tagged switch in a loop proves what the if form proves: the tag
+// still holds the error of the call that stored n on the previous
+// iteration, even though that store follows the switch in the source.
+func efSwitchTagLoopCarried() {
+	var n int
+	var err error
+	for i := 0; i < 3; i++ {
+		switch err {
+		case nil:
+			println(n)
+		}
+		n, err = efSwitchFetchAt(i)
+	}
+}
+
+type efSwitchPair struct {
+	left, right int
+	err         error
+}
+
+func efSwitchFetchPair() (int, int, error) {
+	return 1, 2, nil
+}
+
+// A case expression that rewrites one result leaves the proof for an
+// untouched sibling: the saved tag still describes the call that stored
+// it.
+func efSwitchTagUntouchedSibling(sentinel error) {
+	h := efSwitchPair{}
+	h.left, h.right, h.err = efSwitchFetchPair()
+	switch h.err {
+	case (func() error {
+		h.left = 0
+		return sentinel
+	})():
+		println("other")
+	case nil:
+		defer func() {
+			println(h.right)
+		}()
+	}
+}
+
+// The result the case expression stored again stays unproven: the saved
+// tag says nothing about the replacement.
+func efSwitchTagTouchedSibling(sentinel error) {
+	h := efSwitchPair{}
+	h.left, h.right, h.err = efSwitchFetchPair()
+	switch h.err {
+	case (func() error {
+		h.right, _ = efSwitchFetch()
+		return sentinel
+	})():
+		println("other")
+	case nil:
+		defer func() {
+			println(h.right) // ERROR "result_before_error_check"
+		}()
+	}
+}

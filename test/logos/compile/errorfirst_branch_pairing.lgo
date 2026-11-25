@@ -1,0 +1,44 @@
+// errorcheck
+
+package p
+
+type efBranchHeld struct {
+	stats int
+	err   error
+}
+
+func efBranchFetch() (int, error) {
+	return 1, nil
+}
+
+// A branch inside the deferred literal that overwrites the error field
+// leaves the captured result unchecked and unpaired. The join must not
+// revive the other branch's pairing, or the nil check reads the
+// replacement error instead of the call's.
+func efBranchClearRevives(clear bool) {
+	h := efBranchHeld{}
+	h.stats, h.err = efBranchFetch()
+	defer func() {
+		if clear {
+			h.err = nil
+		}
+		if h.err == nil {
+			println(h.stats) // ERROR "result_before_error_check"
+		}
+	}()
+}
+
+// A branch that resets the result holds no unchecked value, so the other
+// branch's pairing survives the join and the nil check proves the read.
+func efBranchResetKeepsPairing(reset bool) {
+	h := efBranchHeld{}
+	h.stats, h.err = efBranchFetch()
+	defer func() {
+		if reset {
+			h.stats = 0
+		}
+		if h.err == nil {
+			println(h.stats)
+		}
+	}()
+}
