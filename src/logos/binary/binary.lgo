@@ -36,10 +36,13 @@
 // platform integers, strings, maps, unlisted arrays) takes the
 // dynamic original path, so behavior and error kinds match
 // encoding/binary exactly. Decoding into a struct with an unexported
-// field panics, as with the original. Structs with unexported fields
-// from another package only encode their exported fields: comptime
-// cannot see the rest. Structs with blank (_) fields do not compile:
-// Go cannot select a blank field, so no projection can name it.
+// field panics, as with the original, except for unexported fields
+// that need no assignment: a zero-width field such as struct{}
+// decodes without a store, matching the original's recursive walk.
+// Structs with unexported fields from another package only encode
+// their exported fields: comptime cannot see the rest. Structs with
+// blank (_) fields do not compile: Go cannot select a blank field,
+// so no projection can name it.
 //
 // Mapping from the original (data any) to the twin: ReadInto and
 // Decode take *T where the original takes a pointer or slice operand,
