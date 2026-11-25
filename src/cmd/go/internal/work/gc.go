@@ -716,6 +716,7 @@ func (gcToolchain) ldShared(b *Builder, root *Action, toplevelactions []*Action,
 	if err != nil {
 		return err
 	}
+	ldflags = logosLinkCapFlag(ldflags, root.Objdir, root.Package)
 	for _, d := range toplevelactions {
 		if !strings.HasSuffix(d.Target, ".a") { // omit unsafe etc and actions for other shared libraries
 			continue
