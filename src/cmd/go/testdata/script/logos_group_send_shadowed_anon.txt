@@ -1,0 +1,65 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A group-child send of a value whose type is an anonymous struct with
+# unexported fields from another package keeps inference: spelling the
+# element type in the caller's package would name a different type,
+# because unexported field identities include their declaring package.
+cd good
+logos run .
+stdout '^ok 3$'
+logos eject -o out
+cd out
+go run .
+stdout '^ok 3$'
+
+-- good/go.mod --
+module example.com/groupsendanon
+
+go 1.27
+-- good/lib/lib.lgo --
+package lib
+
+import "context"
+
+func Channel() chan struct{ x int } {
+	return make(chan struct{ x int }, 1)
+}
+
+func Value() struct{ x int } {
+	return struct{ x int }{x: 3}
+}
+
+func Take(ctx context.Context, ch chan struct{ x int }) int {
+	select {
+	case v := <-ch:
+		return v.x
+	case <-ctx.Done():
+		return -1
+	}
+}
+-- good/main.lgo --
+package main
+
+import (
+	"context"
+	"example.com/groupsendanon/lib"
+	"fmt"
+)
+
+func run(ctx context.Context) error {
+	ch := lib.Channel()
+	go group (ctx) {
+		go {
+			ch <- lib.Value()
+		}
+	}
+	fmt.Println("ok", lib.Take(ctx, ch))
+	return nil
+}
+
+func main() {
+	if err := run(context.Background()); err != nil {
+		fmt.Println("err:", err)
+	}
+}

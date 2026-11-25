@@ -218,7 +218,7 @@ func (b *spreadBuilder) body() {
 	c := b.c
 	pos := b.pos
 	v := func() *syntax.Name { return nameOf(pos, b.vSpelling) }
-	defaults, defaultText := b.fl.structDefaultFields(pos, b.fl.missingDefaults(c))
+	defaults, defaultText := b.fl.structDefaultFields(pos, b.fl.missingDefaults(c, false))
 	b.native = append(b.native, defineOf(pos,
 		[]syntax.Expr{v()},
 		[]syntax.Expr{at(&syntax.CompositeLit{

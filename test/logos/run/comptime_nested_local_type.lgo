@@ -1,0 +1,47 @@
+// run
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+type record struct {
+	Small uint8
+	Large uint64
+	Other uint8
+}
+
+func Measure[T any](sample any) (int, any) {
+	var zero T
+	if _, ok := sample.(T); !ok {
+		panic("mismatch")
+	}
+	return comptime.SizeOf[T](), zero
+}
+
+var failed bool
+
+func check(name, got, want string) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func main() {
+	var sizes [3]int
+	var tokens [3]any
+	const for i, f := range comptime.Fields[record]() {
+		type slot struct{ Value f.Type }
+		sizes[i], tokens[i] = Measure[slot](slot{})
+	}
+	check("sizes", fmt.Sprint(sizes), "[1 8 1]")
+	check("distinct", fmt.Sprint(tokens[0] != tokens[2]), "true")
+	if failed {
+		os.Exit(1)
+	}
+}

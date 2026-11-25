@@ -48,6 +48,35 @@ func logosClosedUnion(t Type) *_TypeSet {
 	return tset
 }
 
+// INVARIANT: a type switch is exhaustive over the values its operand can hold
+// at that point. A nil case is unreachable when the operand is a local or
+// parameter that narrowing has proven non-nil from an option whose absence
+// is the interface nil value itself (a bare option): the guard excluded
+// exactly the value a nil case would match, and no present-but-nil value can
+// exist without a separate presence flag. Assignment ends narrowing,
+// address-taken, closure-assigned, and goto-containing functions never
+// narrow, so an active narrowing at the switch means no intervening store
+// or jump could have restored nil.
+func (check *Checker) logosSwitchNilExcused(sx *operand) bool {
+	if sx == nil || !sx.isValid() {
+		return false
+	}
+	id, ok := syntax.Unparen(sx.expr).(*syntax.Name)
+	if !ok || id.Value == "_" {
+		return false
+	}
+	obj := check.lookup(id.Value)
+	v, ok := obj.(*Var)
+	if !ok || v.pkg != check.pkg || check.logosNarrow[v] == 0 {
+		return false
+	}
+	opt := logosAsOption(v.typ)
+	if opt == nil {
+		return false
+	}
+	return LogosOptionIsBare(opt.Elem)
+}
+
 func logosMemberOf(t Type, tset *_TypeSet) bool {
 	for _, term := range tset.terms {
 		if Identical(term.typ, t) {
@@ -55,6 +84,13 @@ func logosMemberOf(t Type, tset *_TypeSet) bool {
 		}
 	}
 	return false
+}
+
+func logosUnionAdmits(V Type, tset *_TypeSet) bool {
+	if iface, ok := V.Underlying().(*Interface); ok {
+		return iface.typeSet().subsetOf(tset)
+	}
+	return logosMemberOf(V, tset)
 }
 
 func (check *Checker) logosUnionsOK() bool {
@@ -210,6 +246,91 @@ func (check *Checker) logosUnionAssign(x *operand, T Type, context string) bool 
 	check.errorf(x, IncompatibleAssign, "%s cannot use %s as %s value in %s: %s is not a member of %s", logosNonMember, x, T, context, from, T)
 	x.invalidate()
 	return true
+}
+
+func (check *Checker) logosUnionMemberOf(x *operand, elem Type, context string) bool {
+	if !check.logosUnionsOK() {
+		return false
+	}
+	tset := logosClosedUnion(elem)
+	if tset == nil {
+		// The import overlay does not restore union terms, so an imported
+		// union has no type set here; its members are in the union facts.
+		return check.logosForeignUnionMemberOf(x, elem, context)
+	}
+	if check.logosReadonlyBoundary(x, elem, context) {
+		return true
+	}
+	from := x.typ()
+	if from == nil {
+		return false
+	}
+	if isUntyped(from) {
+		from = Default(from)
+	}
+	return logosMemberOf(from, tset)
+}
+
+// logosForeignUnionMemberOf reports whether x's type is a recorded member
+// of an imported union elem, whose terms were stripped at export.
+func (check *Checker) logosForeignUnionMemberOf(x *operand, elem Type, context string) bool {
+	if _, imported := logosForeignUnionName(elem); !imported {
+		return false
+	}
+	if check.logosReadonlyBoundary(x, elem, context) {
+		return true
+	}
+	from := x.typ()
+	if from == nil {
+		return false
+	}
+	if isUntyped(from) {
+		from = Default(from)
+	}
+	members, ok := LogosUnionMembers(elem)
+	if !ok {
+		return false
+	}
+	text, hasText := logosMemberTypeText(from)
+	for _, m := range members {
+		if m.Type != nil {
+			if Identical(from, m.Type) {
+				return true
+			}
+			continue
+		}
+		if hasText && m.Text() == text {
+			return true
+		}
+	}
+	return false
+}
+
+// logosMemberTypeText spells a named type the way imported union member
+// facts spell it: "pkgpath.Type", or "*pkgpath.Type" behind a pointer.
+// Const and descendant-readonly views of a member are not that member:
+// spelling them alike would let the union option hand the shared
+// backing storage to writers.
+func logosMemberTypeText(t Type) (string, bool) {
+	u := Unalias(t)
+	switch u.(type) {
+	case *ConstView, *ReadonlyDescendants:
+		return "", false
+	}
+	ptr := false
+	if p, ok := u.(*Pointer); ok {
+		ptr = true
+		u = Unalias(p.Elem())
+	}
+	n, ok := u.(*Named)
+	if !ok || n.Obj() == nil || n.Obj().Pkg() == nil {
+		return "", false
+	}
+	text := n.Obj().Pkg().Path() + "." + n.Obj().Name()
+	if ptr {
+		return "*" + text, true
+	}
+	return text, true
 }
 
 func logosUnionShape(t Type) ([]Type, bool, bool) {
@@ -420,4 +541,23 @@ func (check *Checker) logosUnionConstMiss(x, y *operand) bool {
 	}
 	check.errorf(lit, InvalidUntypedConversion, "%s %s is not a member of %s", logosNonMember, from, union)
 	return true
+}
+
+// logosIfaceWord reports whether a value of type t is stored as a fixed-size
+// interface word under LoGOs value-union lowering (SPEC 1.2 lowers a
+// value-used closed union to a methods-only interface). A field,
+// element, or type argument of such a type does not nest the memory of
+// the members its type set admits, so a union member may hold the union
+// itself by value (say, a tree node) without creating an
+// infinitely-sized type. Interface-typed subterms are left out of the
+// memory nest; a type's own declaration still checks the type's
+// internal (type-set) cycles. It applies only when value unions are
+// enabled; a plain Go package keeps the upstream recursive-type rule
+// exactly.
+func (check *Checker) logosIfaceWord(t Type) bool {
+	if !check.logosUnionsOK() {
+		return false
+	}
+	base, _ := logosViewBase(t)
+	return isNonTypeParamInterface(base)
 }

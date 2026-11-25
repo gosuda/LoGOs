@@ -1,0 +1,115 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd herd
+
+# The linter and the race detector accept a herd of children that sleep:
+# no memory is raced, and the group joins in the end.
+logos lint ./...
+! stderr .
+[race] [cgo] env CGO_ENABLED=1
+[race] [cgo] logos test -race -count=1 ./free
+[race] [cgo] stdout '^ok '
+
+# The monitor names the go group statement and the spawn that made the
+# count reach the limit of the monitor, and the finding makes the exit
+# status 1.
+! logos conc run ./free
+stdout '^herd done$'
+stdout '^.*free[/\\]main\.lgo:12: \[conc::group_unbounded\] a group without a limit runs 10000 children at one time; the count follows the work the program gives the group$'
+stdout '^\t.*main\.lgo:12: this go group has no limit$'
+stdout '^\t.*main\.lgo:15: the child that made the count reach 10000 started here$'
+stdout '^\tfix: '
+stdout -count=1 'group_unbounded'
+
+# The test binary links the monitor too.
+! logos conc test -count=1 ./free
+stdout '^ok '
+stdout -count=1 'group_unbounded'
+
+# The same herd behind a limit stays silent, and the program still ends.
+logos conc run ./capped
+stdout '^herd done$'
+! stderr .
+! stdout 'conc::'
+logos conc test -count=1 ./capped
+stdout 'no test files'
+! stdout 'conc::'
+
+-- herd/go.mod --
+module example.com/herd
+
+go 1.27
+-- herd/free/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+)
+
+func herd(ctx context.Context) error {
+	var started sync.WaitGroup
+	go group (ctx) {
+		for range 10000 {
+			started.Add(1)
+			go {
+				started.Done()
+				time.Sleep(2 * time.Second)
+			}
+		}
+		started.Wait()
+	}
+	return nil
+}
+
+func main() {
+	if err := herd(context.Background()); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("herd done")
+}
+-- herd/free/main_test.lgo --
+package main
+
+import "testing"
+
+func TestHerd(t *testing.T) {
+	if err := herd(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+}
+-- herd/capped/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+)
+
+func idle() error {
+	return nil
+}
+
+func herd(ctx context.Context) error {
+	go group (ctx, limit = 100) {
+		for range 10000 {
+			go idle()
+		}
+	}
+	return nil
+}
+
+func main() {
+	if err := herd(context.Background()); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("herd done")
+}

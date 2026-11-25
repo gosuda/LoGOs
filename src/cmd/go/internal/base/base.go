@@ -8,6 +8,7 @@ package base
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -221,8 +222,36 @@ func RunErr(cmdargs ...any) error {
 	return cmd.Run()
 }
 
+// ConcRunExitEnv enables exit code propagation in the run command started by the monitor.
+const ConcRunExitEnv = "LOGOSCONC_RUN_EXIT"
+
 // RunStdin is like run but connects Stdin. It retries if it encounters an ETXTBSY.
 func RunStdin(cmdline []string) {
+	if err := runStdin(cmdline); err != nil {
+		Errorf("%v", err)
+	}
+}
+
+// RunStdinWithExitCode reports failures like RunStdin but preserves the child
+// exit code, using 128 plus the signal number for Unix signal termination.
+func RunStdinWithExitCode(cmdline []string) {
+	err := runStdin(cmdline)
+	if err == nil {
+		return
+	}
+	Errorf("%v", err)
+	exit, ok := errors.AsType[*exec.ExitError](err)
+	if !ok {
+		return
+	}
+	code := exit.ExitCode()
+	if code == -1 {
+		code = signalExitCode(exit.ProcessState)
+	}
+	SetExitStatus(code)
+}
+
+func runStdin(cmdline []string) error {
 	env := slices.Clip(cfg.OrigEnv)
 	env = AppendPATH(env)
 	for try := range 3 {
@@ -234,12 +263,11 @@ func RunStdin(cmdline []string) {
 		StartSigHandlers()
 		err := cmd.Run()
 		if err == nil {
-			break // success
+			return nil
 		}
 
 		if !IsETXTBSY(err) {
-			Errorf("%v", err)
-			break // failure
+			return err
 		}
 
 		// The error was an ETXTBSY. Sleep and try again. It's possible that
@@ -250,6 +278,7 @@ func RunStdin(cmdline []string) {
 		// (*runTestActor).Act in cmd/go/internal/test, which does something similar.
 		time.Sleep(100 * time.Millisecond << uint(try))
 	}
+	return nil
 }
 
 // Usage is the usage-reporting function, filled in by package main

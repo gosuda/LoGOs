@@ -5,13 +5,102 @@
 package eject
 
 import (
+	"bytes"
+	"internal/testenv"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
 )
+
+func TestEjectIndependentTestGraphs(t *testing.T) {
+	const childOut = "LOGOS_TEST_EJECT_INDEPENDENT_GRAPHS_OUT"
+	if out := os.Getenv(childOut); out != "" {
+		cfg.Logos = true
+		cfg.BuildContext.ToolTags = append(cfg.BuildContext.ToolTags, "logos")
+		ejectToDir(t.Context(), out)
+		return
+	}
+
+	goTool := testenv.GoToolPath(t)
+	src, dst := t.TempDir(), t.TempDir()
+	for name, text := range map[string]string{
+		"go.mod":                "module example.com/eject\n\ngo 1.27\n",
+		"value/value.lgo":       "package value\n\nvar number = 1\n\nfunc Get() int { return number }\n",
+		"value/export_test.lgo": "package value\n\nfunc SetForTest(n int) { number = n }\n",
+		"value/value_test.lgo": `package value_test
+
+import (
+	"testing"
+
+	"example.com/eject/reader"
+	"example.com/eject/value"
+)
+
+func TestReaderUsesTestVariant(t *testing.T) {
+	value.SetForTest(7)
+	if got := reader.Read(); got != 7 {
+		t.Fatalf("reader.Read() = %d, want 7", got)
+	}
+}
+`,
+		"reader/reader.lgo": `package reader
+
+import "example.com/eject/value"
+
+func Read() int { return value.Get() }
+`,
+		"reader/reader_test.lgo": `package reader_test
+
+import (
+	"testing"
+
+	"example.com/eject/reader"
+)
+
+func TestReaderUsesOrdinaryPackage(t *testing.T) {
+	if got := reader.Read(); got != 1 {
+		t.Fatalf("reader.Read() = %d, want 1", got)
+	}
+}
+`,
+	} {
+		path := filepath.Join(src, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := []string{"GO111MODULE=on", "GOWORK=off", "GOENV=off", "GOFLAGS=", "GOPROXY=off",
+		"GOSUMDB=off", "GOTOOLCHAIN=local", "GOOS=" + runtime.GOOS, "GOARCH=" + runtime.GOARCH, "CGO_ENABLED=0"}
+	cmd := testenv.Command(t, testenv.Executable(t), "-test.run=^TestEjectIndependentTestGraphs$")
+	cmd.Dir = src
+	cmd.Env = append(cmd.Environ(), env...)
+	cmd.Env = append(cmd.Env, childOut+"="+dst)
+	cmd.Env = append(cmd.Env, "LOGOSEJECT_IN_VARIANT=")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("eject: %v\n%s", err, output)
+	}
+
+	cmd = testenv.Command(t, goTool, "test", "-v", "-count=1", "./...")
+	cmd.Dir = dst
+	cmd.Env = append(cmd.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("test ejected module: %v\n%s", err, output)
+	}
+	for _, name := range []string{"TestReaderUsesTestVariant", "TestReaderUsesOrdinaryPackage"} {
+		if !bytes.Contains(output, []byte("--- PASS: "+name+" ")) {
+			t.Errorf("ejected module did not run %s:\n%s", name, output)
+		}
+	}
+}
 
 func findVariantContextFromLinuxAMD64(pkgDir, name string, hostTags []string) (string, string, []string, bool) {
 	vc, ok := selectVariantContext(pkgDir, name, "linux", "amd64", hostTags)
@@ -140,15 +229,20 @@ func TestFindVariantContextPlatformLogosSyntax(t *testing.T) {
 
 func TestSupportRelPathMapping(t *testing.T) {
 	cases := map[string]string{
-		"logos/rt":      "",
-		"logos/rt/json": "json",
-		"logos/json":    "json",
-		"logos/arena":   "arena",
-		"logos/sync":    "sync",
-		"logos/ascii":   "ascii",
-		"logos/proc":    "proc",
-		"logos/leak":    "leak",
-		"logos/io":      "io",
+		"logos/rt":              "",
+		"logos/rt/json":         "json",
+		"logos/json":            "json",
+		"logos/arena":           "arena",
+		"logos/sync":            "sync",
+		"logos/ascii":           "ascii",
+		"logos/enum":            "enum",
+		"logos/proc":            "proc",
+		"logos/leak":            "leak",
+		"logos/io":              "io",
+		"logos/log":             "log",
+		"logos/strconv":         "strconv",
+		"logos/net/uri":         "net/uri",
+		"logos/encoding/base64": "encoding/base64",
 	}
 	for path, want := range cases {
 		got, ok := supportRelPath(path)

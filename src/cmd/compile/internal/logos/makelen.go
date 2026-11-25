@@ -14,6 +14,42 @@ import (
 	"cmd/compile/internal/types2"
 )
 
+func (w ctWalker) ctMakeLen(c *syntax.CallExpr) (syntax.Expr, []syntax.Stmt, bool) {
+	if len(c.ArgList) < 2 || !w.fl.isMakeCall(c) {
+		return nil, nil, false
+	}
+	dimensions := c.ArgList[1:]
+	found := false
+	for _, dim := range dimensions {
+		syntax.Inspect(dim, func(n syntax.Node) bool {
+			op, ok := lenProduct(n)
+			if ok {
+				found = true
+				if w.fl.ct.makeLenProducts == nil {
+					w.fl.ct.makeLenProducts = make(map[*syntax.Operation]bool)
+				}
+				w.fl.ct.makeLenProducts[op] = true
+			}
+			return true
+		})
+	}
+	if !found {
+		return nil, nil, false
+	}
+	c.ArgList[0] = w.typeSyntax(c.ArgList[0])
+	return c, w.exprList(dimensions), true
+}
+
+func (w ctWalker) ctMakeLenProduct(op *syntax.Operation) (syntax.Expr, []syntax.Stmt, bool) {
+	products := w.fl.ct.makeLenProducts
+	if !products[op] {
+		return nil, nil, false
+	}
+	delete(products, op)
+	call := mulLenCallOf(op, w.fl.ctPkgSelector(op.Pos(), rtImportPath, "MulLen"))
+	return call, w.expressions(&call.ArgList[0], &call.ArgList[1]), true
+}
+
 func (fl *fileLower) lowerMakeLen() {
 	prods := fl.makeLenProducts()
 	if len(prods) == 0 {
@@ -216,12 +252,16 @@ func (fl *fileLower) replaceMulLenField(f reflect.Value, set map[syntax.Expr]boo
 }
 
 func (fl *fileLower) mulLenCall(op *syntax.Operation) syntax.Expr {
-	pos := op.Pos()
-	msg := litOf(pos, strconv.Quote(renderExpr(op)), syntax.StringLit)
-	call := callOf(pos, rtSel(pos, "MulLen"), []syntax.Expr{op.X, op.Y, msg})
+	call := mulLenCallOf(op, rtSel(op.Pos(), "MulLen"))
 	// The synthetic call carries no source parens: pin the product's
 	// own span so source-extent walks — a group child's hoisted
 	// operand, a chain boundary — see `n*m`, not a call at `*`.
 	fl.wrapSpan[call] = span{fl.off(syntax.StartPos(op)), fl.off(syntax.EndPos(op))}
 	return call
+}
+
+func mulLenCallOf(op *syntax.Operation, fun syntax.Expr) *syntax.CallExpr {
+	pos := op.Pos()
+	msg := litOf(pos, strconv.Quote(renderExpr(op)), syntax.StringLit)
+	return callOf(pos, fun, []syntax.Expr{op.X, op.Y, msg})
 }

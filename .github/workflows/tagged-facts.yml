@@ -19,7 +19,7 @@ concurrency:
 jobs:
   tagged-facts:
     if: github.event.pull_request.draft
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 90
     defaults:
       run:

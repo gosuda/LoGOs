@@ -1,0 +1,49 @@
+// run
+
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Inner struct {
+	V int
+}
+
+type Pair struct {
+	First Inner
+	Last  int
+}
+
+func pick() int {
+	for {
+		const for _, f := range comptime.Fields[Pair]() {
+			const if comptime.IsStruct[f.Type]() {
+				return 1
+			} else {
+				break
+			}
+		}
+	}
+}
+
+func main() {
+	check("pick", pick() == 1, pick(), 1)
+	if failed {
+		os.Exit(1)
+	}
+}

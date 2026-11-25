@@ -34,33 +34,39 @@ func logosAsConstView(T Type) *ConstView {
 }
 
 func logosReferenceFree(t Type) bool {
-	return logosReferenceFreeAlong(t, nil)
+	return logosReferenceFreeAlong(t, nil, nil)
 }
 
-func logosReferenceFreeAlong(t Type, expanding []*TypeParam) bool {
+func logosReferenceFreeAlong(t Type, expanding []*TypeParam, path []*Named) bool {
 	if tp, ok := Unalias(t).(*TypeParam); ok {
 		if slices.Contains(expanding, tp) {
 			return false
 		}
 		expanding = append(expanding, tp)
 		return tp.is(func(tm *term) bool {
-			return tm != nil && logosReferenceFreeAlong(tm.typ, expanding)
+			return tm != nil && logosReferenceFreeAlong(tm.typ, expanding, path)
 		})
+	}
+	if named, ok := Unalias(t).(*Named); ok {
+		if slices.Contains(path, named) {
+			return false
+		}
+		path = append(path, named)
 	}
 	switch t := t.Underlying().(type) {
 	case *Basic:
 		return t.Kind() != UnsafePointer
 	case *Array:
-		return t.Len() == 0 || logosReferenceFreeAlong(t.Elem(), expanding)
+		return t.Len() == 0 || logosReferenceFreeAlong(t.Elem(), expanding, path)
 	case *Struct:
 		for i := range t.NumFields() {
-			if !logosReferenceFreeAlong(t.Field(i).Type(), expanding) {
+			if !logosReferenceFreeAlong(t.Field(i).Type(), expanding, path) {
 				return false
 			}
 		}
 		return true
 	case *Option:
-		return logosReferenceFreeAlong(t.Elem, expanding)
+		return logosReferenceFreeAlong(t.Elem, expanding, path)
 	}
 	return false
 }
@@ -96,6 +102,9 @@ func (check *Checker) logosConstAssign(x *operand, T Type, context string) bool 
 	if csrc0 := logosAsConstView(x.typ()); csrc0 == nil && logosAsConstView(T) == nil {
 		if qiface := logosQualifiedIface(T); qiface != nil && x.isValid() && !x.isNil() && T != nil {
 			if Vu := Unalias(x.typ()); Vu != nil && !isTypeParam(Vu) {
+				if tset := logosClosedUnion(T); tset != nil && !logosUnionAdmits(Vu, tset) {
+					return false
+				}
 				var cause string
 				ok := false
 				if Ti := logosPropertyInterface(T); Ti != nil {
@@ -1061,14 +1070,19 @@ func (check *Checker) logosLocalConstMapLen(obj *Const) (int64, bool) {
 }
 
 func (check *Checker) logosImportedConstMapLen(obj *Var) (int64, bool) {
-	if obj.Pkg() == nil || obj.Pkg() == check.pkg {
+	if obj.Pkg() == nil {
 		return 0, false
 	}
 	view := logosAsConstView(obj.Type())
 	if view == nil || !view.ConstMap {
 		return 0, false
 	}
-	if LogosImportedConstMapLen == nil {
+	if check.LogosCtImportConstMap != nil {
+		if row, ok := check.LogosCtImportConstMap(obj.Pkg().Path(), obj.Name()); ok && row.Binding == obj {
+			return int64(row.Count), true
+		}
+	}
+	if obj.Pkg() == check.pkg || LogosImportedConstMapLen == nil {
 		return 0, false
 	}
 	n, ok := LogosImportedConstMapLen(obj.Pkg().Path(), obj.Name())

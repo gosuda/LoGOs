@@ -1,0 +1,39 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+// A package-level Key=int must not win over the function-local
+// type Key = string inside the comptime generic: the const switch tag
+// resolves in the copy's own scope, so the string arm stays live and
+// its comptime call is specialized.
+type Key = int
+
+func InnerValue[T any]() string {
+	const if comptime.IsStruct[T]() {
+		return "struct"
+	}
+	return "inner"
+}
+
+func OuterTag[T any]() string {
+	type Key = string
+	const if comptime.IsStruct[T]() {
+		_ = 0
+	}
+	const switch Key {
+	case string:
+		return InnerValue[int]()
+	case any:
+		return "fallback"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(OuterTag[int]())
+}

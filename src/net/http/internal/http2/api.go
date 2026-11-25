@@ -119,6 +119,10 @@ type ServerConfig interface {
 	IdleTimeout() time.Duration
 }
 
+type extendedConnectConfig interface {
+	ExtendedConnectEnabled() bool
+}
+
 type Handler interface {
 	ServeHTTP(*ResponseWriter, *ServerRequest)
 }

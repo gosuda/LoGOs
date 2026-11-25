@@ -1,0 +1,23 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"unsafe"
+)
+
+func Width[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return comptime.SizeOf[T]()
+	}
+	return comptime.SizeOf[T]()
+}
+
+func Wrap[T any]() int { return Width[map[string]T]() }
+
+func main() {
+	var m map[string]string
+	fmt.Println(Wrap[string]() == int(unsafe.Sizeof(m)))
+}

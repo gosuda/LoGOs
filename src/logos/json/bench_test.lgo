@@ -1,0 +1,76 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package json_test
+
+import (
+	"bytes"
+	stdjson "encoding/json"
+	"testing"
+
+	twinjson "logos/json"
+)
+
+func BenchmarkTwinMarshalStatic(b *testing.B) {
+	p := twinPerson{Name: "ann", Age: 7, Bio: "hello world"}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		bts, berr := twinjson.Marshal(p)
+		if berr != nil {
+			b.Fatal(berr)
+			return
+		}
+		twinSink = bts
+	}
+}
+
+func BenchmarkBaseMarshalStatic(b *testing.B) {
+	p := oraclePerson(twinPerson{Name: "ann", Age: 7, Bio: "hello world"})
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		bts, err := stdjson.Marshal(p)
+		if err != nil {
+			b.Fatal(err)
+		}
+		twinSink = bts
+	}
+}
+
+func BenchmarkTwinMarshalMap(b *testing.B) {
+	m := map[string]int{"b": 1, "a": 2, "c": 3, "d": 4}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		bts, berr := twinjson.Marshal(m)
+		if berr != nil {
+			b.Fatal(berr)
+			return
+		}
+		twinSink = bts
+	}
+}
+
+func BenchmarkBaseMarshalMap(b *testing.B) {
+	m := map[string]int{"b": 1, "a": 2, "c": 3, "d": 4}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		bts, err := stdjson.Marshal(m)
+		if err != nil {
+			b.Fatal(err)
+		}
+		twinSink = bts
+	}
+}
+
+func BenchmarkTwinMarshalWrite(b *testing.B) {
+	p := twinPerson{Name: "ann", Age: 7, Bio: "hello world"}
+	var buf bytes.Buffer
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		buf.Reset()
+		if err := twinjson.MarshalWrite(&buf, p); err != nil {
+			b.Fatal(err)
+		}
+		twinSink = buf.Bytes()
+	}
+}

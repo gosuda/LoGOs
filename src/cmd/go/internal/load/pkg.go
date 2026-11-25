@@ -937,7 +937,7 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 		}
 		if r.dir != "" {
 			var buildMode build.ImportMode
-			buildContext := cfg.BuildContext
+			buildContext := logosBuildContextFor(r.path)
 			if !cfg.ModulesEnabled {
 				buildMode = build.ImportComment
 			} else {
@@ -953,7 +953,7 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 			}
 			if modroot != "" {
 				if rp, err := modindex.GetPackage(modroot, r.dir); err == nil {
-					data.p, data.err = rp.Import(cfg.BuildContext, buildMode)
+					data.p, data.err = rp.Import(logosBuildContextFor(r.path), buildMode)
 					goto Happy
 				} else if !errors.Is(err, modindex.ErrNotIndexed) {
 					base.Fatal(err)
@@ -1001,7 +1001,8 @@ func loadPackageData(ld *modload.Loader, ctx context.Context, path, parentPath, 
 				// Not vendoring, or we already found the vendored path.
 				buildMode |= build.IgnoreVendor
 			}
-			data.p, data.err = cfg.BuildContext.Import(r.path, parentDir, buildMode)
+			buildContext := logosBuildContextFor(r.path)
+			data.p, data.err = buildContext.Import(r.path, parentDir, buildMode)
 		}
 		data.p.ImportPath = r.path
 
@@ -2775,6 +2776,12 @@ func LinkerDeps(s *modload.Loader, p *Package) ([]string, error) {
 	// Building for coverage forces an import of runtime/coverage.
 	if cfg.BuildCover {
 		deps = append(deps, "runtime/coverage")
+	}
+	// The build tag of `logos conc` forces an import of logos/rt, which
+	// carries the monitor in such a build. The build of the main package
+	// adds a file with that import.
+	if slices.Contains(cfg.BuildContext.BuildTags, LogosMonitorTag) {
+		deps = append(deps, LogosRTPkg)
 	}
 
 	return deps, nil

@@ -19,6 +19,7 @@ type scopeItem struct {
 	pos     syntax.Pos
 	hoisted bool
 	join    *groupFrame
+	source  *syntax.ScopeDeferStmt
 }
 
 type scopeDeferCtx struct {
@@ -28,6 +29,8 @@ type scopeDeferCtx struct {
 	items    []scopeItem
 	depth    int
 	join     *groupFrame
+	repeated bool
+	guards   []syntax.Stmt
 }
 
 type scopeFrame struct {
@@ -213,11 +216,44 @@ func scopeEndsExiting(list []syntax.Stmt) bool {
 	if len(list) == 0 {
 		return false
 	}
-	switch list[len(list)-1].(type) {
+	return scopeStmtExits(list[len(list)-1])
+}
+
+func scopeStmtExits(s syntax.Stmt) bool {
+	switch s := s.(type) {
 	case *syntax.ReturnStmt, *syntax.BranchStmt:
 		return true
+	case *syntax.BlockStmt:
+		return scopeEndsExiting(s.List)
+	case *syntax.LabeledStmt:
+		return scopeStmtExits(s.Stmt)
+	case *syntax.IfStmt:
+		if s.Else == nil {
+			return false
+		}
+		return scopeBlockExits(s.Then) && scopeElseExits(s.Else)
 	}
 	return false
+}
+
+func scopeBlockExits(b *syntax.BlockStmt) bool {
+	if b == nil {
+		return false
+	}
+	return scopeEndsExiting(b.List)
+}
+
+func scopeElseExits(e syntax.Stmt) bool {
+	switch e := e.(type) {
+	case *syntax.BlockStmt:
+		return scopeEndsExiting(e.List)
+	case *syntax.IfStmt:
+		if e.Else == nil {
+			return false
+		}
+		return scopeBlockExits(e.Then) && scopeElseExits(e.Else)
+	}
+	return scopeStmtExits(e)
 }
 
 func unwrapScopeLabels(s syntax.Stmt) (syntax.Stmt, []*syntax.Name) {
@@ -749,4 +785,327 @@ func (fc *funcLower) scopeExitStanza(pos syntax.Pos) (native, text []syntax.Stmt
 	}
 	native, text, tw := fc.scopeStanza(pos, items)
 	return native, text, tw.subs
+}
+
+func (fc *funcLower) collectScopeSyntax() (groups bool) {
+	fc.scopeParents = make(map[syntax.Node]syntax.Node)
+	fc.scopeLabels = make(map[string]*syntax.LabeledStmt)
+	var path []syntax.Node
+	syntax.Inspect(fc.body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case nil:
+			path = path[:len(path)-1]
+			return true
+		case syntax.Expr, *syntax.GroupChild:
+			return false
+		case *syntax.GroupStmt:
+			groups = true
+		case *syntax.LabeledStmt:
+			fc.scopeLabels[n.Label.Value] = n
+		}
+		if last := len(path) - 1; last >= 0 {
+			fc.scopeParents[n] = path[last]
+		}
+		path = append(path, n)
+		return true
+	})
+	return groups
+}
+
+func (w ctWalker) scopeSyntaxList(owner syntax.Node, list []syntax.Stmt, lower func([]syntax.Stmt) []syntax.Stmt) []syntax.Stmt {
+	return w.scopeSyntaxListWithJoin(owner, list, lower, nil)
+}
+
+func (w ctWalker) groupScopeBody(body *syntax.BlockStmt, frame groupFrame) []syntax.Stmt {
+	return w.scopeSyntaxListWithJoin(body, body.List, w.stmts, &frame)
+}
+
+func (w ctWalker) scopeSyntaxListWithJoin(owner syntax.Node, list []syntax.Stmt, lower func([]syntax.Stmt) []syntax.Stmt, join *groupFrame) []syntax.Stmt {
+	ctx := w.scopeSyntaxContext(owner, list, join)
+	if ctx == nil {
+		return lower(list)
+	}
+	depth := len(w.scopeCtxs)
+	w.scopeCtxs = append(w.scopeCtxs, ctx)
+	lastExits := scopeEndsExiting(list)
+	list = lower(list)
+	if !lastExits && !w.groupTerminates(list) {
+		pos := syntax.EndPos(owner)
+		list = append(list, w.scopePartialExit(pos, depth)...)
+	}
+	w.scopeCtxs = w.scopeCtxs[:depth]
+	return list
+}
+
+func (w ctWalker) scopeSyntaxContext(owner syntax.Node, list []syntax.Stmt, join *groupFrame) *scopeDeferCtx {
+	var ctx *scopeDeferCtx
+	if join != nil {
+		ctx = &scopeDeferCtx{owner: owner, join: join}
+	}
+	if !w.hasScopeDefer {
+		return ctx
+	}
+	for _, stmt := range list {
+		source, _ := unwrapScopeLabels(stmt)
+		sd, ok := source.(*syntax.ScopeDeferStmt)
+		if !ok {
+			continue
+		}
+		if ctx == nil {
+			ctx = &scopeDeferCtx{owner: owner}
+		}
+		ctx.items = append(ctx.items, scopeItem{source: sd, pos: sd.Pos()})
+	}
+	if ctx == nil || len(ctx.items) == 0 {
+		return ctx
+	}
+	ctx.repeated = w.scopeMayRepeat(owner)
+	loop := w.scopeFallbackLoop(owner)
+	for i := range ctx.items {
+		item := &ctx.items[i]
+		if i > 0 && ctx.repeated {
+			item.armed, item.hoisted = ctx.items[0].armed, ctx.items[0].hoisted
+			continue
+		}
+		item.armed = w.nextScope()
+		w.hoistTemp(item.armed, at(&syntax.FuncType{}, item.pos), "")
+		if loop != nil {
+			item.hoisted = true
+			w.scopeRegisterLoopGuard(loop, w.scopeSyntaxGuard(item.pos, item.armed, join))
+		}
+	}
+	return ctx
+}
+
+func (w ctWalker) scopeMayRepeat(owner syntax.Node) bool {
+	if len(w.scopeLabels) == 0 {
+		return false
+	}
+	seen := make(map[*syntax.LabeledStmt]bool)
+	repeats := false
+	syntax.Inspect(owner, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case syntax.Expr, *syntax.GroupChild:
+			return false
+		case *syntax.LabeledStmt:
+			seen[n] = true
+		case *syntax.BranchStmt:
+			repeats = repeats || n.Tok == syntax.Goto && n.Label != nil && seen[w.scopeLabels[n.Label.Value]]
+		}
+		return !repeats
+	})
+	return repeats
+}
+
+func (w ctWalker) scopeFallbackLoop(owner syntax.Node) *syntax.ForStmt {
+	var loop *syntax.ForStmt
+	for n := w.scopeParents[owner]; n != nil; n = w.scopeParents[n] {
+		switch n := n.(type) {
+		case *syntax.ForStmt:
+			loop = n
+		case *syntax.GroupStmt:
+			return loop
+		}
+	}
+	return loop
+}
+
+func (w ctWalker) scopeRegisterLoopGuard(loop *syntax.ForStmt, guard syntax.Stmt) {
+	if w.groupCtxs == nil {
+		w.groupCtxs = make(map[syntax.Node]*scopeDeferCtx)
+	}
+	ctx := w.groupCtxs[loop]
+	if ctx == nil {
+		ctx = new(scopeDeferCtx)
+		w.groupCtxs[loop] = ctx
+	}
+	ctx.guards = append(ctx.guards, guard)
+}
+
+func (w ctWalker) scopeLoopSyntax(loop *syntax.ForStmt) []syntax.Stmt {
+	if ctx := w.groupCtxs[loop]; ctx != nil {
+		delete(w.groupCtxs, loop)
+		return ctx.guards
+	}
+	return nil
+}
+
+func (w ctWalker) lowerScopeDeferSyntax(s *syntax.ScopeDeferStmt, lower func(syntax.Expr) (syntax.Expr, []syntax.Stmt)) []syntax.Stmt {
+	ctx := w.scopeCtxs[len(w.scopeCtxs)-1]
+	var slot scopeItem
+	for _, item := range ctx.items {
+		if item.source == s {
+			slot = item
+			break
+		}
+	}
+	pos := s.Pos()
+	call := syntax.Unparen(s.Call).(*syntax.CallExpr)
+	if out, ok := w.ctOptionCleanup(call, func(call *syntax.CallExpr) []syntax.Stmt {
+		return w.scopeArmSyntax(pos, slot, ctx, call, lower)
+	}); ok {
+		return []syntax.Stmt{blockEndingAt(pos, syntax.EndPos(s), out)}
+	}
+	return []syntax.Stmt{blockEndingAt(pos, syntax.EndPos(s), w.scopeArmSyntax(pos, slot, ctx, call, lower))}
+}
+
+func (w ctWalker) scopeArmSyntax(pos syntax.Pos, slot scopeItem, ctx *scopeDeferCtx, call *syntax.CallExpr, lower func(syntax.Expr) (syntax.Expr, []syntax.Stmt)) []syntax.Stmt {
+	callee, _ := syntax.Unparen(call.Fun).(*syntax.Name)
+	recovers := !ctx.repeated && namedValue(callee) == "recover" && isBuiltinExpr(w.funcLower, call.Fun)
+	head := w.cleanupCapture(call, lower)
+	holder := func() *syntax.Name { return nameOf(pos, slot.armed) }
+	body := []syntax.Stmt{exprStmtOf(pos, call)}
+	if ctx.repeated {
+		old := w.nextScope()
+		head = append(head, defineOf(pos, []syntax.Expr{nameOf(pos, old)}, []syntax.Expr{holder()}))
+		cond := at(&syntax.Operation{Op: syntax.Neq, X: nameOf(pos, old), Y: w.fl.ctBuiltin(pos, "nil")}, pos)
+		tail := deferOf(pos, callOf(pos, nameOf(pos, old), nil))
+		body = append([]syntax.Stmt{ifOf(pos, nil, cond, []syntax.Stmt{tail})}, body...)
+	}
+	head = append(head, assignOf(pos, []syntax.Expr{holder()}, []syntax.Expr{deferClosure(pos, body)}))
+	if !slot.hoisted {
+		guard := w.scopeInvokeSyntax(pos, slot.armed, ctx.join)
+		if recovers {
+			list := guard.Then.List[1:]
+			invoke := callOf(pos, w.fl.ctBuiltin(pos, "recover"), nil)
+			list[len(list)-1] = exprStmtOf(pos, invoke)
+			guard.Then.List = list
+		}
+		head = append(head, deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{guard}), nil)))
+	}
+	return head
+}
+
+func (w ctWalker) scopeSyntaxGuard(pos syntax.Pos, holder string, join *groupFrame) syntax.Stmt {
+	exit := w.scopeInvokeSyntax(pos, holder, join)
+	return deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{exit}), nil))
+}
+
+func (w ctWalker) scopeInvokeSyntax(pos syntax.Pos, holder string, join *groupFrame) *syntax.IfStmt {
+	name := w.nextScope()
+	get := func() *syntax.Name { return nameOf(pos, holder) }
+	cond := at(&syntax.Operation{Op: syntax.Neq, X: get(), Y: w.fl.ctBuiltin(pos, "nil")}, pos)
+	body := []syntax.Stmt{
+		defineOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{get()}),
+		assignOf(pos, []syntax.Expr{get()}, []syntax.Expr{w.fl.ctBuiltin(pos, "nil")}),
+	}
+	if join != nil {
+		body = append(body, w.groupWaitGuard(pos, *join))
+	}
+	return ifOf(pos, nil, cond, append(body, exprStmtOf(pos, callOf(pos, nameOf(pos, name), nil))))
+}
+
+func (w ctWalker) scopeSyntaxExit(pos syntax.Pos, from, to int, err string) []syntax.Stmt {
+	var out []syntax.Stmt
+	for i := from - 1; i >= to; i-- {
+		ctx := w.scopeCtxs[i]
+		if ctx.join != nil {
+			out = append(out, w.groupWait(pos, *ctx.join, err))
+		}
+		for j := len(ctx.items) - 1; j >= 0; j-- {
+			out = append(out, w.scopeInvokeSyntax(pos, ctx.items[j].armed, nil))
+			if ctx.repeated {
+				break
+			}
+		}
+	}
+	return out
+}
+
+func (w ctWalker) scopeHasJoin(to int) bool {
+	for _, ctx := range w.scopeCtxs[to:] {
+		if ctx.join != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func (w ctWalker) scopePartialExit(pos syntax.Pos, to int) []syntax.Stmt {
+	from := len(w.scopeCtxs)
+	if !w.scopeHasJoin(to) {
+		return w.scopeSyntaxExit(pos, from, to, "")
+	}
+	err := w.nextErr()
+	out := []syntax.Stmt{typedVarDecl(pos, nameOf(pos, err), w.fl.ctBuiltin(pos, "error"))}
+	out = append(out, w.scopeSyntaxExit(pos, from, to, err)...)
+	failed := at(&syntax.Operation{Op: syntax.Neq, X: nameOf(pos, err), Y: w.fl.ctBuiltin(pos, "nil")}, pos)
+	exit := w.scopeSyntaxExit(pos, to, 0, err)
+	exit = append(exit, w.tryTraceSyntax(pos, err))
+	exit = append(exit, w.tryReturnSyntax(pos, err)...)
+	out = append(out, ifOf(pos, nil, failed, exit))
+	return []syntax.Stmt{blockOf(pos, out)}
+}
+
+func (w ctWalker) cleanupReturn(s *syntax.ReturnStmt) ([]syntax.Stmt, syntax.Stmt) {
+	if !w.hasErrdefer && len(w.scopeCtxs) == 0 {
+		return nil, s
+	}
+	pos := s.Pos()
+	var out []syntax.Stmt
+	if s.Results != nil {
+		names := make([]syntax.Expr, len(w.specs))
+		for i, sp := range w.specs {
+			names[i] = nameOf(pos, sp.name.Value)
+		}
+		out = append(out, assignOf(pos, names, syntax.UnpackListExpr(s.Results)))
+	}
+	out = append(out, w.scopePartialExit(pos, 0)...)
+	out = append(out, w.cleanupReturned(pos)...)
+	return nil, blockEndingAt(pos, syntax.EndPos(s), append(out, returnOf(pos, nil)))
+}
+
+func (w ctWalker) scopeBranchSyntax(s *syntax.BranchStmt) []syntax.Stmt {
+	active := w.scopeCtxs
+	if len(active) == 0 {
+		return nil
+	}
+	if s.Tok == syntax.Fallthrough {
+		if active[len(active)-1].owner == w.scopeParents[s] {
+			return w.scopePartialExit(s.Pos(), len(active)-1)
+		}
+		return nil
+	}
+	target := w.scopeBranchTarget(s)
+	if target == nil {
+		return nil
+	}
+	depth := len(active)
+	for depth > 0 {
+		owner := active[depth-1].owner
+		if s.Tok == syntax.Goto && w.scopeContains(owner, target) {
+			break
+		}
+		if s.Tok != syntax.Goto && !w.scopeContains(target, owner) {
+			break
+		}
+		depth--
+	}
+	if depth == len(active) {
+		return nil
+	}
+	return w.scopePartialExit(s.Pos(), depth)
+}
+
+func (w ctWalker) scopeBranchTarget(s *syntax.BranchStmt) syntax.Node {
+	if s.Tok == syntax.Goto && s.Label != nil {
+		return w.scopeLabels[s.Label.Value]
+	}
+	if s.Label != nil {
+		if label := w.scopeLabels[s.Label.Value]; label != nil {
+			return label.Stmt
+		}
+		return nil
+	}
+	for n := w.scopeParents[s]; n != nil; n = w.scopeParents[n] {
+		switch n.(type) {
+		case *syntax.ForStmt:
+			return n
+		case *syntax.SwitchStmt, *syntax.SelectStmt:
+			if s.Tok == syntax.Break {
+				return n
+			}
+		}
+	}
+	return nil
 }

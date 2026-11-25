@@ -127,15 +127,20 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 		var x operand
 		check.expr(nil, &x, guard.X)
 		if x.isValid() {
-			if isTypeParam(x.typ()) {
+			if isTypeParam(x.typ()) || (check.conf.Logos && logosViewedTypeParam(x.typ())) {
 				check.errorf(&x, InvalidTypeSwitch, "cannot use type switch on type parameter value %s", &x)
 			} else if IsInterface(x.typ()) {
 				sx = &x
+			} else if check.conf.Logos && logosQualifiedInterface(x.typ()) {
+				check.error(&x, InvalidTypeSwitch, "cannot use type switch on value with readonly descendants")
 			} else {
 				check.errorf(&x, InvalidTypeSwitch, "%s is not an interface", &x)
 			}
 		}
 	}
+	// Snapshot the excuse with the operand: an arm body that reassigns the
+	// switched variable must not reintroduce the nil-case demand.
+	nilExcused := check.logosSwitchNilExcused(sx)
 
 	var lhsVars []*Var
 	seen := make(map[Type]syntax.Expr)
@@ -167,12 +172,12 @@ func (check *Checker) logosTypeArms(e *syntax.SwitchExpr, guard *syntax.TypeSwit
 	}
 
 	if sx != nil && len(e.Arms) > 0 && !logosHasDefault(e.Arms) {
-		check.logosCoverage(e, sx, seen)
+		check.logosCoverage(e, sx, seen, nilExcused)
 	}
 	return results
 }
 
-func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[Type]syntax.Expr) {
+func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[Type]syntax.Expr, nilExcused bool) {
 	var misses []string
 	if tset := logosClosedUnion(sx.typ()); tset != nil {
 		for _, term := range tset.terms {
@@ -180,7 +185,7 @@ func (check *Checker) logosCoverage(e *syntax.SwitchExpr, sx *operand, seen map[
 				misses = append(misses, TypeString(term.typ, check.qualifier))
 			}
 		}
-		if _, ok := seen[nil]; !ok {
+		if _, ok := seen[nil]; !ok && !nilExcused {
 			misses = append(misses, "nil")
 		}
 	} else {

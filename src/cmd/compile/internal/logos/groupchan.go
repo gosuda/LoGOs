@@ -384,3 +384,169 @@ func (fc *funcLower) groupAugmentSelect(s *syntax.SelectStmt) {
 	rbraceOff := fc.fl.off(s.Rbrace)
 	fc.fl.add(rbraceOff, rbraceOff, "\n"+fc.groupDoneText(top)+"\n")
 }
+
+func (w ctWalker) groupChannelStatement(s syntax.Stmt, top groupFrame) ([]syntax.Stmt, syntax.Stmt, bool) {
+	switch s := s.(type) {
+	case *syntax.SendStmt:
+		return nil, w.groupSendSyntax(s, top), true
+	case *syntax.ExprStmt:
+		if op, ok := groupRecvOp(s.X); ok {
+			pre := w.expressions(&op.X)
+			s.X = op
+			sel := w.groupSelectSyntax(s.Pos(), top, s)
+			return nil, w.scoped(s.Pos(), pre, sel), true
+		}
+	case *syntax.SelectStmt:
+		pre := w.ctChainSelect(s)
+		if !groupSelectHasDefault(s) {
+			s.Body = append(s.Body, w.groupCancelClause(s.Rbrace, top))
+		}
+		return pre, s, true
+	case *syntax.ForStmt:
+		return w.groupForSyntax(s, top)
+	case *syntax.LabeledStmt:
+		if loop, ok := s.Stmt.(*syntax.ForStmt); ok {
+			if rng, ok := w.groupChannelRange(loop); ok {
+				return nil, w.groupRangeSyntax(loop, rng, top, s), true
+			}
+		}
+	case *syntax.IfStmt:
+		if send, ok := s.Init.(*syntax.SendStmt); ok {
+			s.Init = nil
+			before := w.groupSendSyntax(send, top)
+			return append([]syntax.Stmt{before}, w.ifStmt(s)...), s, true
+		}
+	case *syntax.SwitchStmt:
+		if send, ok := s.Init.(*syntax.SendStmt); ok {
+			s.Init = nil
+			before := w.groupSendSyntax(send, top)
+			return append([]syntax.Stmt{before}, w.switchStmt(s)...), s, true
+		}
+	}
+	return nil, nil, false
+}
+
+func (w ctWalker) groupSendSyntax(s *syntax.SendStmt, top groupFrame) syntax.Stmt {
+	pre := w.simple(s)
+	return w.scoped(s.Pos(), pre, w.groupSelectSyntax(s.Pos(), top, s))
+}
+
+func (w ctWalker) groupSelectSyntax(pos syntax.Pos, top groupFrame, comm syntax.SimpleStmt) *syntax.SelectStmt {
+	return at(&syntax.SelectStmt{
+		Body: []*syntax.CommClause{
+			at(&syntax.CommClause{Comm: comm, Colon: pos}, pos),
+			w.groupCancelClause(pos, top),
+		},
+		Rbrace: pos,
+	}, pos)
+}
+
+func (w ctWalker) groupCancelClause(pos syntax.Pos, top groupFrame) *syntax.CommClause {
+	done := callOf(pos, selOf(pos, nameOf(pos, top.gctx), "Done"), nil)
+	recv := at(&syntax.Operation{Op: syntax.Recv, X: done}, pos)
+	exit := w.groupCancelExit(pos, top, nil)
+	return at(&syntax.CommClause{Comm: exprStmtOf(pos, recv), Body: exit, Colon: pos}, pos)
+}
+
+func (w ctWalker) groupCancelExit(pos syntax.Pos, top groupFrame, err syntax.Expr) []syntax.Stmt {
+	if err == nil {
+		err = callOf(pos, selOf(pos, nameOf(pos, top.gctx), "Err"), nil)
+	}
+	var results []syntax.Expr
+	if top.segmentRes != nil {
+		typ := w.fl.ctTypeExpr(pos, top.segmentRes)
+		zero := callOf(pos, w.fl.ctBuiltin(pos, "new"), []syntax.Expr{typ})
+		results = append(results, at(&syntax.Operation{Op: syntax.Mul, X: zero}, pos))
+	}
+	pre, ret := w.cleanupReturn(returnOf(pos, append(results, err)))
+	if ret != nil {
+		pre = append(pre, ret)
+	}
+	return pre
+}
+
+func (w ctWalker) groupReceive(e syntax.Expr, count int) (syntax.Expr, []syntax.Stmt, bool) {
+	top, active := w.groupChanTop()
+	if !active || e == nil {
+		return nil, nil, false
+	}
+	op, ok := groupRecvOp(e)
+	if !ok {
+		return nil, nil, false
+	}
+	typ := w.fl.pkg.info.TypeOf(op.X)
+	if typ == nil {
+		w.reject(op, "missing checked channel receive type")
+		return e, nil, true
+	}
+	ch, ok := types2.CoreType(typ).(*types2.Chan)
+	if !ok {
+		w.reject(op, "missing checked channel element type")
+		return e, nil, true
+	}
+	pos := op.Pos()
+	value := w.fl.cswName("ctrecv")
+	names := []string{value}
+	pre := w.expressions(&op.X)
+	pre = append(pre, typedVarDecl(pos, nameOf(pos, value), w.fl.ctTypeExpr(pos, ch.Elem())))
+	if count == 2 {
+		name := w.fl.cswName("ctrecvok")
+		names = append(names, name)
+		okType := types2.Universe.Lookup("bool").Type()
+		if tuple, ok := w.fl.pkg.info.TypeOf(op).(*types2.Tuple); ok && tuple.Len() == 2 {
+			okType = tuple.At(1).Type()
+		}
+		pre = append(pre, typedVarDecl(pos, nameOf(pos, name), w.fl.ctTypeExpr(pos, okType)))
+	}
+	recv := assignOf(pos, tempNodes(pos, names), []syntax.Expr{op})
+	pre = append(pre, w.groupSelectSyntax(pos, top, recv))
+	return listOf(pos, tempNodes(pos, names)), pre, true
+}
+
+func (w ctWalker) groupChannelRange(s *syntax.ForStmt) (*syntax.RangeClause, bool) {
+	rng, ok := s.Init.(*syntax.RangeClause)
+	if !ok {
+		return nil, false
+	}
+	t := w.fl.pkg.info.TypeOf(syntax.Unparen(rng.X))
+	if t == nil {
+		return nil, false
+	}
+	_, ok = types2.CoreType(t).(*types2.Chan)
+	return rng, ok
+}
+
+func (w ctWalker) groupRangeSyntax(s *syntax.ForStmt, rng *syntax.RangeClause, top groupFrame, label *syntax.LabeledStmt) syntax.Stmt {
+	pos := s.Pos()
+	channel := rng.X
+	pre := w.expressions(&channel)
+	w.groupRangeTargets(s, rng)
+	s.Body.List = w.scopeSyntaxList(s.Body, s.Body.List, func(list []syntax.Stmt) []syntax.Stmt {
+		s.Body.List = nil
+		w.ctPropertyRange(rng, s.Body)
+		target := s.Body.List
+		s.Body.List = list
+		body := w.stmts(list)
+		if len(target) == 0 {
+			return body
+		}
+		return append(target, body...)
+	})
+	rng.X = callOf(pos, w.fl.ctPkgSelector(pos, rtImportPath, "Chan"), []syntax.Expr{nameOf(pos, top.gctx), channel})
+	pre = append(w.scopeLoopSyntax(s), pre...)
+	loop, outer := w.groupRangeLabels(s, label)
+	pre = append(pre, loop)
+	end := s.Body.Rbrace
+	err := w.fl.cswName("ctcancel")
+	bind := defineOf(end, []syntax.Expr{nameOf(end, err)}, []syntax.Expr{
+		callOf(end, selOf(end, nameOf(end, top.gctx), "Err"), nil),
+	})
+	cond := at(&syntax.Operation{Op: syntax.Neq, X: nameOf(end, err), Y: w.fl.ctBuiltin(end, "nil")}, end)
+	check := ifOf(end, bind, cond, w.groupCancelExit(end, top, nameOf(end, err)))
+	block := blockEndingAt(pos, end, append(pre, check))
+	if outer != nil {
+		outer.Stmt = block
+		return outer
+	}
+	return block
+}

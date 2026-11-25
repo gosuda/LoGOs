@@ -122,26 +122,53 @@ func (check *Checker) logosReadonlySliceResult(x *operand, e *syntax.SliceExpr, 
 }
 
 func logosIndexStoreProtected(container Type) bool {
-	base, descendants, readonly := logosReadonlyBase(container)
-	if !descendants {
-		return readonly
+	for {
+		base, descendants, readonly := logosReadonlyBase(container)
+		if readonly {
+			return true
+		}
+		if descendants {
+			_, inline := base.Underlying().(*Array)
+			return !inline
+		}
+		p, ok := Unalias(container).(*Pointer)
+		if !ok {
+			return false
+		}
+		container = p.base
 	}
-	_, inline := base.Underlying().(*Array)
-	return !inline
 }
 
 func (check *Checker) logosFieldStoreProtected(container Type, name string) bool {
-	base, descendants, readonly := logosReadonlyBase(container)
-	if !descendants {
-		return readonly
+	for {
+		base, descendants, readonly := logosReadonlyBase(container)
+		if readonly {
+			return true
+		}
+		if descendants {
+			_, _, indirect := lookupFieldOrMethod(base, true, check.pkg, name, false)
+			return indirect
+		}
+		p, ok := Unalias(container).(*Pointer)
+		if !ok {
+			return false
+		}
+		container = p.base
 	}
-	_, _, indirect := lookupFieldOrMethod(base, true, check.pkg, name, false)
-	return indirect
 }
 
 func logosDerefStoreProtected(container Type) bool {
-	_, descendants, readonly := logosReadonlyBase(container)
-	return readonly || descendants
+	for {
+		_, descendants, readonly := logosReadonlyBase(container)
+		if readonly || descendants {
+			return true
+		}
+		p, ok := Unalias(container).(*Pointer)
+		if !ok {
+			return false
+		}
+		container = p.base
+	}
 }
 
 func logosContainsReadonlyDescendants(T Type) bool {
@@ -152,6 +179,65 @@ func logosContainsReadonlyDescendants(T Type) bool {
 		}
 	}, make(map[Type]bool))
 	return found
+}
+
+// logosViewBase unwraps const views, readonly descendants, and defined
+// types to the value type they qualify. It reports whether a const or
+// readonly view was seen on the way down. A type that revisits itself,
+// as in `type loop const loop`, ends the walk there, so the traversal
+// always terminates; recursive type checking rejects the declaration.
+// Expanding generics such as `type Grow[T any] const Grow[*T]` produce a
+// fresh instance per unwrap, so origin revisits end the walk as well.
+func logosViewBase(T Type) (Type, bool) {
+	qualified := false
+	seen := make(map[Type]bool)
+	for {
+		if T == nil {
+			return nil, qualified
+		}
+		if seen[T] {
+			return T, qualified
+		}
+		seen[T] = true
+		if c := logosAsConstView(T); c != nil {
+			qualified = true
+			T = c.Elem
+			continue
+		}
+		if r := logosAsReadonlyDescendants(T); r != nil {
+			qualified = true
+			T = r.Elem
+			continue
+		}
+		if n, ok := Unalias(T).(*Named); ok {
+			// Origin revisits bound the expansion of a generic that
+			// wraps itself per unwrap (Grow[*T]); a plain Named is its
+			// own origin, so keying it here would end every defined
+			// type's walk before the first unwrap.
+			if n.inst != nil {
+				if seen[n.Origin()] {
+					return T, qualified
+				}
+				seen[n.Origin()] = true
+			}
+			T = n.Underlying()
+			continue
+		}
+		return T, qualified
+	}
+}
+
+// logosViewedTypeParam reports whether T is a type parameter seen through
+// a const or readonly view, so a viewed type parameter keeps the
+// type-parameter diagnostic instead of a readonly or not-an-interface one.
+func logosViewedTypeParam(T Type) bool {
+	base, qualified := logosViewBase(T)
+	return qualified && isTypeParam(base)
+}
+
+func logosQualifiedInterface(T Type) bool {
+	base, qualified := logosViewBase(T)
+	return qualified && !isTypeParam(base) && IsInterface(base)
 }
 
 func logosAnyContainsReadonlyDescendants(V, T Type) bool {

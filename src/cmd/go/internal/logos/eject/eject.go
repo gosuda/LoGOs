@@ -60,6 +60,16 @@ ejected loGo/s dependency module lands under DIR/_logos_deps, and
 the support sources become the shared module
 github.com/gosuda/loGos/rt under DIR/_logos_deps/rt.
 
+The copy holds every other regular file of the main module: each Go
+file that still parses is rewritten to the ejected import paths and
+formatted, and each remaining file is copied byte for byte.
+Dot-prefixed, underscore-prefixed, vendor, testdata, and
+version-control-ignored paths are copied because //go:embed can
+reach them; only package discovery skips those paths. The copy
+leaves out .git contents, logos.toml files, .lgo sources, the
+destination subtree, symlinks and special files, and foreign
+nested modules.
+
 DIR must not exist or must be empty. The ejected tree builds with an
 upstream Go 1.27.2 or newer toolchain. Eject never writes into the
 source tree.
@@ -138,6 +148,7 @@ type ejectPlan struct {
 	logos      []*load.Package
 	known      map[*load.Package]bool
 	testBuilt  map[*load.Package]bool
+	testRoots  []*load.Package
 	provenance map[string][]*load.Package
 }
 
@@ -167,15 +178,28 @@ func ejectToDir(ctx context.Context, out string) {
 	moduleLoader := modload.NewLoader()
 	moduleLoader.InitWorkfile()
 	work.BuildInit(moduleLoader)
-	staging, err := os.MkdirTemp("", "logoseject")
-	if err != nil {
-		base.Fatalf("logos eject: %v", err)
-	}
-	defer func() {
-		if err := os.RemoveAll(staging); err != nil {
-			base.Errorf("logos eject: %v", err)
+	var staging, stateDir string
+	if isEjectVariant() && os.Getenv("LOGOSEJECT_STATE") == "1" {
+		stateDir = variantStatePath(out)
+		if err := os.Mkdir(stateDir, 0700); err != nil {
+			base.Fatalf("logos eject: make variant state: %v", err)
 		}
-	}()
+		staging = filepath.Join(stateDir, "staging")
+		if err := os.Mkdir(staging, 0700); err != nil {
+			base.Fatalf("logos eject: make variant staging: %v", err)
+		}
+	} else {
+		var err error
+		staging, err = os.MkdirTemp("", "logoseject")
+		if err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+		defer func() {
+			if err := os.RemoveAll(staging); err != nil {
+				base.Errorf("logos eject: %v", err)
+			}
+		}()
+	}
 	load.ArmLogosEject(staging)
 	defer load.DisarmLogosEject()
 	opts := load.PackageOpts{AutoVCS: true}
@@ -195,8 +219,8 @@ func ejectToDir(ctx context.Context, out string) {
 		stripEjectCopies(builds)
 		buildEjectRoots(moduleLoader, ctx, testBuildMains(builds))
 	}
-	if isEjectVariant() && os.Getenv("LOGOSEJECT_STATE") == "1" {
-		writeVariantState(plan, staging, out)
+	if stateDir != "" {
+		writeVariantState(plan, stateDir)
 		return
 	}
 	var variantOuts []string
@@ -463,14 +487,29 @@ func hasLogosTestFiles(p *load.Package) bool {
 	return false
 }
 
-// collectTestBuilds prepares test-variant builds for every loGo/s
-// package holding loGo/s test files, and absorbs the test-only
-// dependencies their loads discovered into the plan.
+// collectTestBuilds discovers test dependencies of packages being copied
+// and prepares compilation only for loGo/s test files that need lowering.
 func collectTestBuilds(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, plan *ejectPlan) []testBuild {
 	var builds []testBuild
 	var bad []*load.Package
-	for _, p := range plan.logos {
+	pkgs := slices.Clone(plan.main.pkgs)
+	for _, m := range plan.deps {
+		pkgs = append(pkgs, m.pkgs...)
+	}
+	discoveryOpts := opts
+	discoveryOpts.SuppressBuildInfo = true
+	for _, p := range pkgs {
+		if len(p.TestGoFiles)+len(p.XTestGoFiles) == 0 {
+			continue
+		}
 		if !hasLogosTestFiles(p) {
+			_, ptest, pxtest := load.TestPackagesAndErrors(moduleLoader, ctx, nil, discoveryOpts, p, nil)
+			first := len(plan.testRoots)
+			plan.testRoots = append(plan.testRoots, ptest)
+			if pxtest != nil {
+				plan.testRoots = append(plan.testRoots, pxtest)
+			}
+			load.CheckPackageErrors(load.PackageList(plan.testRoots[first:]))
 			continue
 		}
 		pmain, ptest, pxtest, perr := load.TestPackagesFor(moduleLoader, ctx, opts, p, nil)
@@ -481,15 +520,23 @@ func collectTestBuilds(moduleLoader *modload.Loader, ctx context.Context, opts l
 		if pmain == nil {
 			base.Fatalf("logos eject: no test main for %s", p.ImportPath)
 		}
+		load.CheckPackageErrors(load.PackageList([]*load.Package{pmain}))
+		plan.testRoots = append(plan.testRoots, pmain)
 		builds = append(builds, testBuild{main: pmain, ptest: ptest, pxtest: pxtest})
 		plan.testBuilt[p] = true
 	}
 	load.CheckPackageErrors(bad)
-	var mains []*load.Package
-	for _, t := range builds {
-		mains = append(mains, t.main)
-	}
-	for _, p := range load.PackageList(mains) {
+	testPackages := load.PackageList(plan.testRoots)
+	// Test variants from separate test binaries can share an import path.
+	// Validate their closures separately and check the shared packages together.
+	ordinary := testPackages[:0]
+	for _, p := range testPackages {
+		if p.Incomplete {
+			base.Fatalf("logos eject: incomplete test dependency graph for %s", p.ImportPath)
+		}
+		if !isTestArtifact(p) {
+			ordinary = append(ordinary, p)
+		}
 		found := false
 		for _, q := range plan.provenance[p.ImportPath] {
 			if q == p {
@@ -502,6 +549,7 @@ func collectTestBuilds(moduleLoader *modload.Loader, ctx context.Context, opts l
 		}
 		plan.addPackage(p)
 	}
+	load.CheckPackageErrors(ordinary)
 	resortEjectPlan(plan)
 	return builds
 }
@@ -664,7 +712,7 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string,
 	var rtDir string
 	if usedRT {
 		rtDir = filepath.Join(out, "_logos_deps", "rt")
-		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan, tests)
+		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan)
 		addSupportRequire(filepath.Join(out, "go.mod"), "./_logos_deps/rt")
 	}
 	rewriteMainGoMod(out, plan)
@@ -1521,132 +1569,46 @@ func applyTextEdits(data []byte, edits []textEdit) ([]byte, bool) {
 	return append(out, data[prev:]...), true
 }
 
-// writeSupportModule writes the shared support module: exactly the
-// transitive closure of logos/ packages imported by the ejected packages,
-// plus logos/rt always with its own logos/ imports, each copied
-// non-recursively to the destination the import rewrite maps it to. A
-// destination claimed by two packages, or a member holding only .lgo
-// files, stops the eject instead of landing a broken tree. The sources
-// come from cfg.GOROOT, the root of the toolchain running this command.
-func writeSupportModule(out, goVer string, plan *ejectPlan, tests []testBuild) {
-	goroot := cfg.GOROOT
-	rtDst := filepath.Join(out, "_logos_deps", "rt")
-	closure := ejectSupportClosure(plan, tests, goroot)
-	dst, err := supportDestinations(closure)
-	if err != nil {
+// writeSupportModule writes the shared, self-contained support module.
+func writeSupportModule(out, goVer string, plan *ejectPlan) {
+	src := filepath.Join(cfg.GOROOT, "src")
+	dst := filepath.Join(out, "_logos_deps", "rt")
+	if err := copyEjectedSupport(src, dst, ejectSupportRoots(plan)); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
-	rels := make([]string, 0, len(dst))
-	for rel := range dst {
-		rels = append(rels, rel)
-	}
-	slices.Sort(rels)
-	for _, rel := range rels {
-		copySupportPackage(filepath.Join(goroot, "src", filepath.FromSlash(dst[rel])), filepath.Join(rtDst, filepath.FromSlash(rel)), dst[rel])
-	}
-	copyJSONScanSupport(filepath.Join(goroot, "src", "internal", "jsonscan"), filepath.Join(rtDst, "internal", "jsonscan"))
-	if err := os.WriteFile(filepath.Join(rtDst, "go.mod"), []byte("module "+rtModulePath+"\n\ngo "+goVer+"\n"), 0666); err != nil {
+	copyJSONScanSupport(filepath.Join(src, "internal", "jsonscan"), filepath.Join(dst, "internal", "jsonscan"))
+	if err := os.WriteFile(filepath.Join(dst, "go.mod"), []byte("module "+rtModulePath+"\n\ngo "+goVer+"\n"), 0666); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 }
 
-// ejectSupportClosure returns the sorted logos/ import paths the ejected
-// tree must vendor: every logos/ path imported transitively by the ejected
-// packages and their test variants, plus logos/rt always with its own
-// logos/ imports. The walk follows Internal.Imports through the loaded
-// graph; a closure member with no graph node (only possible for the
-// always-included logos/rt when nothing imports it) contributes the
-// logos/ imports of the Go files eject would copy, read from GOROOT
-// source.
-func ejectSupportClosure(plan *ejectPlan, tests []testBuild, goroot string) []string {
+// ejectSupportRoots keeps support imports from owned packages, their tests,
+// and inactive variant loads. The copy follows further imports in all variants.
+func ejectSupportRoots(plan *ejectPlan) []string {
 	var seeds []*load.Package
 	seeds = append(seeds, plan.main.pkgs...)
 	for _, m := range plan.deps {
 		seeds = append(seeds, m.pkgs...)
 	}
-	for _, t := range tests {
-		for _, p := range []*load.Package{t.main, t.ptest, t.pxtest} {
-			if p != nil {
-				seeds = append(seeds, p)
-			}
-		}
-	}
-	byPath := make(map[string]*load.Package)
+	seeds = append(seeds, plan.testRoots...)
+	seen := map[string]bool{load.LogosRTPkg: true}
+	roots := []string{load.LogosRTPkg}
 	for _, p := range load.PackageList(seeds) {
-		if p == nil || p.ImportPath == "" {
+		if p == nil || !strings.HasPrefix(p.ImportPath, "logos/") || seen[p.ImportPath] {
 			continue
 		}
-		if _, ok := byPath[p.ImportPath]; !ok {
-			byPath[p.ImportPath] = p
+		seen[p.ImportPath] = true
+		roots = append(roots, p.ImportPath)
+	}
+	// Variant inventories retain package identities but not dependency edges.
+	for path := range plan.provenance {
+		if strings.HasPrefix(path, "logos/") && !seen[path] {
+			seen[path] = true
+			roots = append(roots, path)
 		}
 	}
-	seen := map[string]bool{}
-	var queue []string
-	add := func(path string) {
-		if !strings.HasPrefix(path, "logos/") || seen[path] {
-			return
-		}
-		seen[path] = true
-		queue = append(queue, path)
-	}
-	for path := range byPath {
-		add(path)
-	}
-	add(load.LogosRTPkg)
-	for len(queue) > 0 {
-		path := queue[0]
-		queue = queue[1:]
-		if byPath[path] == nil {
-			for _, dep := range logosDirImports(goroot, path) {
-				add(dep)
-			}
-		}
-	}
-	out := make([]string, 0, len(seen))
-	for path := range seen {
-		out = append(out, path)
-	}
-	slices.Sort(out)
-	return out
-}
-
-// logosDirImports reads the logos/ imports of the Go files eject would
-// copy for one support package: non-test, non-runtime .go files at the
-// top of its GOROOT source directory. Subdirectories are separate
-// packages and stay out.
-func logosDirImports(goroot, path string) []string {
-	dir := filepath.Join(goroot, "src", filepath.FromSlash(path))
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		base.Fatalf("logos eject: support package %s: %v", path, err)
-	}
-	seen := map[string]bool{}
-	var out []string
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !isSupportCopyFile(name) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			base.Fatalf("logos eject: %v", err)
-		}
-		f, err := parser.ParseFile(token.NewFileSet(), name, data, parser.ImportsOnly)
-		if err != nil {
-			base.Fatalf("logos eject: cannot parse support file %s: %v", filepath.Join(dir, name), err)
-		}
-		for _, imp := range f.Imports {
-			impPath, err := strconv.Unquote(imp.Path.Value)
-			if err != nil {
-				base.Fatalf("logos eject: cannot parse support file %s: %v", filepath.Join(dir, name), err)
-			}
-			if strings.HasPrefix(impPath, "logos/") && !seen[impPath] {
-				seen[impPath] = true
-				out = append(out, impPath)
-			}
-		}
-	}
-	return out
+	slices.Sort(roots)
+	return roots
 }
 
 func copyJSONScanSupport(src, dst string) {
@@ -1790,6 +1752,15 @@ func isSupportCopyFile(name string) bool {
 	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_runtime.go") && !strings.HasSuffix(name, "_test.go")
 }
 
+// ejectedBuildLines are the build lines that hold in every build of the
+// support copy: the copy is the ejected form, and it has no monitored
+// file, so the tag logosconc selects nothing in it.
+var ejectedBuildLines = [][]byte{
+	[]byte("//go:build logosejected"),
+	[]byte("// +build logosejected"),
+	[]byte("//go:build !logosconc"),
+}
+
 // copySupportPackage copies the Go sources of one support package directory
 // without descending into subdirectories: every subdirectory is a separate
 // package the closure names explicitly when the ejected tree needs it.
@@ -1797,52 +1768,18 @@ func isSupportCopyFile(name string) bool {
 // gofmt pass. A package holding only .lgo files stops the eject: eject
 // lowers user .lgo packages through the compiler into staging, but
 // support packages ride from GOROOT source and have no such lowering.
-func copySupportPackage(src, dst, logosPath string) {
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		base.Fatalf("logos eject: support package %s: %v", logosPath, err)
-	}
-	copied := 0
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !isSupportCopyFile(name) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(src, name))
-		if err != nil {
-			base.Fatalf("logos eject: %v", err)
-		}
-		fixed, _, ok := remapEjectedFile(stripEjectedBuildTag(data), "")
-		if !ok {
-			base.Fatalf("logos eject: cannot parse support file %s", name)
-		}
-		if err := os.MkdirAll(dst, 0777); err != nil {
-			base.Fatalf("logos eject: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dst, name), fixed, 0666); err != nil {
-			base.Fatalf("logos eject: %v", err)
-		}
-		queueEjectGofmt(filepath.Join(dst, name))
-		copied++
-	}
-	if copied == 0 {
-		for _, e := range entries {
-			if !e.IsDir() && logosfile.Is(e.Name()) {
-				base.Fatalf("logos eject: support package %s holds only .lgo files, which eject does not lower", logosPath)
-			}
-		}
-		base.Fatalf("logos eject: support package %s holds no Go sources", logosPath)
-	}
-}
 
 // stripEjectedBuildTag removes ejected build lines, so the support copy
 // compiles under plain go with no tags set.
+
+// stripEjectedBuildTag removes the ejectedBuildLines, so the support
+// copy compiles under plain go with every set of tags.
 func stripEjectedBuildTag(data []byte) []byte {
 	lines := bytes.Split(data, []byte("\n"))
 	kept := lines[:0]
 	for _, l := range lines {
 		trimmed := bytes.TrimSpace(l)
-		if bytes.Equal(trimmed, []byte("//go:build logosejected")) || bytes.Equal(trimmed, []byte("// +build logosejected")) {
+		if slices.ContainsFunc(ejectedBuildLines, func(line []byte) bool { return bytes.Equal(trimmed, line) }) {
 			continue
 		}
 		kept = append(kept, l)

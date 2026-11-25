@@ -34,6 +34,32 @@ func foldJSONKey(k string) string {
 	return b.String()
 }
 
+// foldJSONKeyNoDelim folds a member name like encoding/json/v2 does under
+// MatchCaseInsensitiveNames without MatchCaseSensitiveDelimiter: case-fold
+// and drop '-' and '_'.
+func foldJSONKeyNoDelim(k string) string {
+	var b strings.Builder
+	for i := 0; i < len(k); {
+		c := k[i]
+		if c < utf8.RuneSelf {
+			if c == '-' || c == '_' {
+				i++
+				continue
+			}
+			if 'a' <= c && c <= 'z' {
+				c -= 'a' - 'A'
+			}
+			b.WriteByte(c)
+			i++
+			continue
+		}
+		r, n := utf8.DecodeRuneInString(k[i:])
+		b.WriteRune(foldJSONRune(r))
+		i += n
+	}
+	return b.String()
+}
+
 func foldJSONRune(r rune) rune {
 	for {
 		r2 := unicode.SimpleFold(r)
@@ -64,7 +90,31 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 	body = append(body, ifLines("_logos_v := _logos_s.Saved(); _logos_v != nil", []string{"return _logos_v"})...)
 	body = append(body, js.requiredCheck()...)
 	body = append(body, "return nil")
-	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSON(_logos_data []byte) error {\n", jsonRecv, js.name)
+	fmt.Fprintf(b, "\nfunc _logos_unmarshal_%s(_logos_data []byte, %s *%s, _logos_fold bool) error {\n", js.name, jsonRecv, js.name)
+	for _, l := range indentLines(body) {
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	b.WriteString("}\n")
+	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSON(_logos_data []byte) error { return _logos_unmarshal_%s(_logos_data, %s, true) }\n", jsonRecv, js.name, js.name, jsonRecv)
+}
+
+// unmarshalFromText emits the options-aware UnmarshalJSONFrom form. The
+// static body implements the v1 default options, so it runs only when
+// the caller's options equal those defaults apart from the internal
+// call bits; any other option decodes through encoding/json's default
+// decoder over a method-free shadow type, which applies the caller's
+// options in full. On the fast path one value is streamed and the
+// static body runs under the v1 fold setting.
+func (js *jsonStruct) unmarshalFromText(b *strings.Builder) {
+	body := []string{
+		fmt.Sprintf("if !%s.CallerOptionsAreV1Default(_logos_dec.Options()) {", jsonAlias),
+	}
+	for _, l := range js.fallbackDecodeLines() {
+		body = append(body, "\t"+l)
+	}
+	body = append(body, "}", "_logos_val, _logos_err := _logos_dec.ReadValue()", "if _logos_err != nil {", "\treturn _logos_err", "}", fmt.Sprintf("return _logos_unmarshal_%s(_logos_val, %s, true)", js.name, jsonRecv))
+	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSONFrom(_logos_dec *%s.Decoder) error {\n", jsonRecv, js.name, jsontextAlias)
 	for _, l := range indentLines(body) {
 		b.WriteString(l)
 		b.WriteByte('\n')
@@ -72,10 +122,147 @@ func (js *jsonStruct) unmarshalText(b *strings.Builder) {
 	b.WriteString("}\n")
 }
 
+// unmarshalFromRefusalText emits UnmarshalJSONFrom for a struct whose fields
+// the reflective decoder cannot represent (a non-bare option value or a
+// union member at any container depth, modulo a JSON method boundary): the
+// v1 and v2 defaults take the v1 method, and any other option reports an
+// UnsupportedOptions
+// diagnostic instead of failing inside the shadow type, where an option
+// field looks like a plain struct. A v1 call that differs from the defaults
+// only in struct-tag flags still takes the v1 method: a reflective parent
+// sets those flags while decoding a `,string` or `,format` field, and v1
+// ignores them on struct values.
+func (js *jsonStruct) unmarshalFromRefusalText(b *strings.Builder) {
+	body := []string{
+		fmt.Sprintf("if %s.CallerOptionsAreV1DefaultIgnoringTags(_logos_dec.Options()) || %s.CallerOptionsAreV2Default(_logos_dec.Options()) {", jsonAlias, jsonAlias),
+		"\t_logos_val, _logos_err := _logos_dec.ReadValue()",
+		"\tif _logos_err != nil {",
+		"\t\treturn _logos_err",
+		"\t}",
+		fmt.Sprintf("\treturn %s.UnmarshalJSON([]byte(_logos_val))", jsonRecv),
+		"}",
+		fmt.Sprintf("return %s.UnsupportedOptions(%q)", jsonAlias, js.name),
+	}
+	fmt.Fprintf(b, "\nfunc (%s *%s) UnmarshalJSONFrom(_logos_dec *%s.Decoder) error {\n", jsonRecv, js.name, jsontextAlias)
+	for _, l := range indentLines(body) {
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	b.WriteString("}\n")
+}
+
+// fallbackDecodeLines emits the reflective fallback shared by the
+// options-aware path and the exempt path. A null or non-object document
+// carries no members to validate, so it decodes straight through the shadow
+// without touching the destination: the v1 profile accepts root null as a
+// no-op. Otherwise it buffers the object, scans member presence with the
+// fast path key dispatch, null tracking and last-wins duplicate semantics,
+// and decodes through the method-free shadow into the destination's
+// existing allocations, so a present member keeps nested data and pointer
+// aliases while an omitted member still fails the required-field check.
+func (js *jsonStruct) fallbackDecodeLines() []string {
+	decl := fmt.Sprintf("type _logos_shadow_%s %s", js.name, js.name)
+	call := fmt.Sprintf("return %s.DecodeDefault[_logos_shadow_%s, %s](_logos_dec, (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv)
+	if len(js.required) == 0 {
+		if len(js.defaults) == 0 {
+			return []string{decl, call}
+		}
+		// Field defaults apply only when the input is an object, matching
+		// the v1 body's position after its Object() check. The object is
+		// buffered first so a malformed object cannot reset the defaults.
+		body := []string{decl, "if _logos_dec.PeekKind() == '{' {"}
+		body = append(body,
+			"\t_logos_raw, _logos_read_err := _logos_dec.ReadValue()",
+			"\tif _logos_read_err != nil {",
+			"\t\treturn _logos_read_err",
+			"\t}")
+		for _, l := range js.defaults {
+			body = append(body, "\t"+l)
+		}
+		body = append(body,
+			"\t_logos_base := _logos_dec.InputOffset() - int64(len(_logos_raw))",
+			"\t"+fmt.Sprintf("return %s.DecodeDefaultRaw[_logos_shadow_%s, %s](_logos_raw, _logos_dec.Options(), _logos_base, _logos_dec.StackPointer(), (*_logos_shadow_%s)(%s))", jsonAlias, js.name, js.name, js.name, jsonRecv),
+			"}")
+		return append(body, call)
+	}
+	body := []string{decl}
+	body = append(body, "if _logos_dec.PeekKind() != '{' {")
+	body = append(body, "\t"+call)
+	body = append(body, "}")
+	body = append(body, "_logos_raw, _logos_read_err := _logos_dec.ReadValue()")
+	body = append(body, "if _logos_read_err != nil {")
+	body = append(body, "\treturn _logos_read_err")
+	body = append(body, "}")
+	body = append(body, fmt.Sprintf("var _logos_seen [%d]uint64", seenWords(len(js.required))))
+	body = append(body, "var _logos_firstnulled = -1")
+	body = append(body, js.presenceScanLines()...)
+	body = append(body, "if _logos_scan_err := _logos_pscan.Err(); _logos_scan_err != nil {")
+	body = append(body, "\treturn _logos_scan_err")
+	body = append(body, "}")
+	// Same position as the v1 body: defaults run once the input is known
+	// to be an object, before decoding fills it — but only after the object
+	// buffered and scanned cleanly, so malformed input leaves the
+	// destination untouched.
+	body = append(body, js.defaults...)
+	body = append(body, "_logos_base := _logos_dec.InputOffset() - int64(len(_logos_raw))")
+	body = append(body, fmt.Sprintf("if _logos_fallback_err := %s.DecodeDefaultRaw[_logos_shadow_%s, %s](_logos_raw, _logos_dec.Options(), _logos_base, _logos_dec.StackPointer(), (*_logos_shadow_%s)(%s)); _logos_fallback_err != nil {", jsonAlias, js.name, js.name, js.name, jsonRecv))
+	body = append(body, "\treturn _logos_fallback_err")
+	body = append(body, "}")
+	body = append(body, js.requiredCheck()...)
+	body = append(body, "return nil")
+	return body
+}
+
+// presenceScanLines emits the member-presence scan over the buffered raw
+// object. It mirrors the fast path key dispatch (exact then fold), null
+// tracking and last-wins duplicate semantics for the required fields only;
+// other members are skipped. Presence, not a nil pointer after decode,
+// decides the required-field check.
+func (js *jsonStruct) presenceScanLines() []string {
+	body := []string{
+		fmt.Sprintf("_logos_pscan := %s.NewScanner([]byte(_logos_raw), (*%s)(nil))", jsonAlias, js.name),
+		"if !_logos_pscan.Object() {",
+		"\treturn _logos_pscan.End()",
+		"}",
+		// The reflective decode honors the caller's name-matching options,
+		// so presence must match under the same rule: fold only when the
+		// caller asked for case-insensitive matching, and drop '-' and '_'
+		// only when the caller did not keep delimiters significant.
+		fmt.Sprintf("_logos_casefold := %s.CallerMatchCaseInsensitive(_logos_dec.Options())", jsonAlias),
+		fmt.Sprintf("_logos_delimsens := %s.CallerMatchCaseSensitiveDelimiter(_logos_dec.Options())", jsonAlias),
+		"for _logos_pscan.Next() {",
+		fmt.Sprintf("\t_logos_i := _logos_jsonkey_%s(_logos_pscan.Key())", js.name),
+		"\tif _logos_i < 0 && _logos_casefold {",
+		"\t\tif _logos_delimsens {",
+		fmt.Sprintf("\t\t\t_logos_i = _logos_jsonfold_%s(_logos_pscan.FoldKey())", js.name),
+		"\t\t} else {",
+		fmt.Sprintf("\t\t\t_logos_i = %s(_logos_pscan.FoldKeyNoDelims())", js.foldDName()),
+		"\t\t}",
+		"\t}",
+		"\tswitch _logos_i {",
+	}
+	for _, f := range js.fields {
+		if f.required < 0 {
+			continue
+		}
+		w, b := f.required/64, f.required%64
+		body = append(body, fmt.Sprintf("\tcase %d:", f.pos))
+		body = append(body, "\t\tif _logos_pscan.Null() {")
+		body = append(body, fmt.Sprintf("\t\t\t_logos_seen[%d] &^= 1 << %d", w, b))
+		body = append(body, fmt.Sprintf("\t\t\tif _logos_firstnulled < 0 { _logos_firstnulled = %d }", f.required))
+		body = append(body, "\t\t} else {")
+		body = append(body, fmt.Sprintf("\t\t\t_logos_seen[%d] |= 1 << %d", w, b))
+		body = append(body, "\t\t\t\t_logos_pscan.Skip()")
+		body = append(body, "\t\t}")
+	}
+	body = append(body, "\tdefault:", "\t\t_logos_pscan.Skip()", "\t}", "}")
+	return body
+}
+
 func (js *jsonStruct) loopLines() []string {
 	body := []string{
 		fmt.Sprintf("_logos_i := _logos_jsonkey_%s(_logos_s.Key())", js.name),
-		"if _logos_i < 0 {",
+		"if _logos_i < 0 && _logos_fold {",
 		fmt.Sprintf("\t_logos_i = _logos_jsonfold_%s(_logos_s.FoldKey())", js.name),
 		"}",
 		"switch _logos_i {",
@@ -184,11 +371,13 @@ func (f *jsonField) fallbackQuotedValueLines(field string, kind scalarKind) []st
 }
 
 type trialMember struct {
-	keyed   bool
-	spell   string
-	sample  string
-	ptr     bool
-	keyFunc string
+	keyed     bool
+	spell     string
+	sample    string
+	ptr       bool
+	keyFunc   string
+	decodable bool
+	inits     []promotedDecoderInit
 }
 
 type jsonUnionClass struct {
@@ -217,12 +406,24 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 	uc.members = make([]trialMember, len(members))
 	for i, c := range members {
 		sample, isPtr := strings.CutPrefix(c.code, "*")
+		if !isPtr && c.typ != nil {
+			// An alias can hide a pointer spelling: derive pointer-ness
+			// from the unaliased type while keeping the accessible alias
+			// spelling, so the trial allocates instead of decoding
+			// into a nil value.
+			if p, ok := unaliasConstView(c.typ).(*types2.Pointer); ok {
+				isPtr = true
+				sample = sourceTypeString(unaliasConstView(p.Elem()), js.qualify, js.holderPkg, js.cgoSource)
+			}
+		}
 		uc.members[i] = trialMember{
-			keyed:   c.keyed,
-			spell:   c.code,
-			sample:  sample,
-			ptr:     isPtr,
-			keyFunc: c.keyFunc,
+			keyed:     c.keyed,
+			spell:     c.code,
+			sample:    sample,
+			decodable: c.decodable,
+			inits:     c.inits,
+			ptr:       isPtr,
+			keyFunc:   c.keyFunc,
 		}
 		if c.keyed {
 			uc.keyed = append(uc.keyed, i)
@@ -257,7 +458,18 @@ func (uc jsonUnionClass) errorExpr(matched string) string {
 }
 
 func (uc jsonUnionClass) needsClaim() bool {
-	return len(uc.keyed) > 0 && len(uc.keyed) < len(uc.members)
+	// The claim flag is only read by keyless trials, so a union whose
+	// keyless members are all untriable needs no claim variable: emitting
+	// one would leave it assigned but never read.
+	if len(uc.keyed) == 0 || len(uc.keyed) == len(uc.members) {
+		return false
+	}
+	for _, m := range uc.members {
+		if m.decodable && !m.keyed {
+			return true
+		}
+	}
+	return false
 }
 
 func ownsKey(s trialMember) string {
@@ -332,6 +544,9 @@ func unionKeyScanLines(uc jsonUnionClass) []string {
 
 func unionMemberTrialLines(uc jsonUnionClass, i int) []string {
 	s := uc.members[i]
+	if !s.decodable {
+		return nil
+	}
 	scratch := fmt.Sprintf("_logos_scratch%d", i)
 	decl := fmt.Sprintf("var %s %s", scratch, s.spell)
 	if s.ptr {
@@ -341,20 +556,30 @@ func unionMemberTrialLines(uc jsonUnionClass, i int) []string {
 	if s.keyed {
 		counter, dest = "_logos_match", "_logos_target"
 	}
-	attempt := ifLines(scratch+".UnmarshalJSON(_logos_raw) == nil", []string{
+	decode := ifLines(scratch+".UnmarshalJSON(_logos_raw) == nil", []string{
 		counter + "++",
 		dest + " = " + scratch,
 		fmt.Sprintf("_logos_winidx = %d", i),
 	})
+	// Embedded pointers initialize inside the gated attempt, so a trial
+	// skipped by key matching or the claim gate allocates nothing.
+	trial := decode
+	if len(s.inits) > 0 {
+		gated := make([]string, 0, len(s.inits)+1)
+		for _, in := range s.inits {
+			gated = append(gated, fmt.Sprintf("%s.%s = new(%s)", scratch, in.sel, in.elem))
+		}
+		trial = append(gated, decode...)
+	}
 	inner := []string{decl}
 	switch {
 	case s.keyed:
 		inner = append(inner, ifLines(fmt.Sprintf("_logos_keys_%d == 0", i), []string{fmt.Sprintf("_logos_matched_%d = false", i)})...)
-		inner = append(inner, ifLines(fmt.Sprintf("_logos_matched_%d", i), attempt)...)
+		inner = append(inner, ifLines(fmt.Sprintf("_logos_matched_%d", i), trial)...)
 	case uc.needsClaim():
-		inner = append(inner, ifLines("!_logos_claimed", attempt)...)
+		inner = append(inner, ifLines("!_logos_claimed", trial)...)
 	default:
-		inner = append(inner, attempt...)
+		inner = append(inner, trial...)
 	}
 	out := []string{"{"}
 	out = append(out, indentLines(ifLines(fmt.Sprintf("!_logos_hit || _logos_out.Winner == %d", i), inner))...)
@@ -639,6 +864,40 @@ func (js *jsonStruct) keyFuncs(b *strings.Builder) {
 	}
 	js.writeKeyFunc(b, js.name, "jsonkey", exact)
 	js.writeKeyFunc(b, js.name, "jsonfold", folded)
+	if len(js.required) > 0 && js.hasDelimKeys() {
+		seenD := make(map[string]bool)
+		var foldedD []keyEntry
+		for _, f := range js.fields {
+			fk := foldJSONKeyNoDelim(f.key)
+			if !seenD[fk] {
+				seenD[fk] = true
+				foldedD = append(foldedD, keyEntry{fk, f.pos})
+			}
+		}
+		js.writeKeyFunc(b, js.name, "jsonfoldd", foldedD)
+	}
+}
+
+// hasDelimKeys reports whether a member name carries '-' or '_', the
+// delimiters encoding/json/v2 folds away under MatchCaseInsensitiveNames
+// without MatchCaseSensitiveDelimiter.
+func (js *jsonStruct) hasDelimKeys() bool {
+	for _, f := range js.fields {
+		if strings.ContainsAny(f.key, "-_") {
+			return true
+		}
+	}
+	return false
+}
+
+// foldDName names the delimiter-insensitive fold dispatch: the dedicated
+// table when a member name carries a delimiter, otherwise the plain fold
+// table, whose entries fold identically either way.
+func (js *jsonStruct) foldDName() string {
+	if js.hasDelimKeys() {
+		return "_logos_jsonfoldd_" + js.name
+	}
+	return "_logos_jsonfold_" + js.name
 }
 
 func unionFoldFunc(keyFunc string) string {

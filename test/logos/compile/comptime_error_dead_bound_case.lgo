@@ -1,0 +1,27 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+const N = 3
+
+func RejectB[T any]() int {
+	comptime.Error("unsupported")
+	return 0
+}
+
+func ChooseB[T any]() string {
+	const N = 2
+	_ = comptime.SizeOf[int]()
+	const switch T {
+	case [N]int:
+		RejectB[T]()
+		return "reject"
+	case int:
+		return "int"
+	}
+	return "other"
+}
+
+var _ = ChooseB[[2]int]() // ERROR "\[comptime::error\] unsupported"

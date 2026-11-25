@@ -40,7 +40,7 @@ type variantState struct {
 	EjectModules []string
 }
 
-func writeVariantState(plan *ejectPlan, staging, out string) {
+func writeVariantState(plan *ejectPlan, dir string) {
 	var state variantState
 	for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
 		for _, p := range plan.provenance[path] {
@@ -58,21 +58,12 @@ func writeVariantState(plan *ejectPlan, staging, out string) {
 	for _, m := range plan.deps {
 		state.EjectModules = append(state.EjectModules, m.path)
 	}
-	dir := variantStatePath(out)
-	if err := os.Mkdir(dir, 0777); err != nil {
-		base.Fatalf("logos eject: make variant state: %v", err)
-	}
 	data, err := json.Marshal(state)
 	if err != nil {
 		base.Fatalf("logos eject: encode variant inventory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "packages.json"), data, 0666); err != nil {
 		base.Fatalf("logos eject: write variant inventory: %v", err)
-	}
-	// Both directories belong to this helper's temporary output. Moving the
-	// staging tree preserves owned-request sidecars and avoids another copy.
-	if err := os.Rename(staging, filepath.Join(dir, "staging")); err != nil {
-		base.Fatalf("logos eject: retain variant staging: %v", err)
 	}
 }
 

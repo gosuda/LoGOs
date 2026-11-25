@@ -178,11 +178,11 @@ func isPackageDeclName(name string) bool {
 	return token.IsIdentifier(base) && facts.ValidObject(name)
 }
 
-// packageDeclNames excludes lazy hoisted local types (local·1) and method
+// PackageDeclNames excludes lazy hoisted local types (local·1) and method
 // symbols (Type.Method). A generic local type needs its enclosing dictionary
 // and cannot be resolved by the public type importer. Methods are reached
 // through their declaring types instead.
-func packageDeclNames(pkg *types2.Package) []string {
+func PackageDeclNames(pkg *types2.Package) []string {
 	return slices.DeleteFunc(pkg.Scope().Names(), func(name string) bool {
 		return !isPackageDeclName(name)
 	})
@@ -209,7 +209,7 @@ func reachableFuncFactObjects(pkg *types2.Package) map[string]*types2.Func {
 	refs := make(map[types2.Type]bool)
 	seen := make(map[types2.Type]bool)
 	visit := func(t types2.Type) { graph.references(t, refs, seen) }
-	for _, name := range packageDeclNames(pkg) {
+	for _, name := range PackageDeclNames(pkg) {
 		obj := pkg.Scope().Lookup(name)
 		if fn, ok := obj.(*types2.Func); ok {
 			objects[name] = fn.Origin()
@@ -454,7 +454,7 @@ func clonePackageWithOverlays(orig *types2.Package, byObj map[string][]qualPath,
 	if err := graph.prepare(); err != nil {
 		return nil, err
 	}
-	for _, name := range packageDeclNames(orig) {
+	for _, name := range PackageDeclNames(orig) {
 		if err := insertOverlayDecl(out, graph, byObj, readonly, assert, name); err != nil {
 			return nil, err
 		}
@@ -672,6 +672,17 @@ func (g *overlayGraph) references(t types2.Type, refs map[types2.Type]bool, seen
 
 func (g *overlayGraph) route(t types2.Type, steps []string, q qualKind) {
 	if t == nil || len(steps) == 0 {
+		return
+	}
+	if steps[0] == "O" {
+		// Root marker for a dropped top-level option; it selects no node
+		// of the decoded base. Descend through a present option, else skip
+		// the marker so deeper steps still mark nested declarations.
+		if o := optAsOption(t); o != nil {
+			g.route(o.Elem, steps[1:], q)
+			return
+		}
+		g.route(t, steps[1:], q)
 		return
 	}
 	switch n := t.(type) {
@@ -1651,7 +1662,7 @@ func ifaceHasMethod(t types2.Type, name string, seen map[types2.Type]bool) bool 
 }
 
 func (g *overlayGraph) prepare() error {
-	for _, name := range packageDeclNames(g.orig) {
+	for _, name := range PackageDeclNames(g.orig) {
 		obj := g.orig.Scope().Lookup(name)
 		g.routeObject(name, obj.Type())
 		g.routeReadonlyObject(name, obj.Type())
@@ -1668,7 +1679,7 @@ func (g *overlayGraph) prepare() error {
 		slices.Sort(paths)
 		g.readonlyPaths[name] = paths
 	}
-	for _, name := range packageDeclNames(g.orig) {
+	for _, name := range PackageDeclNames(g.orig) {
 		g.references(g.orig.Scope().Lookup(name).Type(), make(map[types2.Type]bool), make(map[types2.Type]bool))
 	}
 	for {
@@ -2350,6 +2361,28 @@ func wrapAtQual(pkg *types2.Package, t types2.Type, steps []string, q qualKind) 
 	}
 	if t == nil {
 		return t
+	}
+	if steps[0] == "O" && q == qualOption {
+		// Root marker for an alias right-hand side whose top-level option
+		// the general export drops. The decoded base has no option node,
+		// so the marker cannot navigate: with no further steps it restores
+		// the option around the root (idempotent when present), otherwise
+		// it descends into an already-restored option or skips itself on
+		// the bare base so deeper steps still apply.
+		if o := optAsOption(t); o != nil {
+			if len(steps) == 1 {
+				return t
+			}
+			elem := wrapAtQual(pkg, o.Elem, steps[1:], q)
+			if elem == o.Elem {
+				return t
+			}
+			return &types2.Option{Elem: elem}
+		}
+		if len(steps) == 1 {
+			return applyQual(t, q)
+		}
+		return wrapAtQual(pkg, t, steps[1:], q)
 	}
 	if o := optAsOption(t); o != nil {
 		if len(steps) == 0 {

@@ -371,6 +371,165 @@ func (z *zeroCopy) isStringType(t types2.Type) bool {
 	return ok && (b.Kind() == types2.String || b.Kind() == types2.UntypedString)
 }
 
+type ctByteOrigin struct {
+	local   bool
+	blocked bool
+	inputs  []syntax.Expr
+}
+
+func ctByteConversions(root syntax.Node, info *types2.Info) map[*syntax.CallExpr]types2.BasicKind {
+	z := zeroCopy{info: info}
+	origins := make(map[*types2.Var]ctByteOrigin)
+	readonlyCalls := make(map[*syntax.CallExpr]types2.BasicKind)
+	var strings []*syntax.CallExpr
+	write := func(lhs *syntax.Name, rhs syntax.Expr, unknown bool) {
+		v, ok := info.ObjectOf(lhs).(*types2.Var)
+		if !ok || !z.isViewBytes(v.Type()) {
+			return
+		}
+		origin := origins[v]
+		origin.local = origin.local || info.Defs[lhs] == v
+		origin.blocked = origin.blocked || unknown
+		if rhs != nil && !info.Types[rhs].IsNil() {
+			origin.inputs = append(origin.inputs, rhs)
+		}
+		origins[v] = origin
+		if call, ok := syntax.Unparen(rhs).(*syntax.CallExpr); ok && z.ctStringBytes(call, true) {
+			readonlyCalls[call] = types2.Uint8
+		}
+	}
+	writeList := func(lhs, rhs []syntax.Expr) {
+		paired := len(lhs) == len(rhs)
+		for i, dst := range lhs {
+			id, ok := syntax.Unparen(dst).(*syntax.Name)
+			if !ok {
+				continue
+			}
+			var src syntax.Expr
+			if paired {
+				src = rhs[i]
+			}
+			write(id, src, !paired)
+		}
+	}
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.VarDecl:
+			rhs := unlistExpr(n.Values)
+			for i, id := range n.NameList {
+				var src syntax.Expr
+				if len(rhs) == len(n.NameList) {
+					src = rhs[i]
+				}
+				write(id, src, len(rhs) != 0 && src == nil)
+			}
+		case *syntax.AssignStmt:
+			writeList(unlistExpr(n.Lhs), unlistExpr(n.Rhs))
+		case *syntax.RangeClause:
+			writeList(unlistExpr(n.Lhs), nil)
+		case *syntax.Operation:
+			if id, ok := syntax.Unparen(n.X).(*syntax.Name); ok && n.Op == syntax.And && n.Y == nil {
+				write(id, nil, true)
+			}
+		case *syntax.CallExpr:
+			if z.ctStringBytes(n, false) {
+				readonlyCalls[n] = types2.Uint8
+			} else if tv := info.Types[n.Fun]; tv.IsType() && z.isStringType(tv.Type) && len(n.ArgList) == 1 && !n.HasDots {
+				strings = append(strings, n)
+			}
+		}
+		return true
+	})
+	proven := make(map[*types2.Var]bool)
+	var stable func(syntax.Expr) bool
+	stable = func(e syntax.Expr) bool {
+		switch x := syntax.Unparen(e).(type) {
+		case *syntax.Name:
+			switch obj := info.ObjectOf(x).(type) {
+			case *types2.Const:
+				return z.isViewBytes(obj.Type()) || z.isByteSlice(obj.Type())
+			case *types2.Var:
+				if ok, known := proven[obj]; known {
+					return ok
+				}
+				proven[obj] = false
+				o := origins[obj]
+				if !o.local || o.blocked {
+					return false
+				}
+				for _, input := range o.inputs {
+					if !stable(input) {
+						return false
+					}
+				}
+				proven[obj] = true
+				return true
+			}
+		case *syntax.CompositeLit:
+			return z.isByteSlice(info.TypeOf(x)) || z.isViewBytes(info.TypeOf(x))
+		case *syntax.CallExpr:
+			if readonlyCalls[x] == types2.Uint8 {
+				return true
+			}
+			fun := info.Types[x.Fun]
+			return fun.IsType() && z.isViewBytes(fun.Type) && len(x.ArgList) == 1 &&
+				z.isViewBytes(info.TypeOf(x.ArgList[0])) && stable(x.ArgList[0])
+		case *syntax.SliceExpr:
+			return stable(x.X)
+		}
+		return false
+	}
+	for _, call := range strings {
+		if stable(call.ArgList[0]) {
+			readonlyCalls[call] = types2.String
+		}
+	}
+	return readonlyCalls
+}
+
+func (z *zeroCopy) ctStringBytes(call *syntax.CallExpr, readonlySink bool) bool {
+	if len(call.ArgList) != 1 || call.HasDots {
+		return false
+	}
+	fun := z.info.Types[call.Fun]
+	if !fun.IsType() || !(z.isViewBytes(fun.Type) || readonlySink && z.isByteSlice(fun.Type)) {
+		return false
+	}
+	return z.isStringType(z.info.TypeOf(call.ArgList[0]))
+}
+
+func (w ctWalker) ctZeroCopy(call *syntax.CallExpr) (syntax.Expr, []syntax.Stmt, bool) {
+	direction := w.fl.ct.byteConversions[call]
+	if direction != types2.Uint8 && direction != types2.String {
+		return nil, nil, false
+	}
+	pos := call.Pos()
+	target := w.fl.pkg.info.TypeOf(call.Fun)
+	var source types2.Type = types2.Typ[types2.String]
+	data, result := "StringData", "Slice"
+	operand := call.ArgList[0]
+	arg, pre := w.expr(operand)
+	if direction == types2.String {
+		source = types2.NewSlice(types2.Typ[types2.Uint8])
+		data, result = "SliceData", "String"
+	} else if t := w.fl.pkg.info.TypeOf(operand); !types2.Identical(types2.Default(t), source) {
+		arg = callOf(pos, w.fl.ctBuiltin(pos, "string"), []syntax.Expr{arg})
+	}
+	id := nameOf(pos, "_logos_bytes_source")
+	length := callOf(pos, w.fl.ctBuiltin(pos, "len"), []syntax.Expr{nameOf(pos, id.Value)})
+	ptr := callOf(pos, w.fl.ctPkgSelector(pos, "unsafe", data), []syntax.Expr{nameOf(pos, id.Value)})
+	var view syntax.Expr = callOf(pos, w.fl.ctPkgSelector(pos, "unsafe", result), []syntax.Expr{ptr, length})
+	if direction == types2.String && !types2.Identical(target, types2.Typ[types2.String]) {
+		view = callOf(pos, w.fl.ctTypeExpr(pos, target), []syntax.Expr{view})
+	}
+	ft := at(&syntax.FuncType{
+		ParamList:  []*syntax.Field{at(&syntax.Field{Name: id, Type: w.fl.ctTypeExpr(pos, source)}, pos)},
+		ResultList: []*syntax.Field{at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, target)}, pos)},
+	}, pos)
+	lit := at(&syntax.FuncLit{Type: ft, Body: blockOf(pos, []syntax.Stmt{returnOf(pos, []syntax.Expr{view})})}, pos)
+	return callOf(pos, lit, []syntax.Expr{arg}), pre, true
+}
+
 func unlistExpr(e syntax.Expr) []syntax.Expr {
 	if e == nil {
 		return nil

@@ -1,0 +1,28 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Ok[T any]() int {
+	const if false {
+		comptime.Error("bad")
+	}
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+type Pair struct {
+	A int
+}
+
+func main() {
+	fmt.Println(Ok[Pair]())
+}

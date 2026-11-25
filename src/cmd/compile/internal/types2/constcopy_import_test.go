@@ -4,12 +4,12 @@
 
 package types2
 
-// Consumer behavior proof that copied const evaluation carries the
-// check's import capability: a copied call to an imported recursive
-// const func reaches the selected comptime::ctfe_step_limit, a
-// below-limit copied call succeeds, and evaluation without a threaded
-// importer still fails closed (no global cache). Plain Go checking is
-// unaffected.
+// Consumer behavior proof that the const for copy check carries the
+// check's import capability: a copied block that calls an imported
+// recursive const func records its value, and the same block without a
+// threaded importer records none (no global cache). Plain Go checking is
+// unaffected. The step limit of an imported const func inside a comptime
+// instance is pinned by cmd/go script logos_constfunc_import_limits.
 
 import (
 	"fmt"
@@ -85,40 +85,50 @@ func logosCopyCaller(t *testing.T, imp Importer) (*Package, *syntax.File, *Info)
 	return pkg, file, info
 }
 
-// logosCopyParseFunc parses one copy-shaped function declaration.
-func logosCopyParseFunc(t *testing.T, src string) *syntax.FuncDecl {
+// logosCopyParseBlock parses one copied const for iteration block.
+func logosCopyParseBlock(t *testing.T, stmts string) *syntax.BlockStmt {
 	t.Helper()
-	file, err := syntax.Parse(syntax.NewFileBase("cfcopy"), strings.NewReader(src), nil, nil, 0)
+	file, err := syntax.Parse(syntax.NewFileBase("cfcopy"), strings.NewReader("package cfcopy\nfunc cfcopy() {\n{\n"+stmts+"\n}\n}\n"), nil, nil, 0)
 	if err != nil {
 		t.Fatalf("parse copy: %v", err)
 	}
 	for _, decl := range file.DeclList {
-		if fn, ok := decl.(*syntax.FuncDecl); ok {
-			return fn
+		if fn, ok := decl.(*syntax.FuncDecl); ok && len(fn.Body.List) == 1 {
+			if block, ok := fn.Body.List[0].(*syntax.BlockStmt); ok {
+				return block
+			}
 		}
 	}
-	t.Fatal("copy source declares no function")
+	t.Fatal("copy source holds no block")
 	return nil
 }
 
-func logosCopyErrText(errs []Error) string {
-	var sb strings.Builder
-	for _, err := range errs {
-		sb.WriteString(err.Msg)
-		sb.WriteString("\n")
+// logosCopyLimitValue returns the value the copy check recorded for the
+// constant Limit, if any.
+func logosCopyLimitValue(t *testing.T, info *Info) (int64, bool) {
+	t.Helper()
+	for _, o := range info.Defs {
+		if c, ok := o.(*Const); ok && c.Name() == "Limit" {
+			v, ok := info.LogosCTFE[c]
+			if !ok || !v.IsValid() {
+				return 0, false
+			}
+			return v.Int64(), true
+		}
 	}
-	return sb.String()
+	t.Fatal("copy check recorded no Limit constant")
+	return 0, false
 }
 
-// TestLogosCopyImportedStepLimit proves a copied call to the imported
-// recursive const func reaches the selected step limit instead of
-// failing to open the defining package.
-func TestLogosCopyImportedStepLimit(t *testing.T) {
+// TestLogosCopyImportedUnderLimit proves a below-limit call in a copied
+// block to the imported const func evaluates through the threaded
+// importer and records its value.
+func TestLogosCopyImportedUnderLimit(t *testing.T) {
 	defPkg, imp := logosCopyImportFixture(t)
 	pkg, file, info := logosCopyCaller(t, imp)
-	fn := logosCopyParseFunc(t, "package cfcopy\nfunc CopyOver() int {\nconst Limit = _logos_t0.Rec(1000)\nreturn Limit\n}\n")
 	ctx := LogosCopyContext{
 		Scope:    info.Scopes[file],
+		Sig:      NewSignatureType(nil, nil, nil, nil, nil, false),
 		Aliases:  map[*Package]string{defPkg: "_logos_t0"},
 		MaxSteps: info.LogosCTFEMaxSteps,
 		Importer: info.LogosImporter,
@@ -127,57 +137,19 @@ func TestLogosCopyImportedStepLimit(t *testing.T) {
 	if ctx.Scope == nil {
 		t.Fatal("caller file scope missing")
 	}
-	_, errs := LogosCheckCopyFunc(pkg, info, ctx, fn)
-	got := logosCopyErrText(errs)
-	if !strings.Contains(got, "comptime::ctfe_step_limit") {
-		t.Fatalf("copied Rec(1000) errors = %q, want the selected step limit", got)
-	}
-	if strings.Contains(got, "no importer installed") {
-		t.Fatalf("copied Rec(1000) errors = %q, want import resolution, not a missing importer", got)
-	}
-}
-
-// TestLogosCopyImportedUnderLimit proves a below-limit copied call to
-// the same imported const func succeeds and records its value.
-func TestLogosCopyImportedUnderLimit(t *testing.T) {
-	defPkg, imp := logosCopyImportFixture(t)
-	pkg, file, info := logosCopyCaller(t, imp)
-	fn := logosCopyParseFunc(t, "package cfcopy\nfunc CopyUnder() int {\nconst Limit = _logos_t0.Rec(5)\nreturn Limit\n}\n")
-	ctx := LogosCopyContext{
-		Scope:    info.Scopes[file],
-		Aliases:  map[*Package]string{defPkg: "_logos_t0"},
-		MaxSteps: info.LogosCTFEMaxSteps,
-		Importer: info.LogosImporter,
-		Context:  info.LogosContext,
-	}
-	obj, errs := LogosCheckCopyFunc(pkg, info, ctx, fn)
-	if len(errs) != 0 {
-		t.Fatalf("copied Rec(5) errors = %q, want success", logosCopyErrText(errs))
-	}
-	if obj == nil {
-		t.Fatal("copied Rec(5) returned no function object")
-	}
-	var limit *Const
-	for _, o := range info.Defs {
-		if c, ok := o.(*Const); ok && c.Name() == "Limit" {
-			limit = c
-		}
-	}
-	if limit == nil {
-		t.Fatal("copied Rec(5) recorded no Limit constant")
-	}
-	v, ok := info.LogosCTFE[limit]
-	if !ok || !v.IsValid() {
+	LogosCheckCopy(pkg, info, ctx, []*syntax.BlockStmt{logosCopyParseBlock(t, "const Limit = _logos_t0.Rec(5)\n_ = Limit")})
+	v, ok := logosCopyLimitValue(t, info)
+	if !ok {
 		t.Fatal("copied Rec(5) recorded no value for Limit")
 	}
-	if v.Int64() != 5 {
-		t.Fatalf("copied Rec(5) Limit = %d, want 5", v.Int64())
+	if v != 5 {
+		t.Fatalf("copied Rec(5) Limit = %d, want 5", v)
 	}
 }
 
 // TestLogosCopyWithoutImporterFailsClosed proves the capability is
-// threaded, not ambient: the same over-limit copy without an importer
-// in context or info fails to open the package instead of evaluating.
+// threaded, not ambient: the same copied block without an importer in
+// context or info cannot open the defining package and records no value.
 func TestLogosCopyWithoutImporterFailsClosed(t *testing.T) {
 	defPkg, _ := logosCopyImportFixture(t)
 	pkg := NewPackage("example.com/copycallerplain", "caller")
@@ -186,19 +158,15 @@ func TestLogosCopyWithoutImporterFailsClosed(t *testing.T) {
 		Uses: map[*syntax.Name]Object{}, Selections: map[*syntax.SelectorExpr]*Selection{},
 		Scopes: map[syntax.Node]*Scope{}, Instances: map[*syntax.Name]Instance{},
 	}
-	fn := logosCopyParseFunc(t, "package cfcopy\nfunc CopyOver() int {\nconst Limit = _logos_t0.Rec(1000)\nreturn Limit\n}\n")
 	ctx := LogosCopyContext{
 		Scope:    pkg.Scope(),
+		Sig:      NewSignatureType(nil, nil, nil, nil, nil, false),
 		Aliases:  map[*Package]string{defPkg: "_logos_t0"},
 		MaxSteps: 100,
 	}
-	_, errs := LogosCheckCopyFunc(pkg, info, ctx, fn)
-	got := logosCopyErrText(errs)
-	if !strings.Contains(got, "no importer installed") {
-		t.Fatalf("importer-less copy errors = %q, want the missing-importer failure", got)
-	}
-	if strings.Contains(got, "ctfe_step_limit") {
-		t.Fatalf("importer-less copy errors = %q, want no step-limit evaluation", got)
+	LogosCheckCopy(pkg, info, ctx, []*syntax.BlockStmt{logosCopyParseBlock(t, "const Limit = _logos_t0.Rec(5)\n_ = Limit")})
+	if v, ok := logosCopyLimitValue(t, info); ok {
+		t.Fatalf("importer-less copy recorded Limit = %d, want no evaluation", v)
 	}
 }
 

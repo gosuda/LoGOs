@@ -7,6 +7,7 @@ package logos
 import (
 	"fmt"
 	"go/token"
+	"path/filepath"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -1234,4 +1235,123 @@ func (x *hoistHost) caseArm(e *syntax.SwitchExpr, i int, name string, names armN
 	return stmt, cat(
 		gen("if !"+names.done+" { "), gx.cat(), gen(head), gen(guards), gen(": "+names.done+" = true; "), bodyText, gen(" } }; "),
 	)
+}
+
+func (w ctWalker) trySwitchExprSyntax(e *syntax.SwitchExpr) (syntax.Expr, []syntax.Stmt) {
+	pos := e.Pos()
+	typ := w.fl.pkg.info.TypeOf(e)
+	if typ == nil {
+		w.reject(e, "missing checked switch expression type")
+		return e, nil
+	}
+	name := w.fl.cswName("ctswitch")
+	sw := at(&syntax.SwitchStmt{Init: e.Init, Tag: e.Tag, Rbrace: e.Rbrace}, pos)
+	head := w.header(sw, sw.Init)
+	tag := w.expressions(&sw.Tag)
+	guard, isType := sw.Tag.(*syntax.TypeSwitchGuard)
+	var seen []types2.Type
+	var armPrelude bool
+	for _, arm := range e.Arms {
+		cases := arm.Cases
+		var bind syntax.Stmt
+		if isType && cases != nil {
+			cases, bind = w.switchTypeArmSyntax(arm, guard, &seen)
+			if cases == nil {
+				continue
+			}
+		}
+		result, pre := w.expr(arm.Body)
+		armPrelude = armPrelude || len(pre) != 0
+		result = w.ctOptionValue(arm.Body, result, typ)
+		body := append(pre, assignOf(arm.Arrow, []syntax.Expr{nameOf(arm.Arrow, name)}, []syntax.Expr{result}))
+		if bind != nil {
+			body = []syntax.Stmt{blockOf(arm.Arrow, append([]syntax.Stmt{bind}, body...))}
+		}
+		sw.Body = append(sw.Body, at(&syntax.CaseClause{Cases: cases, Body: body, Colon: arm.Arrow}, arm.Pos()))
+	}
+	head = append(head, w.ctChainCases(sw, tag)...)
+	if !hasDefaultArm(e) {
+		end := e.Rbrace
+		file := w.fl.baseName
+		if b := pos.FileBase(); b != nil {
+			file = filepath.Base(b.Filename())
+		}
+		msg := fmt.Sprintf("logos: switch expression at %s:%d matched no arm", file, pos.Line())
+		fail := callOf(end, w.fl.ctBuiltin(end, "panic"), []syntax.Expr{litOf(end, fmt.Sprintf("%q", msg), syntax.StringLit)})
+		sw.Body = append(sw.Body, at(&syntax.CaseClause{Body: []syntax.Stmt{exprStmtOf(end, fail)}, Colon: end}, end))
+	}
+	if len(head) == 0 && !armPrelude {
+		for _, clause := range sw.Body {
+			body := clause.Body
+			if block, ok := body[0].(*syntax.BlockStmt); ok {
+				body = block.List
+			}
+			last := len(body) - 1
+			if as, ok := body[last].(*syntax.AssignStmt); ok {
+				body[last] = at(&syntax.ReturnStmt{Results: as.Rhs}, as.Pos())
+			}
+		}
+		result := at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, typ)}, pos)
+		sig := at(&syntax.FuncType{ResultList: []*syntax.Field{result}}, pos)
+		fn := at(&syntax.FuncLit{Type: sig, Body: blockEndingAt(pos, e.Rbrace, []syntax.Stmt{sw})}, pos)
+		return callOf(pos, fn, nil), nil
+	}
+	def := typedVarDecl(pos, nameOf(pos, name), w.fl.ctTypeExpr(pos, typ))
+	head = append(head, sw)
+	return nameOf(pos, name), []syntax.Stmt{def, blockEndingAt(pos, e.Rbrace, head)}
+}
+
+func (w ctWalker) switchTypeArmSyntax(arm *syntax.ArmClause, guard *syntax.TypeSwitchGuard, seen *[]types2.Type) (syntax.Expr, syntax.Stmt) {
+	var out []syntax.Expr
+	var rebind types2.Type
+	elems := caseElems(arm.Cases)
+	for _, el := range elems {
+		t := w.fl.pkg.info.TypeOf(el)
+		if members, ok := types2.LogosUnionTerms(t); ok {
+			for _, member := range members {
+				if !seenIn(*seen, member) {
+					*seen = append(*seen, member)
+					out = append(out, w.fl.ctTypeExpr(el.Pos(), member))
+				}
+			}
+			if len(elems) == 1 {
+				rebind = t
+			}
+			continue
+		}
+		if t != nil && seenIn(*seen, t) {
+			continue
+		}
+		if t != nil {
+			*seen = append(*seen, t)
+		}
+		out = append(out, el)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	var bind syntax.Stmt
+	if rebind != nil && guard.Lhs != nil && w.switchUsesBinding(arm) {
+		pos := arm.Arrow
+		id := guard.Lhs.Value
+		convert := callOf(pos, w.fl.ctTypeExpr(pos, rebind), []syntax.Expr{nameOf(pos, id)})
+		bind = defineOf(pos, []syntax.Expr{nameOf(pos, id)}, []syntax.Expr{convert})
+	}
+	return listOf(arm.Pos(), out), bind
+}
+
+func (w ctWalker) switchUsesBinding(arm *syntax.ArmClause) bool {
+	info := w.fl.pkg.info
+	binding := info.Implicits[arm]
+	if binding == nil {
+		return true
+	}
+	used := false
+	syntax.Inspect(arm.Body, func(n syntax.Node) bool {
+		if id, ok := n.(*syntax.Name); ok && info.Uses[id] == binding {
+			used = true
+		}
+		return !used
+	})
+	return used
 }

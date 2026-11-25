@@ -1,0 +1,66 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A group-child send of a contextual shift into an owned channel element
+# keeps the typed temporary: the owned type bridge spells the element,
+# so the qualifier check must read the bridge's ejection qualifier rather
+# than require a generated import entry for the original type. Without it
+# the snapshot falls back to inference, defaults to int, and the send
+# rejects the value.
+cd good
+logos run .
+stdout '^ok owned 5$'
+logos eject -o out
+cd out
+go run .
+stdout '^ok owned 5$'
+
+-- good/go.mod --
+module example.com/groupsendowned
+
+go 1.27
+-- good/owner/owner.lgo --
+package owner
+
+type hidden int
+
+const func Make() hidden {
+	return 3
+}
+
+func Channel() chan hidden {
+	return make(chan hidden, 1)
+}
+-- good/main.lgo --
+package main
+
+import (
+	"context"
+	"example.com/groupsendowned/owner"
+	"fmt"
+)
+
+const seed = owner.Make()
+
+func run(ctx context.Context) error {
+	ch := owner.Channel()
+	n := owner.Make()
+	go group (ctx) {
+		go {
+			ch <- 1 << n
+		}
+	}
+	select {
+	case v := <-ch:
+		fmt.Println("ok owned", int(v)-int(seed))
+	case <-ctx.Done():
+		fmt.Println("err: cancelled")
+	}
+	return nil
+}
+
+func main() {
+	if err := run(context.Background()); err != nil {
+		fmt.Println("err:", err)
+	}
+}

@@ -51,7 +51,7 @@ func assertTraceBase(tag, want string) {
 	for {
 		fr, more := frames.Next()
 		fn := fr.Function
-		if strings.Contains(fn, "·logosct") || strings.Contains(fn, "_logosct") {
+		if strings.Contains(fn, "logosct") {
 			fmt.Printf("FAIL %s mangled trace name %q\n", tag, fn)
 			os.Exit(1)
 		}
@@ -73,7 +73,7 @@ func assertTraceBase(tag, want string) {
 		os.Exit(1)
 	}
 	name := fn.Name()
-	if strings.Contains(name, "·logosct") || strings.Contains(name, "_logosct") {
+	if strings.Contains(name, "logosct") {
 		fmt.Printf("FAIL %s FuncForPC mangled %q\n", tag, name)
 		os.Exit(1)
 	}

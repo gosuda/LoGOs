@@ -350,7 +350,7 @@ func (fl *fileLower) flushTypeImports() {
 	if reg == nil || len(reg.order) == 0 {
 		return
 	}
-	nativeUsed := fl.cfNamesInUse()
+	nativeUsed := fl.cfNamesInUse(nil)
 	var ejectTexts []string
 	if fl.constText != "" {
 		ejectTexts = append(ejectTexts, fl.constText)
@@ -388,10 +388,14 @@ func (fl *fileLower) flushTypeImports() {
 		if !nativeUsed[q] && !aliasInEject(q) {
 			continue
 		}
-		decls = append(decls, at(&syntax.ImportDecl{
+		imp := at(&syntax.ImportDecl{
 			LocalPkgName: nameOf(pos, q),
 			Path:         litOf(pos, fmt.Sprintf("%q", p), syntax.StringLit),
-		}, pos))
+		}, pos)
+		decls = append(decls, imp)
+		if !nativeUsed[q] {
+			fl.genImportsPendingNativeUse = append(fl.genImportsPendingNativeUse, imp)
+		}
 		text += "\n\nimport " + q + " " + fmt.Sprintf("%q", p)
 	}
 	if len(decls) > 0 {
@@ -740,6 +744,25 @@ func bareUnions(pkg *types2.Package) []string {
 			out = append(out, name)
 		}
 	}
+	return out
+}
+
+func dualUseUnionNames(pkg *types2.Package, info *types2.Info, files []*syntax.File) []string {
+	var out []string
+	var scope *types2.Scope
+	if pkg != nil {
+		scope = pkg.Scope()
+	}
+	for obj, use := range ClassifyDeclaredUnions(info, files) {
+		if use != UnionDualUse {
+			continue
+		}
+		if scope != nil && scope.Lookup(obj.Name()) != types2.Object(obj) {
+			continue
+		}
+		out = append(out, obj.Name())
+	}
+	slices.Sort(out)
 	return out
 }
 

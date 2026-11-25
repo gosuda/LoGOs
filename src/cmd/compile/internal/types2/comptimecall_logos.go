@@ -100,6 +100,11 @@ func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
 	switch {
 	case !isValid(targ):
 		x.invalidate()
+	case check.logosCtSubst != nil && !isTypeParam(targ) && !check.logosGenericFieldType(targs[0]):
+		_, isStruct := targ.Underlying().(*Struct)
+		x.mode_ = constant_
+		x.typ_ = Typ[UntypedBool]
+		x.val = constant.MakeBool(isStruct)
 	case isTypeParam(targ) || check.logosGenericFieldType(targs[0]):
 		x.mode_ = value
 		x.typ_ = Typ[Bool]
@@ -116,7 +121,7 @@ func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
 	return true
 }
 func (check *Checker) logosTypeOfCall(x *operand, call *syntax.CallExpr) bool {
-	if !check.logosComptimeInGeneric() {
+	if !check.logosComptimeInGeneric() && check.logosCtSubst == nil {
 		return false
 	}
 	idx, ok := call.Fun.(*syntax.IndexExpr)
@@ -140,6 +145,18 @@ func (check *Checker) logosTypeOfCall(x *operand, call *syntax.CallExpr) bool {
 	}
 	x.mode_ = value
 	x.typ_ = tn.Type()
+	if isTypeParam(targ) {
+		if check.logosTypeOfDeferred == nil {
+			check.logosTypeOfDeferred = make(map[syntax.Expr]bool)
+		}
+		check.logosTypeOfDeferred[call.Fun] = true
+	}
+	if check.logosCtSubst != nil && !isTypeParam(targ) {
+		if check.logosTypeOfFact == nil {
+			check.logosTypeOfFact = make(map[syntax.Expr]Type)
+		}
+		check.logosTypeOfFact[call] = targ
+	}
 	return true
 }
 
@@ -211,8 +228,7 @@ func (check *Checker) logosGenericFieldType(e syntax.Expr) bool {
 	if !ok || check.logosFieldVars[v] == nil {
 		return false
 	}
-	b := check.logosFieldBind
-	return b == nil || b.info != check.logosFieldVars[v]
+	return check.logosFieldBindingOf(v) == nil
 }
 
 // logosComptimeError defers a comptime.Error call: the message is read
@@ -230,6 +246,11 @@ func (check *Checker) logosGenericFieldType(e syntax.Expr) bool {
 // a global, so lowered rechecks (fresh checkers sharing Info) decide
 // from their own concrete copies.
 func (check *Checker) logosComptimeInGeneric() bool {
+	// Invariant (instance): a concrete instantiation analysis answers
+	// comptime calls directly; its signature has no type parameters.
+	if check.logosCtSubst != nil {
+		return false
+	}
 	// Invariant (innermost decl): the current signature's own function
 	// type parameters defer the call to per-instantiation copies.
 	if check.sig != nil && check.sig.TypeParams().Len() > 0 {
@@ -253,7 +274,7 @@ func (check *Checker) logosComptimeError(call *syntax.CallExpr) {
 	generic := check.logosComptimeInGeneric()
 	// Invariant (dead silence): M7-S1 dead-branch membership is the
 	// first-check Info proof, shared with lowered rechecks.
-	dead := check.Info.LogosConstIfDead[check.logosCurStmt]
+	dead := check.logosDead(check.logosCurStmt) || check.logosCtDeclCheck
 	var arg syntax.Expr
 	if len(call.ArgList) == 1 {
 		arg = call.ArgList[0]
@@ -277,6 +298,12 @@ func (check *Checker) logosComptimeError(call *syntax.CallExpr) {
 			return
 		}
 		// Invariant (live error): a live constant message fails with its text.
-		check.errorf(arg.Pos(), InvalidConstInit, "[comptime::error] %s", constant.StringVal(val))
+		// Inside an instance analysis the diagnostic points at the
+		// instantiation site so errorcheck fixtures name the caller.
+		at := arg.Pos()
+		if check.logosCtSubst != nil && len(check.logosCtPos) > 0 {
+			at = check.logosCtPos[len(check.logosCtPos)-1]
+		}
+		check.errorf(at, InvalidConstInit, "[comptime::error] %s", constant.StringVal(val))
 	}).describef(call, "comptime.Error %s", call.Pos())
 }

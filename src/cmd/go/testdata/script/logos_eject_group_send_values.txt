@@ -1,0 +1,30 @@
+# A fresh address in a go-group send value (`pi <- &42`) ejects to Go
+# that parses, builds with upstream go, and prints what the native
+# build prints: the closing paren of new(...) stays inside the snapshot.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cp $GOROOT/test/logos/run/group_send_values.lgo a/main.lgo
+
+cd a
+logos run .
+cmp stdout $GOROOT/test/logos/run/group_send_values.out
+logos eject -o out
+exists out/main.go
+! exists out/main.lgo
+cd out
+go run .
+cmp stdout $GOROOT/test/logos/run/group_send_values.out
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+-- a/go.mod --
+module example.com/groupsendvalues
+
+go 1.27

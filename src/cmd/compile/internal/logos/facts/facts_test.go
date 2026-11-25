@@ -35,15 +35,9 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		Props: []facts.PropFact{
 			{Interface: "I", Prefix: "Get"},
 		},
-		Comptimes: []facts.ComptimeFact{
-			{Object: "New", Source: []byte("line1\nline2\n")},
-		},
 	}
 	want := "logos-facts 3\n" +
 		"fingerprint 0001020304050607\n" +
-		"comptime New 12\n" +
-		"line1\nline2\n" +
-		"\n" +
 		"const C K\n" +
 		"fn (*S).Get Readonly\n" +
 		"fn R.M Readonly\n" +
@@ -75,9 +69,6 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 		},
 		Props: []facts.PropFact{
 			{Interface: "I", Prefix: "Get"},
-		},
-		Comptimes: []facts.ComptimeFact{
-			{Object: "New", Source: []byte("line1\nline2\n")},
 		},
 	}
 	if !reflect.DeepEqual(back, wantBack) {
@@ -146,7 +137,6 @@ func TestEncodeSkipsVacuousRecords(t *testing.T) {
 		Consts:      []facts.PathFact{{Object: "C", Path: ""}},
 		Fns:         []facts.FnFact{{Object: "N"}, {Object: "", Readonly: true}},
 		Props:       []facts.PropFact{{Interface: "I"}, {Prefix: "Get"}},
-		Comptimes:   []facts.ComptimeFact{{Object: "New"}, {Source: []byte("x")}},
 	}
 	got := facts.Encode(fp, in)
 	if string(got) != "logos-facts 3\nfingerprint 0100000000000000\n" {
@@ -192,9 +182,7 @@ func TestDecodeRejects(t *testing.T) {
 		{"duplicate", head + "opt H P1\nopt H P1\n", "line 4"},
 		{"blank line", head + "opt H P1\n\nopt S.F R0\n", "line 4"},
 		{"unterminated", head + "opt H P1", "line 3"},
-		{"bad comptime length", head + "comptime New xyz\n", "line 3"},
-		{"negative comptime length", head + "comptime New -1\n", "line 3"},
-		{"truncated comptime", head + "comptime New 10\na\nb\n", "line 3"},
+		{"retired comptime kind", head + "comptime New 1\na\n", "line 3"},
 		{"bad prop prefix", head + "prop I get-x\n", "line 3"},
 		{"conforms missing iface", head + "conforms Orc example.com/l/p\n", "line 3"},
 		{"conforms extra field", head + "conforms Orc example.com/l/p Creature x\n", "line 3"},
@@ -275,19 +263,6 @@ func TestDPathQualifierVsContainer(t *testing.T) {
 	}
 	if out := string(facts.Encode(back.Fingerprint, back)); out != in {
 		t.Fatalf("re-Encode not canonical:\n got %q\nwant %q", out, in)
-	}
-}
-
-func TestDecodeLineNumbersAfterComptimeBody(t *testing.T) {
-	head := "logos-facts 3\nfingerprint 0001020304050607\n"
-	for _, pad := range []int{0, 25} {
-		body := "ab\n" + strings.Repeat("x\n", pad) + "cd"
-		in := head + "comptime New " + itoa(len(body)) + "\n" + body + "\nopt H Q1\n"
-		want := 3 + strings.Count(body, "\n") + 2
-		_, err := facts.Decode([]byte(in))
-		if err == nil || !strings.Contains(err.Error(), "line "+itoa(want)) {
-			t.Errorf("pad %d: Decode error = %v, want error naming line %d", pad, err, want)
-		}
 	}
 }
 
@@ -810,5 +785,34 @@ func TestJSONFactsRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(out, "lang go\n") {
 		t.Fatalf("Go package missing lang go:\n%s", out)
+	}
+}
+
+func TestDualUseFactRoundTrip(t *testing.T) {
+	fp := goobj.FingerprintType{9, 8, 7, 6, 5, 4, 3, 2}
+	in := &facts.Facts{
+		Fingerprint: fp,
+		DualUse:     []string{"Scalar", "Choice"},
+	}
+	want := "logos-facts 3\n" +
+		"fingerprint 0908070605040302\n" +
+		"dualuse Choice\n" +
+		"dualuse Scalar\n"
+	got := facts.Encode(fp, in)
+	if string(got) != want {
+		t.Fatalf("Encode mismatch:\n got %q\nwant %q", got, want)
+	}
+	back, err := facts.Decode(got)
+	if err != nil {
+		t.Fatalf("Decode(Encode) failed: %v", err)
+	}
+	if wantBack := []string{"Choice", "Scalar"}; !reflect.DeepEqual(back.DualUse, wantBack) {
+		t.Errorf("round trip = %v, want %v", back.DualUse, wantBack)
+	}
+	for _, bad := range []string{"dualuse no!such\n", "dualuse A B\n", "dualuse\n", "dualuse D\ndualuse D\n"} {
+		full := "logos-facts 3\nfingerprint 0908070605040302\n" + bad
+		if _, err := facts.Decode([]byte(full)); err == nil {
+			t.Errorf("Decode accepted %q", bad)
+		}
 	}
 }

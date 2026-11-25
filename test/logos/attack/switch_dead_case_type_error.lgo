@@ -1,0 +1,27 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Pick[T any](v T) string {
+	const switch T {
+	case string:
+		var n int = "bad"
+		_ = n
+		return "str"
+	case int:
+		return "int"
+	}
+	const if comptime.IsStruct[T]() {
+		comptime.Error("unsupported")
+	}
+	return ""
+}
+
+func main() {
+	fmt.Println(Pick[int](1))
+}

@@ -12,12 +12,11 @@ func TestNextA16SliceGates(t *testing.T) {
 	cases := []struct {
 		name  string
 		body  string
-		edit  string
 		tasks int
 	}{
-		{name: "sliceC", body: "func g(xs []int) []int {\nvar ys []int\nfor i := 0; i < len(xs); i++ {\nys = append(ys, d(xs[i]))\n}\nreturn ys\n}", edit: "ys := xs.map(x => d(x))"},
-		{name: "sliceRangeIdx", body: "func g(xs []int) []int {\nvar ys []int\nfor i := range xs {\nys = append(ys, d(xs[i]))\n}\nreturn ys\n}", edit: "ys := xs.map(x => d(x))"},
-		{name: "sliceRangeVal", body: "func g(xs []int) []int {\nvar ys []int\nfor _, x := range xs {\nys = append(ys, d(x))\n}\nreturn ys\n}", edit: "ys := xs.map(v => d(v))"},
+		{name: "sliceC", body: "func g(xs []int) []int {\nvar ys []int\nfor i := 0; i < len(xs); i++ {\nys = append(ys, d(xs[i]))\n}\nreturn ys\n}", tasks: 1},
+		{name: "sliceRangeIdx", body: "func g(xs []int) []int {\nvar ys []int\nfor i := range xs {\nys = append(ys, d(xs[i]))\n}\nreturn ys\n}", tasks: 1},
+		{name: "sliceRangeVal", body: "func g(xs []int) []int {\nvar ys []int\nfor _, x := range xs {\nys = append(ys, d(x))\n}\nreturn ys\n}", tasks: 1},
 		{name: "namedSlice", body: "type S []int\nfunc g(xs S) []int {\nvar ys []int\nfor i := 0; i < len(xs); i++ {\nys = append(ys, d(xs[i]))\n}\nreturn ys\n}", tasks: 1},
 		{name: "arrayC", body: "func g(arr [3]int) []int {\nvar ys []int\nfor i := 0; i < len(arr); i++ {\nys = append(ys, d(arr[i]))\n}\nreturn ys\n}", tasks: 1},
 		{name: "arrayRange", body: "func g(arr [3]int) []int {\nvar ys []int\nfor _, v := range arr {\nys = append(ys, d(v))\n}\nreturn ys\n}", tasks: 1},
@@ -34,20 +33,16 @@ func TestNextA16SliceGates(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			edits, tasks := scanSnippet(t, imp, base+tc.body+"\n")
-			if tc.edit != "" {
-				if len(edits) != 1 {
-					t.Fatalf("got %d edits", len(edits))
-				}
-				if len(tasks) != 0 {
-					t.Fatalf("got tasks")
-				}
-				return
-			}
 			if len(edits) != 0 {
-				t.Fatalf("got edits")
+				t.Fatalf("got %d edits %v, want none: loops are review tasks, never edits", len(edits), edits)
 			}
 			if len(tasks) != tc.tasks {
 				t.Fatalf("got %d tasks", len(tasks))
+			}
+			for _, task := range tasks {
+				if task.Rule != "loop-chain" {
+					t.Fatalf("got rule %q want loop-chain", task.Rule)
+				}
 			}
 		})
 	}

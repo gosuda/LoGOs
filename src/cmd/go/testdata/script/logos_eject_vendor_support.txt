@@ -1,0 +1,64 @@
+env GOPROXY=off
+env GOSUMDB=off
+env GOTOOLCHAIN=local
+env GOWORK=off
+
+cd m
+logos eject -o out
+
+cd out
+go test -mod=readonly -v ./...
+stdout '^--- PASS: TestEjectedH3Server '
+[exec:sh] exec sh -c 'if [ -n "$UPROOT1273" ]; then exec env -u GOROOT "$UPROOT1273/bin/go" test -mod=readonly ./...; fi'
+
+-- m/go.mod --
+module example.com/ejectedh3
+
+go 1.27
+
+require golang.org/x/net v0.0.0
+
+replace golang.org/x/net => ./caller-net
+
+-- m/server.go --
+package ejectedh3
+
+import logoshttp "logos/net/http"
+
+func newServer() *logoshttp.H3Server {
+	return &logoshttp.H3Server{}
+}
+
+-- m/server_test.go --
+package ejectedh3
+
+import (
+	"errors"
+	"net/http"
+	"testing"
+
+	"golang.org/x/net/http/httpguts"
+)
+
+func TestEjectedH3Server(t *testing.T) {
+	if httpguts.CallerMarker != "caller module" {
+		t.Fatal("the caller's x/net replacement changed")
+	}
+	server := newServer()
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Serve(nil); !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Serve after Close = %v, want %v", err, http.ErrServerClosed)
+	}
+}
+
+-- m/caller-net/go.mod --
+module golang.org/x/net
+
+go 1.27
+
+-- m/caller-net/http/httpguts/marker.go --
+package httpguts
+
+const CallerMarker = "caller module"

@@ -301,12 +301,14 @@ func (fl *fileLower) markJoin(s syntax.Stmt) {
 }
 
 func groupWaitOnce(pos syntax.Pos, g, j string) *syntax.IfStmt {
-	return ifOf(pos, nil,
-		at(&syntax.Operation{Op: syntax.Not, X: nameOf(pos, j)}, pos),
-		[]syntax.Stmt{
-			assignOf(pos, []syntax.Expr{nameOf(pos, j)}, []syntax.Expr{nameOf(pos, "true")}),
-			exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, g), "Wait"), nil)),
-		})
+	call := callOf(pos, selOf(pos, nameOf(pos, g), "Wait"), nil)
+	return groupWaitOnceWith(pos, j, nameOf(pos, "true"), exprStmtOf(pos, call))
+}
+
+func groupWaitOnceWith(pos syntax.Pos, joined string, truth syntax.Expr, wait syntax.Stmt) *syntax.IfStmt {
+	cond := at(&syntax.Operation{Op: syntax.Not, X: nameOf(pos, joined)}, pos)
+	mark := assignOf(pos, []syntax.Expr{nameOf(pos, joined)}, []syntax.Expr{truth})
+	return ifOf(pos, nil, cond, []syntax.Stmt{mark, wait})
 }
 
 func (fc *funcLower) newGroupFrame(s *syntax.GroupStmt) groupFrame {
@@ -367,11 +369,16 @@ func (fc *funcLower) lowerGroupInline(s *syntax.GroupStmt) []syntax.Stmt {
 	s.Body.List = fc.lowerList(s.Body.List)
 	fc.groupStack = fc.groupStack[:len(fc.groupStack)-1]
 	rbrace := s.Body.Rbrace
-	joinNative, joinText, joinSubs := fc.groupEndJoin(rbrace, frame)
 	rbraceOff := fl.off(rbrace)
-	fl.addT(rbraceOff+1, rbraceOff+1, cat(gen("\n"), renderText(joinText, joinSubs), gen("}\n")))
 	out := append([]syntax.Stmt{header, blankUse}, rebindStmts...)
-	out = append(append(out, flagDef, guardDef, s.Body), joinNative...)
+	out = append(out, flagDef, guardDef, s.Body)
+	closing := gen("\n}\n")
+	if !fl.pkg.info.LogosGroupTerminating[s] {
+		joinNative, joinText, joinSubs := fc.groupEndJoin(rbrace, frame)
+		closing = cat(gen("\n"), renderText(joinText, joinSubs), gen("}\n"))
+		out = append(out, joinNative...)
+	}
+	fl.addT(rbraceOff+1, rbraceOff+1, closing)
 	block := blockOf(pos, out)
 	block.Rbrace = rbrace
 	return []syntax.Stmt{block}
@@ -577,4 +584,144 @@ func (fc *funcLower) lowerGroupGo(s *syntax.CallStmt) []syntax.Stmt {
 	fl.add(callEnd, callEnd, parts[1]+"}) }")
 	native := exprStmtOf(pos, callOf(pos, selOf(pos, nameOf(pos, top.g), top.spawn()), []syntax.Expr{lit}))
 	return []syntax.Stmt{blockOf(pos, append(capNative, native))}
+}
+
+func (w ctWalker) groupStatement(s syntax.Stmt) ([]syntax.Stmt, syntax.Stmt, bool) {
+	top, active := w.groupTop()
+	switch s := s.(type) {
+	case *syntax.GroupStmt:
+		if active && !top.child {
+			return nil, w.groupChildSyntax(s.Pos(), top, nil, s), true
+		}
+		return nil, w.groupInlineSyntax(s), true
+	case *syntax.GroupChild:
+		if active && top.g != "" {
+			return nil, w.groupChildSyntax(s.Pos(), top, s.Body, nil), true
+		}
+	case *syntax.CallStmt:
+		if active && top.g != "" && s.Tok == syntax.Go {
+			return nil, w.groupGoSyntax(s, top), true
+		}
+	}
+	if active && top.child {
+		return w.groupChannelStatement(s, top)
+	}
+	return nil, nil, false
+}
+
+func (w ctWalker) groupInlineSyntax(s *syntax.GroupStmt) *syntax.BlockStmt {
+	fl := w.fl
+	pos := s.Pos()
+	ctxName, rebind := plainContextName(s.Ctx)
+	limit := s.Limit
+	if limit == nil {
+		limit = litOf(pos, "0", syntax.IntLit)
+	}
+	args := []syntax.Expr{s.Ctx, limit}
+	list := w.exprList(args)
+	top := groupFrame{g: fl.cswName("ctgroup"), gctx: fl.cswName("ctgctx"), j: fl.cswName("ctjoined"), body: s.Body}
+	newGroup := callOf(pos, fl.ctPkgSelector(pos, rtImportPath, "NewGroup"), args)
+	list = append(list,
+		defineOf(pos, tempNodes(pos, []string{top.g, top.gctx}), []syntax.Expr{newGroup}),
+		assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{nameOf(pos, top.gctx)}),
+	)
+	if rebind {
+		list = append(list,
+			defineOf(pos, []syntax.Expr{nameOf(pos, ctxName)}, []syntax.Expr{nameOf(pos, top.gctx)}),
+			assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{nameOf(pos, ctxName)}),
+		)
+	}
+	list = append(list,
+		defineOf(pos, []syntax.Expr{nameOf(pos, top.j)}, []syntax.Expr{fl.ctBuiltin(pos, "false")}),
+		deferOf(pos, callOf(pos, deferClosure(pos, []syntax.Stmt{w.groupWaitGuard(pos, top)}), nil)),
+	)
+	old := w.groupStack
+	w.groupStack = append(old, top)
+	s.Body.List = w.groupScopeBody(s.Body, top)
+	w.groupStack = old
+	return blockEndingAt(pos, s.Body.Rbrace, append(list, s.Body))
+}
+
+func (w ctWalker) groupWaitGuard(pos syntax.Pos, top groupFrame) *syntax.IfStmt {
+	call := callOf(pos, selOf(pos, nameOf(pos, top.g), "Wait"), nil)
+	return groupWaitOnceWith(pos, top.j, w.fl.ctBuiltin(pos, "true"), exprStmtOf(pos, call))
+}
+
+func (w ctWalker) groupWait(pos syntax.Pos, top groupFrame, err string) syntax.Stmt {
+	fl := w.fl
+	joinErr := fl.cswName("ctjoinerr")
+	call := callOf(pos, selOf(pos, nameOf(pos, top.g), "Wait"), nil)
+	bind := defineOf(pos, []syntax.Expr{nameOf(pos, joinErr)}, []syntax.Expr{call})
+	cond := at(&syntax.Operation{Op: syntax.Neq, X: nameOf(pos, joinErr), Y: fl.ctBuiltin(pos, "nil")}, pos)
+	replace := assignOf(pos, []syntax.Expr{nameOf(pos, err)}, []syntax.Expr{nameOf(pos, joinErr)})
+	wait := ifOf(pos, bind, cond, []syntax.Stmt{replace})
+	return groupWaitOnceWith(pos, top.j, fl.ctBuiltin(pos, "true"), wait)
+}
+
+func (w ctWalker) groupChildType(pos syntax.Pos, top groupFrame) *syntax.FuncType {
+	return at(&syntax.FuncType{
+		ParamList: []*syntax.Field{at(&syntax.Field{
+			Name: nameOf(pos, top.gctx),
+			Type: w.fl.ctPkgSelector(pos, rtImportPath, "Context"),
+		}, pos)},
+		ResultList: []*syntax.Field{at(&syntax.Field{
+			Name: nameOf(pos, w.fl.cswName("ctchildresult")),
+			Type: w.fl.ctTypeExpr(pos, types2.Universe.Lookup("error").Type()),
+		}, pos)},
+	}, pos)
+}
+
+func (w ctWalker) groupChildSyntax(pos syntax.Pos, top groupFrame, body *syntax.BlockStmt, nested *syntax.GroupStmt) syntax.Stmt {
+	if body == nil {
+		body = blockEndingAt(pos, nested.Body.Rbrace, []syntax.Stmt{nested})
+	}
+	ft := w.groupChildType(pos, top)
+	err := types2.NewParam(pos, w.fl.pkg.tpkg, ft.ResultList[0].Name.Value, types2.Universe.Lookup("error").Type())
+	sig := types2.NewSignatureType(nil, nil, nil, nil, types2.NewTuple(err), false)
+	child := ctWalker{newFuncLower(w.fl, ft, sig, body)}
+	child.groupStack = []groupFrame{{g: top.g, gctx: top.gctx, child: true}}
+	child.prepareCleanupSyntax()
+	end := body.Rbrace
+	body.List = append(body.List, returnOf(end, []syntax.Expr{w.fl.ctBuiltin(end, "nil")}))
+	body.List = child.scopeSyntaxList(body, body.List, child.stmts)
+	child.finishCleanupSyntax()
+	return w.groupSpawnSyntax(pos, top, ft, body)
+}
+
+func (w ctWalker) groupGoSyntax(s *syntax.CallStmt, top groupFrame) syntax.Stmt {
+	call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
+	if !ok {
+		w.reject(s, "missing checked go group call")
+		return s
+	}
+	pos := s.Pos()
+	if sel, optional := syntax.Unparen(call.Fun).(*syntax.OptSelectExpr); optional {
+		body := w.ctOptionGuardCall(call, sel, func(guarded *syntax.CallExpr, _ *types2.Signature) []syntax.Stmt {
+			return []syntax.Stmt{w.groupGoCallSyntax(pos, guarded, top)}
+		})
+		return blockEndingAt(pos, syntax.EndPos(s), body)
+	}
+	return w.groupGoCallSyntax(pos, call, top)
+}
+
+func (w ctWalker) groupGoCallSyntax(pos syntax.Pos, call *syntax.CallExpr, top groupFrame) syntax.Stmt {
+	n, hasErr := types2.LogosErrorResults(w.fl.pkg.info.TypeOf(call))
+	list := w.groupCaptureSyntax(call)
+	var run syntax.Stmt = exprStmtOf(pos, call)
+	if hasErr {
+		err := w.fl.cswName("ctgoerr")
+		lhs := append(blankNames(pos, n), nameOf(pos, err))
+		bind := defineOf(pos, lhs, []syntax.Expr{call})
+		cond := at(&syntax.Operation{Op: syntax.Neq, X: nameOf(pos, err), Y: w.fl.ctBuiltin(pos, "nil")}, pos)
+		run = ifOf(pos, bind, cond, []syntax.Stmt{returnOf(pos, []syntax.Expr{nameOf(pos, err)})})
+	}
+	body := blockOf(pos, []syntax.Stmt{run, returnOf(pos, []syntax.Expr{w.fl.ctBuiltin(pos, "nil")})})
+	spawn := w.groupSpawnSyntax(pos, top, w.groupChildType(pos, top), body)
+	return blockOf(pos, append(list, spawn))
+}
+
+func (w ctWalker) groupSpawnSyntax(pos syntax.Pos, top groupFrame, ft *syntax.FuncType, body *syntax.BlockStmt) syntax.Stmt {
+	lit := at(&syntax.FuncLit{Type: ft, Body: body}, pos)
+	spawn := selOf(pos, nameOf(pos, top.g), top.spawn())
+	return exprStmtOf(pos, callOf(pos, spawn, []syntax.Expr{lit}))
 }

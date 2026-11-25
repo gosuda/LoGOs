@@ -1,0 +1,61 @@
+// run
+
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Inner struct {
+	X int
+	Y int
+	Z int
+}
+
+type Outer struct {
+	Skip int
+	Mid  int
+	Stop Inner
+}
+
+// ladder's inner const for returns after one field only when the outer
+// field is a struct: the Skip and Mid expansions emit every inner
+// field while the Stop expansion emits only the first. Each expansion
+// reads the terminating verdict recorded for its own outer field.
+func ladder() []string {
+	var out []string
+	const for _, f := range comptime.Fields[Outer]() {
+		const for _, g := range comptime.Fields[Inner]() {
+			out = append(out, f.Name+"."+g.Name)
+			const switch f.Type {
+			case int:
+			case Inner:
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func main() {
+	got := ladder()
+	want := []string{"Skip.X", "Skip.Y", "Skip.Z", "Mid.X", "Mid.Y", "Mid.Z", "Stop.X"}
+	check("ladder", fmt.Sprint(got) == fmt.Sprint(want), got, want)
+	if failed {
+		os.Exit(1)
+	}
+}

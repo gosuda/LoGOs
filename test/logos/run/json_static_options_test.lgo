@@ -1,0 +1,222 @@
+//go:build goexperiment.jsonv2
+
+// run
+
+package jsonstaticoptions
+
+import (
+	"bytes"
+	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+type OptBox struct {
+	Name   string `json:"name"`
+	Count  int32  `json:"count"`
+	Active bool   `json:"active"`
+}
+
+func TestStaticOptionsV1DefaultMarshal(t *testing.T) {
+	v := OptBox{Name: "one", Count: 3, Active: true}
+	got, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte(`{"name":"one","count":3,"active":true}`)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("marshal default: got %s want %s", got, want)
+	}
+	var gotBox OptBox
+	if err := json.Unmarshal([]byte(`{"name":"two","count":5,"active":false}`), &gotBox); err != nil {
+		t.Fatal(err)
+	}
+	if gotBox.Name != "two" || gotBox.Count != 5 || gotBox.Active {
+		t.Fatalf("unmarshal default: %+v", gotBox)
+	}
+}
+
+func TestStaticOptionsEmitAndIndent(t *testing.T) {
+	v := OptBox{Name: "one", Count: 3, Active: true}
+	var b bytes.Buffer
+	enc := jsontext.NewEncoder(&b, jsontext.WithIndent("  "))
+	if err := jsonv2.MarshalEncode(enc, v); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("{\n  \"name\": \"one\",\n  \"count\": 3,\n  \"active\": true\n}\n")
+	if !bytes.Equal(b.Bytes(), want) {
+		t.Fatalf("indent: got %s want %s", b.Bytes(), want)
+	}
+
+	var out OptBox
+	dec := jsontext.NewDecoder(bytes.NewReader([]byte("{\"name\":\"x\",\"count\":1,\"active\":false}")))
+	if err := jsonv2.UnmarshalDecode(dec, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Name != "x" || out.Count != 1 || out.Active {
+		t.Fatalf("decode options: %+v", out)
+	}
+}
+
+func TestStaticOptionsRejectUnknownMembers(t *testing.T) {
+	in := []byte(`{"name":"a","count":1,"extra":true}`)
+	var lenient OptBox
+	if err := jsonv2.Unmarshal(in, &lenient); err != nil {
+		t.Fatalf("default options: %v", err)
+	}
+	if lenient.Name != "a" || lenient.Count != 1 {
+		t.Fatalf("default options: %+v", lenient)
+	}
+	var strict OptBox
+	err := jsonv2.Unmarshal(in, &strict, jsonv2.RejectUnknownMembers(true))
+	if err == nil {
+		t.Fatal("RejectUnknownMembers(true) accepted the member \"extra\"")
+	}
+	semantic := &jsonv2.SemanticError{}
+	if !errors.As(err, &semantic) {
+		t.Fatalf("error is %T, want *json.SemanticError: %v", err, err)
+	}
+	if semantic.GoType != reflect.TypeFor[OptBox]() {
+		t.Errorf("error names %v, want %v", semantic.GoType, reflect.TypeFor[OptBox]())
+	}
+	if !strings.Contains(err.Error(), `unknown object member name "extra"`) {
+		t.Errorf("error text %q does not name the member", err)
+	}
+}
+
+func TestStaticOptionsOmitZeroStructFields(t *testing.T) {
+	got, err := jsonv2.Marshal(OptBox{}, jsonv2.OmitZeroStructFields(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{}` {
+		t.Errorf("OmitZeroStructFields(true): got %s, want {}", got)
+	}
+	got, err = jsonv2.Marshal(OptBox{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"name":"","count":0,"active":false}`; string(got) != want {
+		t.Errorf("default options: got %s, want %s", got, want)
+	}
+}
+
+func TestStaticOptionsNestedValue(t *testing.T) {
+	type envelope struct {
+		Box OptBox `json:"box"`
+	}
+	var out envelope
+	err := jsonv2.Unmarshal([]byte(`{"box":{"name":"a","surplus":1}}`), &out, jsonv2.RejectUnknownMembers(true))
+	if err == nil {
+		t.Fatal("RejectUnknownMembers(true) accepted the nested member \"surplus\"")
+	}
+}
+
+type OptVal struct {
+	N int? `json:"n"`
+}
+
+func TestStaticOptionsOptionExemptMarshalRefusesOptions(t *testing.T) {
+	var b bytes.Buffer
+	enc := jsontext.NewEncoder(&b, jsontext.WithIndent("  "))
+	err := jsonv2.MarshalEncode(enc, OptVal{N: 1})
+	if err == nil {
+		t.Fatalf("indented marshal of an exempt struct succeeded with %s, want an UnsupportedOptions diagnostic", b.String())
+	}
+	if !strings.Contains(err.Error(), "option") {
+		t.Fatalf("refusal error %q does not name option fields", err)
+	}
+}
+
+func TestStaticOptionsOptionExemptStrictRefuses(t *testing.T) {
+	var v OptVal
+	err := jsonv2.Unmarshal([]byte(`{"n":1}`), &v, jsonv2.RejectUnknownMembers(true))
+	if err == nil {
+		t.Fatal("RejectUnknownMembers(true) on an option struct succeeded, want an UnsupportedOptions diagnostic")
+	}
+	if !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("strict error %q is not the UnsupportedOptions diagnostic", err)
+	}
+	var dflt OptVal
+	if err := jsonv2.Unmarshal([]byte(`{"n":{"Value":1,"Present":true}}`), &dflt); err != nil {
+		t.Fatal(err)
+	}
+	if (dflt.N ?? -1) != 1 {
+		t.Fatalf("v2 default decode gave %+v, want N set to 1", dflt)
+	}
+}
+
+func TestStaticOptionsStringTagFieldRoundTrip(t *testing.T) {
+	v := struct {
+		V OptVal `json:"value,string"`
+	}{V: OptVal{N: 1}}
+	got, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("v1 marshal of a ,string struct field: %v", err)
+	}
+	if want := `{"value":{"n":{"Value":1,"Present":true}}}`; string(got) != want {
+		t.Fatalf("marshal: got %s, want %s", got, want)
+	}
+	if err := json.Unmarshal([]byte(`{"value":{"n":{"Value":2,"Present":true}}}`), &v); err != nil {
+		t.Fatalf("v1 unmarshal of a ,string struct field: %v", err)
+	}
+	if (v.V.N ?? -1) != 2 {
+		t.Fatalf("unmarshal gave %+v, want N set to 2", v)
+	}
+}
+
+type OptInts [](int?)
+
+func (v OptInts) MarshalJSON() ([]byte, error) { return []byte(`[1]`), nil }
+
+func (v *OptInts) UnmarshalJSON(data []byte) error {
+	var got []int
+	if err := json.Unmarshal(data, &got); err != nil {
+		return err
+	}
+	if len(got) != 1 || got[0] != 1 {
+		return errors.New("OptInts wants [1]")
+	}
+	*v = OptInts{1}
+	return nil
+}
+
+type OptMethodBox struct {
+	V OptInts `json:"v"`
+}
+
+func TestStaticOptionsMethodCoveredMarshal(t *testing.T) {
+	var b bytes.Buffer
+	enc := jsontext.NewEncoder(&b, jsontext.WithIndent("  "))
+	if err := jsonv2.MarshalEncode(enc, OptMethodBox{V: OptInts{1}}); err != nil {
+		t.Fatalf("indented marshal with a method-covered option field: %v", err)
+	}
+	if !strings.Contains(b.String(), `"v"`) {
+		t.Fatalf("indented marshal gave %s, want the method output for v", b.String())
+	}
+	var back OptMethodBox
+	if err := jsonv2.Unmarshal(b.Bytes(), &back); err != nil {
+		t.Fatalf("indented marshal output does not decode: %v", err)
+	}
+	if len(back.V) != 1 {
+		t.Fatalf("indented marshal round trip gave %+v, want one element in V", back)
+	}
+}
+
+func TestStaticOptionsMethodCoveredStrictDecode(t *testing.T) {
+	var v OptMethodBox
+	if err := jsonv2.Unmarshal([]byte(`{"v":[1]}`), &v, jsonv2.RejectUnknownMembers(true)); err != nil {
+		t.Fatalf("strict decode with a method-covered option field: %v", err)
+	}
+	if len(v.V) != 1 {
+		t.Fatalf("strict decode gave %+v, want one element in V", v)
+	}
+}
+
+// Union-exempt coverage lives in json_static_union_options_test.lgo: a
+// union interface used as a value type does not survive the eject profile,
+// so it cannot be declared in this ejected fixture.

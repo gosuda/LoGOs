@@ -1,0 +1,15 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+func Pick[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return 1
+	}
+	comptime.Error("need struct")
+	return 0
+}
+
+var _ = Pick[int]() // ERROR "need struct"

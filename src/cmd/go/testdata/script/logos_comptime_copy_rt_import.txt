@@ -1,0 +1,118 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos build ./...
+logos test -count=1 -v ./...
+stdout '^--- PASS: TestControlInternal '
+stdout '^--- PASS: TestColumnsExternal '
+
+# SPEC: an expansion at or below the selected limit MUST compile,
+# whichever file triggered the instantiation.
+
+-- w/go.mod --
+module example.com/copyrt
+
+go 1.27
+
+-- w/lib/lib.lgo --
+package lib
+
+import (
+	"comptime"
+	"errors"
+)
+
+type Item struct {
+	Name string?
+}
+
+func ColumnsOf[E any]() ([]string, error) {
+	const if comptime.IsStruct[E]() {
+		out := []string{}
+		const for _, f := range comptime.Fields[E]() {
+			kind, ok := Probe[f.Type]()
+			if !ok {
+				return nil, errors.New("lib: unsupported field")
+			}
+			out = append(out, kind)
+		}
+		return out, nil
+	} else {
+		comptime.Error("lib: entity must be a struct")
+	}
+	return nil, errors.New("lib: unreachable")
+}
+
+func Probe[F any]() (string, bool) {
+	const switch F {
+	case string:
+		return "s", true
+	case string?:
+		return "opt", true
+	}
+	return "", false
+}
+
+-- w/lib/control.lgo --
+package lib
+
+func Control() (int, error) {
+	cols, err := ColumnsOf[Item]()
+	if err != nil {
+		return 0, err
+	}
+	return len(cols), nil
+}
+
+-- w/lib/intern_test.lgo --
+package lib
+
+import "testing"
+
+func TestControlInternal(t *testing.T) {
+	n, err := Control()
+	if err != nil {
+		t.Fatalf("Control: err = %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("Control: n = %d, want 1", n)
+	}
+}
+
+-- w/lib/extern_test.lgo --
+package lib_test
+
+import (
+	"testing"
+
+	"example.com/copyrt/lib"
+)
+
+func TestColumnsExternal(t *testing.T) {
+	cols, err := lib.ColumnsOf[lib.Item]()
+	if err != nil {
+		t.Fatalf("ColumnsOf: err = %v", err)
+	}
+	if len(cols) != 1 || cols[0] != "opt" {
+		t.Fatalf("ColumnsOf: cols = %v, want [opt]", cols)
+	}
+}
+
+-- w/app/app.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/copyrt/lib"
+)
+
+func main() {
+	cols, err := lib.ColumnsOf[lib.Item]()
+	if err == nil && len(cols) == 1 && cols[0] == "opt" {
+		fmt.Println("cols 1 opt")
+		return
+	}
+	fmt.Println("BAD", err)
+}

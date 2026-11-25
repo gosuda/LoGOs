@@ -1,0 +1,60 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A group-child send of a contextual shift into a channel whose element
+# type embeds an interface through a type argument keeps the typed
+# temporary: the spelling names the embedded interface, not the
+# inherited methods, so checking the full method set rejects a valid
+# spelling and the fallback defaults the shift to int. Without the
+# snapshot the send rejects the value.
+cd good
+logos run .
+stdout '^ok sealed 4$'
+logos eject -o out
+cd out
+go run .
+stdout '^ok sealed 4$'
+
+-- good/go.mod --
+module example.com/groupsendsealed
+
+go 1.27
+-- good/lib/lib.lgo --
+package lib
+
+type Sealed interface {
+	hidden()
+}
+-- good/main.lgo --
+package main
+
+import (
+	"context"
+	"example.com/groupsendsealed/lib"
+	"fmt"
+)
+
+type Word[T any] int8
+
+func run(ctx context.Context) error {
+	ch := make(chan Word[interface{ lib.Sealed }], 1)
+	var n uint = 2
+	go group (ctx) {
+		go {
+			ch <- 1 << n
+		}
+	}
+	select {
+	case v := <-ch:
+		fmt.Println("ok sealed", int8(v))
+	case <-ctx.Done():
+		fmt.Println("err: cancelled")
+	}
+	return nil
+}
+
+func main() {
+	if err := run(context.Background()); err != nil {
+		fmt.Println("err:", err)
+	}
+}

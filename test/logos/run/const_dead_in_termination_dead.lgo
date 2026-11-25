@@ -1,0 +1,51 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Pair struct {
+	A int
+	B string
+}
+
+func afterCase[T any]() int {
+	const switch T {
+	case int:
+		return 1
+	}
+	const if comptime.IsStruct[T]() {
+		comptime.Error("struct after the switch")
+	}
+	return 0
+}
+
+func firstName[T any]() string {
+	const for _, f := range comptime.Fields[T]() {
+		const if f.Index == 0 {
+			return f.Name
+		}
+		const switch f.Type {
+		case float64:
+			comptime.Error("float field")
+		}
+	}
+	return ""
+}
+
+func plain() int {
+	const if true {
+		return 2
+	}
+	const if false {
+		comptime.Error("dead in plain")
+	}
+	return 0
+}
+
+func main() {
+	fmt.Println(afterCase[int](), afterCase[string](), firstName[Pair](), plain())
+}

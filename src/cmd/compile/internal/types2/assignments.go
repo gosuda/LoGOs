@@ -19,6 +19,10 @@ import (
 // Use T == nil to indicate assignment to an untyped blank identifier.
 // If the assignment check fails, x.mode is set to invalid.
 func (check *Checker) assignment(x *operand, T Type, context string) {
+	check.assignOperand(x, T, context, resultSlot{})
+}
+
+func (check *Checker) assignOperand(x *operand, T Type, context string, result resultSlot) {
 	check.logosLambdaResolve(x, T)
 	check.singleValue(x)
 
@@ -56,7 +60,7 @@ func (check *Checker) assignment(x *operand, T Type, context string) {
 
 	check.logosPlatformStore(x, T) // logos M3-S5 hook.
 
-	check.logosPlatformReturn(x, T, context) // logos M9-S2 hook: platform pointers returned as interfaces.
+	check.logosPlatformReturn(x, T, context, result) // logos M9-S2 hook: platform pointers returned as interfaces.
 
 	if isUntyped(x.typ()) {
 		target := T
@@ -179,7 +183,7 @@ func (check *Checker) initConst(lhs *Const, x *operand) {
 // If lhs doesn't have a type yet, it is given the type of x,
 // or Typ[Invalid] in case of an error.
 // If the initialization check fails, x.mode is set to invalid.
-func (check *Checker) initVar(lhs *Var, x *operand, context string) {
+func (check *Checker) initVar(lhs *Var, x *operand, context string, result resultSlot) {
 	if !x.isValid() || !isValid(x.typ()) || !isValid(lhs.typ) {
 		if lhs.typ == nil {
 			lhs.typ = Typ[Invalid]
@@ -207,13 +211,16 @@ func (check *Checker) initVar(lhs *Var, x *operand, context string) {
 			typ = Default(typ)
 		}
 		lhs.typ = typ
+		if check.logosCtAbstract != nil {
+			check.logosCtKeepType(lhs, check.logosCtOriginalType(x.expr, result.index))
+		}
 		check.logosConstInferVar(lhs)           // logos M5-S1 hook: inferred locals copy out of views.
 		if check.logosInheritPlatform(lhs, x) { // logos M3-S5 hook.
 			return
 		}
 	}
 
-	check.assignment(x, lhs.typ, context)
+	check.assignOperand(x, lhs.typ, context, result)
 	check.logosRegionDecl(lhs, x)
 }
 
@@ -238,6 +245,7 @@ func (check *Checker) lhsVar(lhs syntax.Expr) Type {
 	var v_used bool
 	if ident != nil {
 		if obj := check.lookup(ident.Value); obj != nil {
+			check.logosConstForAssign(ident, obj) // logos comptime hook: a const for index variable is not assignable.
 			// It's ok to mark non-local variables, but ignore variables
 			// from other packages to avoid potential race conditions with
 			// dot-imported variables.
@@ -443,7 +451,7 @@ func (check *Checker) returnError(at poser, lhs []*Var, rhs []*operand) {
 // to variables lhs.
 // If returnStmt is non-nil, initVars type-checks the implicit assignment
 // of result expressions orig_rhs to function result parameters lhs.
-func (check *Checker) initVars(lhs []*Var, orig_rhs []syntax.Expr, returnStmt syntax.Stmt) {
+func (check *Checker) initVars(lhs []*Var, orig_rhs []syntax.Expr, returnStmt *syntax.ReturnStmt) {
 	l, r := len(lhs), len(orig_rhs)
 
 	context := "assignment"
@@ -470,7 +478,7 @@ func (check *Checker) initVars(lhs []*Var, orig_rhs []syntax.Expr, returnStmt sy
 				desc = "result variable"
 			}
 			check.expr(newTarget(lhs.typ, desc), &x, orig_rhs[i])
-			check.initVar(lhs, &x, context)
+			check.initVar(lhs, &x, context, resultSlot{stmt: returnStmt, index: i})
 		}
 		return
 	}
@@ -498,12 +506,12 @@ func (check *Checker) initVars(lhs []*Var, orig_rhs []syntax.Expr, returnStmt sy
 
 	rhs, commaOk := check.multiExpr(orig_rhs[0], l == 2 && returnStmt == nil)
 	r = len(rhs)
-	if check.logosTupleInitVars(lhs, orig_rhs, rhs, context) { // logos M6-S5 hook: pack/unpack.
+	if check.logosTupleInitVars(lhs, orig_rhs, rhs, context, returnStmt) { // logos M6-S5 hook: pack/unpack.
 		return
 	}
 	if l == r {
 		for i, lhs := range lhs {
-			check.initVar(lhs, rhs[i], context)
+			check.initVar(lhs, rhs[i], context, resultSlot{stmt: returnStmt, index: i})
 		}
 		// Only record comma-ok expression if both initializations succeeded
 		// (go.dev/issue/59371).
@@ -678,5 +686,18 @@ func (check *Checker) shortVarDecl(pos poser, lhs, rhs []syntax.Expr) {
 	scopePos := endPos(rhs[len(rhs)-1])
 	for _, obj := range newVars {
 		check.declare(scope, nil, obj, scopePos) // id = nil: recordDef already called
+	}
+}
+
+func (check *Checker) logosMarkIndexVar(v *Var) {
+	if check.logosIndexVars == nil {
+		check.logosIndexVars = make(map[*Var]bool)
+	}
+	check.logosIndexVars[v] = true
+}
+
+func (check *Checker) logosConstForAssign(ident *syntax.Name, obj Object) {
+	if v, ok := obj.(*Var); ok && check.logosIndexVars[v] {
+		check.errorf(ident, UnassignableOperand, "[comptime::const_for_assign] cannot assign to const for variable %s", ident.Value)
 	}
 }
