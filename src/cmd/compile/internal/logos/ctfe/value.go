@@ -1737,6 +1737,9 @@ func (e *evaluator) valueSize(v Value, seen map[any]bool) int64 {
 		}
 		return 8
 	case v.fval != nil:
+		if v.typ != nil && (v.typ.Kind == KFloat32 || v.typ.Kind == KFloat64) {
+			return max(8, ratBytes(v.fval))
+		}
 		return ratBytes(v.fval)
 	case v.cparts != nil:
 		return ratBytes(&v.cparts[0]) + ratBytes(&v.cparts[1])
