@@ -217,6 +217,14 @@ func ejectToDir(ctx context.Context, out string) {
 	opts := load.PackageOpts{AutoVCS: true}
 	patterns := []string{"all"}
 	if isEjectVariant() {
+		// The helper loads only the packages that own inactive files,
+		// but it still builds their test variants, so the module
+		// loader must resolve test dependencies of those packages.
+		// Without this, a test-only import (such as the sibling
+		// package an external test file imports) is missing from the
+		// loader's package set and the helper fails with
+		// "cannot find package".
+		opts.ModResolveTests = true
 		if packages := os.Getenv("LOGOSEJECT_PACKAGES"); packages != "" {
 			patterns = strings.Split(packages, "\n")
 		}
