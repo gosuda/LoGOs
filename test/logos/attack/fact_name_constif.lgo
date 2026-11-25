@@ -1,0 +1,28 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Names[T any]() []string {
+	var out []string
+	const for _, f := range comptime.Fields[T]() {
+		const if f.Name != "Skip" {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
+type Row struct {
+	A    int
+	Skip int
+	B    int
+}
+
+func main() {
+	fmt.Println(Names[Row]())
+}

@@ -10,7 +10,7 @@ metadata:
 
 # Migrate Go to LoGOs
 
-Move one Go module to LoGOs in order: inventory, baseline, convert, fix, verify. Use `logos next` to automate file renaming and error-handling rewrites, with hand conversion as fallback. Fall back to eject when migration stalls.
+Move one Go module to LoGOs in order: inventory, baseline, convert, fix, verify. Use `logos next --fix` to print a conversion patch that renames the files and rewrites plain `fmt.Sprintf` calls to interpolation. Convert error returns and append loops by hand from the review tasks of the patch. Fall back to eject when migration stalls.
 
 Coverage: the mapping table covers M1 error propagation, M3 nil forms, M6 interpolation and chains, and M14 fixed-array SIMD. M2 unions, M4 properties, M5 const forms, and M12 capabilities add no mapping rows: those features have no Go equivalent to rewrite.
 
@@ -18,7 +18,7 @@ Coverage: the mapping table covers M1 error propagation, M3 nil forms, M6 interp
 
 1. Inventory. List each non-standard Go dependency with `logos list -deps`. Done when the list is written down and each entry has a verdict: keep (the `.lgo` package imports it as a Go package), replace with a LoGOs module, or replace with the standard library. A module holds one kind (all `.go` or all `.lgo`), and Go and LoGOs packages import each other per import, so a dependency never blocks migration.
 2. Baseline. Run `go test ./...` in the Go module and save the full output to a file. Done when the log file exists and the exit code is recorded.
-3. Convert. Run `logos next` in the module root to preview changes in a unified diff without altering files. When ready, run `logos next --fix` to rewrite error returns to `?`, rename files to `.lgo`, and emit unhandled cases into `next_tasks.json`. Hand conversion remains the fallback if automated conversion leaves tasks.
+3. Convert. Run `logos next` in the module root to preview the conversion as a unified diff; it changes no file. Run `logos next --fix > next.patch` to check the module and save the conversion patch; it changes no file either. Apply the patch from the module root with `git apply next.patch`: it deletes each converted `.go` file, adds its `.lgo` file with plain `fmt.Sprintf` calls rewritten to `$"..."`, and adds review tasks to `next_tasks.json`. Convert each task by hand: rewrite an explicit error return to `?` when the rules for `?` below hold, and rewrite an append loop to a chain only when its slice-capacity caveat does not matter. Convert by hand each `.go` file that the active build does not check, because the patch leaves it. Done when no `.go` file remains and each task is converted or kept with a reason.
 4. Fix. Run `logos build ./...`. Fix each diagnostic by its rule ID in the table below. Repeat until the build exits 0.
 5. Verify. Run `logos build ./...` and `logos test ./...`. Done when both exit 0 and the same tests that passed in the baseline log still pass.
 6. Fallback. When migration stalls, or the user needs plain Go, run `logos eject -o DIR` on the LoGOs module: eject writes a complete pure-Go copy of the module to DIR, and that plain-Go output works alongside the remaining Go code. Done when `go build ./...` and `go test ./...` both exit 0 inside DIR.
@@ -72,7 +72,7 @@ These rules apply to both Go and `.lgo` lint targets, and diagnostics report ori
 | `correctness::mixed_package` | Finish the rename: no package holds both `.go` and `.lgo`. |
 | `correctness::misplaced_try` | Split the expression so `?` ends its own statement. |
 | `correctness::errdefer_needs_error_result` | Add a final `error` result, or use `defer`. |
-| `correctness::reserved_identifier` | Rename identifiers that start with `_logos_` or `Logos_`. |
+| `correctness::reserved_identifier` | Rename identifiers that start with `_logos_` or `Logos_` or contain `_logosct`. |
 | `correctness::duplicate_stem_filename` | Rename one of the two files that share a stem. |
 | `correctness::not_an_option` | Apply `?.` and `??` to option types only. |
 | `correctness::nil_deref_unproven` | Narrow with `!= nil`, select with `?.`, or unwrap with `??`. |

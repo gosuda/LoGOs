@@ -5,7 +5,9 @@
 package logos
 
 import (
+	"go/constant"
 	"go/token"
+	"slices"
 	"strings"
 
 	"cmd/compile/internal/base"
@@ -19,14 +21,23 @@ func (fl *fileLower) lowerStructDefaults() {
 	// field defaults before stripFieldDefaults orphans them, and fill/
 	// factory text then renders the respelled form on its own.
 	fl.lowerTypeParamLits()
-	stripped := make(map[*syntax.FieldDefault]bool)
-	typeNames := fl.defaultTypeNames()
+	typeNames := fl.defaultTypeNames(fl.file)
+	fl.defaultDepScan()
+	// Fill before strip: a composite literal inside a field default gets
+	// its own missing fields here, so the factory body rendered from the
+	// default subtree carries the inner defaults. The fill splice inside
+	// the erased default span is dropped by stripFieldDefaults while the
+	// appended elements stay in the subtree that renderDefault prints.
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
-		switch n := n.(type) {
-		case *syntax.StructType:
-			fl.stripFieldDefaults(n, stripped, typeNames)
-		case *syntax.CompositeLit:
-			fl.fillStructDefaults(n)
+		if lit, ok := n.(*syntax.CompositeLit); ok {
+			fl.fillStructDefaults(lit)
+		}
+		return true
+	})
+	stripped := make(map[*syntax.FieldDefault]bool)
+	syntax.Inspect(fl.file, func(n syntax.Node) bool {
+		if st, ok := n.(*syntax.StructType); ok {
+			fl.stripFieldDefaults(st, stripped, typeNames)
 		}
 		return true
 	})
@@ -34,7 +45,7 @@ func (fl *fileLower) lowerStructDefaults() {
 
 // lowerTypeParamLits respells an empty composite literal the checker admitted
 // as a zero value — T{} for a type parameter, int{}, or an elided {} element —
-// as *new(T): a concrete substitution in a comptime copy carries the real
+// as *new(T): a concrete substitution in a comptime instance carries the real
 // literal, while a plain generic emits the equivalent allocation.
 func (fl *fileLower) lowerTypeParamLits() {
 	// Field defaults never emit their source: stripFieldDefaults erases
@@ -165,9 +176,9 @@ func (fl *fileLower) typeSpell(typ types2.Type) string {
 // this file to its TypeDecl so defaults can bind to declaration-scope
 // factories. Local or anonymous struct types get no entry: they keep the
 // textual default path.
-func (fl *fileLower) defaultTypeNames() map[*syntax.StructType]*syntax.TypeDecl {
+func (fl *fileLower) defaultTypeNames(file *syntax.File) map[*syntax.StructType]*syntax.TypeDecl {
 	m := map[*syntax.StructType]*syntax.TypeDecl{}
-	for _, d := range fl.file.DeclList {
+	for _, d := range file.DeclList {
 		td, ok := d.(*syntax.TypeDecl)
 		if !ok || td.Alias || td.Name == nil {
 			continue
@@ -404,15 +415,181 @@ func (fl *fileLower) fieldDefaultEnd(st *syntax.StructType, i int, fd *syntax.Fi
 type structDefault struct {
 	field string
 	text  string
+	// key is "owner.field" when text is a package factory call, so a fill
+	// inside a default subtree can tell whether the call re-enters an
+	// enclosing default; "" when the text is the rendered default itself.
+	key string
+}
+
+// defFillBudget caps the text fills append inside field-default subtrees.
+// Chained local defaults render the already-expanded earlier level again,
+// so without a bound a short chain multiplies into unbounded output.
+const defFillBudget = 1 << 20
+
+// defaultDepScan records, for every composite literal sitting inside a
+// field default's subtree, which enclosing defaulted fields of named
+// package types contain it, and the factory keys each such field's subtree
+// directly requires. A fill that would emit a factory call reaching one of
+// its enclosing keys makes that factory recursive — it never terminates —
+// so the literal is reported instead of filled.
+func (fl *fileLower) defaultDepScan() {
+	if fl.pkg.defScanned {
+		return
+	}
+	fl.pkg.defScanned = true
+	for _, file := range fl.pkg.files {
+		fl.defaultDepScanFile(file, fl.defaultTypeNames(file))
+	}
+}
+
+// defaultDepScanFile records the default-subtree literals and factory
+// edges of one file; defEdges spans files, so a cycle through defaults
+// declared in different files still closes.
+func (fl *fileLower) defaultDepScanFile(file *syntax.File, typeNames map[*syntax.StructType]*syntax.TypeDecl) {
+	syntax.Inspect(file, func(n syntax.Node) bool {
+		st, ok := n.(*syntax.StructType)
+		if !ok {
+			return true
+		}
+		td := typeNames[st]
+		for _, f := range st.FieldList {
+			fd, ok := f.Type.(*syntax.FieldDefault)
+			if !ok || fd.Default == nil {
+				continue
+			}
+			key := ""
+			if td != nil && td.Name != nil && f.Name != nil {
+				key = td.Name.Value + "." + f.Name.Value
+			}
+			syntax.Inspect(fd.Default, func(m syntax.Node) bool {
+				if c, ok := m.(*syntax.CallExpr); ok && fl.unsafeFoldCall(c) {
+					// unsafe.Sizeof/Alignof/Offsetof fold at check:
+					// their argument literals never evaluate, so they
+					// create no factory dependency. They still join
+					// inDefault: their text is copied into each emitted
+					// default, which the expansion budget must charge.
+					syntax.Inspect(c, func(u syntax.Node) bool {
+						if l, ok := u.(*syntax.CompositeLit); ok {
+							if fl.pkg.inDefault == nil {
+								fl.pkg.inDefault = map[*syntax.CompositeLit]bool{}
+							}
+							fl.pkg.inDefault[l] = true
+						}
+						return true
+					})
+					return false
+				}
+				lit, ok := m.(*syntax.CompositeLit)
+				if !ok {
+					return true
+				}
+				if fl.pkg.inDefault == nil {
+					fl.pkg.inDefault = map[*syntax.CompositeLit]bool{}
+				}
+				fl.pkg.inDefault[lit] = true
+				if key == "" {
+					return true
+				}
+				if fl.pkg.defInside == nil {
+					fl.pkg.defInside = map[*syntax.CompositeLit][]string{}
+				}
+				fl.pkg.defInside[lit] = append(fl.pkg.defInside[lit], key)
+				for _, d := range fl.missingDefaults(lit, true) {
+					if d.key == "" {
+						continue
+					}
+					if fl.pkg.defEdges == nil {
+						fl.pkg.defEdges = map[string]map[string]bool{}
+					}
+					if fl.pkg.defEdges[key] == nil {
+						fl.pkg.defEdges[key] = map[string]bool{}
+					}
+					fl.pkg.defEdges[key][d.key] = true
+				}
+				return true
+			})
+		}
+		return true
+	})
+}
+
+// unsafeFoldCall reports whether c is a call the checker folds to a
+// constant: unsafe.Sizeof, unsafe.Alignof, and unsafe.Offsetof never
+// evaluate their arguments, so literals inside them are not factory
+// dependencies.
+func (fl *fileLower) unsafeFoldCall(c *syntax.CallExpr) bool {
+	switch f := syntax.Unparen(c.Fun).(type) {
+	case *syntax.SelectorExpr:
+		switch f.Sel.Value {
+		case "Sizeof", "Alignof", "Offsetof":
+		default:
+			return false
+		}
+		n, ok := f.X.(*syntax.Name)
+		if !ok {
+			return false
+		}
+		pn, ok := fl.pkg.info.Uses[n].(*types2.PkgName)
+		return ok && pn.Imported().Path() == "unsafe"
+	case *syntax.Name:
+		switch f.Value {
+		case "Sizeof", "Alignof", "Offsetof":
+			_, ok := fl.pkg.info.Uses[f].(*types2.Builtin)
+			return ok
+		}
+	}
+	return false
+}
+
+// defReaches reports whether the factory key can reach any of the named
+// keys through the default dependency edges — a fill emitting that factory
+// inside one of those defaults would make it recursive.
+func (fl *fileLower) defReaches(key string, targets []string) bool {
+	seen := map[string]bool{}
+	var visit func(k string) bool
+	visit = func(k string) bool {
+		if seen[k] {
+			return false
+		}
+		seen[k] = true
+		for _, t := range targets {
+			if k == t {
+				return true
+			}
+		}
+		for next := range fl.pkg.defEdges[k] {
+			if visit(next) {
+				return true
+			}
+		}
+		return false
+	}
+	return visit(key)
 }
 
 func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
+	if fl.pkg.inDefault[lit] && fl.defFillOver {
+		// The expansion budget already reported: stop rendering nested
+		// defaults instead of doing the remaining exponential work.
+		return
+	}
 	if fl.hasSpread(lit) {
 		// Spread lowering emits its initializer and its text together. A
 		// generated default has no source span to reuse as a spread operand.
 		return
 	}
-	missing := fl.missingDefaults(lit)
+	missing := fl.missingDefaults(lit, false)
+	if targets := fl.pkg.defInside[lit]; len(targets) > 0 {
+		keep := missing[:0]
+		for _, d := range missing {
+			if d.key != "" && fl.defReaches(d.key, targets) {
+				base.Errorf("%s: logos: field default %s of %s is recursive", lit.Pos().String(), d.field, d.key)
+				continue
+			}
+			keep = append(keep, d)
+		}
+		missing = keep
+	}
 	if len(missing) == 0 {
 		return
 	}
@@ -421,6 +598,13 @@ func (fl *fileLower) fillStructDefaults(lit *syntax.CompositeLit) {
 	lit.NKeys += len(native)
 	brace := fl.literalBrace(lit)
 	fl.add(brace+1, brace+1, text)
+	if fl.pkg.inDefault[lit] {
+		fl.defFillBytes += len(text)
+		if fl.defFillBytes > defFillBudget && !fl.defFillOver {
+			fl.defFillOver = true
+			base.Errorf("%s: logos: nested field defaults exceed the %d-byte expansion budget", lit.Pos().String(), defFillBudget)
+		}
+	}
 }
 
 func (fl *fileLower) structDefaultFields(pos syntax.Pos, defaults []structDefault) ([]syntax.Expr, string) {
@@ -437,9 +621,37 @@ func (fl *fileLower) structDefaultFields(pos syntax.Pos, defaults []structDefaul
 	return native, text.String()
 }
 
-func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
-	names, texts := fl.structDefaultsFor(lit)
-	if len(names) == 0 {
+// missingDefaults returns the field defaults a literal omits. keysOnly
+// keeps the factory keys but skips rendering default text: the
+// dependency scan calls it on literals of other files, whose positions
+// this file's line table cannot resolve.
+func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit, keysOnly bool) []structDefault {
+	t := fl.pkg.info.TypeOf(lit)
+	if t == nil {
+		return nil
+	}
+	u, _ := ctLiteralType(lit, t)
+	st, _ := u.Underlying().(*types2.Struct)
+	if st == nil {
+		return nil
+	}
+	named, _ := u.(*types2.Named)
+	defs := fl.pkg.info.LogosFieldDefaults[st]
+	if len(defs) == 0 && named != nil {
+		origin, _ := named.Origin().Underlying().(*types2.Struct)
+		defs = fl.pkg.info.LogosFieldDefaults[origin]
+	}
+	var obj *types2.TypeName
+	if named != nil {
+		obj = named.Obj()
+	}
+	var imported []facts.DefaultFact
+	if len(defs) == 0 && obj != nil && obj.Pkg() != nil && obj.Pkg() != fl.pkg.tpkg {
+		if f, ok := facts.Lookup(obj.Pkg().Path()); ok && f != nil {
+			imported = f.Defaults
+		}
+	}
+	if len(defs) == 0 && len(imported) == 0 {
 		return nil
 	}
 	present := make(map[string]bool)
@@ -461,128 +673,75 @@ func (fl *fileLower) missingDefaults(lit *syntax.CompositeLit) []structDefault {
 		}
 	}
 	var out []structDefault
-	for i, name := range names {
-		if !present[name] {
-			out = append(out, structDefault{field: name, text: texts[i]})
+	for _, d := range defs {
+		if present[d.Field] {
+			continue
 		}
+		sd := structDefault{field: d.Field, key: d.Owner + "." + d.Field}
+		if !keysOnly {
+			sd.text = fl.localDefaultValue(named, d)
+		}
+		out = append(out, sd)
+	}
+	for _, d := range imported {
+		if d.Type != obj.Name() || present[d.Field] {
+			continue
+		}
+		sd := structDefault{field: d.Field}
+		if !keysOnly {
+			sd.text = fl.importedDefaultValue(named, d)
+		}
+		out = append(out, sd)
 	}
 	return out
 }
 
-func (fl *fileLower) structDefaultsFor(lit *syntax.CompositeLit) ([]string, []string) {
-	t := fl.pkg.info.TypeOf(lit)
-	if t == nil {
-		return nil, nil
+func (fl *fileLower) localDefaultValue(named *types2.Named, d types2.LogosFieldDefault) string {
+	fname := fl.pkg.defaultFactoryPlan()[d.Owner+"."+d.Field]
+	if fname == "" {
+		return fl.renderDefault(d.Default)
 	}
-	u := types2.Unalias(t)
-	st, _ := u.(*types2.Struct)
-	if st == nil {
-		if n, ok := u.(*types2.Named); ok {
-			if s, ok := n.Underlying().(*types2.Struct); ok {
-				st = s
+	if named == nil {
+		return fname + "()"
+	}
+	owner, _ := fl.pkg.tpkg.Scope().Lookup(d.Owner).(*types2.TypeName)
+	obj := named.Obj()
+	if obj == owner {
+		return fname + fl.defaultTypeArgs(named.TypeArgs()) + "()"
+	}
+	if owner != nil {
+		if typ, ok := owner.Type().(*types2.Named); ok && typ.TypeParams().Len() != 0 {
+			if args := fl.ownerArgsText(obj, owner, named.TypeArgs()); args != "" {
+				return fname + args + "()"
 			}
 		}
 	}
-	if st == nil {
-		return nil, nil
+	return fname + "()"
+}
+
+func (fl *fileLower) importedDefaultValue(named *types2.Named, d facts.DefaultFact) string {
+	obj := named.Obj()
+	owner, sym, ok := strings.Cut(d.Text, "/")
+	if !ok {
+		owner, sym = "", owner
 	}
-	named, _ := u.(*types2.Named)
-	var obj *types2.TypeName
-	var targs string
-	var litArgs *types2.TypeList
-	if named != nil {
-		if o := named.Obj(); o != nil && o.Pkg() != nil {
-			obj = o
-			litArgs = named.TypeArgs()
-			if litArgs != nil && litArgs.Len() > 0 {
-				var parts []string
-				for i := 0; i < litArgs.Len(); i++ {
-					parts = append(parts, litArgs.At(i).String())
-				}
-				targs = "[" + strings.Join(parts, ", ") + "]"
-			}
-		}
+	name := fl.importQualifier(obj.Pkg()) + sym
+	if owner == obj.Name() {
+		name += fl.defaultTypeArgs(named.TypeArgs())
 	}
-	qual := ""
-	if obj != nil {
-		qual = fl.importQualifier(obj.Pkg())
+	return name + "()"
+}
+
+func (fl *fileLower) defaultTypeArgs(args *types2.TypeList) string {
+	if args.Len() == 0 {
+		return ""
 	}
-	plan := fl.pkg.defaultFactoryPlan()
-	call := func(d types2.LogosFieldDefault) string {
-		fname := plan[d.Owner+"."+d.Field]
-		if fname == "" {
-			return fl.renderDefault(d.Default)
-		}
-		// The factory's type parameters belong to the owner type. A literal
-		// naming the owner itself supplies matching type arguments; a type
-		// defined over the owner's struct resolves the plain factory when it
-		// is not generic, and otherwise falls back to the default's text.
-		var ownerObj types2.Object
-		if fl.pkg.tpkg != nil && fl.pkg.tpkg.Scope() != nil {
-			ownerObj = fl.pkg.tpkg.Scope().Lookup(d.Owner)
-		}
-		if obj == ownerObj {
-			return qual + fname + targs + "()"
-		}
-		if tn, ok := ownerObj.(*types2.TypeName); ok {
-			if on, ok := tn.Type().(*types2.Named); !ok || on.TypeParams().Len() == 0 {
-				return qual + fname + "()"
-			}
-			// The owner is generic: recover its arguments from the derived
-			// type's own declaration. Rendering the default's text here would
-			// rebind its names to the literal's scope; emitting the bare call
-			// fails loudly instead.
-			if args := fl.ownerArgsText(obj, ownerObj, litArgs); args != "" {
-				return qual + fname + args + "()"
-			}
-		}
-		return qual + fname + "()"
+	parts := make([]string, args.Len())
+	qualify := fl.typeQualifier()
+	for i := range parts {
+		parts[i] = types2.TypeString(args.At(i), qualify)
 	}
-	if defs := fl.pkg.info.LogosFieldDefaults[st]; len(defs) > 0 {
-		names := make([]string, 0, len(defs))
-		texts := make([]string, 0, len(defs))
-		for _, d := range defs {
-			names = append(names, d.Field)
-			texts = append(texts, call(d))
-		}
-		return names, texts
-	}
-	if obj == nil || obj.Pkg() == fl.pkg.tpkg {
-		return nil, nil
-	}
-	imp, ok := facts.Lookup(obj.Pkg().Path())
-	if !ok || imp == nil {
-		return nil, nil
-	}
-	var names, texts []string
-	for _, d := range imp.Defaults {
-		if d.Type != obj.Name() {
-			continue
-		}
-		// The factory's type parameters belong to the declaring (owner)
-		// type, which rides in front of the symbol in the fact text. A
-		// literal naming the owner itself supplies matching arguments;
-		// a defined-over literal takes the plain factory. When the owner
-		// is generic the bare call cannot infer its parameters, which
-		// surfaces the unsupported defined-over-generic case as a build
-		// error rather than a silent wrong value.
-		owner, sym, _ := strings.Cut(d.Text, "/")
-		if sym == "" {
-			sym = owner
-			owner = ""
-		}
-		var ownerObj types2.Object
-		if owner != "" && obj.Pkg().Scope() != nil {
-			ownerObj = obj.Pkg().Scope().Lookup(owner)
-		}
-		text := qual + sym + "()"
-		if ownerObj == obj {
-			text = qual + sym + targs + "()"
-		}
-		names = append(names, d.Field)
-		texts = append(texts, text)
-	}
-	return names, texts
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 func (fl *fileLower) literalBrace(lit *syntax.CompositeLit) int {
@@ -635,4 +794,603 @@ func (fl *fileLower) reparseDefault(text string, pos syntax.Pos) syntax.Expr {
 		return true
 	})
 	return value
+}
+
+func (r *ctReducer) copyCtStructDefaultFacts(st, _ *syntax.StructType, f *ctFrame) {
+	typ, _ := f.info.TypeOf(st).(*types2.Struct)
+	var defs []types2.LogosFieldDefault
+	for _, d := range f.info.LogosFieldDefaults[typ] {
+		if d.Owner != "" {
+			continue
+		}
+		value, ok := f.nodes[d.Default].(syntax.Expr)
+		if !ok {
+			r.invalid(d.Default, "missing reduced field default")
+			continue
+		}
+		d.Default = value
+		defs = append(defs, d)
+	}
+	if len(defs) != 0 {
+		if r.info.LogosFieldDefaults == nil {
+			r.info.LogosFieldDefaults = make(map[*types2.Struct][]types2.LogosFieldDefault)
+		}
+		r.info.LogosFieldDefaults[typ] = defs
+	}
+}
+
+func (w ctWalker) ctStructDefaultType(st *syntax.StructType) {
+	for _, field := range st.FieldList {
+		if d, ok := field.Type.(*syntax.FieldDefault); ok {
+			field.Type = d.Type
+		}
+	}
+}
+
+func (w ctWalker) ctStructDefault(lit *syntax.CompositeLit) (syntax.Expr, []syntax.Stmt, bool) {
+	info := w.fl.pkg.info
+	typ := info.TypeOf(lit)
+	if info.LogosZeroLit[lit] {
+		return w.ctZeroLiteral(lit, typ), nil, true
+	}
+	if typ == nil {
+		return nil, nil, false
+	}
+	elem, addr := ctLiteralType(lit, typ)
+	defaults := w.ctStructDefaultFields(lit, elem, elem, nil)
+	if w.fl.hasSpread(lit) {
+		e, pre := w.ctStructSpread(lit, elem, defaults, addr)
+		return e, pre, true
+	}
+	fields := defaults.fields
+	if len(fields) == 0 {
+		return nil, nil, false
+	}
+	pre := w.literalValues(lit)
+	if len(pre) != 0 {
+		st := elem.Underlying().(*types2.Struct)
+		var defaults []syntax.Stmt
+		for _, el := range fields {
+			pair := el.(*syntax.KeyValueExpr)
+			name := w.nextArg()
+			pos := pair.Pos()
+			d := at(&syntax.VarDecl{
+				NameList: []*syntax.Name{nameOf(pos, name)},
+				Type:     w.fl.ctTypeExpr(pos, ctDefaultField(st, pair.Key.(*syntax.Name).Value).Type()),
+				Values:   pair.Value,
+			}, pos)
+			defaults = append(defaults, at(&syntax.DeclStmt{DeclList: []syntax.Decl{d}}, pos))
+			pair.Value = nameOf(pos, name)
+		}
+		pre = append(defaults, pre...)
+	}
+	lit.Type = w.fl.ctTypeExpr(lit.Pos(), elem)
+	out := lit
+	if defaults.private {
+		amended := *lit
+		out = &amended
+		w.fl.ct.bindOwnedLiteral(out)
+	}
+	out.ElemList = append(fields, lit.ElemList...)
+	out.NKeys += len(fields)
+	if addr {
+		return at(&syntax.Operation{Op: syntax.And, X: out}, lit.Pos()), pre, true
+	}
+	return out, pre, true
+}
+
+func (w ctWalker) ctZeroLiteral(lit *syntax.CompositeLit, typ types2.Type) syntax.Expr {
+	if typ == nil {
+		w.reject(lit, "missing checked type of zero literal")
+		return lit
+	}
+	pos := lit.Pos()
+	zero := callOf(pos, w.fl.ctBuiltin(pos, "new"), []syntax.Expr{w.fl.ctTypeExpr(pos, typ)})
+	return at(&syntax.Operation{Op: syntax.Mul, X: zero}, pos)
+}
+
+func ctDefaultBase(typ types2.Type) types2.Type {
+	for {
+		switch t := types2.Unalias(typ).(type) {
+		case *types2.ConstView:
+			typ = t.Elem
+		case *types2.ReadonlyDescendants:
+			typ = t.Elem
+		default:
+			return t
+		}
+	}
+}
+
+func ctLiteralType(lit *syntax.CompositeLit, typ types2.Type) (types2.Type, bool) {
+	typ = ctDefaultBase(typ)
+	if lit.Type == nil {
+		if ptr, ok := typ.Underlying().(*types2.Pointer); ok {
+			return ctDefaultBase(ptr.Elem()), true
+		}
+	}
+	return typ, false
+}
+
+func ctDefaultField(st *types2.Struct, name string) *types2.Var {
+	for i := range st.NumFields() {
+		if f := st.Field(i); f.Name() == name {
+			return f
+		}
+	}
+	return nil
+}
+
+type ctDefaultUse struct {
+	expr   syntax.Expr
+	typ    types2.Type
+	owner  *types2.Named
+	thunk  string
+	parent *ctDefaultUse
+}
+
+type ctDefaultFields struct {
+	fields  []syntax.Expr
+	private bool
+}
+
+func (w ctWalker) ctStructDefaultFields(lit *syntax.CompositeLit, concrete, semantic types2.Type, active *ctDefaultUse) ctDefaultFields {
+	st, _ := concrete.Underlying().(*types2.Struct)
+	if st == nil || (len(lit.ElemList) != 0 && lit.NKeys == 0 && !w.fl.hasSpread(lit)) {
+		return ctDefaultFields{}
+	}
+	source := w.ctDefaultRecords(semantic)
+	if source.named == nil && len(source.checked) == 0 {
+		return ctDefaultFields{}
+	}
+	present := make(map[string]bool, lit.NKeys)
+	for _, spread := range w.fl.pkg.info.LogosSpreads[lit] {
+		for _, name := range spread.Fields {
+			present[name] = true
+		}
+	}
+	for _, e := range lit.ElemList {
+		if pair, ok := e.(*syntax.KeyValueExpr); ok {
+			present[pair.Key.(*syntax.Name).Value] = true
+		}
+	}
+	pos := lit.Pos()
+	var out ctDefaultFields
+	add := func(field *types2.Var, value syntax.Expr) {
+		if value == nil {
+			return
+		}
+		out.private = out.private || w.ctDefaultForeignField(field)
+		out.fields = append(out.fields, at(&syntax.KeyValueExpr{Key: nameOf(pos, field.Name()), Value: value}, pos))
+	}
+	missing := func(name string) *types2.Var {
+		if present[name] {
+			return nil
+		}
+		field := ctDefaultField(st, name)
+		if field == nil {
+			w.reject(lit, "default metadata does not name a field of the literal type: "+name)
+		}
+		return field
+	}
+	for _, d := range source.checked {
+		field := missing(d.Field)
+		if field == nil {
+			continue
+		}
+		if d.Owner != "" {
+			add(field, w.ctDefaultFactory(lit, source.named, d))
+			continue
+		}
+		add(field, w.ctDefaultLocal(lit, d.Default, field.Type(), source.named, active))
+	}
+	for _, row := range source.archived {
+		field := missing(row.Field)
+		if field == nil {
+			continue
+		}
+		factory := row.Factory
+		if factory == nil || factory.Pkg() == nil {
+			w.reject(lit, "missing checked default factory for "+row.Field)
+			continue
+		}
+		add(field, w.ctDefaultFactoryCall(lit.Pos(), factory.Pkg().Path(), factory.Name(), source.named.TypeArgs()))
+	}
+	return out
+}
+
+func (w ctWalker) ctDefaultForeignField(field *types2.Var) bool {
+	pkg := field.Pkg()
+	return !field.Exported() && pkg != nil && pkg.Path() != w.fl.ct.owner.Path()
+}
+
+func (w ctWalker) ctDefaultLocal(lit *syntax.CompositeLit, expr syntax.Expr, typ types2.Type, owner *types2.Named, active *ctDefaultUse) syntax.Expr {
+	pos := lit.Pos()
+	for use := active; use != nil; use = use.parent {
+		if expr != use.expr {
+			continue
+		}
+		sameOwner := use.owner == owner || (use.owner != nil && owner != nil && types2.Identical(use.owner, owner))
+		if !sameOwner || !types2.Identical(use.typ, typ) {
+			w.reject(lit, "recursive local struct field default changes its instantiation")
+			return nil
+		}
+		if use.thunk == "" {
+			use.thunk = w.nextArg()
+		}
+		return callOf(pos, nameOf(pos, use.thunk), nil)
+	}
+	use := ctDefaultUse{expr: expr, typ: typ, owner: owner, parent: active}
+	render := ctDefaultRender{info: w.fl.pkg.info, owner: owner, active: &use}
+	value := w.ctDefaultExpression(expr, typ, render)
+	if use.thunk == "" {
+		return value
+	}
+	return w.ctDefaultThunk(pos, typ, use.thunk, value)
+}
+
+func (w ctWalker) ctDefaultThunk(pos syntax.Pos, typ types2.Type, name string, value syntax.Expr) syntax.Expr {
+	sig := func() *syntax.FuncType {
+		result := at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, typ)}, pos)
+		return at(&syntax.FuncType{ResultList: []*syntax.Field{result}}, pos)
+	}
+	decl := at(&syntax.VarDecl{NameList: []*syntax.Name{nameOf(pos, name)}, Type: sig()}, pos)
+	thunk := at(&syntax.FuncLit{Type: sig(), Body: blockOf(pos, []syntax.Stmt{returnOf(pos, []syntax.Expr{value})})}, pos)
+	body := []syntax.Stmt{
+		at(&syntax.DeclStmt{DeclList: []syntax.Decl{decl}}, pos),
+		assignOf(pos, []syntax.Expr{nameOf(pos, name)}, []syntax.Expr{thunk}),
+		returnOf(pos, []syntax.Expr{callOf(pos, nameOf(pos, name), nil)}),
+	}
+	wrap := at(&syntax.FuncLit{Type: sig(), Body: blockOf(pos, body)}, pos)
+	return callOf(pos, wrap, nil)
+}
+
+type ctDefaultSource struct {
+	named    *types2.Named
+	checked  []types2.LogosFieldDefault
+	archived []types2.LogosCtNamedDefault
+}
+
+func (w ctWalker) ctDefaultRecords(t types2.Type) ctDefaultSource {
+	info := w.fl.pkg.info
+	st, _ := t.Underlying().(*types2.Struct)
+	n, _ := t.(*types2.Named)
+	if n == nil {
+		return ctDefaultSource{checked: info.LogosFieldDefaults[st]}
+	}
+	for n != nil {
+		if defs := info.LogosCtImportedNamedDefaults(n); len(defs) != 0 {
+			return ctDefaultSource{named: n, archived: defs}
+		}
+		rhs, _ := types2.Unalias(info.LogosCtNamedRHS(n)).(*types2.Named)
+		if rhs == nil {
+			origin, _ := n.Origin().Underlying().(*types2.Struct)
+			if defs := info.LogosFieldDefaults[origin]; len(defs) != 0 {
+				return ctDefaultSource{named: n, checked: defs}
+			}
+			concrete, _ := n.Underlying().(*types2.Struct)
+			if defs := info.LogosFieldDefaults[concrete]; len(defs) != 0 {
+				return ctDefaultSource{named: n, checked: defs}
+			}
+		}
+		n = rhs
+	}
+	return ctDefaultSource{}
+}
+
+func (w ctWalker) ctDefaultFactory(lit *syntax.CompositeLit, typ *types2.Named, d types2.LogosFieldDefault) syntax.Expr {
+	if typ == nil || typ.Obj().Pkg() == nil || typ.Obj().Name() != d.Owner {
+		w.reject(lit, "missing checked declaring type of default factory for "+d.Owner+"."+d.Field)
+		return nil
+	}
+	pkg := typ.Obj().Pkg()
+	symbol := w.ctDefaultFactorySymbol(pkg, d)
+	if symbol == "" || typ.TypeArgs().Len() != typ.TypeParams().Len() {
+		w.reject(lit, "missing checked default factory or type arguments for "+d.Owner+"."+d.Field)
+		return nil
+	}
+	return w.ctDefaultFactoryCall(lit.Pos(), pkg.Path(), symbol, typ.TypeArgs())
+}
+
+func (w ctWalker) ctDefaultFactoryCall(pos syntax.Pos, path, symbol string, args *types2.TypeList) syntax.Expr {
+	var fun syntax.Expr = w.fl.ctPkgSelector(pos, path, symbol)
+	if args.Len() != 0 {
+		indices := make([]syntax.Expr, args.Len())
+		for i := range indices {
+			indices[i] = w.fl.ctTypeExpr(pos, args.At(i))
+		}
+		fun = at(&syntax.IndexExpr{X: fun, Index: listOf(pos, indices)}, pos)
+	}
+	return callOf(pos, fun, nil)
+}
+
+func (w ctWalker) ctDefaultFactorySymbol(pkg *types2.Package, field types2.LogosFieldDefault) string {
+	ct := w.fl.ct
+	if (ct.consumer != nil && pkg.Path() != ct.consumer.Path()) || (ct.consumer == nil && pkg.Path() != ct.owner.Path()) {
+		return ""
+	}
+	if f := facts.Current(); f != nil {
+		for _, d := range f.Defaults {
+			owner, symbol, ok := strings.Cut(d.Text, "/")
+			if ok && owner == field.Owner && d.Field == field.Field {
+				return symbol
+			}
+		}
+	}
+	key := field.Owner + "." + field.Field
+	if pkg == w.fl.pkg.tpkg {
+		return w.fl.pkg.defaultFactoryPlan()[key]
+	}
+	info := w.fl.pkg.info
+	for info.LogosCtDefaultOrigin != nil {
+		info = info.LogosCtDefaultOrigin
+	}
+	return facts.FactoryNamePlan(info, pkg)[key]
+}
+
+type ctDefaultRender struct {
+	info   *types2.Info
+	owner  *types2.Named
+	active *ctDefaultUse
+}
+
+func ctDefaultValue(info *types2.Info, e syntax.Expr) (types2.Type, constant.Value) {
+	if tv, ok := info.Types[e]; ok {
+		return tv.Type, tv.Value
+	}
+	if info.StoreTypesInSyntax {
+		tv := e.GetTypeInfo()
+		typ, _ := tv.Type.(types2.Type)
+		return typ, tv.Value
+	}
+	return nil, nil
+}
+
+func (w ctWalker) ctDefaultExpression(e syntax.Expr, target types2.Type, render ctDefaultRender) syntax.Expr {
+	e = syntax.Unparen(e)
+	var typ types2.Type
+	var val constant.Value
+	for render.info != nil {
+		typ, val = ctDefaultValue(render.info, e)
+		if typ != nil {
+			break
+		}
+		render.info = render.info.LogosCtDefaultOrigin
+	}
+	if typ == nil {
+		w.reject(e, "missing checked declaration expression for field default")
+		return e
+	}
+	semantic := typ
+	if render.owner != nil {
+		typ = types2.LogosCtSubstituteNamed(typ, render.owner, w.fl.pkg.info.LogosContext)
+	}
+	var out syntax.Expr
+	switch {
+	case val != nil:
+		out = w.ctDefaultConstant(e, typ, val)
+	default:
+		lit, ok := e.(*syntax.CompositeLit)
+		if !ok {
+			w.reject(e, "missing checked constant for field default")
+			return e
+		}
+		if render.info.LogosZeroLit[lit] {
+			out = w.ctZeroLiteral(lit, typ)
+		} else {
+			out = w.ctDefaultComposite(lit, typ, semantic, render)
+		}
+	}
+	if target != nil {
+		out = w.ctOptionValueFrom(out, typ, target)
+	}
+	return out
+}
+
+func (w ctWalker) ctDefaultConstant(e syntax.Expr, typ types2.Type, val constant.Value) syntax.Expr {
+	pos := e.Pos()
+	base := ctDefaultBase(typ)
+	basic, ok := base.Underlying().(*types2.Basic)
+	if !ok {
+		w.reject(e, "missing concrete type for field default constant")
+		return e
+	}
+	name := nameOf(pos, "_logos_ct_default")
+	w.fl.ct.bindUse(name, types2.NewConst(pos, nil, name.Value, basic, val))
+	if base != basic {
+		return callOf(pos, w.fl.ctTypeExpr(pos, typ), []syntax.Expr{name})
+	}
+	return name
+}
+
+func (w ctWalker) ctDefaultComposite(lit *syntax.CompositeLit, typ, semantic types2.Type, render ctDefaultRender) syntax.Expr {
+	elem, addr := ctLiteralType(lit, typ)
+	source, _ := ctLiteralType(lit, semantic)
+	defaults := w.ctStructDefaultFields(lit, elem, source, render.active)
+	fields := defaults.fields
+	pos := lit.Pos()
+	n := at(&syntax.CompositeLit{
+		Type:     w.fl.ctTypeExpr(pos, elem),
+		ElemList: slices.Grow(fields, len(lit.ElemList)),
+		NKeys:    lit.NKeys + len(fields),
+		Rbrace:   lit.Rbrace,
+	}, pos)
+	private := defaults.private
+	u := elem.Underlying()
+	for i, e := range lit.ElemList {
+		pair, _ := e.(*syntax.KeyValueExpr)
+		var key syntax.Expr
+		if pair != nil {
+			key, e = pair.Key, pair.Value
+		}
+		var target types2.Type
+		switch u := u.(type) {
+		case *types2.Struct:
+			if id, ok := key.(*syntax.Name); ok {
+				if fld, ok := render.info.Uses[id].(*types2.Var); ok {
+					obj, _, _ := types2.LookupFieldOrMethod(u, false, fld.Pkg(), id.Value)
+					if field, ok := obj.(*types2.Var); ok {
+						private = private || w.ctDefaultForeignField(field)
+						target = field.Type()
+					}
+				}
+				if target == nil {
+					w.reject(id, "missing checked field of default literal")
+				}
+				key = nameOf(id.Pos(), id.Value)
+			} else {
+				field := u.Field(i)
+				private = private || w.ctDefaultForeignField(field)
+				target = field.Type()
+			}
+		case *types2.Map:
+			key = w.ctDefaultExpression(key, u.Key(), render)
+			target = u.Elem()
+		case *types2.Slice:
+			target = u.Elem()
+		case *types2.Array:
+			target = u.Elem()
+		}
+		if key != nil {
+			switch u.(type) {
+			case *types2.Slice, *types2.Array:
+				key = w.ctDefaultExpression(key, nil, render)
+			}
+		}
+		e = w.ctDefaultExpression(e, target, render)
+		if key != nil {
+			e = at(&syntax.KeyValueExpr{Key: key, Value: e}, pair.Pos())
+		}
+		n.ElemList = append(n.ElemList, e)
+	}
+	if private {
+		w.fl.ct.bindOwnedLiteral(n)
+	}
+	if addr {
+		return at(&syntax.Operation{Op: syntax.And, X: n}, pos)
+	}
+	return n
+}
+
+func (w ctWalker) ctStructSpreadAddr(op *syntax.Operation) (syntax.Expr, []syntax.Stmt, bool) {
+	if op.Op != syntax.And || op.Y != nil {
+		return nil, nil, false
+	}
+	lit, ok := syntax.Unparen(op.X).(*syntax.CompositeLit)
+	if !ok || !w.fl.hasSpread(lit) {
+		return nil, nil, false
+	}
+	typ := w.fl.pkg.info.TypeOf(lit)
+	if typ == nil {
+		w.reject(lit, "missing checked type for spread literal")
+		return lit, nil, true
+	}
+	typ = ctDefaultBase(typ)
+	e, pre := w.ctStructSpread(lit, typ, w.ctStructDefaultFields(lit, typ, typ, nil), true)
+	return e, pre, true
+}
+
+func (w ctWalker) ctStructSpread(lit *syntax.CompositeLit, typ types2.Type, defaults ctDefaultFields, addr bool) (syntax.Expr, []syntax.Stmt) {
+	pos := lit.Pos()
+	name := w.nextArg()
+	tmp := func() *syntax.Name { return nameOf(pos, name) }
+	fields := defaults.fields
+	init := at(&syntax.CompositeLit{Type: w.fl.ctTypeExpr(pos, typ), ElemList: fields, NKeys: len(fields), Rbrace: lit.Rbrace}, pos)
+	if defaults.private {
+		w.fl.ct.bindOwnedLiteral(init)
+	}
+	body := []syntax.Stmt{defineOf(pos, []syntax.Expr{tmp()}, []syntax.Expr{init})}
+	spreads := w.fl.pkg.info.LogosSpreads[lit]
+	hoisted := false
+	for i, el := range lit.ElemList {
+		switch el := el.(type) {
+		case *syntax.SpreadExpr:
+			src := spreads[0]
+			spreads = spreads[1:]
+			value, pre := w.expr(src.Src)
+			hoisted = hoisted || len(pre) != 0
+			body = append(body, pre...)
+			if len(src.Fields) == 0 {
+				body = append(body, assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{value}))
+				continue
+			}
+			if len(src.Fields) == 1 {
+				field := src.Fields[0]
+				lhs, rhs := selOf(pos, tmp(), field), selOf(pos, value, field)
+				body = append(body, assignOf(pos, []syntax.Expr{lhs}, []syntax.Expr{rhs}))
+				continue
+			}
+			from := w.nextArg()
+			body = append(body, defineOf(pos, []syntax.Expr{nameOf(pos, from)}, []syntax.Expr{value}))
+			for _, field := range src.Fields {
+				lhs := selOf(pos, tmp(), field)
+				rhs := selOf(pos, nameOf(pos, from), field)
+				body = append(body, assignOf(pos, []syntax.Expr{lhs}, []syntax.Expr{rhs}))
+			}
+		case *syntax.KeyValueExpr:
+			value, pre := w.checkedOperand(el.Value, w.ctOptionTarget(lit, el, i))
+			hoisted = hoisted || len(pre) != 0
+			lhs := selOf(pos, tmp(), el.Key.(*syntax.Name).Value)
+			body = append(body, pre...)
+			body = append(body, assignOf(pos, []syntax.Expr{lhs}, []syntax.Expr{value}))
+		}
+	}
+	var result syntax.Expr = tmp()
+	if addr {
+		result = at(&syntax.Operation{Op: syntax.And, X: result}, pos)
+		typ = types2.NewPointer(typ)
+	}
+	if hoisted {
+		return result, body
+	}
+	body = append(body, returnOf(pos, []syntax.Expr{result}))
+	ret := at(&syntax.Field{Type: w.fl.ctTypeExpr(pos, typ)}, pos)
+	fn := at(&syntax.FuncLit{
+		Type: at(&syntax.FuncType{ResultList: []*syntax.Field{ret}}, pos),
+		Body: blockEndingAt(pos, lit.Rbrace, body),
+	}, pos)
+	return callOf(pos, fn, nil), nil
+}
+
+func (w ctWalker) ctStructSpreadSelfUpdate(s *syntax.AssignStmt) ([]syntax.Stmt, bool) {
+	if s.Op != 0 {
+		return nil, false
+	}
+	target, ok := s.Lhs.(*syntax.Name)
+	if !ok || target.Value == "_" {
+		return nil, false
+	}
+	lit, ok := syntax.Unparen(s.Rhs).(*syntax.CompositeLit)
+	if !ok || !w.fl.hasSpread(lit) {
+		return nil, false
+	}
+	info := w.fl.pkg.info
+	obj := info.Uses[target]
+	if obj == nil {
+		return nil, false
+	}
+	for _, spread := range info.LogosSpreads[lit] {
+		src, ok := syntax.Unparen(spread.Src).(*syntax.Name)
+		if !ok || info.Uses[src] != obj {
+			return nil, false
+		}
+	}
+	var lhs, rhs []syntax.Expr
+	var targets []types2.Type
+	for i, e := range lit.ElemList {
+		if kv, ok := e.(*syntax.KeyValueExpr); ok {
+			lhs = append(lhs, selOf(kv.Pos(), nameOf(target.Pos(), target.Value), kv.Key.(*syntax.Name).Value))
+			rhs = append(rhs, kv.Value)
+			targets = append(targets, w.ctOptionTarget(lit, kv, i))
+		}
+	}
+	pos := s.Pos()
+	if len(rhs) == 0 {
+		return []syntax.Stmt{assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{target})}, true
+	}
+	pre := w.watchExprs(len(rhs), func(i int) *syntax.Expr { return &rhs[i] },
+		func(i int, old syntax.Expr) (syntax.Expr, []syntax.Stmt) {
+			return w.checkedOperand(old, targets[i])
+		})
+	return append(pre, assignOf(pos, lhs, rhs)), true
 }

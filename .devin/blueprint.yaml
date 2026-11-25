@@ -32,3 +32,36 @@ knowledge:
   - name: notes
     contents: |
       Work on release-branch.go1.27; fork-first PATH. Rebuild after compiler/cmd changes — tests use installed binaries. Milestone gate: (cd src && ./run.bash --no-rebuild).
+---
+# macOS (arm64) variant: same bootstrap, darwin tarball.
+runs-on: macos
+initialize: |
+  set -e
+  if [ ! -x "$HOME/go-bootstrap/bin/go" ]; then
+    curl -LsSf -o /tmp/go.tgz https://go.dev/dl/go1.27.4.darwin-arm64.tar.gz
+    echo "91a44a2b8a716600ad94a4f143e156116620db8828086a6e3602291be9bd0bb4  /tmp/go.tgz" | shasum -a 256 -c -
+    rm -rf "$HOME/go-bootstrap" && mkdir -p "$HOME/go-bootstrap"
+    tar -C "$HOME/go-bootstrap" --strip-components=1 -xzf /tmp/go.tgz
+  fi
+  (cd src && GOROOT_BOOTSTRAP=$HOME/go-bootstrap ./make.bash)
+maintenance: |
+  echo "PATH=$(pwd)/bin:$PATH" >> $ENVRC
+knowledge:
+  - name: test
+    contents: |
+      cd src && go test -count=1 -short <pkg>
+      Script tests: go test -count=1 cmd/go -run 'Script/^logos_<name>$'
+      Compiler dir tests: go test -count=1 cmd/internal/testdir -run 'Test/logos/'
+      Add -race for concurrency, runtime, and cmd/go changes.
+  - name: lint
+    contents: |
+      gofmt -l <files> prints nothing; go vet <pkgs> passes.
+      New packages only: (cd src/cmd && golangci-lint run --config ../../logos-doc/golangci.yml ./go/internal/logos/...)
+  - name: build
+    contents: |
+      (cd src && GOROOT_BOOTSTRAP=$HOME/go-bootstrap ./make.bash)
+      Smoke: logos version; logos help
+  - name: notes
+    contents: |
+      Work on release-branch.go1.27; fork-first PATH. Rebuild after compiler, runtime, or cmd changes — tests use installed binaries. Milestone gate: (cd src && ./run.bash --no-rebuild).
+      Fast compiler rebuild for iteration only: (cd src && env -u GOOS -u GOARCH go build -o ../pkg/tool/darwin_arm64/compile ./cmd/compile). env -u keeps a cross-build target from overwriting the host tool. Re-run make.bash before the final test pass or gate: it refreshes the linker and installed commands the shortcut leaves alone, and tests run installed binaries.

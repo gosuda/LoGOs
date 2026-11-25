@@ -1,0 +1,209 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd jobs
+
+# The linter and the race detector accept a child that does not look at
+# its context: no memory is raced, and the group joins in the end.
+logos lint ./...
+! stderr .
+[race] [cgo] env CGO_ENABLED=1
+[race] [cgo] logos test -race -count=1 ./ignores
+[race] [cgo] stdout '^ok '
+
+# The monitor names the statement where the child waits and the
+# statement that started it, and the finding makes the exit status 1.
+! logos conc run -stall 200ms ./ignores
+stdout '^jobs done: first job failed$'
+stdout '^.*ignores[/\\]main\.lgo:15: \[conc::group_child_stalled\] a group child did not return within 200ms after its group was cancelled'
+stdout '^\t.*main\.lgo:15: the child is here now, in the state: sleep$'
+stdout '^\t.*main\.lgo:22: the group started this child here$'
+stdout '^\tfix: '
+stdout -count=1 'group_child_stalled'
+
+! logos conc test -stall=200ms -count=1 ./ignores
+stdout '^ok '
+stdout '\[conc::group_child_stalled\]'
+
+# A child that another child started is watched in the same way.
+! logos conc run -stall 200ms ./nested
+stdout '^jobs done: first job failed$'
+stdout '^.*nested[/\\]main\.lgo:15: \[conc::group_child_stalled\] '
+stdout '^\t.*main\.lgo:23: the group started this child here$'
+stdout -count=1 'group_child_stalled'
+
+# A group whose parent context ends is watched in the same way.
+! logos conc run -stall 200ms ./outer
+stdout '^jobs done: <nil>$'
+stdout '^.*outer[/\\]main\.lgo:10: \[conc::group_child_stalled\] '
+stdout '^\t.*main\.lgo:18: the group started this child here$'
+stdout -count=1 'group_child_stalled'
+
+# The child returns before the default duration of 5s ends.
+logos conc run ./ignores
+stdout '^jobs done: first job failed$'
+! stderr .
+! stdout 'conc::'
+
+# A child that returns at the cancellation gives no finding.
+logos conc run -stall 200ms ./returns
+stdout '^jobs done: first job failed$'
+! stderr .
+! stdout 'conc::'
+logos conc test -stall 200ms -count=1 ./returns
+! stdout 'conc::'
+
+! logos conc run -stall soon ./returns
+stderr '^logos conc run: -stall "soon" is not a positive duration$'
+! stdout .
+! logos conc test -stall -1s ./returns
+stderr '^logos conc test: -stall "-1s" is not a positive duration$'
+
+-- jobs/go.mod --
+module example.com/jobs
+
+go 1.27
+-- jobs/ignores/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow() error {
+	time.Sleep(1500 * time.Millisecond)
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow()
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- jobs/ignores/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- jobs/returns/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow(ctx context.Context) error {
+	select {
+	case <-time.After(1500 * time.Millisecond):
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go slow(ctx)
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- jobs/returns/main_test.lgo --
+package main
+
+import "testing"
+
+func TestJobs(t *testing.T) {
+	if err := jobs(t.Context()); err == nil {
+		t.Fatal("the first job did not fail the group")
+	}
+}
+-- jobs/outer/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+)
+
+func slow() error {
+	time.Sleep(1500 * time.Millisecond)
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	go group (ctx) {
+		go slow()
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}
+-- jobs/nested/main.lgo --
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+)
+
+func fail() error {
+	return errors.New("first job failed")
+}
+
+func slow() error {
+	time.Sleep(1500 * time.Millisecond)
+	return nil
+}
+
+func jobs(ctx context.Context) error {
+	go group (ctx) {
+		go fail()
+		go {
+			go slow()
+		}
+	}
+	return nil
+}
+
+func main() {
+	fmt.Println("jobs done:", jobs(context.Background()))
+}

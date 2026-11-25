@@ -1,0 +1,14 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+//go:build comptimeasan_owner
+
+package owner
+
+func init() {
+	if Read[Shared](2, 8) != [3]uint64{41, 101, 101} {
+		panic("owner init read incorrect helper data")
+	}
+	println("owner init OK")
+}

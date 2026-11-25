@@ -1,0 +1,14 @@
+package main
+
+import (
+	"fmt"
+
+	"example.com/structdefaults/owner"
+)
+
+func main() {
+	direct := owner.Policy{}
+	client := owner.Client{Name: "nested defaults"}
+	override := owner.Client{Name: "explicit override", Policy: owner.Policy{Timeout: 31}}
+	fmt.Println(direct.Timeout, client.Policy.Timeout, client.ExplicitPolicy.Timeout, override.Policy.Timeout)
+}

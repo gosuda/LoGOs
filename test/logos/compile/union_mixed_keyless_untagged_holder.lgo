@@ -1,0 +1,14 @@
+// compile
+
+package p
+
+type MixedPlain struct{ R float64 }
+
+type MixedTagged struct{ S int64 `json:"s"` }
+
+type MixedNode interface{ MixedPlain | MixedTagged }
+
+type MixedHolder struct {
+	Item   MixedNode
+	Status int = 200
+}

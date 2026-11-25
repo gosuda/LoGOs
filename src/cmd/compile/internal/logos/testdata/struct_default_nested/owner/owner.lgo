@@ -1,0 +1,11 @@
+package owner
+
+type Policy struct {
+	Timeout int = 10
+}
+
+type Client struct {
+	Name           string
+	Policy         Policy = Policy{}
+	ExplicitPolicy Policy = Policy{Timeout: 27}
+}

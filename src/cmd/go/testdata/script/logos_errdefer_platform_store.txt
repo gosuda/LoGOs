@@ -1,0 +1,87 @@
+env GOPROXY=off
+env GOSUMDB=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+logos eject -o out
+
+cd out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go run .
+
+-- m/go.mod --
+module example.com/errdeferplatformstore
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"container/list"
+	"errors"
+	"slices"
+)
+
+type handoffResult struct {
+	entry   *list.Element
+	summary string
+}
+
+type returnTrace []string
+
+func (trace *returnTrace) value(items *list.List) *list.List {
+	*trace = append(*trace, "value")
+	return items
+}
+
+func (trace *returnTrace) result(err error) error {
+	*trace = append(*trace, "error")
+	return err
+}
+
+func (trace *returnTrace) cleanup() {
+	*trace = append(*trace, "cleanup")
+}
+
+func handoff(items *list.List, trace *returnTrace, err error) (*handoffResult?, error) {
+	errdefer trace.cleanup()
+	return &handoffResult{entry: trace.value(items).Front(), summary: $"size {items.Len()}"}, trace.result(err)
+}
+
+func tryEmpty(trace *returnTrace) (panicked bool, err error) {
+	defer func() { panicked = recover() != nil }()
+	var empty list.List
+	_, err = handoff(&empty, trace, nil)
+	return false, err
+}
+
+func main() {
+	var items list.List
+	entry := items.PushBack("kept")
+	var trace returnTrace
+	got, err := handoff(&items, &trace, nil)
+	if err != nil {
+		panic(err)
+	}
+	if got == nil {
+		panic("successful return lost the result")
+	}
+	if got.entry != entry || got.summary != "size 1" || !slices.Equal(trace, returnTrace{"value", "error"}) {
+		panic("successful return changed the result or ran cleanup")
+	}
+
+	trace = nil
+	failure := errors.New("handoff failed")
+	_, err = handoff(&items, &trace, failure)
+	if !errors.Is(err, failure) || !slices.Equal(trace, returnTrace{"value", "error", "cleanup"}) {
+		panic("error return changed the error or skipped cleanup")
+	}
+
+	trace = nil
+	panicked, err := tryEmpty(&trace)
+	if err != nil || !panicked || !slices.Equal(trace, returnTrace{"value", "cleanup"}) {
+		panic("nil platform store did not panic and run cleanup before evaluating the next operand")
+	}
+}

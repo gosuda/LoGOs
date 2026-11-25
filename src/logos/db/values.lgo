@@ -213,6 +213,33 @@ func (d *AnyDest) Scan(src any) error {
 	return nil
 }
 
+// nullScan writes one sql.Null record: a NULL column clears the value
+// and Valid; any other value converts through Assign and sets Valid.
+// It mirrors Null.Scan without the reflective convertAssign body.
+func nullScan[E any](v *E, valid *bool, src any) error {
+	if src == nil {
+		var zero E
+		*v = zero
+		*valid = false
+		return nil
+	}
+	err := Assign[E](v, src)
+	*valid = err == nil
+	return err
+}
+
+// NullDest binds one sql.Null record by its value and Valid fields,
+// so a NULL column or a converted value lands without reflect.
+type NullDest[E any] struct {
+	v     *E
+	valid *bool
+}
+
+// Scan implements sql.Scanner.
+func (d *NullDest[E]) Scan(src any) error {
+	return nullScan(d.v, d.valid, src)
+}
+
 // ScannerDest binds a destination that converts itself, such as
 // sql.Null. The wrapped Scan owns the conversion.
 type ScannerDest struct {

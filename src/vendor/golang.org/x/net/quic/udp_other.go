@@ -40,14 +40,16 @@ func (c *netUDPConn) LocalAddr() netip.AddrPort {
 	return a.AddrPort()
 }
 
-func (c *netUDPConn) Read(f func(*datagram)) {
+func (c *netUDPConn) Read(f func(*datagram)) error {
 	for {
 		dgram := newDatagram()
 		n, peerAddr, err := c.c.ReadFromUDPAddrPort(dgram.b)
 		if err != nil {
-			return
+			dgram.recycle()
+			return err
 		}
 		if n == 0 {
+			dgram.recycle()
 			continue
 		}
 		dgram.peerAddr = unmapAddrPort(peerAddr)

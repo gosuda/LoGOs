@@ -1,0 +1,12 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package left
+
+import "example.com/comptimeasan/owner"
+
+var Initial = Read(0, 0)
+
+//go:noinline
+func Read(index, key int) [3]uint64 { return owner.Read[owner.Shared](index, key) }

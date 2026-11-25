@@ -1,0 +1,15 @@
+// compile
+
+package p
+
+import "comptime"
+
+type Empty struct{}
+
+func Spin() int {
+	for {
+		const for _, field := range comptime.Fields[Empty]() {
+			break
+		}
+	}
+}

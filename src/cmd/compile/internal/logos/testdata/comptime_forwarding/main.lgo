@@ -1,0 +1,57 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"fmt"
+	"unsafe"
+
+	"example.com/forwarding/owner"
+)
+
+type Packet struct {
+	Sequence uint64
+	Payload  [3]uint64
+}
+
+type Code uint16
+
+func main() {
+	var packet Packet
+	var packets []Packet
+	var packetBatches map[string][]Packet
+	packetSize := int(unsafe.Sizeof(packet))
+	wantPacket := [4]owner.Layout{
+		{Kind: "plain", Size: packetSize, BaseSize: packetSize},
+		{Kind: "pointer", Size: int(unsafe.Sizeof(&packet)), BaseSize: packetSize},
+		{Kind: "slice", Size: int(unsafe.Sizeof(packets)), BaseSize: packetSize},
+		{Kind: "map", Size: int(unsafe.Sizeof(packetBatches)), BaseSize: packetSize},
+	}
+	if got := owner.Layouts[Packet](); got != wantPacket {
+		panic(fmt.Sprintf("Layouts[Packet]() = %+v, want %+v", got, wantPacket))
+	}
+
+	var code Code
+	var codes []Code
+	var codeBatches map[string][]Code
+	codeSize := int(unsafe.Sizeof(code))
+	wantCode := [4]owner.Layout{
+		{Kind: "plain", Size: codeSize, BaseSize: codeSize},
+		{Kind: "pointer", Size: int(unsafe.Sizeof(&code)), BaseSize: codeSize},
+		{Kind: "slice", Size: int(unsafe.Sizeof(codes)), BaseSize: codeSize},
+		{Kind: "map", Size: int(unsafe.Sizeof(codeBatches)), BaseSize: codeSize},
+	}
+	layouts := owner.Layouts[Code]
+	if got := layouts(); got != wantCode {
+		panic(fmt.Sprintf("Layouts[Code] function value = %+v, want %+v", got, wantCode))
+	}
+
+	measure := owner.Measure[byte, byte]
+	byteSize := int(unsafe.Sizeof(byte(0)))
+	wantByte := owner.Layout{Kind: "plain", Size: byteSize, BaseSize: byteSize}
+	if got := measure(); got != wantByte {
+		panic(fmt.Sprintf("Measure[byte, byte] function value = %+v, want %+v", got, wantByte))
+	}
+}

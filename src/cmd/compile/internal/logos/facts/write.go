@@ -36,6 +36,7 @@ func WriteChecked(pkg *types2.Package, info *types2.Info, files []*syntax.File, 
 	writeAsserts(pkg, out)
 	writeLocks(pkg, info, files, out)
 	writeNilErrors(pkg, info, files, out)
+	writeDeriveds(pkg, out)
 	if f == nil && out.empty() {
 		return nil
 	}
@@ -126,6 +127,23 @@ func eachExportedNamed(pkg *types2.Package, yield func(name string, named *types
 	}
 }
 
+func eachExportedAlias(pkg *types2.Package, yield func(name string, rhs types2.Type)) {
+	scope := pkg.Scope()
+	if scope == nil {
+		return
+	}
+	for _, name := range scope.Names() {
+		obj, ok := scope.Lookup(name).(*types2.TypeName)
+		if !ok || obj == nil || !obj.Exported() || !obj.IsAlias() {
+			continue
+		}
+		alias, ok := obj.Type().(*types2.Alias)
+		if !ok {
+			continue
+		}
+		yield(name, alias.Rhs())
+	}
+}
 func appendUnique[E comparable](s []E, e E) []E {
 	for _, have := range s {
 		if have == e {

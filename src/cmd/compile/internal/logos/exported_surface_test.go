@@ -166,6 +166,22 @@ func TestSurfaceEjectUnionConstraintOnly(t *testing.T) {
 	}
 }
 
+func TestSurfaceEjectUnionBoundMethodDualError(t *testing.T) {
+	const src = "package p\n\ntype D interface {\n\tint | string\n}\n\ntype Scalar = D\n\nfunc Use[T D, S interface {\n\tSend(Scalar)\n}](x T, s S) {\n}\n"
+	info, files, srcs := unionSurfaceCheck(t, src)
+	if _, err := EjectUnionEdits(info, files, srcs); err == nil || !strings.Contains(err.Error(), "union D") {
+		t.Errorf("EjectUnionEdits bound method err = %v, want the dual-use union D", err)
+	}
+}
+
+func TestSurfaceEjectUnionInstantiatedAliasConstraintOnly(t *testing.T) {
+	const src = "package p\n\ntype D[T any] interface {\n\tint | string\n}\n\ntype Scalar = D[string]\n\nfunc F[T Scalar](x T) T {\n\treturn x\n}\n"
+	info, files, srcs := unionSurfaceCheck(t, src)
+	if _, err := EjectUnionEdits(info, files, srcs); err != nil {
+		t.Errorf("EjectUnionEdits instantiated alias err = %v, want nil", err)
+	}
+}
+
 func TestSurfaceNativeUnionValueEdits(t *testing.T) {
 	const src = "package p\n\ntype U interface {\n\tint | string\n}\n\nvar _ U\n"
 	info, files, srcs := unionSurfaceCheck(t, src)

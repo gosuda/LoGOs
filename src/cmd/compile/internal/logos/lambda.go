@@ -14,6 +14,102 @@ import (
 	"cmd/compile/internal/types2"
 )
 
+// lambdaSyntax takes ownership of a checked lambda clone. Its caller lowers the
+// resulting body in a new function frame, using the original body facts.
+func (fl *fileLower) lambdaSyntax(lam *syntax.LambdaExpr, sig *types2.Signature) *syntax.FuncLit {
+	ft := fl.lambdaFuncType(lam, sig)
+	var body *syntax.BlockStmt
+	switch b := lam.Body.(type) {
+	case *syntax.BlockStmt:
+		body = b
+		if results := sig.Results(); results.Len() > 0 && results.At(0).Name() != "" {
+			// A bare return can use named results, but the target's names are not in scope.
+			for i, field := range ft.ResultList {
+				field.Name = nameOf(field.Pos(), fmt.Sprintf("_logos_lr%d", i))
+			}
+		}
+	case syntax.Expr:
+		pos := syntax.StartPos(b)
+		var stmt syntax.Stmt
+		if len(ft.ResultList) == 0 {
+			stmt = exprStmtOf(pos, b)
+		} else {
+			stmt = at(&syntax.ReturnStmt{Results: b}, pos)
+		}
+		body = blockEndingAt(lam.Arrow, syntax.EndPos(b), []syntax.Stmt{stmt})
+	default:
+		panic("logos: invalid checked lambda body")
+	}
+	return at(&syntax.FuncLit{Type: ft, Body: body}, lam.Pos())
+}
+
+func (fl *fileLower) lambdaFuncType(lam *syntax.LambdaExpr, sig *types2.Signature) *syntax.FuncType {
+	params := make([]*syntax.Field, len(lam.Params))
+	for i, name := range lam.Params {
+		pos := name.Pos()
+		typ := sig.Params().At(i).Type()
+		var te syntax.Expr
+		if sig.Variadic() && i == len(params)-1 {
+			elem := typ.Underlying().(*types2.Slice).Elem()
+			te = at(&syntax.DotsType{Elem: fl.ctTypeExpr(pos, elem)}, pos)
+		} else {
+			te = fl.ctTypeExpr(pos, typ)
+		}
+		params[i] = at(&syntax.Field{Name: name, Type: te}, pos)
+	}
+	results := make([]*syntax.Field, sig.Results().Len())
+	for i := range results {
+		pos := lam.Arrow
+		results[i] = at(&syntax.Field{Type: fl.ctTypeExpr(pos, sig.Results().At(i).Type())}, pos)
+	}
+	return at(&syntax.FuncType{ParamList: params, ResultList: results}, lam.Pos())
+}
+
+// chainLambdaSyntax adapts a chain lambda's element-only returns to an explicit
+// (element, error) callback when the chain requests an error result.
+func (fl *fileLower) chainLambdaSyntax(lam *syntax.LambdaExpr, sig *types2.Signature) *syntax.FuncLit {
+	if sig.Results().Len() == 1 {
+		return fl.lambdaSyntax(lam, sig)
+	}
+	ft := fl.lambdaFuncType(lam, sig)
+	pos := lam.Arrow
+	const okName = "_logos_lambda_ok"
+	// A named error starts at zero without looking up a possibly captured nil.
+	ft.ResultList[0].Name = nameOf(pos, "_logos_lambda_result")
+	ft.ResultList[1].Name = nameOf(pos, okName)
+	var body *syntax.BlockStmt
+	switch b := lam.Body.(type) {
+	case *syntax.BlockStmt:
+		body = b
+		syntax.Inspect(b, func(n syntax.Node) bool {
+			switch n := n.(type) {
+			case *syntax.FuncLit, *syntax.LambdaExpr, *syntax.GroupChild:
+				return false
+			case *syntax.ReturnStmt:
+				n.Results = listOf(n.Pos(), []syntax.Expr{n.Results, nameOf(n.Pos(), okName)})
+			}
+			return true
+		})
+	case syntax.Expr:
+		body = chainLambdaExprBody(b, pos, okName)
+	default:
+		panic("logos: invalid checked chain lambda body")
+	}
+	return at(&syntax.FuncLit{Type: ft, Body: body}, lam.Pos())
+}
+
+func chainLambdaExprBody(expr syntax.Expr, arrow syntax.Pos, okName string) *syntax.BlockStmt {
+	pos, end := syntax.StartPos(expr), syntax.EndPos(expr)
+	if t, ok := syntax.Unparen(expr).(*syntax.TryExpr); ok {
+		const valName = "_logos_lambda_value"
+		assign := defineOf(t.Pos(), []syntax.Expr{nameOf(t.Pos(), valName)}, []syntax.Expr{t})
+		ret := returnOf(pos, []syntax.Expr{nameOf(pos, valName), nameOf(pos, okName)})
+		return blockEndingAt(arrow, end, []syntax.Stmt{assign, ret})
+	}
+	ret := returnOf(pos, []syntax.Expr{expr, nameOf(pos, okName)})
+	return blockEndingAt(arrow, end, []syntax.Stmt{ret})
+}
+
 func (fl *fileLower) lowerLambdas() {
 	var lams []*syntax.LambdaExpr
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
@@ -85,14 +181,22 @@ func (fl *fileLower) lowerLambdaExpr(lam *syntax.LambdaExpr) *syntax.FuncLit {
 		return nil
 	}
 	var hoisted string
+	var yieldSpellings []string
 	if block, ok := lam.Body.(*syntax.BlockStmt); ok {
 		var ok2 bool
-		resultsText, hoisted, ok2 = fl.lowerLambdaFrame(pos, sig, block, cat(params...).s, resultsText)
+		resultsText, hoisted, yieldSpellings, ok2 = fl.lowerLambdaFrame(pos, sig, block, cat(params...).s, resultsText)
 		if !ok2 {
 			return nil
 		}
 	}
 	body, bodyText := fl.lambdaBody(lam, sig, pos)
+	if yieldSpellings != nil {
+		// The body is a generator: lowerYield's text splices land on the
+		// block's brace boundaries, outside the interior span lambdaBody
+		// copies, so the iterator wrapper must be emitted around the body
+		// text here.
+		bodyText = cat(gen(" return func("+yieldParam+" func("+strings.Join(yieldSpellings, ", ")+") bool) {"), bodyText, gen(" }"))
+	}
 	fullText := cat(gen("func("), cat(params...), gen(")"+resultsText+" {"+hoisted+" "), bodyText, gen(" }"))
 	ft, ok := typeExprAt("func("+cat(params...).s+")"+resultsText, pos)
 	if !ok {
@@ -241,26 +345,26 @@ func (fl *fileLower) lambdaTryBody(sig *types2.Signature, pos syntax.Pos, t *syn
 	return blockOf(pos, []syntax.Stmt{as, branch, ret}), cat(parts...)
 }
 
-func (fl *fileLower) lowerLambdaFrame(pos syntax.Pos, sig *types2.Signature, block *syntax.BlockStmt, paramText, resultsText string) (string, string, bool) {
+func (fl *fileLower) lowerLambdaFrame(pos syntax.Pos, sig *types2.Signature, block *syntax.BlockStmt, paramText, resultsText string) (string, string, []string, bool) {
 	deferTry, errdefer, scopeDefer := cleanupsIn(block)
 	if (deferTry || errdefer || scopeDefer) && sig.Results().Len() > 0 {
 		named, ok := fl.lambdaNamedResults(pos, sig)
 		if !ok {
-			return "", "", false
+			return "", "", nil, false
 		}
 		resultsText = named
 	}
 	ft, ok := typeExprAt("func("+paramText+")"+resultsText, pos)
 	if !ok {
-		return "", "", false
+		return "", "", nil, false
 	}
 	functype, ok := ft.(*syntax.FuncType)
 	if !ok {
-		return "", "", false
+		return "", "", nil, false
 	}
 	fc := newFuncLower(fl, functype, sig, block)
 	fc.lower()
-	return resultsText, fc.prependHoists(), true
+	return resultsText, fc.prependHoists(), fc.yieldSpellings, true
 }
 
 func (fl *fileLower) lambdaNamedResults(pos syntax.Pos, sig *types2.Signature) (string, bool) {

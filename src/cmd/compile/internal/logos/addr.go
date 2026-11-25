@@ -11,6 +11,15 @@ import (
 	"cmd/compile/internal/syntax"
 )
 
+func (w ctWalker) ctAddrFresh(op *syntax.Operation) (syntax.Expr, []syntax.Stmt, bool) {
+	if op.Op != syntax.And || op.Y != nil || !w.fl.pkg.info.LogosAddrFresh[op] {
+		return nil, nil, false
+	}
+	value, pre := w.expr(op.X)
+	pos := op.Pos()
+	return callOf(pos, w.fl.ctBuiltin(pos, "new"), []syntax.Expr{value}), pre, true
+}
+
 func (fl *fileLower) lowerAddrFresh() {
 	fresh := fl.pkg.info.LogosAddrFresh
 	if len(fresh) == 0 {
@@ -30,10 +39,16 @@ func (fl *fileLower) lowerAddrFresh() {
 	})
 }
 
+// lowerAddrOp rewrites `&x` to `new(x)`. Both edits go to the narrowest
+// moved region holding the whole `&x`: routed by its own offset, the
+// closing paren at the operand end would stay outside a region that ends
+// there (a group send value snapshot) while `new(` lands in its copy.
 func (fl *fileLower) lowerAddrOp(e *syntax.Operation) syntax.Expr {
 	amp := fl.off(e.Pos())
-	fl.add(amp, amp+1, "new(")
-	fl.add(fl.unaryOperandEnd(amp), fl.unaryOperandEnd(amp), ")")
+	end := fl.unaryOperandEnd(amp)
+	m := fl.narrowestMove(span{start: amp, end: end}, false)
+	fl.placeSplice(splice{start: amp, end: amp + 1, text: "new("}, m)
+	fl.placeSplice(splice{start: end, end: end, text: ")"}, m)
 	pos := e.Pos()
 	return at(&syntax.CallExpr{Fun: nameOf(pos, "new"), ArgList: []syntax.Expr{e.X}}, pos)
 }

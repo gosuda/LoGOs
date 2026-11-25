@@ -1,0 +1,47 @@
+[GOOS:windows] skip 'logos conc needs named pipes'
+[GOOS:plan9] skip 'logos conc needs named pipes'
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd tags
+
+# Tags set only in GOFLAGS reach the monitored build.
+env GOFLAGS=-tags=foo
+logos conc run .
+stdout '^foo$'
+
+# An explicit -tags overrides GOFLAGS, and the monitor joins it.
+logos conc run -tags=bar .
+stdout '^plain$'
+
+# The plain command agrees with the monitored build.
+logos run .
+stdout '^foo$'
+logos run -tags=bar .
+stdout '^plain$'
+
+-- tags/go.mod --
+module example.com/tags
+
+go 1.27
+-- tags/main.go --
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println(variant)
+}
+-- tags/variant_plain.go --
+//go:build !foo
+
+package main
+
+const variant = "plain"
+-- tags/variant_foo.go --
+//go:build foo
+
+package main
+
+const variant = "foo"

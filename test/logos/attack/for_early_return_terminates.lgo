@@ -1,0 +1,25 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Pair struct {
+	A int
+	B int
+}
+
+func First() int {
+	const for _, f := range comptime.Fields[Pair]() {
+		const if f.Index == 0 {
+			return 1
+		}
+	}
+}
+
+func main() {
+	fmt.Println(First())
+}

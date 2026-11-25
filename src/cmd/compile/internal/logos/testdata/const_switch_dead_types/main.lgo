@@ -1,0 +1,37 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func pick[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return -1
+	}
+	const switch T {
+	case string:
+		var _ interface{}
+		type deadMap map[string]int
+		type deadChan chan int
+		type recursive interface {
+			Next() interface{ recursive }
+		}
+		return -2
+	case int:
+		type scores map[string]int
+		type queue chan int
+		score, _ := scores{"answer": 40}["answer"]
+		var selected interface{} = score
+		return selected.(int) + cap(make(queue, 2))
+	}
+	return -3
+}
+
+func main() {
+	fmt.Println(pick[int]())
+}

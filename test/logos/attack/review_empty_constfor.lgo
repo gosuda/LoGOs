@@ -1,0 +1,32 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type empty struct{}
+
+type pair struct {
+	First  int
+	Second int
+}
+
+func returnFromEmpty() string {
+	const for _, field := range comptime.Fields[empty]() {
+		return field.Name
+	}
+} // ERROR "missing return"
+
+func returnFromPair() string {
+	const for _, field := range comptime.Fields[pair]() {
+		return field.Name
+	}
+}
+
+func returnFromPairIfEnabled(enabled bool) string {
+	const for _, field := range comptime.Fields[pair]() {
+		if enabled {
+			return field.Name
+		}
+	}
+} // ERROR "missing return"

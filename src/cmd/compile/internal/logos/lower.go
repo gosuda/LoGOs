@@ -59,14 +59,25 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 	clearOwnedConstants()
 	f := facts.Write(pkg, info, files, src)
 	f.BareUnions = bareUnions(pkg)
+	f.DualUse = dualUseUnionNames(pkg, info, files)
+	f.CheckedUnionTypes = true
 	facts.SetCurrent(f)
 	shared := &packageLower{info: info, tpkg: pkg, files: files, src: src, constMaps: collectConstMaps(files, info)}
 	shared.importedMaps = map[*types2.Var]*constMapGen{}
 	shared.importedDone = map[string]bool{}
 	shared.composites, shared.compositeSeq = collectComposites(files, info)
 	shared.importedComposites = map[*types2.Var]*importedComposite{}
-	base.ClearLogosCtClones(pkg.Path())
-	shared.ctExp = newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
+	newCfExpander(shared, files, src) // comptime generics of every file, registered before any file lowers.
+	ctEjectBlanked = nil
+	var prepared *ctPreparedPackage
+	if info.LogosCtImport != nil && len(info.LogosCtInst) != 0 {
+		var err error
+		prepared, err = stageCtPreparedPackage(pkg, info)
+		if err != nil {
+			base.Fatalf("%v", err)
+		}
+	}
+	var traceFile *syntax.File
 	edits := make(map[*syntax.File][]Edit)
 	tupleFiles := make(map[string]int)
 	changed := false
@@ -74,6 +85,9 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 		data, ok := src[file]
 		if !ok {
 			continue
+		}
+		if traceFile == nil {
+			traceFile = file
 		}
 		buf := slices.Clone(data)
 		fl := &fileLower{
@@ -100,16 +114,35 @@ func Lower(pkg *types2.Package, info *types2.Info, files []*syntax.File, src map
 			edits[file] = editsOf(data, fl.base, fl.splices)
 		}
 	}
+	if prepared != nil {
+		if len(prepared.sites.decls) != 0 {
+			if traceFile == nil {
+				base.Fatalf("logos: no consumer source file for comptime trace sites")
+			}
+			prepared.sites.appendDecls(traceFile)
+		}
+		// Hoisted const-for-local declarations were moved to package
+		// level after staging; link them to their original
+		// iteration-local types so the finish pass rebinds instance
+		// type references to the package-level declarations.
+		if len(shared.ctLocalHoists) != 0 {
+			if prepared.localDefs == nil {
+				prepared.localDefs = make(map[*syntax.Name]*types2.TypeName)
+			}
+			for name, old := range shared.ctLocalHoists {
+				prepared.localDefs[name] = old
+			}
+		}
+		info.LogosCtFinish = prepared.finish
+		changed = true
+	}
 	clear(interpKinds) // Kinds of originals a const for replaced are never consumed; drop them with the rest.
 	if !changed {
-		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) // pure-info consts (rt.Freeze results) need a plain recheck.
+		changed = infoHasConstView(info, files) || hasSynthStaticMethods(pkg) || infoHasInferredOption(pkg, info, files)
 	}
 	base.ExitIfErrors()
 	for _, file := range files {
 		rejectSurvivors(file)
-	}
-	for _, name := range shared.ctExp.memo {
-		base.RegisterLogosCtClone(pkg.Path(), name)
 	}
 	return changed, edits
 }
@@ -146,6 +179,8 @@ type packageLower struct {
 	info               *types2.Info
 	tpkg               *types2.Package
 	siteSeq            int
+	ejectNames         map[string]string
+	ejectOwners        map[string]*types2.Package
 	constMaps          map[*types2.Const]*constMapGen
 	importedMaps       map[*types2.Var]*constMapGen
 	importedSeq        int
@@ -161,10 +196,25 @@ type packageLower struct {
 	freezeCopiers      []freezeEntry
 	freezeSeq          int
 	factoryPlan        map[string]string
-	files              []*syntax.File
-	src                map[*syntax.File][]byte
-	typeDecls          map[*types2.TypeName]*syntax.TypeDecl
-	declSrc            map[*syntax.TypeDecl][]byte
+	// Struct-default fill state, shared across files: inDefault marks
+	// literals inside a field default's subtree, defInside maps such a
+	// literal to the enclosing defaulted-field keys, and defEdges holds
+	// the factory keys each defaulted field's subtree requires. The scan
+	// covers every file of the package so cycles spanning files are
+	// found; defScanned runs it once.
+	inDefault  map[*syntax.CompositeLit]bool
+	defInside  map[*syntax.CompositeLit][]string
+	defEdges   map[string]map[string]bool
+	defScanned bool
+	files      []*syntax.File
+	src        map[*syntax.File][]byte
+	typeDecls  map[*types2.TypeName]*syntax.TypeDecl
+	declSrc    map[*syntax.TypeDecl][]byte
+	// ctLocalHoists maps hoisted const-for-local type declarations
+	// (fresh nodes) to the original iteration-local types they were
+	// copied from, so the finish pass can rebind instance type
+	// references to the package-level declarations.
+	ctLocalHoists map[*syntax.Name]*types2.TypeName
 }
 
 // declOf maps a package-level TypeName back to its TypeDecl and the file's
@@ -195,6 +245,7 @@ func (pl *packageLower) declOf(tn *types2.TypeName) (*syntax.TypeDecl, []byte) {
 // fileLower carries the state of lowering one file.
 type fileLower struct {
 	pkg           *packageLower
+	ct            *ctLowerContext
 	file          *syntax.File
 	src           []byte
 	keywords      facts.KeywordIndex
@@ -212,9 +263,11 @@ type fileLower struct {
 	needRT        bool
 	needRTText    bool // text-only rt need: eject output references rt, checked AST does not.
 	rtDeclEmitted bool // the import flush actually emitted the rt ImportDecl; needRT alone can outlive the reference that raised it.
+	ejectRetired  []*syntax.FuncDecl
 	needSimd      bool
 	needSimdMath  bool
 	needJSON      bool
+	needJSONText  bool
 	needBinary    bool
 	needReflect   bool
 	siteDecls     []*syntax.VarDecl
@@ -222,9 +275,13 @@ type fileLower struct {
 	// this file, as parsed nodes and as eject text.
 	constDecls                 []syntax.Decl
 	constText                  string
+	constMapMarks              map[string]constMapTextRef
 	names                      map[*types2.Package]string
 	genImps                    *genImports
 	importsPendingGeneratedUse []*syntax.ImportDecl
+	genImportsPendingNativeUse []*syntax.ImportDecl
+	ejectSites                 map[syntax.Node]bool
+	ctRuntimeUnsafe            bool // the ejected text imports unsafe for a comptime run-time body
 	// Option lowering state: optMemo pins one lowering per shared
 	// `T?` type node, narrowDone pins rewritten narrowed reads,
 	// wrapSpan remembers original spans of synthetic wrapper tops for
@@ -246,6 +303,9 @@ type fileLower struct {
 	wrapOwner      map[syntax.Expr]int
 	wrapSeq        int
 	retResults     map[*syntax.ReturnStmt][]types2.Type
+	// defFillBytes/defFillOver run the nested-default expansion budget.
+	defFillBytes int
+	defFillOver  bool
 	// optBodyType stashes the checked type of a replaced top-level
 	// lambda body (`??`/`?.`/property-read/interpolation): the
 	// replacement is synthetic and carries no recorded type, but chain
@@ -290,6 +350,7 @@ type fileLower struct {
 	groupClosures      *groupClosureRegistry
 	groupJoins         map[syntax.Stmt]bool
 	funcs              map[*syntax.BlockStmt]*funcLower
+	unwindFlags        map[*syntax.BlockStmt]string // armed deferred literal body -> return flag of its errdefer frame.
 	compositeDone      map[syntax.Expr]bool
 }
 
@@ -588,6 +649,203 @@ func spanInside(sp splice, s span) bool {
 	return sp.start >= s.start && sp.end <= s.end && (sp.end > sp.start || (sp.start > s.start && sp.end < s.end))
 }
 
+// chunkOffsetOf maps the source range [start, end) into a lowered text
+// through the origin chunks of that text. It reports the offset only
+// when one verbatim chunk covers the whole range: a chunk boundary
+// inside the range means lowered bytes stand where source stood.
+func chunkOffsetOf(chunks []chunk, start, end int) (int, bool) {
+	for _, c := range chunks {
+		if c.orig <= start && end <= c.orig+c.n {
+			return c.out + start - c.orig, true
+		}
+	}
+	return 0, false
+}
+
+// origRangeOf maps the working-buffer range [start, end) back to its
+// source range through the file origin chunks. Copies of one const for
+// body share the source range from different buffer ranges, so a frozen
+// operand inside an unrolled copy maps to the source its lowered copies
+// derive from. Const-for-substituted bytes are chunkless, so the range
+// may span a gap, and an endpoint may land inside one: a start in a gap
+// maps to the source the gap's substitution began at, an end to where it
+// stopped, so an operand that begins or ends with generated text keeps a
+// source range that covers the substituted source.
+func (fl *fileLower) origRangeOf(start, end int) (int, int, bool) {
+	if end <= start {
+		return 0, 0, false
+	}
+	oS := -1
+	oE := -1
+	for i, c := range fl.srcMap.chunks {
+		if c.out <= start && start < c.out+c.n {
+			oS = c.orig + start - c.out
+		}
+		if oS < 0 && start < c.out && i > 0 {
+			oS = fl.srcMap.chunks[i-1].orig + fl.srcMap.chunks[i-1].n
+		}
+		if c.out < end && end <= c.out+c.n {
+			oE = c.orig + end - c.out
+		}
+		if oE < 0 && end <= c.out && i > 0 {
+			oE = c.orig
+		}
+		if oS >= 0 && oE >= 0 {
+			break
+		}
+	}
+	if oS < 0 || oE < 0 || oE < oS {
+		return 0, 0, false
+	}
+	return oS, oE, true
+}
+
+// loweredSpanOf maps the source range [oStart, oEnd) to the output span
+// covering it in a lowered text. The span includes lowered bytes inserted
+// between the range source bytes, so replacing the whole span drops the
+// duplicate evaluation at the store site.
+func loweredSpanOf(chunks []chunk, oStart, oEnd int) (int, int, bool) {
+	if oEnd <= oStart {
+		return 0, 0, false
+	}
+	sOut := -1
+	eOut := -1
+	for _, c := range chunks {
+		if sOut < 0 && c.orig <= oStart && oStart < c.orig+c.n {
+			sOut = c.out + oStart - c.orig
+		}
+		if c.orig < oEnd && oEnd <= c.orig+c.n {
+			eOut = c.out + oEnd - c.orig
+		}
+		if sOut >= 0 && eOut >= 0 {
+			break
+		}
+	}
+	if sOut < 0 || eOut < 0 || eOut < sOut {
+		return 0, 0, false
+	}
+	return sOut, eOut, true
+}
+
+// loweredAt maps the working-buffer range [sStart, sEnd) into a lowered
+// text holding its source. The fast path covers a verbatim chunk; the
+// span path covers a frozen operand split by an earlier lowering.
+func (fl *fileLower) loweredAt(chunks []chunk, sStart, sEnd int) (int, int, bool) {
+	oS, oE, ok := fl.origRangeOf(sStart, sEnd)
+	if !ok {
+		return 0, 0, false
+	}
+	if at, ok := chunkOffsetOf(chunks, oS, oE); ok {
+		return at, at + (oE - oS), true
+	}
+	return loweredSpanOf(chunks, oS, oE)
+}
+
+// skipLiteral returns the index just past the string or rune literal
+// starting at i, or i itself when the literal is unterminated.
+func skipLiteral(text string, i int) int {
+	q := text[i]
+	j := i + 1
+	for j < len(text) {
+		c := text[j]
+		if q != '`' && c == '\\' {
+			j += 2
+			continue
+		}
+		if c == q {
+			return j + 1
+		}
+		j++
+	}
+	return i
+}
+
+// gapWrapExtend widens a slice computed by loweredAt inside a composed
+// lowered text so the generated wrappers that enclose the operand stay
+// part of it: an opening run like `any(` immediately before the slice
+// and a closing run like `.(caseT)` immediately after are chunkless, so
+// slicing between the operand's first and last verbatim bytes drops the
+// opener while retaining the close. An endpoint strictly inside a
+// verbatim chunk never extends.
+func gapWrapExtend(chunks []chunk, text string, s, e int) (int, int) {
+	inChunk := func(pos int) bool {
+		for _, c := range chunks {
+			if c.out < pos && pos < c.out+c.n {
+				return true
+			}
+		}
+		return false
+	}
+	if !inChunk(e) {
+		hi := len(text)
+		for _, c := range chunks {
+			if c.out >= e && c.out < hi {
+				hi = c.out
+			}
+		}
+		for e < hi {
+			b := text[e]
+			switch {
+			case b == ')' || b == '(' || b == ']' || b == '}' || b == '.':
+				e++
+			case 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' || '0' <= b && b <= '9' || b == '_':
+				e++
+			case b == '"' || b == '\'' || b == '`':
+				ne := skipLiteral(text, e)
+				if ne == e {
+					return s, e
+				}
+				e = ne
+			default:
+				return s, e
+			}
+		}
+	}
+	if s > 0 && !inChunk(s) && text[s-1] == '(' {
+		lo := 0
+		for _, c := range chunks {
+			if c.out+c.n <= s && c.out+c.n > lo {
+				lo = c.out + c.n
+			}
+		}
+		// The opener's matching close must live inside the widened slice;
+		// otherwise the wrap belongs to more than this operand and pulling
+		// the opener in leaves the close behind.
+		depth, bal := 0, true
+		for i := lo; i < e; i++ {
+			switch text[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth < 0 {
+					bal = false
+				}
+			case '"', '\'', '`':
+				ni := skipLiteral(text, i)
+				if ni > i {
+					i = ni - 1
+				}
+			case '/':
+				// A quote inside a comment ("don't") would otherwise
+				// start a fake literal that swallows a real opener and
+				// leaves its close to drive depth negative.
+				ni := commentEnd([]byte(text), i)
+				if ni > i {
+					i = ni - 1
+				}
+			}
+			if !bal {
+				break
+			}
+		}
+		if bal && depth == 0 {
+			s = lo
+		}
+	}
+	return s, e
+}
+
 func partitionSplices(list []splice, s span) (kept, inner []splice) {
 	kept = list[:0]
 	for _, sp := range list {
@@ -674,11 +932,12 @@ func (fl *fileLower) newSite(pos syntax.Pos, line uint) string {
 // lowerFile lowers every function body of one file.
 func (fl *fileLower) lowerFile() {
 	fl.collectInterpKinds() // interpolation operand kinds before any rewrite.
-	fl.lowerComptime()      // comptime generic copies, then const for unrolling, before any rewrite.
+	fl.lowerComptime()      // comptime generic retirement, then const for unrolling, before any rewrite.
 	fl.lowerStructDefaults()
 	fl.scanRodataMarkers() // hand-written //logos:rodata lines.
 	fl.lowerArenaEject()
 	fl.lowerZeroCopy() // zero-copy string/bytes conversions.
+	fl.enrollLoweredConstMaps()
 	fl.lowerCTFE()
 	fl.lowerConstMapRanges()
 	fl.eraseConstViews()  // erase const views and bound recorded slices; also erases readonly interface `const` qualifiers.
@@ -708,7 +967,7 @@ func (fl *fileLower) lowerFile() {
 
 	fl.lowerStaticJSON() // generated MarshalJSON and UnmarshalJSON; sets needRT and needJSON before the imports.
 	fl.flushTypeImports()
-	if fl.needRT || fl.needRTText || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needReflect || fl.needBinary {
+	if fl.needRT || fl.needRTText || fl.needSimd || fl.needSimdMath || fl.needJSON || fl.needJSONText || fl.needReflect || fl.needBinary {
 		var imps []syntax.Decl
 		pos := fl.file.Pos()
 		for _, spec := range fl.logosImportSpecs() {
@@ -737,6 +996,7 @@ func (fl *fileLower) lowerFile() {
 	fl.resolveChainMoves() // copies of moved chain operands, after every edit inside them.
 	fl.finalizeConstFor()
 	fl.remapRegions()
+	fl.finishConstMapEjectText()
 }
 
 // genImports tracks synthesized and reused imports for one file being lowered.
@@ -755,32 +1015,37 @@ type logosImportSpec struct {
 }
 
 // rtReferenced reports whether the file's emitted text or mutated tree still
-// references the rt alias. Passes set needRT eagerly when they record a
-// reference, but a later removal — a dead const-if branch, a dropped case —
-// can erase every splice that carried it, and the bare flag would then emit
-// an unused import the build rejects.
-func (fl *fileLower) rtReferenced() bool {
+// references the rt alias, leaving out the declarations in retired and the
+// splices inside their text. Passes set needRT eagerly when they record a
+// reference, but a later removal — a dead const-if branch, a dropped case,
+// a comptime generic that eject deletes — can erase every splice that
+// carried it, and the bare flag would then emit an unused import the build
+// rejects.
+func (fl *fileLower) rtReferenced(retired []*syntax.FuncDecl) bool {
 	needle := rtAlias + "."
 	if strings.Contains(fl.constText, needle) {
 		return true
 	}
-	for _, sp := range fl.splices {
-		if strings.Contains(sp.text, needle) {
+	dropped := make([]span, len(retired))
+	for i, fn := range retired {
+		dropped[i] = fl.cfDeclSpan(fn)
+	}
+	names := func(list []splice) bool {
+		return slices.ContainsFunc(list, func(sp splice) bool {
+			return strings.Contains(sp.text, needle) && !slices.ContainsFunc(dropped, func(s span) bool { return spanInside(sp, s) })
+		})
+	}
+	if names(fl.splices) {
+		return true
+	}
+	for _, r := range fl.regions {
+		if names(r.splices) {
 			return true
 		}
 	}
-	for _, r := range fl.regions {
-		for _, sp := range r.splices {
-			if strings.Contains(sp.text, needle) {
-				return true
-			}
-		}
-	}
 	for _, m := range fl.moves {
-		for _, sp := range m.inner {
-			if strings.Contains(sp.text, needle) {
-				return true
-			}
+		if names(m.inner) {
+			return true
 		}
 	}
 	found := false
@@ -788,8 +1053,11 @@ func (fl *fileLower) rtReferenced() bool {
 		if found {
 			return false
 		}
-		if sel, ok := n.(*syntax.SelectorExpr); ok {
-			if nm, ok := sel.X.(*syntax.Name); ok && nm.Value == rtAlias {
+		switch n := n.(type) {
+		case *syntax.FuncDecl:
+			return !slices.Contains(retired, n)
+		case *syntax.SelectorExpr:
+			if nm, ok := n.X.(*syntax.Name); ok && nm.Value == rtAlias {
 				found = true
 				return false
 			}
@@ -808,8 +1076,9 @@ func (fl *fileLower) rtReferenced() bool {
 
 func (fl *fileLower) logosImportSpecs() []logosImportSpec {
 	specs := []logosImportSpec{
-		{fl.needRT && fl.rtReferenced(), rtAlias, rtImportPath, rtImport},
+		{fl.needRT && fl.rtReferenced(nil), rtAlias, rtImportPath, rtImport},
 		{fl.needJSON, jsonAlias, jsonImportPath, jsonImport},
+		{fl.needJSONText, jsontextAlias, jsontextImportPath, jsontextImport},
 		{fl.needReflect, reflectAlias, "reflect", reflectImport},
 	}
 	for _, item := range binaryImportTable {
@@ -869,7 +1138,14 @@ func (fl *fileLower) addHeaderSplice() {
 		ins = off
 	}
 	for _, spec := range fl.logosImportSpecs() {
-		if spec.need || (spec.path == rtImportPath && fl.needRTText) {
+		need := spec.need
+		if spec.path == rtImportPath {
+			need = fl.needRTText || need && (len(fl.ejectRetired) == 0 || fl.rtReferenced(fl.ejectRetired))
+			if spec.need && !need {
+				fl.ejectHideImport(spec.path)
+			}
+		}
+		if need {
 			fl.add(ins, ins, "\n\nimport "+spec.alias+" "+fmt.Sprintf("%q", spec.path))
 		}
 	}
@@ -957,11 +1233,13 @@ type funcLower struct {
 	ft               *syntax.FuncType
 	body             *syntax.BlockStmt
 	specs            []resultSpec
+	ctYield          *ctYieldFrame
 	errName          string
 	hasDeferTry      bool
 	hasErrdefer      bool
 	hasScopeDefer    bool
 	okName           string
+	unwindFlag       string // return flag of the errdefer frame that defers this literal; see armDeferredLiterals.
 	errSeq           int
 	funSeq           int
 	argSeq           int
@@ -979,6 +1257,7 @@ type funcLower struct {
 	hoisted          []hoistedVar
 	hoistSubs        []hoistSub
 	label            *syntax.LabeledStmt
+	yieldSpellings   []string // non-nil when lowerYield wrapped the body: the element spellings of the yield callback.
 }
 
 func (fl *fileLower) resultSpecs(ft *syntax.FuncType, sig *types2.Signature) []resultSpec {
@@ -1033,10 +1312,14 @@ func (fc *funcLower) lower() {
 	}
 	if fc.hasErrdefer {
 		fc.armOkFlag()
+		fc.armDeferredLiterals()
 	}
 	fc.lowerScopeDefers()
 	fc.lowerConstIf()
+	fc.unwindFlag = fc.fl.unwindFlags[fc.body]
+	exits := endsInReturn(fc.body.List)
 	fc.body.List = fc.lowerList(fc.body.List)
+	fc.armUnwindText(exits)
 }
 
 // detectCleanups records whether the body holds a defer? or an errdefer

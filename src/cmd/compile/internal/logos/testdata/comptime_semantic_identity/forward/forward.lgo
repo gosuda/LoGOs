@@ -1,0 +1,14 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package forward
+
+import "example.com/semanticidentity/owner"
+
+// Q3 negative case: an exported forwarding function in an importable
+// package. Building this package must fail with
+// [comptime::exported_forwarder] naming Pair and Kind.
+func Pair[A, B any]() [2]string {
+	return [2]string{owner.Kind[A](), owner.Kind[B]()}
+}

@@ -46,10 +46,12 @@ func PlanFields[T any](row *T, prefix string, plan *ScanPlan) error {
 
 // PlanClaimed records the column for a time.Time or Scanner field and
 // reports whether it did, so the const if above only sees plain
-// structs, options, scalars and unsupported types.
+// structs, options, scalars and unsupported types. The time claim is
+// answered at comptime; a Scanner is an interface value, so its claim
+// stays at run time.
 func PlanClaimed[F any](dst *F, path string, name string, tag string, plan *ScanPlan) bool {
-	var zero F
-	if _, isTime := any(zero).(time.Time); isTime {
+	const switch F {
+	case time.Time:
 		PlanLeaf(path, name, tag, plan)
 		return true
 	}
@@ -58,6 +60,18 @@ func PlanClaimed[F any](dst *F, path string, name string, tag string, plan *Scan
 		return true
 	}
 	return false
+}
+
+// ClaimTop reports whether the whole destination converts itself: a
+// top-level time.Time or Scanner is one column, never a flattened
+// struct.
+func ClaimTop[F any](dst *F) bool {
+	const switch F {
+	case time.Time:
+		return true
+	}
+	_, ok := any(dst).(sql.Scanner)
+	return ok
 }
 
 // PlanScalar records one non-struct field. The probe ScanLeaf call
@@ -104,15 +118,17 @@ func ScanFields[T any](row *T, prefix string, dests *[]any) error {
 	return nil
 }
 
-// ScanClaimed binds time.Time and Scanner fields through the runtime
-// check and reports whether it did, so the const if above only sees
-// plain structs, options, scalars and unsupported types.
+// ScanClaimed binds time.Time, sql.Null and Scanner fields and reports
+// whether it did, so the const if above only sees plain structs,
+// options, scalars and unsupported types. The concrete claims are
+// answered at comptime; a Scanner is an interface value, so its claim
+// stays at run time.
 func ScanClaimed[F any](dst *F, path string, dests *[]any) bool {
-	return ScanPlain(any(dst), path, dests) || ScanScanner(any(dst), path, dests)
+	return ScanPlain[F](dst, path, dests) || ScanNull[F](dst, path, dests) || ScanScanner(any(dst), path, dests)
 }
 
 func ScanLeaf[F any](dst *F, path string, dests *[]any) error {
-	if ScanPlain(any(dst), path, dests) || ScanOption(any(dst), path, dests) {
+	if ScanPlain[F](dst, path, dests) || ScanOption[F](dst, path, dests) {
 		return nil
 	}
 	if ScanAny(any(dst), path, dests) || ScanScanner(any(dst), path, dests) {
@@ -180,121 +196,246 @@ func AppendNamedFloat[F any](dst *F, path string, dests *[]any) {
 	}
 }
 
-// ScanPlain binds the exact predeclared destination types.
-func ScanPlain(dst any, path string, dests *[]any) bool {
-	switch p := dst.(type) {
-	case *time.Time:
-		*dests = append(*dests, &NotNullDest[time.Time]{dst: p, path: path})
+// ScanPlain binds the exact predeclared destination types, each
+// answered by a const switch case at comptime.
+func ScanPlain[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case time.Time:
+		*dests = append(*dests, &NotNullDest[time.Time]{dst: dst, path: path})
 		return true
-	case *[]byte:
-		*dests = append(*dests, &NotNullDest[[]byte]{dst: p, path: path})
+	case []byte:
+		*dests = append(*dests, &NotNullDest[[]byte]{dst: dst, path: path})
 		return true
-	case *string:
-		*dests = append(*dests, &NotNullDest[string]{dst: p, path: path})
+	case string:
+		*dests = append(*dests, &NotNullDest[string]{dst: dst, path: path})
 		return true
-	case *bool:
-		*dests = append(*dests, &NotNullDest[bool]{dst: p, path: path})
+	case bool:
+		*dests = append(*dests, &NotNullDest[bool]{dst: dst, path: path})
 		return true
-	case *int:
-		*dests = append(*dests, &NotNullDest[int]{dst: p, path: path})
-		return true
-	case *int8:
-		*dests = append(*dests, &NotNullDest[int8]{dst: p, path: path})
-		return true
-	case *int16:
-		*dests = append(*dests, &NotNullDest[int16]{dst: p, path: path})
-		return true
-	case *int32:
-		*dests = append(*dests, &NotNullDest[int32]{dst: p, path: path})
-		return true
-	case *int64:
-		*dests = append(*dests, &NotNullDest[int64]{dst: p, path: path})
+	case int:
+		*dests = append(*dests, &NotNullDest[int]{dst: dst, path: path})
 		return true
 	}
-	return scanPlainUint(dst, path, dests)
+	return scanPlainInt[F](dst, path, dests)
 }
 
-func scanPlainUint(dst any, path string, dests *[]any) bool {
-	switch p := dst.(type) {
-	case *uint:
-		*dests = append(*dests, &NotNullDest[uint]{dst: p, path: path})
+func scanPlainInt[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case int8:
+		*dests = append(*dests, &NotNullDest[int8]{dst: dst, path: path})
 		return true
-	case *uint8:
-		*dests = append(*dests, &NotNullDest[uint8]{dst: p, path: path})
+	case int16:
+		*dests = append(*dests, &NotNullDest[int16]{dst: dst, path: path})
 		return true
-	case *uint16:
-		*dests = append(*dests, &NotNullDest[uint16]{dst: p, path: path})
+	case int32:
+		*dests = append(*dests, &NotNullDest[int32]{dst: dst, path: path})
 		return true
-	case *uint32:
-		*dests = append(*dests, &NotNullDest[uint32]{dst: p, path: path})
+	case int64:
+		*dests = append(*dests, &NotNullDest[int64]{dst: dst, path: path})
 		return true
-	case *uint64:
-		*dests = append(*dests, &NotNullDest[uint64]{dst: p, path: path})
+	}
+	return scanPlainUint[F](dst, path, dests)
+}
+
+func scanPlainUint[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case uint:
+		*dests = append(*dests, &NotNullDest[uint]{dst: dst, path: path})
 		return true
-	case *float32:
-		*dests = append(*dests, &NotNullDest[float32]{dst: p, path: path})
+	case uint8:
+		*dests = append(*dests, &NotNullDest[uint8]{dst: dst, path: path})
 		return true
-	case *float64:
-		*dests = append(*dests, &NotNullDest[float64]{dst: p, path: path})
+	case uint16:
+		*dests = append(*dests, &NotNullDest[uint16]{dst: dst, path: path})
+		return true
+	case uint32:
+		*dests = append(*dests, &NotNullDest[uint32]{dst: dst, path: path})
+		return true
+	case uint64:
+		*dests = append(*dests, &NotNullDest[uint64]{dst: dst, path: path})
+		return true
+	case float32:
+		*dests = append(*dests, &NotNullDest[float32]{dst: dst, path: path})
+		return true
+	case float64:
+		*dests = append(*dests, &NotNullDest[float64]{dst: dst, path: path})
 		return true
 	}
 	return false
 }
 
-// ScanOption binds the option destinations. A NULL column becomes an
-// absent option; any other value scans into the element type.
-func ScanOption(dst any, path string, dests *[]any) bool {
-	switch p := dst.(type) {
-	case *rt.Option[time.Time]:
-		*dests = append(*dests, &OptionDest[time.Time]{dst: p, path: path})
+// ScanNull binds the sql.Null destinations by element type: the value
+// field converts through Assign and the Valid flag follows, so a NULL
+// column never enters a reflective Scan body.
+func ScanNull[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case sql.Null[string]:
+		*dests = append(*dests, &NullDest[string]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[string]:
-		*dests = append(*dests, &OptionDest[string]{dst: p, path: path})
+	case sql.Null[bool]:
+		*dests = append(*dests, &NullDest[bool]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[bool]:
-		*dests = append(*dests, &OptionDest[bool]{dst: p, path: path})
+	case sql.Null[int]:
+		*dests = append(*dests, &NullDest[int]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[int16]:
-		*dests = append(*dests, &OptionDest[int16]{dst: p, path: path})
+	case sql.Null[int8]:
+		*dests = append(*dests, &NullDest[int8]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[int32]:
-		*dests = append(*dests, &OptionDest[int32]{dst: p, path: path})
+	case sql.Null[int16]:
+		*dests = append(*dests, &NullDest[int16]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[int64]:
-		*dests = append(*dests, &OptionDest[int64]{dst: p, path: path})
-		return true
-	case *rt.Option[float32]:
-		*dests = append(*dests, &OptionDest[float32]{dst: p, path: path})
-		return true
-	case *rt.Option[float64]:
-		*dests = append(*dests, &OptionDest[float64]{dst: p, path: path})
+	case sql.Null[int32]:
+		*dests = append(*dests, &NullDest[int32]{v: &dst.V, valid: &dst.Valid})
 		return true
 	}
-	return scanOptionInt(dst, path, dests)
+	return scanNullInt[F](dst, path, dests)
 }
 
-func scanOptionInt(dst any, path string, dests *[]any) bool {
-	switch p := dst.(type) {
-	case *rt.Option[int]:
-		*dests = append(*dests, &OptionDest[int]{dst: p, path: path})
+func scanNullInt[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case sql.Null[int64]:
+		*dests = append(*dests, &NullDest[int64]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[int8]:
-		*dests = append(*dests, &OptionDest[int8]{dst: p, path: path})
+	case sql.Null[uint]:
+		*dests = append(*dests, &NullDest[uint]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[uint]:
-		*dests = append(*dests, &OptionDest[uint]{dst: p, path: path})
+	case sql.Null[uint8]:
+		*dests = append(*dests, &NullDest[uint8]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[uint8]:
-		*dests = append(*dests, &OptionDest[uint8]{dst: p, path: path})
+	case sql.Null[uint16]:
+		*dests = append(*dests, &NullDest[uint16]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[uint16]:
-		*dests = append(*dests, &OptionDest[uint16]{dst: p, path: path})
+	case sql.Null[uint32]:
+		*dests = append(*dests, &NullDest[uint32]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[uint32]:
-		*dests = append(*dests, &OptionDest[uint32]{dst: p, path: path})
+	case sql.Null[uint64]:
+		*dests = append(*dests, &NullDest[uint64]{v: &dst.V, valid: &dst.Valid})
 		return true
-	case *rt.Option[uint64]:
-		*dests = append(*dests, &OptionDest[uint64]{dst: p, path: path})
+	}
+	return scanNullTime[F](dst, path, dests)
+}
+
+func scanNullTime[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case sql.Null[float32]:
+		*dests = append(*dests, &NullDest[float32]{v: &dst.V, valid: &dst.Valid})
+		return true
+	case sql.Null[float64]:
+		*dests = append(*dests, &NullDest[float64]{v: &dst.V, valid: &dst.Valid})
+		return true
+	case sql.Null[time.Time]:
+		*dests = append(*dests, &NullDest[time.Time]{v: &dst.V, valid: &dst.Valid})
+		return true
+	case sql.Null[[]byte]:
+		*dests = append(*dests, &NullDest[[]byte]{v: &dst.V, valid: &dst.Valid})
+		return true
+	case sql.Null[uuid.UUID]:
+		*dests = append(*dests, &NullDest[uuid.UUID]{v: &dst.V, valid: &dst.Valid})
+		return true
+	}
+	return scanNullNamed[F](dst, path, dests)
+}
+
+func scanNullNamed[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case sql.NullString:
+		*dests = append(*dests, &NullDest[string]{v: &dst.String, valid: &dst.Valid})
+		return true
+	case sql.NullBool:
+		*dests = append(*dests, &NullDest[bool]{v: &dst.Bool, valid: &dst.Valid})
+		return true
+	case sql.NullByte:
+		*dests = append(*dests, &NullDest[byte]{v: &dst.Byte, valid: &dst.Valid})
+		return true
+	case sql.NullInt16:
+		*dests = append(*dests, &NullDest[int16]{v: &dst.Int16, valid: &dst.Valid})
+		return true
+	case sql.NullInt32:
+		*dests = append(*dests, &NullDest[int32]{v: &dst.Int32, valid: &dst.Valid})
+		return true
+	case sql.NullInt64:
+		*dests = append(*dests, &NullDest[int64]{v: &dst.Int64, valid: &dst.Valid})
+		return true
+	case sql.NullFloat64:
+		*dests = append(*dests, &NullDest[float64]{v: &dst.Float64, valid: &dst.Valid})
+		return true
+	case sql.NullTime:
+		*dests = append(*dests, &NullDest[time.Time]{v: &dst.Time, valid: &dst.Valid})
+		return true
+	}
+	return false
+}
+
+// ScanOption binds the option destinations by element type. A NULL
+// column becomes an absent option; any other value scans into the
+// element type.
+func ScanOption[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case rt.Option[time.Time]:
+		*dests = append(*dests, &OptionDest[time.Time]{dst: dst, path: path})
+		return true
+	case rt.Option[string]:
+		*dests = append(*dests, &OptionDest[string]{dst: dst, path: path})
+		return true
+	case rt.Option[bool]:
+		*dests = append(*dests, &OptionDest[bool]{dst: dst, path: path})
+		return true
+	case rt.Option[int]:
+		*dests = append(*dests, &OptionDest[int]{dst: dst, path: path})
+		return true
+	case rt.Option[int8]:
+		*dests = append(*dests, &OptionDest[int8]{dst: dst, path: path})
+		return true
+	case rt.Option[int16]:
+		*dests = append(*dests, &OptionDest[int16]{dst: dst, path: path})
+		return true
+	}
+	return scanOptionInt[F](dst, path, dests)
+}
+
+func scanOptionInt[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case rt.Option[int32]:
+		*dests = append(*dests, &OptionDest[int32]{dst: dst, path: path})
+		return true
+	case rt.Option[int64]:
+		*dests = append(*dests, &OptionDest[int64]{dst: dst, path: path})
+		return true
+	case rt.Option[uint]:
+		*dests = append(*dests, &OptionDest[uint]{dst: dst, path: path})
+		return true
+	case rt.Option[uint8]:
+		*dests = append(*dests, &OptionDest[uint8]{dst: dst, path: path})
+		return true
+	case rt.Option[uint16]:
+		*dests = append(*dests, &OptionDest[uint16]{dst: dst, path: path})
+		return true
+	case rt.Option[uint32]:
+		*dests = append(*dests, &OptionDest[uint32]{dst: dst, path: path})
+		return true
+	}
+	return scanOptionTail[F](dst, path, dests)
+}
+
+func scanOptionTail[F any](dst *F, path string, dests *[]any) bool {
+	const switch F {
+	case rt.Option[uint64]:
+		*dests = append(*dests, &OptionDest[uint64]{dst: dst, path: path})
+		return true
+	case rt.Option[float32]:
+		*dests = append(*dests, &OptionDest[float32]{dst: dst, path: path})
+		return true
+	case rt.Option[float64]:
+		*dests = append(*dests, &OptionDest[float64]{dst: dst, path: path})
+		return true
+	case rt.Option[[]byte]:
+		*dests = append(*dests, &OptionDest[[]byte]{dst: dst, path: path})
+		return true
+	case rt.Option[uuid.UUID]:
+		*dests = append(*dests, &OptionDest[uuid.UUID]{dst: dst, path: path})
+		return true
+	case rt.Option[sql.RawBytes]:
+		*dests = append(*dests, &OptionDest[sql.RawBytes]{dst: dst, path: path})
 		return true
 	}
 	return false

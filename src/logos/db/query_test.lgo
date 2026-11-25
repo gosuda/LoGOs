@@ -7,6 +7,7 @@ package db_test
 import (
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -27,7 +28,9 @@ import (
 type fakeTable struct {
 	cols []string
 	rows [][]driver.Value
-	err error
+	err     error
+	more    *fakeTable?
+	moreErr error
 }
 
 type fakeDriver struct {
@@ -123,6 +126,22 @@ func (r *fakeRows) Next(dest []driver.Value) error {
 	return nil
 }
 
+func (r *fakeRows) HasNextResultSet() bool {
+	return r.table.more != nil
+}
+
+func (r *fakeRows) NextResultSet() error {
+	if r.table.moreErr != nil {
+		return r.table.moreErr
+	}
+	if r.table.more == nil {
+		return io.EOF
+	}
+	r.table = r.table.more ?? r.table
+	r.idx = 0
+	return nil
+}
+
 var twinFake = &fakeDriver{tables: map[string]*fakeTable{}}
 
 var twinFakeOnce sync.Once
@@ -133,6 +152,29 @@ func openTwinFake(t *testing.T, name string, cols []string, rows [][]driver.Valu
 		sql.Register("twinfake", twinFake)
 	})
 	twinFake.tables[name] = &fakeTable{cols: cols, rows: rows}
+	return openFakeDB(t, name)
+}
+
+func openTwinFakeAdvanceErr(t *testing.T, name string, cols []string, rows [][]driver.Value, advance error) *sql.DB {
+	t.Helper()
+	twinFakeOnce.Do(func() {
+		sql.Register("twinfake", twinFake)
+	})
+	twinFake.tables[name] = &fakeTable{cols: cols, rows: rows, more: &fakeTable{}, moreErr: advance}
+	return openFakeDB(t, name)
+}
+
+func openTwinFakeMulti(t *testing.T, name string, cols []string, rows [][]driver.Value, moreCols []string, moreRows [][]driver.Value) *sql.DB {
+	t.Helper()
+	twinFakeOnce.Do(func() {
+		sql.Register("twinfake", twinFake)
+	})
+	twinFake.tables[name] = &fakeTable{cols: cols, rows: rows, more: &fakeTable{cols: moreCols, rows: moreRows}}
+	return openFakeDB(t, name)
+}
+
+func openFakeDB(t *testing.T, name string) *sql.DB {
+	t.Helper()
 	db, err := sql.Open("twinfake", name)
 	if err != nil {
 		panic(fmt.Sprintf("open %s: %v", name, err))
@@ -246,6 +288,21 @@ func TestOneRejectsMismatchedColumnsWithoutRows(t *testing.T) {
 type strictRow struct {
 	ID int64  `col:"id"`
 	S  string `col:"s"`
+}
+
+func TestQueryReturnsResultSetAdvanceError(t *testing.T) {
+	// A driver error on NextResultSet is recorded on the rows; the
+	// scan must surface it instead of returning the first set's data.
+	advance := errors.New("driver: advance failed")
+	db := openTwinFakeAdvanceErr(t, "advance_err", []string{"a", "b"}, [][]driver.Value{{"x", "y"}}, advance)
+	_, gotErr := twindb.Query[pairRow](t.Context(), db, "SELECT a, b FROM advance_err")
+	if !errors.Is(gotErr, advance) {
+		t.Fatalf("Query error = %v, want wrapped %v", gotErr, advance)
+	}
+	_, oneErr := twindb.One[pairRow](t.Context(), db, "SELECT a, b FROM advance_err")
+	if !errors.Is(oneErr, advance) {
+		t.Fatalf("One error = %v, want wrapped %v", oneErr, advance)
+	}
 }
 
 func TestQueryRejectsNullInNonOptional(t *testing.T) {
@@ -711,5 +768,138 @@ func TestQueryScanErrorWraps(t *testing.T) {
 	_, err := twindb.Query[int64](t.Context(), db, "SELECT n FROM bad")
 	if err == nil || !strings.Contains(err.Error(), "Scan error on column index 0") || !strings.Contains(err.Error(), "invalid syntax") {
 		t.Fatalf("error = %v, want wrapped scan error", err)
+	}
+}
+
+type reuseScanner struct {
+	buf []byte
+}
+
+// Scan keeps one buffer and rewrites it in place, exactly the shape
+// that exposes a destination reused across rows without a reset.
+func (s *reuseScanner) Scan(src any) error {
+	b, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("reuse scanner got %T", src)
+	}
+	if cap(s.buf) == 0 {
+		s.buf = make([]byte, 0, 16)
+	}
+	s.buf = append(s.buf[:0], b...)
+	return nil
+}
+
+type reuseRow struct {
+	S reuseScanner `col:"s"`
+}
+
+func TestQueryResetsScannerRows(t *testing.T) {
+	db := openTwinFake(t, "reuse", []string{"s"}, [][]driver.Value{
+		{[]byte("aa")},
+		{[]byte("bb")},
+	})
+	gotRows, gotErr := twindb.Query[reuseRow](t.Context(), db, "SELECT s FROM reuse")
+	if gotErr != nil {
+		panic(fmt.Sprintf("query reuse: %v", gotErr))
+	}
+	rows := gotRows
+	if len(rows) != 2 {
+		t.Fatalf("Query returned %d rows, want 2", len(rows))
+	}
+	if string(rows[0].S.buf) != "aa" {
+		t.Fatalf("first buf = %q, want aa", rows[0].S.buf)
+	}
+	if string(rows[1].S.buf) != "bb" {
+		t.Fatalf("second buf = %q, want bb", rows[1].S.buf)
+	}
+}
+
+func TestQueryTopLevelScalarShapes(t *testing.T) {
+	when := time.Unix(1690000000, 0).UTC()
+	db := openTwinFake(t, "times", []string{"t"}, [][]driver.Value{{when}})
+	rows, err := twindb.Query[time.Time](t.Context(), db, "SELECT t FROM times")
+	if err != nil {
+		panic(fmt.Sprintf("query times: %v", err))
+	}
+	if len(rows) != 1 || !rows[0].Equal(when) {
+		t.Fatalf("Query[time.Time] = %+v, want [%v]", rows, when)
+	}
+	ndb := openTwinFake(t, "nulls", []string{"v"}, [][]driver.Value{{nil}, {"x"}})
+	ns, nerr := twindb.Query[sql.Null[string]](t.Context(), ndb, "SELECT v FROM nulls")
+	if nerr != nil {
+		panic(fmt.Sprintf("query nulls: %v", nerr))
+	}
+	if len(ns) != 2 || ns[0].Valid || !ns[1].Valid || ns[1].V != "x" {
+		t.Fatalf("Query[sql.Null[string]] = %+v, want [{false} {x true}]", ns)
+	}
+}
+
+func TestQueryRejectsSecondResultSet(t *testing.T) {
+	db := openTwinFakeMulti(t, "two-sets", []string{"a"}, [][]driver.Value{{"x"}}, []string{"b"}, [][]driver.Value{{"y"}})
+	_, err := twindb.Query[string](t.Context(), db, "SELECT a FROM s")
+	if err == nil || !strings.Contains(err.Error(), "multiple result sets") {
+		t.Fatalf("Query error = %v, want multiple result sets", err)
+	}
+	db2 := openTwinFakeMulti(t, "two-sets-one", []string{"a"}, [][]driver.Value{{"x"}}, []string{"b"}, [][]driver.Value{{"y"}})
+	_, err = twindb.One[string](t.Context(), db2, "SELECT a FROM s")
+	if err == nil || !strings.Contains(err.Error(), "multiple result sets") {
+		t.Fatalf("One error = %v, want multiple result sets", err)
+	}
+}
+
+type wideOptRow struct {
+	B []byte?        `col:"b"`
+	U uuid.UUID?    `col:"u"`
+	R sql.RawBytes? `col:"r"`
+}
+
+func TestQueryScansWideOptions(t *testing.T) {
+	uid := uuid.MustParse("97b6a4e0-5323-43e9-82c8-88110d6686d6")
+	db := openTwinFake(t, "wide", []string{"b", "u", "r"}, [][]driver.Value{
+		{[]byte("x"), "97b6a4e0-5323-43e9-82c8-88110d6686d6", []byte("r1")},
+		{nil, nil, nil},
+	})
+	rowsQ, rowsErr := twindb.Query[wideOptRow](t.Context(), db, "SELECT b, u, r FROM wide")
+	if rowsErr != nil {
+		panic(fmt.Sprintf("query wide: %v", rowsErr))
+	}
+	rows := rowsQ
+	if len(rows) != 2 {
+		t.Fatalf("Query returned %d rows, want 2", len(rows))
+	}
+	if value := rows[0].B ?? nil; string(value) != "x" {
+		t.Fatalf("row b = %q, want x", value)
+	}
+	var zu uuid.UUID
+	if value := rows[0].U ?? zu; value != uid {
+		t.Fatalf("row u = %v, want %v", value, uid)
+	}
+	if value := rows[0].R ?? nil; string(value) != "r1" {
+		t.Fatalf("row r = %q, want r1", value)
+	}
+	if rows[1].B != nil || rows[1].U != nil || rows[1].R != nil {
+		t.Fatalf("NULL row = %+v, want every option absent", rows[1])
+	}
+}
+
+func TestQueryRowAllocs(t *testing.T) {
+	db := openTwinFake(t, "allocs", []string{"a", "b"}, [][]driver.Value{
+		{"x", "y"},
+		{"x", "y"},
+		{"x", "y"},
+		{"x", "y"},
+	})
+	n := testing.AllocsPerRun(50, func() {
+		got, err := twindb.Query[pairRow](t.Context(), db, "SELECT a, b FROM pairs")
+		if err != nil {
+			panic(fmt.Sprintf("query pairs: %v", err))
+		}
+		if len(got) != 4 {
+			panic(fmt.Sprintf("query pairs = %d rows, want 4", len(got)))
+		}
+	})
+	t.Logf("Query allocs per run: %v", n)
+	if n > 60 {
+		t.Fatalf("allocs = %v, want at most 60", n)
 	}
 }

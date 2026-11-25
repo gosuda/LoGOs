@@ -1,0 +1,13 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Empty struct{}
+
+func first() string {
+	const for _, f := range comptime.Fields[Empty]() {
+		return f.Name
+	}
+} // ERROR "missing return"

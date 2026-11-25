@@ -146,7 +146,10 @@ func (check *Checker) instantiateSignature(pos syntax.Pos, expr syntax.Expr, typ
 	// count is correct at this point (see assertion above); hence the type assertion
 	// to *Signature will always succeed.
 	inst := check.instance(pos, typ, targs, nil, check.context()).(*Signature)
-	assert(inst.TypeParams().Len() == 0) // signature is not generic anymore
+	assert(inst.TypeParams().Len() == 0)                                             // signature is not generic anymore
+	if res := check.logosCtAnalyze(pos, expr, xlist, typ, targs, inst); res != nil { // logos comptime instantiation hook.
+		inst = res
+	}
 	check.recordInstance(expr, targs, inst)
 	assert(len(xlist) <= len(targs))
 
@@ -274,6 +277,17 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 	// signature may be generic
 	cgocall := x.mode() == cgofunc
 
+	// logos M5-S1 hook: a function value read through a const view carries
+	// the view's qualification, but calling it mutates nothing — unwrap the
+	// qualification so the call sees the plain signature.
+	if check.conf.Logos {
+		if base, descendants, readonly := logosReadonlyBase(x.typ()); descendants || readonly {
+			if _, ok := base.Underlying().(*Signature); ok {
+				x.typ_ = base
+			}
+		}
+	}
+
 	// If the operand type is a type parameter, all types in its type set
 	// must have a common underlying type, which must be a signature.
 	u, err := commonUnder(x.typ(), func(t, u Type) *typeError {
@@ -366,6 +380,9 @@ func (check *Checker) callExpr(x *operand, call *syntax.CallExpr) exprKind {
 		x.typ_ = sig.results
 	}
 	x.expr = call
+	if check.logosTagGetFold(x, call, sig, args) {
+		return statement
+	}
 	check.hasCallOrRecv = true
 
 	// if type inference failed, a parameterized result must be invalidated
@@ -702,6 +719,11 @@ func (check *Checker) arguments(call *syntax.CallExpr, sig *Signature, targs []T
 		check.logosPushGoCall(call) // logos M3-S5 hook.
 		if n > 0 {
 			check.logosPushGenericArgs(targs) // logos M3-S5 hook.
+		} else if rtargs := check.logosReceiverTypeArgs(call); len(rtargs) > 0 {
+			// A method of a generic type fills its declared
+			// type-parameter positions: substituted parameters are
+			// generic positions and take platform arguments.
+			check.logosPushGenericArgs(rtargs) // logos M3-S5 hook.
 		} else {
 			check.logosPushConcreteArgs() // logos M3-S5 hook.
 		}
@@ -741,7 +763,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 	// can only appear in qualified identifiers which are mapped to
 	// selector expressions.
 	if ident, ok := e.X.(*syntax.Name); ok {
-		obj := check.lookup(ident.Value)
+		_, obj := check.logosCtLookupScope(ident)
 		if pname, _ := obj.(*PkgName); pname != nil {
 			assert(pname.pkg == check.pkg)
 			check.recordUse(ident, pname)
@@ -881,7 +903,9 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 		return
 	}
 
-	check.logosFieldVarSelMark(x, e) // logos M7-S2 hook: selections on const-for field variables.
+	if check.logosFieldVarSelMark(x, e) { // logos M7-S2 hook: selections on const-for field variables.
+		return
+	}
 	if check.logosReadonlySelect(x, e, sel) {
 		return
 	}
@@ -1003,7 +1027,7 @@ func (check *Checker) selector(x *operand, e *syntax.SelectorExpr, wantType bool
 			}
 			check.recordSelection(e, MethodVal, x.typ(), obj, index, indirect)
 
-			x.mode_ = value
+			x.mode_, x.val = value, nil
 
 			// remove/stash receiver
 			sig := *obj.typ.(*Signature)
