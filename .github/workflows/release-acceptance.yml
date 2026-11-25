@@ -33,7 +33,7 @@ defaults:
 jobs:
   optimization:
     name: "std-cmd-${{ matrix.driver }}-O${{ matrix.level }}"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -60,7 +60,9 @@ jobs:
 
   parity:
     name: "complete-clean-tip-parity"
-    runs-on: "ubuntu-24.04"
+    # Parity preflight needs 10 GiB of available memory; the base Depot
+    # runner has 8 GB, so this leg keeps the 16 GB size it had on GitHub.
+    runs-on: "depot-ubuntu-24.04-4"
     timeout-minutes: 300
     steps:
       - name: "Check out the exact clean candidate tip"
@@ -75,7 +77,7 @@ jobs:
 
   repro-a:
     name: "repro-host-ubuntu24"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 180
     outputs:
       result: "${{ steps.repro.outputs.result }}"
@@ -93,6 +95,8 @@ jobs:
 
   repro-b:
     name: "repro-host-ubuntu-current"
+    # This leg tracks the moving Ubuntu image while repro-a stays pinned,
+    # so a pass still covers two different host images.
     runs-on: "ubuntu-latest"
     timeout-minutes: 180
     outputs:
@@ -112,7 +116,7 @@ jobs:
   repro-compare:
     name: "compare-independent-host-digests"
     needs: ["repro-a", "repro-b"]
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 10
     steps:
       - name: "Check out the exact clean candidate tip"
@@ -130,7 +134,7 @@ jobs:
 
   runtimes:
     name: "real-gopls-qemu-wasm"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 240
     steps:
       - name: "Check out the exact clean candidate tip"
@@ -145,7 +149,7 @@ jobs:
 
   closure:
     name: "M22-scope-closure"
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 10
     steps:
       - name: "Check out the exact clean candidate tip"

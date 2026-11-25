@@ -17,8 +17,7 @@ import (
 // reflect.Type.String prints it, or "" when the type mentions a type
 // parameter. The native tree gains a call node while the eject text
 // gains an exact-span splice of the same call, preserving surrounding
-// comments and formatting. lowerPlatform runs first in lowerFile, so
-// later passes fold its splices into theirs through textOf.
+// comments and formatting.
 
 type platformJob struct {
 	expr syntax.Expr
@@ -58,9 +57,25 @@ func (fl *fileLower) lowerPlatform() {
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		switch n := n.(type) {
 		case *syntax.AssignStmt:
+			// A single value feeding several destinations is the
+			// comma-ok shape: wrapping it in the single-result
+			// MustNonNil call would not compile, so the lookup
+			// stays as is. Positions nested inside still lower.
+			if l, ok := n.Lhs.(*syntax.ListExpr); ok && len(l.ElemList) > 1 {
+				if _, ok := n.Rhs.(*syntax.ListExpr); !ok {
+					break
+				}
+			}
 			collectSingle(n.Rhs, func(e syntax.Expr) { n.Rhs = e })
 		case *syntax.VarDecl:
 			if n.Values != nil {
+				// Same comma-ok shape as above: `var v, ok = m[k]`
+				// keeps the two-result lookup.
+				if len(n.NameList) > 1 {
+					if _, ok := n.Values.(*syntax.ListExpr); !ok {
+						break
+					}
+				}
 				collectSingle(n.Values, func(e syntax.Expr) { n.Values = e })
 			}
 		case *syntax.CallExpr:
@@ -89,7 +104,7 @@ func (fl *fileLower) lowerPlatform() {
 		return a.span.start - b.span.start
 	})
 	for _, j := range jobs {
-		inner := fl.textOf(j.span)
+		inner := fl.lazyText(j.span)
 		pos := j.expr.Pos()
 		site := fl.newSite(pos, pos.Line())
 		name := staticTypeNameLit(fl.pkg.info.TypeOf(j.expr))
@@ -103,6 +118,19 @@ func (fl *fileLower) lowerPlatform() {
 		fl.addT(j.span.start, j.span.end, cat(
 			gen(rtAlias+".MustNonNil("), inner, gen(", "+name+", &"+site+")")))
 	}
+}
+
+func (w ctWalker) ctPlatformOperand(original, lowered syntax.Expr) syntax.Expr {
+	fl := w.fl
+	if _, checked := fl.pkg.info.LogosChecks[original]; !checked {
+		return lowered
+	}
+	pos := original.Pos()
+	return callOf(pos, fl.ctPkgSelector(pos, rtImportPath, "MustNonNil"), []syntax.Expr{
+		lowered,
+		litOf(pos, staticTypeNameLit(fl.pkg.info.TypeOf(original)), syntax.StringLit),
+		addrOf(pos, fl.ctTrySite(pos)),
+	})
 }
 
 // platformSpan resolves the exact source span of a recorded expression.

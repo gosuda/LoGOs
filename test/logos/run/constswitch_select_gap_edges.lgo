@@ -1,0 +1,122 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Holder struct {
+	Ptr  *bool
+	Rank int
+}
+
+func (h Holder) M() *bool   { return h.Ptr }
+func (h Holder) Index() int { return h.Rank }
+
+func pick[A any, B any](a A, b B) A {
+	return a
+}
+
+var seq int
+
+func next() int {
+	seq++
+	return 0
+}
+
+// The frozen operand starts with the matched selector receiver, so its
+// lowered form opens with a generated `any(` cast wrapper.
+func recvLead[T any](s []T, ch chan T) {
+	const switch T {
+	case interface {
+		M() *bool
+		Index() int
+	}:
+		var p interface {
+			M() *bool
+			Index() int
+		}
+		select {
+		case p, *pick(s[s[0].Index()], 0).M() = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+// The frozen index begins with a const-for substitution, so its start
+// lands in a chunkless region of the working buffer.
+type Two struct {
+	A     int
+	ABCDE int
+}
+
+func recvForLead[T any](s []T, ch chan T) {
+	const for _, f := range comptime.Fields[Two]() {
+		const switch T {
+		case interface{ M() *bool }:
+			var p interface{ M() *bool }
+			select {
+			case p, *pick(s[len(f.Name)+next()], 0).M() = <-ch:
+				_ = p
+			default:
+			}
+		}
+	}
+}
+
+var pool = []Holder{{Ptr: new(bool)}}
+
+func values[T any](s []T, label string) []T {
+	_ = label
+	return s
+}
+
+// A quoted parenthesis inside the operand is not a bracket of the
+// generated cast wrapper: the widened slice must keep `any(` matched.
+// The receiver element type is the type parameter itself, so `.M()`
+// resolves through the case interface and the lowering emits the cast;
+// a quote inside the comment is not a literal start.
+func recvQuoted[T any](s []T, ch chan T) {
+	const switch T {
+	case interface{ M() *bool }:
+		var p interface{ M() *bool }
+		select {
+		case p, *values(s, /* don't normalize */ string('x'))[next()].M() = <-ch:
+			_ = p
+		default:
+		}
+	}
+}
+
+func main() {
+	ch := make(chan Holder, 1)
+	ch <- Holder{Ptr: new(bool), Rank: 0}
+	hs := []Holder{{Ptr: new(bool), Rank: 0}}
+	recvLead[Holder](hs, ch)
+	fmt.Println("seq", seq)
+	fmt.Println("store", *hs[0].Ptr)
+
+	ch2 := make(chan Holder, 2)
+	ch2 <- Holder{Ptr: new(bool)}
+	ch2 <- Holder{Ptr: new(bool)}
+	hs2 := []Holder{{Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}, {Ptr: new(bool)}}
+	recvForLead[Holder](hs2, ch2)
+	fmt.Println("seq", seq)
+	if seq == 2 && *hs2[1].Ptr && *hs2[5].Ptr {
+		fmt.Println("ok gap-edges")
+	} else {
+		fmt.Println("FAIL gap-edges")
+	}
+
+	ch3 := make(chan Holder, 1)
+	ch3 <- Holder{Ptr: new(bool)}
+	recvQuoted[Holder](pool, ch3)
+	if *pool[0].Ptr {
+		fmt.Println("ok quoted")
+	} else {
+		fmt.Println("FAIL quoted")
+	}
+}

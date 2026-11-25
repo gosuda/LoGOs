@@ -1,0 +1,75 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type Text struct{ Text string }
+type Call struct{ Name string }
+
+type Part interface {
+	Text | Call
+}
+
+func name(p Part?) string {
+	if p == nil {
+		return "none"
+	}
+	switch v := p.(type) {
+	case Text:
+		return v.Text
+	case Call:
+		return v.Name
+	}
+	return "unreachable"
+}
+
+func nameBlock(p Part?) string {
+	if p != nil {
+		switch v := p.(type) {
+		case Text:
+			return v.Text
+		case Call:
+			return v.Name
+		}
+		return "unreachable"
+	}
+	return "none"
+}
+
+func nameExpr(p Part?) string {
+	if p == nil {
+		return "none"
+	}
+	return switch p.(type) {
+	case Text => "text"
+	case Call => "call"
+	}
+}
+
+func main() {
+	check("narrow-text", name(Part(Text{Text: "x"})) == "x", name(Part(Text{Text: "x"})), "x")
+	check("narrow-call", name(Part(Call{Name: "y"})) == "y", name(Part(Call{Name: "y"})), "y")
+	check("narrow-nil", name(nil) == "none", name(nil), "none")
+	check("block-text", nameBlock(Part(Text{Text: "x"})) == "x", nameBlock(Part(Text{Text: "x"})), "x")
+	check("block-nil", nameBlock(nil) == "none", nameBlock(nil), "none")
+	check("expr-call", nameExpr(Part(Call{Name: "y"})) == "call", nameExpr(Part(Call{Name: "y"})), "call")
+	check("expr-nil", nameExpr(nil) == "none", nameExpr(nil), "none")
+	if failed {
+		os.Exit(1)
+	}
+}

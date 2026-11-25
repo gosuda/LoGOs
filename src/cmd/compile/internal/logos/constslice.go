@@ -112,3 +112,16 @@ func covTypedBody(spellI string) string {
 		"_logos_cs_r[_logos_cs_i] = " + spellI + "(_logos_cs_s[_logos_cs_i])\n" +
 		"}\nreturn _logos_cs_r\n"
 }
+
+func (w ctWalker) ctConstCov(original, lowered syntax.Expr) syntax.Expr {
+	iface := w.fl.pkg.info.LogosConstCov[original]
+	if iface == nil {
+		return lowered
+	}
+	pos := original.Pos()
+	fun := at(&syntax.IndexExpr{
+		X:     w.fl.ctPkgSelector(pos, rtImportPath, "CovSlice"),
+		Index: w.fl.ctTypeExpr(pos, iface),
+	}, pos)
+	return callOf(pos, fun, []syntax.Expr{lowered})
+}

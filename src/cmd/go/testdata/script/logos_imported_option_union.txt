@@ -1,0 +1,166 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A closed union defined in one package, used with option types in another:
+# a concrete imported member assigns directly into U? variables, struct
+# fields, arguments and results; nil is allowed; an unrelated concrete type
+# that implements the same method set is still not a member.
+
+cd w
+logos run .
+stdout '^direct true A$'
+stdout '^plain true$'
+stdout '^empty true none$'
+stdout '^field true B$'
+stdout '^arg A none$'
+stdout '^res true true B$'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+cd out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native.txt
+cd ../..
+
+cd neg
+! logos build ./...
+stderr 'cannot use'
+cd ..
+
+-- w/go.mod --
+module example.com/optunion
+
+go 1.27
+
+-- w/m/m.lgo --
+package m
+
+type A struct {
+	X int
+}
+
+func (a A) Label() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) Label() string {
+	return "B"
+}
+
+// U is a closed union over imported member types with a method-only
+// Go-facing projection.
+type U interface {
+	A | B
+	Label() string
+}
+
+// Plain is a nil-capable union with no method requirement.
+type Plain interface {
+	A | B
+}
+
+-- w/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/optunion/m"
+)
+
+type Holder struct {
+	Item  m.U?
+	Cargo m.Plain?
+}
+
+func first(u m.U?) string {
+	return u?.Label() ?? "none"
+}
+
+func pick(n int) m.U? {
+	if n == 0 {
+		return nil
+	}
+	return m.B{Y: "y"}
+}
+
+func main() {
+	var direct m.U? = m.A{X: 1}
+	fmt.Println("direct", direct != nil, direct?.Label() ?? "?")
+
+	var plain m.Plain? = m.A{X: 2}
+	fmt.Println("plain", plain != nil)
+
+	var empty m.U?
+	fmt.Println("empty", empty == nil, first(empty))
+
+	h := Holder{Item: m.B{Y: "y"}}
+	fmt.Println("field", h.Item != nil, h.Item?.Label() ?? "?")
+
+	fmt.Println("arg", first(direct), first(nil))
+
+	p := pick(0)
+	q := pick(1)
+	fmt.Println("res", p == nil, q != nil, q?.Label() ?? "?")
+}
+
+-- neg/go.mod --
+module example.com/optunionneg
+
+go 1.27
+
+-- neg/dep/dep.lgo --
+package dep
+
+type A struct {
+	X int
+}
+
+func (a A) Label() string {
+	return "A"
+}
+
+type B struct {
+	Y string
+}
+
+func (b B) Label() string {
+	return "B"
+}
+
+type U interface {
+	A | B
+	Label() string
+}
+
+-- neg/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/optunionneg/dep"
+)
+
+// C implements the method set of dep.U but is not one of its members.
+type C struct {
+	Z int
+}
+
+func (c C) Label() string {
+	return "C"
+}
+
+func main() {
+	// A concrete nonmember must not satisfy the optional union; it is the
+	// only statement in the package that can fail the build, so a pass
+	// after the fix means the rejection itself holds.
+	var bad dep.U? = C{Z: 1}
+	fmt.Println(bad?.Label() ?? "?")
+}

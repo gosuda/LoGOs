@@ -1,0 +1,87 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# SPEC 2.5 (T-205): an instance of a comptime generic is checked in the
+# scope of its defining package, and the instantiating package never
+# resolves the generic's names. lib.Limit evaluates lib's const func Rec
+# in each instance; main declares its own plain func Rec and alt its own
+# const func Rec, both with lib.Rec's signature. Every instance must still
+# fold lib.Rec(5) = 15.
+cd w
+logos build ./...
+logos run ./main
+stdout '^limit 15 16$'
+stdout '^alt 15 16$'
+stdout '^local -999 -7$'
+
+logos eject -o out
+cd out
+go run ./main
+stdout '^limit 15 16$'
+stdout '^alt 15 16$'
+stdout '^local -999 -7$'
+
+-- w/go.mod --
+module example.com/ctshadow
+
+go 1.27
+
+-- w/lib/lib.lgo --
+package lib
+
+import "comptime"
+
+const func Rec(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return n + Rec(n-1)
+}
+
+func Limit[T any]() int {
+	const limit = Rec(5)
+	const if comptime.IsStruct[T]() {
+		return limit
+	} else {
+		return limit + 1
+	}
+}
+
+-- w/alt/alt.lgo --
+package alt
+
+import "example.com/ctshadow/lib"
+
+const func Rec(n int) int {
+	return -n - 2
+}
+
+func Limits() (int, int) {
+	return lib.Limit[struct{}](), lib.Limit[int]()
+}
+
+func Local() int {
+	const v = Rec(5)
+	return v
+}
+
+-- w/main/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/ctshadow/alt"
+	"example.com/ctshadow/lib"
+)
+
+func Rec(n int) int {
+	return -999
+}
+
+func main() {
+	fmt.Println("limit", lib.Limit[struct{}](), lib.Limit[int]())
+	a, b := alt.Limits()
+	fmt.Println("alt", a, b)
+	fmt.Println("local", Rec(5), alt.Local())
+}

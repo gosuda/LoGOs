@@ -56,6 +56,7 @@ const (
 	TypeInterface
 	TypeUnion
 	TypeTypeParam
+	TypeNamedCaptured // LoGOs: hidden local declaration with explicit enclosing dictionary arguments
 )
 
 // A CodeObj distinguishes among go/types.Object encodings.

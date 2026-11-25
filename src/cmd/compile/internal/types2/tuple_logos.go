@@ -327,7 +327,7 @@ func (check *Checker) logosTuplePack(lhs []*Var, rhs []syntax.Expr, results []*o
 	return true
 }
 
-func (check *Checker) logosTupleInitVars(lhs []*Var, orig_rhs []syntax.Expr, rhs []*operand, context string) bool {
+func (check *Checker) logosTupleInitVars(lhs []*Var, orig_rhs []syntax.Expr, rhs []*operand, context string, returnStmt *syntax.ReturnStmt) bool {
 	if !check.conf.Logos {
 		return false
 	}
@@ -341,7 +341,7 @@ func (check *Checker) logosTupleInitVars(lhs []*Var, orig_rhs []syntax.Expr, rhs
 		}
 		for i, v := range lhs {
 			el := tupleElemOperand(orig_rhs[0], i, elems[i])
-			check.initVar(v, &el, context)
+			check.initVar(v, &el, context, resultSlot{returnStmt, i})
 		}
 		return true
 	}
@@ -361,14 +361,19 @@ func (check *Checker) logosTupleAssignStmt(lhs []syntax.Expr, orig_rhs []syntax.
 		if !ok || len(types) != len(rhs) {
 			return false
 		}
-		target := check.tupleAssignTarget(lhs[0])
-		if target == nil {
+		ident, ok := syntax.Unparen(lhs[0]).(*syntax.Name)
+		if !ok || ident.Value == "_" {
 			return false
 		}
-		targets, ok := tupleElemsOf(target)
+		target, ok := check.lookup(ident.Value).(*Var)
+		if !ok {
+			return false
+		}
+		targets, ok := tupleElemsOf(target.typ)
 		if !ok || len(targets) != len(rhs) {
 			return false
 		}
+		check.recordUse(ident, target)
 		for i, r := range rhs {
 			check.assignment(r, targets[i], context)
 		}
@@ -386,17 +391,6 @@ func (check *Checker) logosTupleAssignStmt(lhs []syntax.Expr, orig_rhs []syntax.
 		return true
 	}
 	return false
-}
-
-func (check *Checker) tupleAssignTarget(lhs syntax.Expr) Type {
-	ident, ok := syntax.Unparen(lhs).(*syntax.Name)
-	if !ok || ident.Value == "_" {
-		return nil
-	}
-	if v, ok := check.lookup(ident.Value).(*Var); ok {
-		return v.typ
-	}
-	return nil
 }
 
 func (check *Checker) logosTupleNilCheck(lhs *Var, x *operand, context string) bool {

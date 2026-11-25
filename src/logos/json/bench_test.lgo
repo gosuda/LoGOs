@@ -5,8 +5,8 @@
 package json_test
 
 import (
-	stdjson "encoding/json"
 	"bytes"
+	stdjson "encoding/json"
 	"testing"
 
 	twinjson "logos/json"

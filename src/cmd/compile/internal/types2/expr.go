@@ -593,7 +593,7 @@ func (check *Checker) comparison(x, y *operand, op syntax.Operator, switchCase b
 		// The operands are never materialized; no need to update
 		// their types.
 	} else {
-		x.mode_ = value
+		x.mode_, x.val = value, nil
 		// The operands have now their final types, which at run-
 		// time will be materialized. Update the expression trees.
 		// If the current types are untyped, the materialized type
@@ -1144,11 +1144,15 @@ func (check *Checker) exprInternal(T *target, x *operand, e syntax.Expr, hint Ty
 			check.error(e, InvalidSyntaxTree, "invalid use of AssertExpr")
 			goto Error
 		}
-		if isTypeParam(x.typ()) {
+		if isTypeParam(x.typ()) || (check.conf.Logos && logosViewedTypeParam(x.typ())) {
 			check.errorf(x, InvalidAssert, invalidOp+"cannot use type assertion on type parameter value %s", x)
 			goto Error
 		}
 		if _, ok := x.typ().Underlying().(*Interface); !ok {
+			if check.conf.Logos && logosQualifiedInterface(x.typ()) {
+				check.errorf(e, ImpossibleAssert, "%s cannot erase readonly descendants in a type assertion", logosConstEscape)
+				goto Error
+			}
 			check.errorf(x, InvalidAssert, invalidOp+"%s is not an interface", x)
 			goto Error
 		}

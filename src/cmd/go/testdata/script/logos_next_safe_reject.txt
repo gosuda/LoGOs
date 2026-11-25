@@ -1,0 +1,199 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+cp go.mod $WORK/go.mod.orig
+cp a.go $WORK/a.orig
+cp tests/z_test.go $WORK/test.orig
+# An invalid staged LoGOs test must block the entire module, including a.go,
+# and must not leak any patch bytes to stdout.
+! logos next --fix
+! stdout '.'
+stderr 'preflight test failed'
+stderr 'z_test.lgo'
+cmp a.go $WORK/a.orig
+cmp tests/z_test.go $WORK/test.orig
+! exists a.lgo
+! exists tests/z_test.lgo
+! exists next_tasks.json
+rm tests/z_test.go
+
+# The active compiler cannot vouch for the ignored file's rename.
+cp ../extra/skipped.go skipped.go
+! logos next --fix
+stderr 'skipped.go.*not checked|not checked.*skipped.go'
+cmp a.go $WORK/a.orig
+cmp skipped.go ../extra/skipped.go
+! exists a.lgo
+! exists skipped.lgo
+! exists next_tasks.json
+rm skipped.go
+
+# A local replacement is staged from its saved bytes: --fix proves the
+# conversion against that frozen copy and changes neither module. An entry
+# of the replacement that is not a regular file cannot be saved, so --fix
+# refuses it before any patch is emitted.
+mkdir ../dep
+cp ../depmod/go.mod ../dep/go.mod
+cp ../depmod/dep.go ../dep/dep.go
+cp ../extra/go.mod.replace go.mod
+cp ../extra/a.go.dep a.go
+logos next --fix
+stdout '^\+\+\+ b/a\.lgo$'
+stdout '^\+	dep\.Ping\(\)$'
+stderr '^logos next: patch for 1 files'
+cmp a.go ../extra/a.go.dep
+cmp ../dep/dep.go ../depmod/dep.go
+cmp go.mod ../extra/go.mod.replace
+! exists a.lgo
+! exists next_tasks.json
+[symlink] symlink ../dep/link.go -> dep.go
+[symlink] ! logos next --fix
+[symlink] ! stdout '.'
+[symlink] stderr 'local replacement example.com/nextreject/dep: link.go is not a regular file'
+[symlink] rm ../dep/link.go
+logos next
+stderr 'review only'
+cp $WORK/go.mod.orig go.mod
+cp $WORK/a.orig a.go
+rm ../dep/go.mod ../dep/dep.go
+
+
+# A directory at a .lgo destination would leave the emitted patch
+# inapplicable, so --fix refuses instead of describing a conversion that
+# cannot be applied.
+mkdir a.lgo
+! logos next --fix
+stderr 'a.lgo'
+cmp a.go $WORK/a.orig
+exists a.lgo
+! exists next_tasks.json
+rm a.lgo
+
+# A directory at the plan destination leaves the required plan change with
+# no applicable destination, so --fix refuses. --ai-patch still writes the
+# plan itself, so it must refuse the same destination.
+mkdir next_tasks.json
+! logos next --fix
+stderr 'next_tasks.json'
+! logos next --ai-patch
+stderr 'next_tasks.json'
+cmp a.go $WORK/a.orig
+! exists a.lgo
+exists next_tasks.json
+rm next_tasks.json
+
+# An existing plan carrying a field the format does not know is refused:
+# merging would drop that field, so --fix reports an error, emits no patch
+# bytes, and leaves every byte of source and plan untouched.
+cp ../extra/plan-unknown-field.json next_tasks.json
+cp next_tasks.json $WORK/plan-unknown.before
+! logos next --fix
+! stdout '.'
+stderr '.'
+cmp a.go $WORK/a.orig
+cmp next_tasks.json $WORK/plan-unknown.before
+! exists a.lgo
+rm next_tasks.json
+
+# A malformed (truncated) existing plan is refused the same way: the
+# command fails, stdout stays empty, and no file changes.
+cp ../extra/plan-truncated.json next_tasks.json
+cp next_tasks.json $WORK/plan-truncated.before
+! logos next --fix
+! stdout '.'
+stderr '.'
+cmp a.go $WORK/a.orig
+cmp next_tasks.json $WORK/plan-truncated.before
+! exists a.lgo
+rm next_tasks.json
+
+# Overlay bytes cannot authorize saved-file updates.
+env GOFLAGS=-overlay=../extra/overlay.json
+! logos next --fix
+stderr 'overlay'
+cmp a.go $WORK/a.orig
+! exists a.lgo
+! exists next_tasks.json
+
+-- m/go.mod --
+module example.com/nextreject
+
+go 1.27
+-- m/a.go --
+package sample
+
+import "strconv"
+
+func Parse(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+-- m/tests/z_test.go --
+package tests
+
+import "testing"
+
+func oldNil() *int { return nil }
+
+func TestOldNil(t *testing.T) {
+	if oldNil() != nil {
+		t.Fatal("expected nil")
+	}
+}
+-- extra/skipped.go --
+//go:build ignore
+
+package sample
+-- extra/overlay.json --
+{"Replace":{"a.go":"../extra/virtual.go"}}
+-- extra/virtual.go --
+package sample
+
+func Parse(s string) (int, error) { return len(s), nil }
+-- extra/plan-unknown-field.json --
+{
+  "version": "logos-next-1",
+  "tasks": [],
+  "foreign_field": true
+}
+-- extra/plan-truncated.json --
+{
+  "version": "logos-next-1",
+  "tasks": [
+-- extra/go.mod.replace --
+module example.com/nextreject
+
+go 1.27
+
+require example.com/nextreject/dep v0.0.0
+
+replace example.com/nextreject/dep => ../dep
+-- extra/a.go.dep --
+package sample
+
+import (
+	"strconv"
+
+	"example.com/nextreject/dep"
+)
+
+func Parse(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, err
+	}
+	dep.Ping()
+	return n, nil
+}
+-- depmod/go.mod --
+module example.com/nextreject/dep
+
+go 1.27
+-- depmod/dep.go --
+package dep
+
+func Ping() {}

@@ -5,21 +5,27 @@
 package json
 
 import (
+	"bytes"
 	"comptime"
 	stdjson "encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"io"
 
 	"logos/json/internal/compact"
+	"logos/json/internal/stream"
 )
 
 // Marshal returns the JSON encoding of v. For a value-struct type
-// with a generated or hand-written MarshalJSON method it calls that
+// with a generated or hand-written marshal method it calls that
 // method directly through a comptime interface case, with no value
-// boxing, and runs the result through the same compact-and-escape pass
-// the original applies. Every other value, including nil pointers and
-// interfaces, goes through encoding/json, so output bytes equal the
-// original on the same inputs (a nil pointer marshals as null, never
-// panics).
+// boxing, preferring the streaming MarshalJSONTo over MarshalJSON the
+// way encoding/json does under JSONv2. The result runs through the
+// same compact-and-escape pass the original applies and is copied, so
+// the caller owns the returned slice. Every other value, including nil
+// pointers and interfaces, goes through encoding/json, so output bytes
+// equal the original on the same inputs (a nil pointer marshals as
+// null, never panics).
 //
 // Failure path: when the method returns an error, or when its output
 // is not valid JSON, the twin delegates the whole value to
@@ -29,6 +35,16 @@ import (
 func Marshal[T any](v T) ([]byte, error) {
 	const if comptime.IsStruct[T]() {
 		const switch T {
+		case jsonv2.MarshalerTo:
+			var buf bytes.Buffer
+			if err := v.MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+				return stdjson.Marshal(v)
+			}
+			out, cerr := compact.Escaped(buf.Bytes())
+			if cerr != nil {
+				return stdjson.Marshal(v)
+			}
+			return append([]byte(nil), out...), nil
 		case stdjson.Marshaler:
 			b, err := v.MarshalJSON()
 			if err != nil {
@@ -38,20 +54,44 @@ func Marshal[T any](v T) ([]byte, error) {
 			if cerr != nil {
 				return stdjson.Marshal(v)
 			}
-			return out, nil
+			return append([]byte(nil), out...), nil
 		}
 	}
 	return stdjson.Marshal(v)
 }
 
 // Unmarshal parses data into a value of type T and returns it. For a
-// struct type with a generated or hand-written UnmarshalJSON method it
-// calls that method. Every other type goes through encoding/json, so
-// results and error values equal the original on the same inputs.
+// struct type with a generated or hand-written unmarshal method it
+// calls that method, preferring the streaming UnmarshalJSONFrom over
+// UnmarshalJSON the way encoding/json does under JSONv2. The input is
+// validated as a whole first, and the method receives only the JSON
+// value without surrounding space, matching the standard dispatch.
+// Every other type goes through encoding/json, so results and error
+// values equal the original on the same inputs.
 func Unmarshal[T any](data []byte) (T, error) {
 	var v T
+	if u, ok := any(&v).(jsonv2.UnmarshalerFrom); ok {
+		val, valid := compact.Trimmed(data)
+		if !valid {
+			err := stdjson.Unmarshal(data, &v)
+			return v, err
+		}
+		declined, err := stream.FromValue(u, val)
+		if err != nil {
+			return v, err
+		}
+		if !declined {
+			return v, nil
+		}
+		// The method declined without reading; try the next decoder.
+	}
 	if u, ok := any(&v).(stdjson.Unmarshaler); ok {
-		err := u.UnmarshalJSON(data)
+		val, valid := compact.Trimmed(data)
+		if !valid {
+			err := stdjson.Unmarshal(data, &v)
+			return v, err
+		}
+		err := u.UnmarshalJSON(val)
 		return v, err
 	}
 	err := stdjson.Unmarshal(data, &v)
@@ -59,26 +99,31 @@ func Unmarshal[T any](data []byte) (T, error) {
 }
 
 // MarshalWrite marshals in and writes the bytes to out in one Write
-// call. Value-struct types take the same generated-method path as
-// Marshal; every other value goes through encoding/json. A method
-// failure delegates to encoding/json the same way Marshal does, so the
-// returned error is the original's.
+// call. Value-struct types take the same method path as Marshal;
+// every other value goes through encoding/json. When the method path
+// fails, the fallback's bytes are written when its marshal succeeds,
+// so a successful fallback is never reported without output.
 func MarshalWrite[T any](out io.Writer, in T) error {
 	const if comptime.IsStruct[T]() {
 		const switch T {
+		case jsonv2.MarshalerTo:
+			var buf bytes.Buffer
+			if err := in.MarshalJSONTo(jsontext.NewEncoder(&buf)); err == nil {
+				eb, cerr := compact.Escaped(buf.Bytes())
+				if cerr == nil {
+					_, werr := out.Write(eb)
+					return werr
+				}
+			}
 		case stdjson.Marshaler:
 			b, err := in.MarshalJSON()
-			if err != nil {
-				_, merr := stdjson.Marshal(in)
-				return merr
+			if err == nil {
+				eb, cerr := compact.Escaped(b)
+				if cerr == nil {
+					_, werr := out.Write(eb)
+					return werr
+				}
 			}
-			eb, cerr := compact.Escaped(b)
-			if cerr != nil {
-				_, merr := stdjson.Marshal(in)
-				return merr
-			}
-			_, err = out.Write(eb)
-			return err
 		}
 	}
 	b, err := stdjson.Marshal(in)
@@ -88,3 +133,4 @@ func MarshalWrite[T any](out io.Writer, in T) error {
 	_, err = out.Write(b)
 	return err
 }
+

@@ -1,0 +1,54 @@
+// run
+
+package jsonunion
+
+import (
+	"encoding/json"
+	"errors"
+	"testing"
+
+	"logos/rt"
+)
+
+// A tagged holder over a union whose members have no json tags, defaults, or
+// non-nil pointer fields: such members get no generated UnmarshalJSON, so a
+// tagged holder cannot decode them and must be rejected at type check time.
+// An untagged holder that a field default makes decode-eligible must instead
+// leave such a member untriable, so it builds and decoding runs no trial on it.
+
+type PlainLeaf struct{ S string }
+
+type PlainGroup struct{ Kids []PlainLeaf }
+
+type PlainNode interface{ PlainLeaf | PlainGroup }
+
+type PlainUntaggedHolder struct {
+	Body   PlainNode
+	Status int = 200
+}
+
+func TestPlainUntaggedHolderBuildsAndRunsNoTrial(t *testing.T) {
+	h := PlainUntaggedHolder{}
+	if h.Status != 200 {
+		t.Fatalf("default Status = %d, want 200", h.Status)
+	}
+	err := json.Unmarshal([]byte(`{"Body":{"S":"x"}}`), &h)
+	if err == nil {
+		t.Fatal("expected a union trial error, got nil")
+		return
+	}
+	var trialErr rt.UnionTrialError
+	if !errors.As(err, &trialErr) {
+		t.Fatalf("expected rt.UnionTrialError, got %T: %v", err, err)
+		return
+	}
+	if trialErr.Matched != 0 {
+		t.Fatalf("a member without UnmarshalJSON counted %d matches, want 0", trialErr.Matched)
+	}
+	if trialErr.Total != 2 {
+		t.Fatalf("Total = %d, want 2", trialErr.Total)
+	}
+	if h.Body != nil {
+		t.Fatalf("expected nil Body after a failed trial, got %#v", h.Body)
+	}
+}

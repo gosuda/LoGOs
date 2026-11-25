@@ -1,0 +1,19 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Cfg struct {
+	Host string
+	Port int
+}
+
+func loop() int {
+	for {
+		const for _, f := range comptime.Fields[Cfg]() {
+			_ = f.Name
+			break
+		}
+	}
+} // ERROR "missing return"

@@ -2,19 +2,27 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 
 cd w
-# The defining package fails on the unexported identifiers its exported
-# comptime generic names; the importer must never see undefined: names.
-! logos build ./...
-stderr 'comptime::unexported_in_exported'
-stderr 'unexported type named'
-stderr 'unexported func collect'
-! stderr 'undefined: app'
+# A comptime generic may name the unexported identifiers of its own
+# package. Each instance is checked in the scope of the defining package,
+# so an instantiation in another package builds and runs, and no
+# undefined: name or refusal appears (SPEC 2.5, T-205).
+logos build ./...
+! stderr .
+logos run ./main
+stdout '^2$'
 
 cd ../m
-# Package main cannot be imported, so its exported comptime generic may
-# name an unexported function of the package; the program runs.
+# Package main instantiates its own exported comptime generic, which
+# names an unexported function of the package; the program runs.
 logos run .
 stdout '^2$'
+cd ../x
+# The issue's exact shape: an external test package instantiates the
+# generic with a field-type argument and a field projection. The external
+# test package is another package, and its instantiation builds and runs.
+logos build ./...
+logos test ./...
+stdout '^ok\s+example.com/x/app'
 
 -- w/go.mod --
 module example.com/cfrepro
@@ -31,7 +39,7 @@ type named struct {
 }
 
 func collect[F any](parts []named, name string, field F) []named {
-	return parts
+	return append(parts, named{name: name})
 }
 
 func Run[T any](root *T) int {
@@ -92,4 +100,45 @@ func Load[T any]() int {
 
 func main() {
 	fmt.Println(Load[pair]())
+}
+
+-- x/go.mod --
+module example.com/x
+
+go 1.27
+
+-- x/app/app.lgo --
+package app
+
+import "comptime"
+
+type named struct{ name string }
+
+func collect[F any](parts []named, name string, field F) []named {
+	return append(parts, named{name: name})
+}
+
+func Run[T any](root *T) int {
+	var parts []named
+	const for _, f := range comptime.Fields[T]() {
+		parts = collect[f.Type](parts, f.Name, root.[f])
+	}
+	return len(parts)
+}
+
+-- x/app/app_test.lgo --
+package app_test
+
+import (
+	"testing"
+
+	"example.com/x/app"
+)
+
+type root struct{ A int }
+
+func TestRun(t *testing.T) {
+	if n := app.Run[root](&root{}); n != 1 {
+		t.Fatalf("Run = %d, want 1", n)
+	}
 }

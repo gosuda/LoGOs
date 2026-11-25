@@ -4,7 +4,11 @@
 
 package p
 
-import "strings"
+import (
+	"errors"
+	"net/http"
+	"strings"
+)
 
 type User struct {
 	Name   string
@@ -74,6 +78,26 @@ func nilInit(q *User) {
 
 func nilReturn() *User {
 	return nil /* ERROR "[correctness::nil_to_nonnil] cannot assign nil to non-nil *User" */
+}
+
+func nilPairReturn() (*User, error) {
+	return nil /* ERROR "[correctness::nil_to_nonnil] cannot assign nil to non-nil *User" */, nil
+}
+
+type gateway struct{}
+
+func (gateway) Fetch() (*Inner, error) {
+	return nil /* ERROR "[correctness::nil_to_nonnil] cannot assign nil to non-nil *Inner" */, nil
+}
+
+func (gateway) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{}, errors.New("transport failed")
+}
+
+var _ http.RoundTripper = gateway{}
+
+func okPairReturn() (*Inner, error) {
+	return &Inner{X: 1}, nil
 }
 
 func nilElem() {

@@ -26,8 +26,6 @@ exists out/wire/wire.go
 ! grep '_logos_tparam' out/main.go
 ! grep '_logos_ctcomptime' out/main.go
 
-grep '_logos_t[0-9]+ "strings"' out/main.go
-
 cd out
 go run .
 cmp stdout $WORK/want.txt

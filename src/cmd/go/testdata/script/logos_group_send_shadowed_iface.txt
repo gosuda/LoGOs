@@ -1,0 +1,69 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A group-child send of a value whose type is an anonymous interface
+# with unexported methods from another package keeps inference: spelling
+# the element type in the caller's package would name a different type,
+# because unexported method identities include their declaring package.
+cd good
+logos run .
+stdout '^ok true$'
+logos eject -o out
+cd out
+go run .
+stdout '^ok true$'
+
+-- good/go.mod --
+module example.com/groupsendiface
+
+go 1.27
+-- good/lib/lib.lgo --
+package lib
+
+import "context"
+
+type impl struct{ n int }
+
+func (impl) hidden() {}
+
+func Channel() chan interface{ hidden() } {
+	return make(chan interface{ hidden() }, 1)
+}
+
+func Value() interface{ hidden() } {
+	return impl{n: 3}
+}
+
+func Take(ctx context.Context, ch chan interface{ hidden() }) bool {
+	select {
+	case v := <-ch:
+		return v != nil
+	case <-ctx.Done():
+		return false
+	}
+}
+-- good/main.lgo --
+package main
+
+import (
+	"context"
+	"example.com/groupsendiface/lib"
+	"fmt"
+)
+
+func run(ctx context.Context) error {
+	ch := lib.Channel()
+	go group (ctx) {
+		go {
+			ch <- lib.Value()
+		}
+	}
+	fmt.Println("ok", lib.Take(ctx, ch))
+	return nil
+}
+
+func main() {
+	if err := run(context.Background()); err != nil {
+		fmt.Println("err:", err)
+	}
+}

@@ -1,0 +1,89 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+
+# An imported union with a Go decoder trials it when the holder imports the
+# member package: the timestamp decodes into time.Time.
+logos run ./with
+stdout '^with ok 2026-01-01$'
+
+# Without that import the member stays untriable and valid input reports
+# zero matches.
+! logos run ./without
+stdout '0 of 2 members matched'
+
+-- w/go.mod --
+module example.com/impdec
+
+go 1.27
+
+-- w/u/u.lgo --
+package u
+
+import "time"
+
+type Plain struct {
+	R float64
+}
+
+type MixedNode interface {
+	time.Time | Plain
+}
+
+-- w/with/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"time"
+
+	"example.com/impdec/u"
+)
+
+type WithHolder struct {
+	Body   u.MixedNode
+	Status int = 200
+}
+
+func main() {
+	var h WithHolder
+	if err := json.Unmarshal([]byte(`{"Body":"2026-01-01T00:00:00Z"}`), &h); err != nil {
+		fmt.Println("decode error:", err)
+		os.Exit(1)
+	}
+	t, ok := h.Body.(time.Time)
+	if !ok {
+		fmt.Printf("wrong member %T %+v\n", h.Body, h.Body)
+		os.Exit(1)
+	}
+	fmt.Println("with ok", t.Format("2006-01-02"))
+}
+
+-- w/without/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"example.com/impdec/u"
+)
+
+type WithoutHolder struct {
+	Body   u.MixedNode
+	Status int = 200
+}
+
+func main() {
+	var h WithoutHolder
+	if err := json.Unmarshal([]byte(`{"Body":"2026-01-01T00:00:00Z"}`), &h); err != nil {
+		fmt.Println("decode error:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("unexpected ok %T %+v\n", h.Body, h.Body)
+	os.Exit(2)
+}

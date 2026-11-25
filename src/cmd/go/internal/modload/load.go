@@ -1887,7 +1887,7 @@ func (pld *packageLoader) load(ld *Loader, ctx context.Context, pkg *loadPkg) {
 		// We can't scan standard packages for gccgo.
 	} else {
 		var err error
-		imports, testImports, err = scanDir(modroot, pkg.dir, pld.Tags)
+		imports, testImports, err = scanDir(modroot, pkg.dir, logosScanTags(pkg.path, pld.Tags))
 		if err != nil {
 			pkg.err = err
 			return

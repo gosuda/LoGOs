@@ -41,10 +41,10 @@ jobs:
   logos:
     name: "${{ matrix.suite }}"
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: "${{ matrix.suite == 'scripts' && 'ubuntu-24.04' || 'ubuntu-26.04' }}"
+    runs-on: "${{ matrix.suite == 'upstream' && 'ubuntu-26.04' || 'depot-ubuntu-24.04' }}"
     timeout-minutes: "${{ matrix.suite == 'scripts' && 180 || 90 }}"
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         # Share one toolchain build across the shorter suites.
         suite: ["unit", "scripts", "upstream", "autovec"]

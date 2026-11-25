@@ -1,0 +1,24 @@
+// errorcheck
+
+package p
+
+func assertConstTypeParam[T ~int](v const T) {
+	if _, ok := v.(int); ok { // ERROR "cannot use type assertion on type parameter value"
+	}
+}
+
+func switchConstTypeParam[T ~int](v const T) string {
+	switch v.(type) { // ERROR "cannot use type switch on type parameter value"
+	case int:
+		return "int"
+	default:
+		return "other"
+	}
+}
+
+func exprConstTypeParam[T ~int](v const T) string {
+	return switch v.(type) { // ERROR "cannot use type switch on type parameter value"
+	case int => "int"
+	default => "other"
+	}
+}

@@ -1,0 +1,6 @@
+ok block lambda seq
+ok block lambda seq2
+ok early return
+ok returned lambda
+ok generator body is lazy
+ok early break stops body

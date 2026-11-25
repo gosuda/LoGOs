@@ -43,6 +43,10 @@ func TestMSAN(t *testing.T) {
 	cases := []struct {
 		src     string
 		wantErr bool
+		// msanError names the sanitizer report the binary must print.
+		// A crash without it (for example a panic on uninitialized
+		// garbage) does not count as an MSan failure.
+		msanError string
 	}{
 		{src: "msan.go"},
 		{src: "msan2.go"},
@@ -53,7 +57,10 @@ func TestMSAN(t *testing.T) {
 		{src: "msan6.go"},
 		{src: "msan7.go"},
 		{src: "msan8.go"},
+		{src: "msan_eq.go"},
+		{src: "msan_eq_fail.go", wantErr: true, msanError: "use-of-uninitialized-value"},
 		{src: "msan_fail.go", wantErr: true},
+		{src: "msan_eq_fail.go", wantErr: true},
 	}
 	for _, tc := range cases {
 		name := strings.TrimSuffix(tc.src, ".go")
@@ -69,10 +76,13 @@ func TestMSAN(t *testing.T) {
 			cmd := hangProneCmd(outPath)
 			if tc.wantErr {
 				out, err := cmd.CombinedOutput()
-				if err != nil {
-					return
+				if err == nil {
+					t.Fatalf("%#q exited without error; want MSAN failure\n%s", cmd, out)
 				}
-				t.Fatalf("%#q exited without error; want MSAN failure\n%s", cmd, out)
+				if tc.msanError != "" && !strings.Contains(string(out), tc.msanError) {
+					t.Fatalf("%#q exited without expected MSan error\n%s; got failure\n%s", cmd, tc.msanError, out)
+				}
+				return
 			}
 			mustRun(t, cmd)
 		})

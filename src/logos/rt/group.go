@@ -10,8 +10,9 @@ import (
 )
 
 // Group is a bound set of goroutines. Build it with NewGroup, spawn
-// children with Go, and join them with Wait.
+// children with Go, and join them with Wait or WaitContext.
 type Group struct {
+	monitor    monitorState
 	ctx        context.Context
 	cancel     context.CancelFunc
 	sem        chan struct{}
@@ -49,13 +50,13 @@ func (e *PanicError) Error() string {
 // wake, until Wait has joined them all.
 func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 	c, cancel := context.WithCancel(ctx)
-	slot := logosGroupAcquire()
-	done := make(chan struct{})
-	stop := context.AfterFunc(ctx, func() {
-		logosCancelGroup(slot)
-		close(done)
+	g := &Group{ctx: c, cancel: cancel, slot: logosGroupAcquire(), parentDone: make(chan struct{})}
+	monitorCreated(g, limit)
+	g.parentStop = context.AfterFunc(ctx, func() {
+		logosCancelGroup(g.slot)
+		monitorCancelled(g)
+		close(g.parentDone)
 	})
-	g := &Group{ctx: c, cancel: cancel, slot: slot, parentStop: stop, parentDone: done}
 	g.cond.L = &g.mu
 	if limit > 0 {
 		g.sem = make(chan struct{}, limit)
@@ -74,7 +75,7 @@ func NewGroup(ctx context.Context, limit int) (*Group, context.Context) {
 func (g *Group) Go(f func(context.Context) error) {
 	g.register()
 	g.acquire()
-	go g.run(f)
+	go g.run(monitored(g, f))
 }
 
 // GoNested spawns f as a child from a goroutine that is itself a child
@@ -83,6 +84,7 @@ func (g *Group) Go(f func(context.Context) error) {
 // does not wait for the slot it holds.
 func (g *Group) GoNested(f func(context.Context) error) {
 	g.register()
+	f = monitored(g, f)
 	go func() {
 		g.acquire()
 		g.run(f)
@@ -128,6 +130,7 @@ func (g *Group) fail(err error) {
 		g.first = err
 		g.cancel()
 		logosCancelGroup(g.slot)
+		monitorCancelled(g)
 	}
 }
 
@@ -138,6 +141,21 @@ func (g *Group) childDone() {
 	if g.live == 0 {
 		g.cond.Broadcast()
 	}
+}
+
+// finishJoin releases the runtime slot, cancels the child context, and
+// reports the first child error or panic. The caller holds no lock and
+// has already marked the join complete.
+func (g *Group) finishJoin() error {
+	if !g.parentStop() {
+		<-g.parentDone
+	}
+	monitorJoined(g)
+	logosGroupRelease(g.slot)
+	g.cancel()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.first
 }
 
 // Wait joins every child, cancels the child context, and reports the
@@ -158,12 +176,40 @@ func (g *Group) Wait() error {
 	}
 	g.joined = true
 	g.mu.Unlock()
-	if !g.parentStop() {
-		<-g.parentDone
-	}
-	logosGroupRelease(g.slot)
-	g.cancel()
+	return g.finishJoin()
+}
+
+// WaitContext joins every child and reports what Wait would report. If
+// ctx ends first, it stops waiting and returns ctx.Err(): the children
+// keep running under the group context, the slot stays with the group,
+// and a later Wait completes the join. A WaitContext that runs to
+// completion joins like Wait, and any Wait or WaitContext after a
+// completed join panics with "logos: Group.Wait called twice".
+func (g *Group) WaitContext(ctx context.Context) error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.first
+	if g.waited {
+		g.mu.Unlock()
+		panic("logos: Group.Wait called twice")
+	}
+	g.waited = true
+	g.live--
+	stop := context.AfterFunc(ctx, func() {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.cond.Broadcast()
+	})
+	for g.live > 0 {
+		if ctx.Err() != nil {
+			g.live++
+			g.waited = false
+			g.mu.Unlock()
+			stop()
+			return ctx.Err()
+		}
+		g.cond.Wait()
+	}
+	g.joined = true
+	g.mu.Unlock()
+	stop()
+	return g.finishJoin()
 }

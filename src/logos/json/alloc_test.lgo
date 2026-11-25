@@ -28,8 +28,20 @@ func twinWantAllocs(t *testing.T, want int, f func()) {
 
 func TestTwinAllocs(t *testing.T) {
 	p := twinPerson{Name: "ann", Age: 7, Bio: "x"}
-	twinWantAllocs(t, 1, func() {
+	// One alloc for the method's own output, one for the copy that
+	// keeps caller ownership equal to encoding/json.
+	twinWantAllocs(t, 2, func() {
 		b, err := twinjson.Marshal(p)
+		if err != nil {
+			return
+		}
+		twinSink = b
+	})
+	// A space inside a string value is significant and stays on the
+	// clean path; it must not push the marshal through Compact's buffer.
+	spaced := twinPerson{Name: "ann", Age: 7, Bio: "hello world"}
+	twinWantAllocs(t, 2, func() {
+		b, err := twinjson.Marshal(spaced)
 		if err != nil {
 			return
 		}

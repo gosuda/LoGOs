@@ -22,13 +22,13 @@ This skill edits tracked text files and rebuilds `bin/`. It never edits `src/ven
    Done when the newest stable release, its date, its support state, and its advisory result are written down. When a source is unreachable, mark that item unconfirmed and continue. When an applicable unresolved critical advisory affects the release, report the blocked release and the advisory identifier and stop.
 2. Find the stale mentions. With `n` set to `VERSION` line 1 without `go`, run from the checkout root:
    - `rg -n 'forkVersionPin|upstreamVersionPin' src/cmd/internal/goparity/parity_test.go`
-   - `rg -n 'is known to work' README.md`
+   - `rg -n 'go1\.[0-9]+\.[0-9]+|1\.[0-9]+\.[0-9]+' README.md`
    - `rg -n 'Base: Go|fork of Go|current compiler base|Go baseline: the tree' AGENTS.md logos-doc/SPEC.md logos-doc/IMPLEMENTATION.md`
    - `rg -n 'go1\.[0-9]+\.[0-9]+|"1\.[0-9]+\.[0-9]+"' .github`
    Done when every hit is classed as a baseline site (step 3), a floor or oracle (step 4), or evidence (step 4).
 3. Set the baseline sites to `n`:
    - `src/cmd/internal/goparity/parity_test.go`: `forkVersionPin` and `upstreamVersionPin`. Before you raise `upstreamVersionPin`, run the audit its failure message names (`git diff --stat <old tag> <new oracle tag> -- src test`) and read the result.
-   - `README.md`: the bootstrap sentence `Go N is known to work` (true only after a `make.bash` run with that Go) and the sample outputs of `logos version` and `go version`.
+   - `README.md`: the opening `fork of the Go N` declaration, the build sentence `with Bash and an upstream Go N installation`, the `logos version` sample output, the `CI bootstraps the fork with upstream Go N` note, and the `logos eject` sentence `upstream Go N or newer` (it tracks the baseline, not the ejection floor).
    - `AGENTS.md`: the first sentence `fork of Go N`.
    - `logos-doc/SPEC.md`: the header `Base: Go N` and sections 0.1 and 18.1.
    - `logos-doc/IMPLEMENTATION.md`: the G2 baseline line, `Base: Go N` and `fork of Go N` in slice texts, and the compiler-base sentences. State version assertions as the `$GOROOT/VERSION` text, because `src/cmd/go/testdata/script/logos_command.txt` compares against `$GOROOT/VERSION` and not a literal.
@@ -36,7 +36,7 @@ This skill edits tracked text files and rebuilds `bin/`. It never edits `src/ven
    Done when the drift check of step 2 shows no baseline site naming another release.
 4. Leave these alone:
    - `go 1.27` in `src/go.mod` and `src/cmd/go.mod`, and the default `"1.27"` in `goVersionOf` (`src/cmd/go/internal/logos/eject/eject.go`): the language line, not a patch pin.
-   - The ejected-code floor (SPEC 0.3), `UPROOT1272` and `UPROOT1273`, and their checksum rows in `.github/scripts/install-upstream-oracles.sh` and `.github/workflows/cgo.yml`: ejection oracles that stay old on purpose.
+   - The ejected-code floor of Go 1.27.2 (SPEC 0.3) — `UPROOT1272` and `UPROOT1273`, and their checksum rows in `.github/scripts/install-upstream-oracles.sh` and `.github/workflows/cgo.yml`: ejection oracles that stay old on purpose.
    - Dated tables, `logos-doc/REDTEAM.md`, `logos-doc/validation/**`, `logos-doc/measurements/**`, and tool facts such as the Go version a linter was built with.
    Done when no edit touches these.
 5. Rebuild and reinstall. Run only when no test or build job uses `bin/`, because `make.bash` rewrites `bin/` and `pkg/tool/`.

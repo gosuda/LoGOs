@@ -141,6 +141,7 @@ func (s *groupStage[S, R, D]) start(ctx context.Context, yield func(R, error) bo
 	s.yield = yield
 	segCtx, cancel := context.WithCancel(ctx)
 	g, gctx := NewGroup(segCtx, 0)
+	monitorBounded(g)
 	s.g, s.cancel, s.gdone = g, cancel, gctx.Done()
 	s.wake = make(chan struct{}, 1)
 	s.cond.L = &s.mu

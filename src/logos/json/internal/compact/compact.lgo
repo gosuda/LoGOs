@@ -53,19 +53,77 @@ func Escaped(src []byte) ([]byte, error) {
 }
 
 // clean reports whether src can contain neither insignificant space
-// nor a byte the escape pass would rewrite.
+// nor a byte the escape pass would rewrite. Space inside a quoted
+// string is significant and survives compaction, so only space
+// outside strings disqualifies the input; the HTML metacharacters and
+// U+2028/U+2029 are rewritten wherever they appear.
 func clean(b []byte) bool {
+	inStr, esc := false, false
 	for i := 0; i < len(b); i++ {
 		c := b[i]
-		if c == ' ' || c == '\t' || c == '\r' || c == '\n' ||
-			c == '<' || c == '>' || c == '&' {
-			return false
+		if esc {
+			esc = false
+			continue
+		}
+		if inStr {
+			switch c {
+			case '\\':
+				esc = true
+			case '"':
+				inStr = false
+			case '<', '>', '&':
+				return false
+			}
+		} else {
+			switch c {
+			case '"':
+				inStr = true
+			case ' ', '\t', '\r', '\n', '<', '>', '&':
+				return false
+			}
 		}
 		if c == 0xE2 && i+2 < len(b) && b[i+1] == 0x80 && b[i+2]&^1 == 0xA8 {
 			return false
 		}
 	}
 	return true
+}
+
+// Trimmed returns data without surrounding JSON space and whether the
+// document is valid JSON. valid=false means the caller should delegate
+// to encoding/json for the real error. Exported because a comptime
+// generic cannot name an unexported function of its own package.
+func Trimmed(data []byte) (val []byte, valid bool) {
+	if !stdjson.Valid(data) {
+		return nil, false
+	}
+	start := 0
+	for start < len(data) && isSpace(data[start]) {
+		start++
+	}
+	end := len(data)
+	for end > start && isSpace(data[end-1]) {
+		end--
+	}
+	return data[start:end], true
+}
+
+// IsNull reports whether data is the `null` literal, ignoring
+// surrounding JSON space.
+func IsNull(data []byte) bool {
+	start := 0
+	for start < len(data) && isSpace(data[start]) {
+		start++
+	}
+	end := len(data)
+	for end > start && isSpace(data[end-1]) {
+		end--
+	}
+	return end-start == 4 && data[start] == 'n' && data[start+1] == 'u' && data[start+2] == 'l' && data[start+3] == 'l'
+}
+
+func isSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
 }
 
 func needsEscape(b []byte) bool {

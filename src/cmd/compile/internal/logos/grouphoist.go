@@ -154,17 +154,9 @@ func (h *groupHoist) expr(e syntax.Expr) syntax.Expr {
 	return e
 }
 
-func (h *groupHoist) valueTemp(pos syntax.Pos, like syntax.Expr, tmp string, value syntax.Expr, valueText otext) ([]syntax.Stmt, []otext) {
-	fl := h.fc.fl
-	if typ := fl.pkg.info.TypeOf(like); typ != nil {
-		if native, spelled, ok := fl.spellTypeBoth(types2.Default(typ), pos); ok {
-			return []syntax.Stmt{
-					typedVarDecl(pos, nameOf(pos, tmp), native),
-					assignOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{value}),
-				},
-				[]otext{gen("var " + tmp + " " + spelled), cat(gen(tmp+" = "), valueText)}
-		}
-	}
+func (h *groupHoist) valueTemp(pos syntax.Pos, _ syntax.Expr, tmp string, value syntax.Expr, valueText otext) ([]syntax.Stmt, []otext) {
+	// `:=` infers the temporary's type from the operand, so no spelled type
+	// name is re-resolved in a scope where a local declaration may shadow it.
 	return []syntax.Stmt{defineOf(pos, []syntax.Expr{nameOf(pos, tmp)}, []syntax.Expr{value})},
 		[]otext{cat(gen(tmp+" := "), valueText)}
 }
@@ -191,7 +183,9 @@ func (h *groupHoist) channel(op *syntax.Operation) (syntax.Expr, otext, types2.T
 		nch = h.expr(ch)
 		fc.hoistSubEmit(fc.hoistSubTake(mark))
 	}
-	chText := fl.textOf(chSpan)
+	// A lazy copy: interpolation is lowered last, so an eager copy would
+	// keep the unlowered interpolation in the ejected channel text.
+	chText := fl.lazyText(chSpan)
 	return nch, chText, elemT
 }
 
@@ -454,8 +448,7 @@ func (fc *funcLower) groupHoistSend(s *syntax.SendStmt, top groupFrame) []syntax
 	fl := fc.fl
 	scanForLiterals(fl, s)
 	h := fc.newGroupHoist(top, fc.groupStmtStart(s))
-	sel, text, sp := h.send(s)
-	h.add([]syntax.Stmt{sel}, text)
+	sp := h.send(s)
 	fl.addT(sp.start, sp.end, joinO(h.text, "\n"))
 	return h.native
 }
@@ -618,4 +611,95 @@ func (fl *fileLower) groupBalanced(from, start, end int) span {
 		return true
 	})
 	return span{start: start, end: end}
+}
+
+func groupNativeHasRecv(nodes ...syntax.Node) bool {
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		found := false
+		syntax.Inspect(node, func(n syntax.Node) bool {
+			if found {
+				return false
+			}
+			switch n := n.(type) {
+			case *syntax.FuncLit, *syntax.LambdaExpr:
+				return false
+			case *syntax.Operation:
+				found = n.Op == syntax.Recv && n.Y == nil
+			}
+			return !found
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func (w ctWalker) groupLvalueSlots(e syntax.Expr) []*syntax.Expr {
+	info := w.fl.pkg.info
+	switch n := syntax.Unparen(e).(type) {
+	case *syntax.IndexExpr:
+		if t := info.TypeOf(n.X); t != nil {
+			if _, array := types2.CoreType(t).(*types2.Array); array {
+				return append(w.groupLvalueSlots(n.X), &n.Index)
+			}
+		}
+		return []*syntax.Expr{&n.X, &n.Index}
+	case *syntax.SelectorExpr:
+		if t := info.TypeOf(n.X); t != nil {
+			if _, tuple := compositeUnderlying(t).(*types2.LogosTuple); tuple {
+				n.Sel.Value = tupleSelectionName(t, n.Sel.Value)
+				return w.groupLvalueSlots(n.X)
+			}
+			if _, value := types2.CoreType(t).(*types2.Struct); value {
+				return w.groupLvalueSlots(n.X)
+			}
+		}
+		return []*syntax.Expr{&n.X}
+	case *syntax.Operation:
+		if n.Y == nil && n.Op == syntax.Mul {
+			return []*syntax.Expr{&n.X}
+		}
+	}
+	return nil
+}
+
+func (w ctWalker) groupAssign(s *syntax.AssignStmt) ([]syntax.Stmt, bool) {
+	lhs := syntax.UnpackListExpr(s.Lhs)
+	if len(lhs) != 2 || s.Rhs == nil {
+		return nil, false
+	}
+	value, setup, ok := w.groupReceive(s.Rhs, 2)
+	if !ok {
+		return nil, false
+	}
+	var slots []*syntax.Expr
+	if s.Op != syntax.Def {
+		for _, target := range lhs {
+			slots = append(slots, w.groupLvalueSlots(target)...)
+		}
+	}
+	var pre []syntax.Stmt
+	for _, slot := range slots {
+		original := *slot
+		lowered, steps := w.expr(original)
+		pre = append(pre, steps...)
+		*slot = lowered
+		if hold := w.hold(original, slot); hold != nil {
+			pre = append(pre, hold)
+		}
+	}
+	values := syntax.UnpackListExpr(value)
+	if tuple, ok := w.fl.pkg.info.TypeOf(s.Rhs).(*types2.Tuple); ok && tuple.Len() == len(values) {
+		for i, item := range values {
+			if typ := w.ctOptionTarget(s, s.Rhs, i); typ != nil {
+				values[i] = w.ctOptionValueFrom(item, tuple.At(i).Type(), typ)
+			}
+		}
+	}
+	s.Rhs = listOf(s.Pos(), values)
+	return append(pre, setup...), true
 }

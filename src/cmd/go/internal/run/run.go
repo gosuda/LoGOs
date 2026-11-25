@@ -8,7 +8,9 @@ package run
 import (
 	"context"
 	"go/build"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"cmd/go/internal/base"
@@ -75,6 +77,17 @@ func init() {
 }
 
 func runRun(ctx context.Context, cmd *base.Command, args []string) {
+	runProgram := runProgramActor(base.RunStdin)
+	if cfg.Logos && os.Getenv(base.ConcRunExitEnv) == "1" {
+		if err := os.Unsetenv(base.ConcRunExitEnv); err != nil {
+			base.Fatal(err)
+		}
+		cfg.OrigEnv = slices.DeleteFunc(cfg.OrigEnv, func(entry string) bool {
+			return strings.HasPrefix(entry, base.ConcRunExitEnv+"=")
+		})
+		runProgram = runProgramActor(base.RunStdinWithExitCode)
+	}
+
 	moduleLoader := modload.NewLoader()
 	if shouldUseOutsideModuleMode(args) {
 		// Set global module flags for 'go run cmd@version'.
@@ -173,7 +186,7 @@ func runRun(ctx context.Context, cmd *base.Command, args []string) {
 
 	a1 := b.LinkAction(moduleLoader, work.ModeBuild, work.ModeBuild, p)
 	a1.CacheExecutable = true
-	a := &work.Action{Mode: "go run", Actor: work.ActorFunc(buildRunProgram), Args: cmdArgs, Deps: []*work.Action{a1}}
+	a := &work.Action{Mode: "go run", Actor: runProgram, Args: cmdArgs, Deps: []*work.Action{a1}}
 	b.Do(ctx, a)
 }
 
@@ -199,9 +212,9 @@ func shouldUseOutsideModuleMode(args []string) bool {
 		!filepath.IsAbs(args[0])
 }
 
-// buildRunProgram is the action for running a binary that has already
-// been compiled. We ignore exit status.
-func buildRunProgram(b *work.Builder, ctx context.Context, a *work.Action) error {
+type runProgramActor func([]string)
+
+func (run runProgramActor) Act(b *work.Builder, _ context.Context, a *work.Action) error {
 	cmdline := str.StringList(work.FindExecCmd(), a.Deps[0].BuiltTarget(), a.Args)
 	if cfg.BuildN || cfg.BuildX {
 		b.Shell(a).ShowCmd("", "%s", strings.Join(cmdline, " "))
@@ -210,6 +223,6 @@ func buildRunProgram(b *work.Builder, ctx context.Context, a *work.Action) error
 		}
 	}
 
-	base.RunStdin(cmdline)
+	run(cmdline)
 	return nil
 }

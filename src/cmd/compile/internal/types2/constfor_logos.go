@@ -8,6 +8,7 @@ import (
 	"cmd/compile/internal/syntax"
 	"go/constant"
 	. "internal/types/errors"
+	"reflect"
 	"slices"
 )
 
@@ -18,24 +19,31 @@ type LogosConstFor struct {
 	IndexVar  *Var
 	Generic   bool
 	GoVersion string
+	// Term and Breaks record, per visible field in expansion order, the
+	// terminating and break verdict of the body under that field's
+	// predicate values, for the analysis in return.go. They stay empty
+	// for a generic const for, whose expansion is not yet known.
+	Term   []bool
+	Breaks []LogosConstForBreaks
+	// Iterations holds the reachable iterations, indexed by field
+	// declaration index; nil for skipped fields.
+	Iterations []*Info
 }
 
 type LogosCopyContext struct {
-	Scope      *Scope
-	Sig        *Signature
-	Version    string
-	Disqual    []map[string]bool
-	Funcs      []*Func
-	Aliases    map[*Package]string
-	MaxSteps   int
-	NodeLimit  int
-	Importer   Importer
-	Context    *Context
-	ConstFuncs map[string]LogosConstFunc
-	Bind       LogosTypeBindings
+	Scope     *Scope
+	Sig       *Signature
+	Version   string
+	Disqual   []map[string]bool
+	Aliases   map[*Package]string
+	MaxSteps  int
+	NodeLimit int
+	Importer  Importer
+	Context   *Context
+	Bind      LogosTypeBindings
 }
 
-func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]Error) *Checker {
+func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info) *Checker {
 	imp := ctx.Importer
 	if imp == nil && info != nil {
 		imp = info.LogosImporter
@@ -54,11 +62,7 @@ func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]E
 		Importer:           imp,
 		IgnoreBranchErrors: true,
 		LogosCTFEMaxSteps:  ctx.MaxSteps,
-		Error: func(err error) {
-			if e, ok := err.(Error); ok && !e.Soft && errs != nil {
-				*errs = append(*errs, e)
-			}
-		},
+		Error:              func(error) {},
 	}
 	conf.LogosComptimeNodeLimit = ctx.NodeLimit
 	if conf.LogosCTFEMaxSteps == 0 && info != nil {
@@ -67,45 +71,29 @@ func (ctx LogosCopyContext) logosCopyChecker(pkg *Package, info *Info, errs *[]E
 	mc := NewChecker(conf, pkg, info)
 	mc.version = asGoVersion(ctx.Version)
 	mc.logosCopy = true
-	mc.scope = NewScope(ctx.Scope, nopos, nopos, "logos copies")
-	for _, f := range ctx.Funcs {
-		mc.scope.Insert(f)
-	}
+	mc.scope = &Scope{parent: ctx.Scope, comment: "logos copies"}
 	for imported, alias := range ctx.Aliases {
 		mc.scope.Insert(NewPkgName(nopos, pkg, alias, imported))
 	}
+	mc.logosBindCopyTypes(ctx.Bind)
 	mc.sig = ctx.Sig
 	mc.logosDisqual = slices.Clone(ctx.Disqual)
-	mc.logosSeedConstFuncs(info, ctx.ConstFuncs)
+	mc.logosSeedConstFuncs(info)
 	return mc
 }
 
-func (check *Checker) logosSeedConstFuncs(info *Info, explicit map[string]LogosConstFunc) {
-	if len(explicit) == 0 && (info == nil || len(info.LogosConstFuncs) == 0) {
+func (check *Checker) logosSeedConstFuncs(info *Info) {
+	if info == nil || len(info.LogosConstFuncs) == 0 {
 		return
 	}
 	bodies, consts := check.logosConstFuncBodies()
-	seed := func(name string, rec LogosConstFunc) {
-		if rec.Decl == nil {
-			return
-		}
-		if _, dup := bodies[name]; !dup {
-			bodies[name] = rec.Decl
-		}
-		if rec.Const {
-			consts[rec.Decl] = true
-		}
-	}
-	if info != nil {
-		for name, rec := range info.LogosConstFuncs {
-			seed(name, rec)
-		}
-	}
-	for name, rec := range explicit {
+	for key, rec := range info.LogosConstFuncs {
 		if rec.Decl == nil {
 			continue
 		}
-		bodies[name] = rec.Decl
+		if _, dup := bodies[key]; !dup {
+			bodies[key] = rec.Decl
+		}
 		if rec.Const {
 			consts[rec.Decl] = true
 		}
@@ -122,55 +110,21 @@ func LogosCheckCopy(pkg *Package, info *Info, ctx LogosCopyContext, blocks []*sy
 	if ctx.Scope == nil || ctx.Sig == nil {
 		return
 	}
-	mc := ctx.logosCopyChecker(pkg, info, nil)
+	mc := ctx.logosCopyChecker(pkg, info)
 	for _, b := range blocks {
 		mc.stmt(0, b)
 	}
 	mc.logosCopyFinish()
 }
 
-func LogosCheckCopyFunc(pkg *Package, info *Info, ctx LogosCopyContext, fn *syntax.FuncDecl) (*Func, []Error) {
-	if ctx.Scope == nil || fn.Body == nil {
-		return nil, nil
-	}
-	var errs []Error
-	mc := ctx.logosCopyChecker(pkg, info, &errs)
-	sig := new(Signature)
-	mc.funcType(sig, nil, nil, fn.Type)
-	obj := NewFunc(fn.Name.Pos(), pkg, fn.Name.Value, sig)
-	mc.recordDef(fn.Name, obj)
-	mc.scope.Insert(obj)
-	mc.funcBody(nil, fn.Name.Value, sig, fn.Body, nil)
-	mc.logosCopyFinish()
-	return obj, errs
-}
-
 type LogosTypeBindings struct {
-	Types  map[string]Type
-	Pkgs   map[string]*Package
-	Fields map[string]Type
+	Pkgs map[string]*Package
 }
 
-func LogosResolveType(pkg *Package, info *Info, ctx LogosCopyContext, e syntax.Expr) (Type, bool) {
-	if ctx.Scope == nil {
-		return nil, false
+func (check *Checker) logosBindCopyTypes(bind LogosTypeBindings) {
+	for name, p := range bind.Pkgs {
+		check.scope.Insert(NewPkgName(nopos, check.pkg, name, p))
 	}
-	var errs []Error
-	mc := ctx.logosCopyChecker(pkg, info, &errs)
-	for name, t := range ctx.Bind.Types {
-		mc.scope.Insert(NewTypeName(nopos, pkg, name, t))
-	}
-	for name, p := range ctx.Bind.Pkgs {
-		mc.scope.Insert(NewPkgName(nopos, pkg, name, p))
-	}
-	for name, t := range ctx.Bind.Fields {
-		stub := NewPackage("", name)
-		stub.Scope().Insert(NewTypeName(nopos, stub, "Type", t))
-		mc.scope.Insert(NewPkgName(nopos, pkg, name, stub))
-	}
-	t := mc.typ(e)
-	mc.logosCopyFinish()
-	return t, len(errs) == 0 && isValid(t)
 }
 
 type logosFieldBinding struct {
@@ -260,7 +214,7 @@ func (check *Checker) logosConstForRange(s *syntax.ConstForStmt, info *LogosCons
 		return true
 	}
 	st, ok := targ.Underlying().(*Struct)
-	if !ok && check.Info.LogosConstIfDead[s] {
+	if !ok && check.logosDead(s) {
 		return false
 	}
 	if !ok {
@@ -294,9 +248,15 @@ func (check *Checker) logosConstForBody(s *syntax.ConstForStmt, info *LogosConst
 		iv := NewVar(s.Index.Pos(), check.pkg, s.Index.Value, Typ[Int])
 		check.declare(check.scope, s.Index, iv, s.Index.Pos())
 		info.IndexVar = iv
+		check.logosMarkIndexVar(iv)
 	}
 
 	inner := ctxt &^ (fallthroughOk | finalSwitchCase | inTypeSwitch)
+	if info.Generic && check.logosCtDeclCheck {
+		check.scope.logosUsageDeferred = true
+		check.logosNoteDeadUses(s.Body)
+		return
+	}
 	if info.Struct != nil {
 		check.logosConstForConcrete(s, info, inner)
 	} else if info.Generic {
@@ -306,19 +266,24 @@ func (check *Checker) logosConstForBody(s *syntax.ConstForStmt, info *LogosConst
 }
 
 func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosConstFor, inner stmtContext) {
-	saved := check.conf.Error
-	seen := make(map[string]bool)
+	if saved := check.conf.Error; saved != nil {
+		seen := make(map[string]bool)
+		check.conf.Error = func(err error) {
+			if key := err.Error(); !seen[key] {
+				seen[key] = true
+				saved(err)
+			}
+		}
+		defer func() { check.conf.Error = saved }()
+	}
 	outer := check.logosFieldBind
 	defer func() { check.logosFieldBind = outer }()
-	check.conf.Error = func(err error) {
-		if key := err.Error(); !seen[key] {
-			seen[key] = true
-			saved(err)
-		}
-	}
-	defer func() { check.conf.Error = saved }()
+	loopScope := check.scope
 	checked := 0
 	bodyNodes := logosCountBodyNodes(s.Body)
+	info.Iterations = make([]*Info, info.Struct.NumFields())
+	liveFields := len(info.Iterations)
+	terminated := false
 	for i := range info.Struct.NumFields() {
 		if !check.logosConstForCharge(s, bodyNodes) {
 			break
@@ -329,16 +294,68 @@ func (check *Checker) logosConstForConcrete(s *syntax.ConstForStmt, info *LogosC
 		}
 		checked++
 		check.logosFieldBind = &logosFieldBinding{info: info, index: i, field: f, tag: info.Struct.Tag(i), outer: outer}
+		savedInfo, savedUntyped := check.Info, check.untyped
+		savedTypeOf, savedDeferred := check.logosTypeOfFact, check.logosTypeOfDeferred
+		check.Info = logosIsolatedInfo(savedInfo)
+		if check.logosDeclInfo == nil {
+			check.logosDeclInfo = savedInfo
+		}
+		check.untyped, check.logosTypeOfFact, check.logosTypeOfDeferred = nil, nil, nil
 		check.openScope(s.Body, "const for iteration")
 		check.stmtList(inner, s.Body.List)
 		check.closeScope()
+		check.logosKeepOuterUses(savedInfo, loopScope)
+		term := check.isTerminatingList(s.Body.List, "")
+		info.Term = append(info.Term, term)
+		info.Breaks = append(info.Breaks, check.logosLiveBreaks(s.Body))
+		if !terminated {
+			info.Iterations[i] = check.Info
+			if term {
+				terminated = true
+				liveFields = i + 1
+			}
+		}
+		check.recordUntyped()
+		check.Info, check.untyped = savedInfo, savedUntyped
+		check.logosTypeOfFact, check.logosTypeOfDeferred = savedTypeOf, savedDeferred
+		if check.logosDeclInfo == savedInfo {
+			check.logosDeclInfo = nil
+		}
 	}
+	info.Iterations = info.Iterations[:liveFields]
 	if checked == 0 {
 		check.usedVars[info.FieldVar] = true
 		if info.IndexVar != nil {
 			check.usedVars[info.IndexVar] = true
 		}
+		if check.Info.LogosConstIfDead == nil {
+			check.Info.LogosConstIfDead = make(map[syntax.Stmt]bool)
+		}
+		for _, st := range s.Body.List {
+			markDeadStmts(check.Info.LogosConstIfDead, st)
+		}
+		check.logosNoteDeadUses(s.Body)
 	}
+}
+
+func (check *Checker) logosKeepOuterUses(parent *Info, loop *Scope) {
+	if parent.Uses == nil {
+		return
+	}
+	for id, obj := range check.Info.Uses {
+		if obj.Parent() != nil && !logosScopeWithin(obj.Parent(), loop) {
+			parent.Uses[id] = obj
+		}
+	}
+}
+
+func logosScopeWithin(s, outer *Scope) bool {
+	for ; s != nil; s = s.parent {
+		if s == outer {
+			return true
+		}
+	}
+	return false
 }
 
 func (check *Checker) logosConstForCharge(s *syntax.ConstForStmt, n int) bool {
@@ -414,25 +431,47 @@ func (check *Checker) logosFieldVarNote(e *syntax.Name, obj Object) {
 	check.logosFieldPend[e] = v
 }
 
-func (check *Checker) logosFieldVarSelMark(x *operand, e *syntax.SelectorExpr) {
+func (check *Checker) logosFieldVarSelMark(x *operand, e *syntax.SelectorExpr) bool {
 	name, ok := e.X.(*syntax.Name)
 	if !ok {
-		return
+		return false
 	}
 	_, obj := check.lookupScope(name.Value)
 	v, ok := obj.(*Var)
 	if !ok || check.logosFieldVars[v] == nil {
-		return
+		return false
+	}
+	if b := check.logosFieldBindingOf(v); b != nil {
+		var typ Type
+		var val constant.Value
+		switch e.Sel.Value {
+		case "Name":
+			typ, val = Typ[String], constant.MakeString(b.field.Name())
+		case "Index":
+			typ, val = Typ[Int], constant.MakeInt64(int64(b.index))
+		case "Exported":
+			typ, val = Typ[Bool], constant.MakeBool(b.field.Exported())
+		case "Tag":
+			typ, val = check.logosComptimeObj("StructTag").Type(), constant.MakeString(b.tag)
+		}
+		if val != nil {
+			check.recordUse(name, obj)
+			check.usedVars[v] = true
+			delete(check.logosFieldPend, name)
+			x.mode_, x.typ_, x.val, x.expr = constant_, typ, val, e
+			return true
+		}
 	}
 	for _, sel := range logosFieldValueSels {
 		if e.Sel.Value == sel {
 			delete(check.logosFieldPend, name)
-			return
+			return false
 		}
 	}
 	if e.Sel.Value != "Type" {
 		delete(check.logosFieldPend, name)
 	}
+	return false
 }
 
 func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) bool {
@@ -457,16 +496,14 @@ func (check *Checker) logosFieldTypeType(e *syntax.SelectorExpr, x *operand) boo
 		check.logosFieldTypeOwner = make(map[syntax.Expr]*LogosConstFor)
 	}
 	check.logosFieldTypeOwner[e] = owner
-	for b := check.logosFieldBind; b != nil; b = b.outer {
-		if owner == b.info {
-			x.mode_ = typexpr
-			x.typ_ = b.field.Type()
-			if check.logosFieldBound == nil {
-				check.logosFieldBound = make(map[syntax.Expr]bool)
-			}
-			check.logosFieldBound[e] = true
-			return true
+	if b := check.logosFieldBindingOf(v); b != nil {
+		x.mode_ = typexpr
+		x.typ_ = b.field.Type()
+		if check.logosFieldBound == nil {
+			check.logosFieldBound = make(map[syntax.Expr]bool)
 		}
+		check.logosFieldBound[e] = true
+		return true
 	}
 	x.mode_ = typexpr
 	x.typ_ = logosComptimeAny
@@ -537,19 +574,36 @@ func (check *Checker) logosFieldProjExpr(x *operand, e *syntax.FieldProjExpr) {
 		check.errorf(e.Pos(), MissingFieldOrMethod, "[comptime::const_for_projection] cannot project a field of %s", xop.typ())
 		return
 	}
-	st, ok := xt.Underlying().(*Struct)
-	if !ok || info.Struct == nil || st != info.Struct {
+	if info.Struct != nil && !Identical(xt, info.Target) && check.logosCtSubst != nil {
+		if b := check.logosFieldBindingOf(v); b != nil {
+			check.logosFieldProjByName(x, &xop, mode, b.field)
+			return
+		}
+	}
+	if info.Struct == nil || !Identical(xt, info.Target) {
 		check.errorf(e.Pos(), MissingFieldOrMethod, "[comptime::const_for_projection] cannot project a field of %s", xop.typ())
 		return
 	}
 	x.mode_ = mode
-	for b := check.logosFieldBind; b != nil; b = b.outer {
-		if info == b.info {
-			x.typ_ = b.field.Type()
-			return
-		}
+	if b := check.logosFieldBindingOf(v); b != nil {
+		x.typ_ = b.field.Type()
+		return
 	}
 	x.typ_ = check.logosFieldNarrowOr(info)
+}
+
+func (check *Checker) logosFieldProjByName(x, xop *operand, mode operandMode, field *Var) {
+	obj, _, indirect := lookupFieldOrMethod(xop.typ(), false, check.pkg, field.Name(), false)
+	fld, ok := obj.(*Var)
+	if !ok {
+		check.errorf(x.expr.Pos(), MissingFieldOrMethod, "[comptime::const_for_projection] cannot project field %s of %s", field.Name(), xop.typ())
+		return
+	}
+	if indirect {
+		mode = variable
+	}
+	x.mode_ = mode
+	x.typ_ = fld.Type()
 }
 
 // logosFieldNarrowOr answers the field's type as narrowed by the
@@ -599,4 +653,249 @@ func (check *Checker) logosConstForExecutes(s *syntax.ConstForStmt) bool {
 		}
 	}
 	return false
+}
+
+func (check *Checker) logosFieldBindingOf(v *Var) *logosFieldBinding {
+	for b := check.logosFieldBind; b != nil; b = b.outer {
+		if b.info.FieldVar == v {
+			return b
+		}
+	}
+	return nil
+}
+
+func (check *Checker) logosTagGetFold(x *operand, call *syntax.CallExpr, sig *Signature, args []*operand) bool {
+	if check.logosFieldBind == nil || sig.recvold == nil {
+		return false
+	}
+	fun, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok || fun.Sel.Value != "Get" || sig.recvold.Type() != check.logosComptimeObj("StructTag").Type() {
+		return false
+	}
+	sel, ok := syntax.Unparen(fun.X).(*syntax.SelectorExpr)
+	if !ok || sel.Sel.Value != "Tag" {
+		return false
+	}
+	name, ok := sel.X.(*syntax.Name)
+	if !ok {
+		return false
+	}
+	_, obj := check.lookupScope(name.Value)
+	v, _ := obj.(*Var)
+	b := check.logosFieldBindingOf(v)
+	if b == nil {
+		return false
+	}
+	if hasDots(call) || len(args) != 1 || !args[0].isValid() {
+		x.invalidate()
+		return true
+	}
+	fact := LogosTagGet{Receiver: sel, Tag: b.tag}
+	if arg := args[0]; arg.mode() == constant_ && arg.val.Kind() == constant.String {
+		tag := reflect.StructTag(b.tag)
+		fact.Value = constant.MakeString(tag.Get(constant.StringVal(arg.val)))
+	}
+	if check.Info.LogosTagGet == nil {
+		check.Info.LogosTagGet = make(map[*syntax.CallExpr]LogosTagGet)
+	}
+	check.Info.LogosTagGet[call] = fact
+	if fact.Value == nil {
+		return false
+	}
+	x.mode_, x.val = constant_, fact.Value
+	return true
+}
+
+// logosTerminatingConstFor reports whether a const for is terminating by
+// its expansion: over a concrete struct the statement stands for the
+// sequence of its per-field bodies, so it terminates when some visible
+// field's body terminates under that field's predicate values, and a
+// struct with no visible fields expands to nothing and never terminates.
+// When no per-field verdict was recorded (a generic const for or a
+// rejected range), it falls back to the shared body, the previous rule.
+// logosConstForConcrete records Term per visible field.
+func (check *Checker) logosTerminatingConstFor(s *syntax.ConstForStmt) bool {
+	info := check.Info.LogosConstFor[s]
+	if info == nil {
+		return false
+	}
+	if len(info.Term) == 0 && info.Struct == nil {
+		return check.isTerminatingList(s.Body.List, "")
+	}
+	for _, term := range info.Term {
+		if term {
+			return true
+		}
+	}
+	return false
+}
+
+// logosHasBreakConstFor reports whether some visible field's live body
+// holds a break that leaves the const for for the label-ed statement or,
+// when implicit is set, the closest outer breakable statement. Only the
+// emitted prefix counts: unrolling stops after the first terminating
+// field, so later fields never run. A struct with no visible fields holds
+// no break. When no per-field verdict was recorded, it falls back to the
+// shared body, the previous rule. logosConstForConcrete records Breaks
+// per visible field.
+func (check *Checker) logosHasBreakConstFor(s *syntax.ConstForStmt, label string, implicit bool) bool {
+	info := check.Info.LogosConstFor[s]
+	if info == nil {
+		return false
+	}
+	if len(info.Breaks) == 0 && info.Struct == nil {
+		return check.hasBreak(s.Body, label, implicit)
+	}
+	for i, brk := range info.Breaks {
+		if implicit && brk.Implicit {
+			return true
+		}
+		if label != "" && slices.Contains(brk.Labels, label) {
+			return true
+		}
+		if i < len(info.Term) && info.Term[i] {
+			break
+		}
+	}
+	return false
+}
+
+// LogosConstForBreaks names the breaks of one field's live body that can
+// leave the const for: Implicit is an unlabeled break of the enclosing
+// breakable statement, Labels are labels not bound inside the body.
+type LogosConstForBreaks struct {
+	Implicit bool
+	Labels   []string
+}
+
+// logosLiveBreaks collects the breaks in a const for body that can leave
+// the statement: an unlabeled break of the enclosing breakable statement,
+// and a labeled break whose label is not bound to a breakable nested in
+// the body (labels are unique per function, so a label not bound inside
+// names a statement outside). Dead const code, which this field's
+// expansion does not run, holds no break.
+func (check *Checker) logosLiveBreaks(s syntax.Stmt) LogosConstForBreaks {
+	var brk LogosConstForBreaks
+	check.logosLiveBreakWalk(s, false, nil, &brk)
+	return brk
+}
+
+// logosLiveBreakWalk walks s collecting leaving breaks into brk. inner
+// reports whether an unlabeled break under s binds to a breakable nested
+// in the const for body; bound holds the labels of those breakables.
+func (check *Checker) logosLiveBreakWalk(s syntax.Stmt, inner bool, bound map[string]bool, brk *LogosConstForBreaks) {
+	if check.logosDead(s) {
+		return
+	}
+	switch s := s.(type) {
+	case *syntax.BranchStmt:
+		if s.Tok != syntax.Break {
+			return
+		}
+		if s.Label == nil {
+			if !inner {
+				brk.Implicit = true
+			}
+			return
+		}
+		if !bound[s.Label.Value] && !slices.Contains(brk.Labels, s.Label.Value) {
+			brk.Labels = append(brk.Labels, s.Label.Value)
+		}
+
+	case *syntax.LabeledStmt:
+		if logosBreakableStmt(s.Stmt) {
+			bound = logosBindLabel(bound, s.Label.Value)
+		}
+		check.logosLiveBreakWalk(s.Stmt, inner, bound, brk)
+
+	case *syntax.BlockStmt:
+		check.logosLiveBreakList(s.List, inner, bound, brk)
+
+	case *syntax.IfStmt:
+		check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+		if s.Else != nil {
+			check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+		}
+
+	case *syntax.ForStmt:
+		check.logosLiveBreakList(s.Body.List, true, bound, brk)
+
+	case *syntax.SwitchStmt:
+		for _, cc := range s.Body {
+			check.logosLiveBreakList(cc.Body, true, bound, brk)
+		}
+
+	case *syntax.SelectStmt:
+		for _, cc := range s.Body {
+			check.logosLiveBreakList(cc.Body, true, bound, brk)
+		}
+
+	case *syntax.ConstIfStmt:
+		if v, ok := check.logosConstIfKnown(s.Cond); ok {
+			if v {
+				check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+			} else if s.Else != nil {
+				check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+			}
+			return
+		}
+		check.logosLiveBreakWalk(s.Then, inner, bound, brk)
+		if s.Else != nil {
+			check.logosLiveBreakWalk(s.Else, inner, bound, brk)
+		}
+
+	case *syntax.ConstSwitchStmt:
+		for _, c := range s.Cases {
+			check.logosLiveBreakList(c.Body, inner, bound, brk)
+		}
+
+	case *syntax.GroupStmt:
+		check.logosLiveBreakList(s.Body.List, inner, bound, brk)
+
+	case *syntax.ConstForStmt:
+		// A nested const for keeps the enclosing label namespace; its own
+		// recorded per-field breaks are the breaks its expansion runs.
+		// Without a record (a generic or rejected nested range) the walk
+		// falls back to the nested body, the previous rule.
+		if ninfo := check.Info.LogosConstFor[s]; ninfo != nil && (len(ninfo.Breaks) > 0 || ninfo.Struct != nil) {
+			for _, nbrk := range ninfo.Breaks {
+				if nbrk.Implicit && !inner {
+					brk.Implicit = true
+				}
+				for _, l := range nbrk.Labels {
+					if !bound[l] && !slices.Contains(brk.Labels, l) {
+						brk.Labels = append(brk.Labels, l)
+					}
+				}
+			}
+		} else {
+			check.logosLiveBreakWalk(s.Body, inner, bound, brk)
+		}
+	}
+}
+
+func (check *Checker) logosLiveBreakList(list []syntax.Stmt, inner bool, bound map[string]bool, brk *LogosConstForBreaks) {
+	for _, s := range list {
+		check.logosLiveBreakWalk(s, inner, bound, brk)
+	}
+}
+
+func logosBreakableStmt(s syntax.Stmt) bool {
+	switch s.(type) {
+	case *syntax.ForStmt, *syntax.SwitchStmt, *syntax.SelectStmt:
+		return true
+	}
+	return false
+}
+
+func logosBindLabel(bound map[string]bool, label string) map[string]bool {
+	if bound[label] {
+		return bound
+	}
+	next := make(map[string]bool, len(bound)+1)
+	for l := range bound {
+		next[l] = true
+	}
+	next[label] = true
+	return next
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"sync"
@@ -29,10 +30,15 @@ type Endpoint struct {
 	acceptQueue queue[*Conn] // new inbound connections
 	connsMap    connsMap     // only accessed by the listen loop
 
-	connsMu sync.Mutex
-	conns   map[*Conn]struct{}
-	closing bool          // set when Close is called
-	closec  chan struct{} // closed when the listen loop exits
+	connsMu          sync.Mutex
+	conns            map[*Conn]struct{}
+	acceptingStopped bool
+	closing          bool
+
+	packetClosing   chan struct{}
+	packetCloseOnce sync.Once
+	packetCloseErr  error
+	closec          chan struct{}
 }
 
 type endpointTestHooks interface {
@@ -43,7 +49,7 @@ type endpointTestHooks interface {
 type packetConn interface {
 	Close() error
 	LocalAddr() netip.AddrPort
-	Read(f func(*datagram))
+	Read(f func(*datagram)) error
 	Write(datagram) error
 }
 
@@ -91,12 +97,13 @@ func NewEndpoint(conn net.PacketConn, config *Config) (*Endpoint, error) {
 
 func newEndpoint(pc packetConn, config *Config, hooks endpointTestHooks) (*Endpoint, error) {
 	e := &Endpoint{
-		listenConfig: config,
-		packetConn:   pc,
-		testHooks:    hooks,
-		conns:        make(map[*Conn]struct{}),
-		acceptQueue:  newQueue[*Conn](),
-		closec:       make(chan struct{}),
+		listenConfig:  config,
+		packetConn:    pc,
+		testHooks:     hooks,
+		conns:         make(map[*Conn]struct{}),
+		acceptQueue:   newQueue[*Conn](),
+		packetClosing: make(chan struct{}),
+		closec:        make(chan struct{}),
 	}
 	var statelessResetKey [32]byte
 	if config != nil {
@@ -118,46 +125,104 @@ func (e *Endpoint) LocalAddr() netip.AddrPort {
 	return e.packetConn.LocalAddr()
 }
 
+var (
+	errEndpointClosed       = errors.New("endpoint closed")
+	errEndpointNotAccepting = errors.New("endpoint not accepting connections")
+)
+
 // Close closes the Endpoint.
 // Any blocked operations on the Endpoint or associated Conns and Stream will be unblocked
 // and return errors.
 //
 // Close aborts every open connection.
 // Data in stream read and write buffers is discarded.
-// It waits for the peers of any open connection to acknowledge the connection has been closed.
+// It waits for the peers of open connections to acknowledge closure, except
+// for unconfirmed inbound handshakes, which end after one close-send attempt.
+// If ctx expires first, Close closes the packet socket immediately and returns ctx.Err().
+// After shutdown completes, Close returns the packet socket's close error, if any.
 func (e *Endpoint) Close(ctx context.Context) error {
-	e.acceptQueue.close(errors.New("endpoint closed"))
+	select {
+	case <-e.closec:
+		return e.packetCloseErr
+	default:
+	}
 
-	// It isn't safe to call Conn.Abort or conn.exit with connsMu held,
-	// so copy the list of conns.
 	var conns []*Conn
+	var closeNow bool
 	e.connsMu.Lock()
 	if !e.closing {
-		e.closing = true // setting e.closing prevents new conns from being created
-		for c := range e.conns {
-			conns = append(conns, c)
-		}
-		if len(e.conns) == 0 {
-			e.packetConn.Close()
-		}
+		e.closing = true
+		e.acceptQueue.close(errEndpointClosed)
+		conns = e.snapshotConnsLocked()
+		closeNow = len(conns) == 0
 	}
 	e.connsMu.Unlock()
 
+notify:
 	for _, c := range conns {
-		c.Abort(localTransportError{code: errNo})
+		select {
+		case <-ctx.Done():
+			break notify
+		case <-e.packetClosing:
+			break notify
+		case <-c.donec:
+		case c.msgc <- closeEndpointConn:
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		e.closePacket()
+		return err
+	}
+	if closeNow {
+		e.closePacket()
 	}
 	select {
 	case <-e.closec:
-	case <-ctx.Done():
-		for _, c := range conns {
-			c.exit()
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		return e.packetCloseErr
+	case <-ctx.Done():
+		e.closePacket()
 		return ctx.Err()
 	}
-	return nil
+}
+
+func closeEndpointConn(now time.Time, c *Conn) {
+	c.enterClosing(now, localTransportError{code: errNo})
+	if c.side == serverSide && !c.handshakeConfirmed.isSet() {
+		c.maybeSend(now)
+		c.abortImmediately(now, errEndpointClosed)
+	}
+}
+
+func (e *Endpoint) closePacket() {
+	e.packetCloseOnce.Do(func() {
+		close(e.packetClosing)
+		e.packetCloseErr = e.packetConn.Close()
+	})
+}
+
+func (e *Endpoint) snapshotConnsLocked() []*Conn {
+	conns := make([]*Conn, 0, len(e.conns))
+	for c := range e.conns {
+		conns = append(conns, c)
+	}
+	return conns
+}
+
+// StopAccepting prevents creation of new inbound connections.
+// It does not close the socket, stop outbound dialing, or stop handshakes for
+// existing connections. Those connections may still be returned by Accept.
+// Use the Accept context to stop waiting for connections.
+func (e *Endpoint) StopAccepting() {
+	e.connsMu.Lock()
+	e.acceptingStopped = true
+	e.connsMu.Unlock()
 }
 
 // Accept waits for and returns the next connection.
+// If the packet receive loop stops unexpectedly, Accept returns its error.
 func (e *Endpoint) Accept(ctx context.Context) (*Conn, error) {
 	return e.acceptQueue.get(ctx)
 }
@@ -186,7 +251,10 @@ func (e *Endpoint) newConn(now time.Time, config *Config, side connSide, cids ne
 	e.connsMu.Lock()
 	defer e.connsMu.Unlock()
 	if e.closing {
-		return nil, errors.New("endpoint closed")
+		return nil, errEndpointClosed
+	}
+	if side == serverSide && e.acceptingStopped {
+		return nil, errEndpointNotAccepting
 	}
 	c, err := newConn(now, side, cids, peerHostname, peerAddr, config, e)
 	if err != nil {
@@ -222,21 +290,39 @@ func (e *Endpoint) connDrained(c *Conn) {
 		}
 	})
 	e.connsMu.Lock()
-	defer e.connsMu.Unlock()
 	delete(e.conns, c)
-	if e.closing && len(e.conns) == 0 {
-		e.packetConn.Close()
+	closeNow := e.closing && len(e.conns) == 0
+	e.connsMu.Unlock()
+	if closeNow {
+		e.closePacket()
 	}
 }
 
 func (e *Endpoint) listen() {
 	defer close(e.closec)
-	e.packetConn.Read(func(m *datagram) {
+	err := e.packetConn.Read(func(m *datagram) {
 		if e.connsMap.updateNeeded.Load() {
 			e.connsMap.applyUpdates()
 		}
 		e.handleDatagram(m)
 	})
+
+	e.connsMu.Lock()
+	if !e.closing {
+		e.closing = true
+		e.acceptQueue.close(fmt.Errorf("quic: read packet: %w", err))
+	}
+	conns := e.snapshotConnsLocked()
+	e.connsMu.Unlock()
+
+	// Close the socket before notifying connections, whose loops may be blocked writing.
+	e.closePacket()
+	for _, c := range conns {
+		c.exit()
+	}
+	for _, c := range conns {
+		<-c.donec
+	}
 }
 
 func (e *Endpoint) handleDatagram(m *datagram) {
@@ -255,7 +341,26 @@ func (e *Endpoint) handleDatagram(m *datagram) {
 
 	// TODO: This can block the endpoint while waiting for the conn to accept the dgram.
 	// Think about buffering between the receive loop and the conn.
-	c.sendMsg(m)
+	if !e.sendConnMsg(c, m) {
+		m.recycle()
+	}
+}
+
+func (e *Endpoint) sendConnMsg(c *Conn, m any) bool {
+	select {
+	case <-c.donec:
+		return false
+	case <-e.packetClosing:
+		return false
+	default:
+	}
+	select {
+	case <-c.donec:
+	case <-e.packetClosing:
+	case c.msgc <- m:
+		return true
+	}
+	return false
 }
 
 func (e *Endpoint) handleUnknownDestinationDatagram(m *datagram) {
@@ -273,7 +378,7 @@ func (e *Endpoint) handleUnknownDestinationDatagram(m *datagram) {
 	var token statelessResetToken
 	copy(token[:], m.b[len(m.b)-len(token):])
 	if c := e.connsMap.byResetToken[token]; c != nil {
-		c.sendMsg(func(now time.Time, c *Conn) {
+		e.sendConnMsg(c, func(now time.Time, c *Conn) {
 			c.handleStatelessReset(now, token)
 		})
 		return
@@ -330,17 +435,16 @@ func (e *Endpoint) handleUnknownDestinationDatagram(m *datagram) {
 	} else {
 		cids.originalDstConnID = p.dstConnID
 	}
-	var err error
 	c, err := e.newConn(now, e.listenConfig, serverSide, cids, "", m.peerAddr)
 	if err != nil {
-		// The accept queue is probably full.
 		// We could send a CONNECTION_CLOSE to the peer to reject the connection.
 		// Currently, we just drop the datagram.
 		// https://www.rfc-editor.org/rfc/rfc9000.html#section-5.2.2-5
 		return
 	}
-	c.sendMsg(m)
-	m = nil // don't recycle, sendMsg takes ownership
+	if e.sendConnMsg(c, m) {
+		m = nil
+	}
 }
 
 func (e *Endpoint) maybeSendStatelessReset(b []byte, peerAddr netip.AddrPort) {

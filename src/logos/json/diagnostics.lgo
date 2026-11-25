@@ -4,31 +4,75 @@
 
 package json
 
+import (
+	stdjson "encoding/json"
+	"strings"
+)
+
 // Diagnostics describes where in the input a syntax error sits. Line
-// and Column count from 1. Offset is the byte offset from the start of
-// the input, as encoding/json reports it. Context is the single input
-// line that holds the offset, without the line break.
+// and Column count from 1 and point at the offending byte. Offset is
+// the byte offset from the start of the input, as encoding/json
+// reports it (it counts bytes already read, so it is one past an
+// invalid byte, or the end of input for unexpected EOF). Context is
+// an excerpt of the input line that holds the byte, without the line
+// break; ContextColumn is the offending byte's column within that
+// excerpt, so callers can place a caret even when the line was
+// trimmed.
 type Diagnostics struct {
-	Line    int
-	Column  int
-	Offset  int
-	Context string
+	Line          int
+	Column        int
+	Offset        int
+	Context       string
+	ContextColumn int
 }
 
 // DiagnosticsFor converts offset (an encoding/json SyntaxError or
 // UnmarshalTypeError offset) to line, column and context. It scans the
 // input once and allocates only the context string. Callers that never
 // ask for diagnostics pay nothing: Unmarshal itself never calls this.
+//
+// The reported offset counts bytes already read, so an invalid byte
+// sits at offset-1. Callers holding a *encoding/json.SyntaxError
+// should use DiagnosticsForError, which keeps the end position for a
+// genuine unexpected-EOF error.
 func DiagnosticsFor(data []byte, offset int64) Diagnostics {
+	return diagnostics(data, offset, false)
+}
+
+// DiagnosticsForError is DiagnosticsFor fed by the error encoding/json
+// returned. A *SyntaxError whose message is the scanner's
+// unexpected-EOF message reports the end of input rather than the
+// byte before it; a *UnmarshalTypeError uses its offset field. Any
+// other error reports the start of the input.
+func DiagnosticsForError(data []byte, err error) Diagnostics {
+	if syn, ok := err.(*stdjson.SyntaxError); ok {
+		return diagnostics(data, syn.Offset, strings.Contains(syn.Error(), "unexpected end of JSON input"))
+	}
+	if te, ok := err.(*stdjson.UnmarshalTypeError); ok {
+		return diagnostics(data, te.Offset, false)
+	}
+	return diagnostics(data, 0, false)
+}
+
+func diagnostics(data []byte, offset int64, atEnd bool) Diagnostics {
 	off := clampOffset(data, offset)
-	line, lineStart := countLines(data, off)
-	lineEnd := findLineEnd(data, off)
-	ctx := string(data[lineStart:lineEnd])
+	pos := off
+	if !atEnd && off > 0 && off <= len(data) {
+		pos = off - 1
+	}
+	line, lineStart := countLines(data, pos)
+	lineEnd := findLineEnd(data, pos)
+	lo := trimStart(lineEnd-lineStart, pos-lineStart)
+	excerptEnd := lineEnd
+	if end := lineStart + lo + 200; end < excerptEnd {
+		excerptEnd = end
+	}
 	return Diagnostics{
-		Line:    line,
-		Column:  off - lineStart + 1,
-		Offset:  off,
-		Context: trimContext(ctx, off-lineStart),
+		Line:          line,
+		Column:        pos - lineStart + 1,
+		Offset:        off,
+		Context:       string(data[lineStart+lo : excerptEnd]),
+		ContextColumn: pos - (lineStart + lo) + 1,
 	}
 }
 
@@ -64,18 +108,18 @@ func findLineEnd(data []byte, off int) int {
 	return len(data)
 }
 
-func trimContext(ctx string, rel int) string {
-	if len(ctx) <= 200 {
-		return ctx
+// trimStart returns the byte index where a 200-byte excerpt centered
+// near rel begins, or 0 when the whole line fits.
+func trimStart(lineLen, rel int) int {
+	if lineLen <= 200 {
+		return 0
 	}
 	lo := rel - 80
 	if lo < 0 {
 		lo = 0
 	}
-	hi := lo + 200
-	if hi > len(ctx) {
-		hi = len(ctx)
-		lo = hi - 200
+	if hi := lo + 200; hi > lineLen {
+		lo = lineLen - 200
 	}
-	return ctx[lo:hi]
+	return lo
 }

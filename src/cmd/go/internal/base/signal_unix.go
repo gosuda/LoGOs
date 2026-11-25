@@ -16,3 +16,11 @@ var signalsToIgnore = []os.Signal{os.Interrupt, syscall.SIGQUIT}
 // SignalTrace is the signal to send to make a Go program
 // crash with a stack trace.
 var SignalTrace os.Signal = syscall.SIGQUIT
+
+func signalExitCode(state *os.ProcessState) int {
+	status, ok := state.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() {
+		return -1
+	}
+	return 128 + int(status.Signal())
+}

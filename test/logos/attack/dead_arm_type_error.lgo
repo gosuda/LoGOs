@@ -1,0 +1,21 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func Pick[T any]() int {
+	const if comptime.IsStruct[T]() {
+		var x T
+		_ = x.NoSuch
+		return 0
+	}
+	return 4
+}
+
+func main() {
+	fmt.Println(Pick[int]())
+}

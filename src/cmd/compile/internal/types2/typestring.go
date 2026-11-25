@@ -74,15 +74,16 @@ type typeWriter struct {
 	tpSubscripts bool           // if set, write type parameter indices as subscripts
 	pkgInfo      bool           // package-annotate first unexported-type field to avoid confusing type description
 	logosCgoPkg  *Package       // original C spellings for this source package
+	logosLocal   bool           // spell function-local type names bare
 }
 
 func newTypeWriter(buf *bytes.Buffer, qf Qualifier) *typeWriter {
-	return &typeWriter{buf, make(map[Type]bool), qf, nil, nil, true, false, false, nil}
+	return &typeWriter{buf, make(map[Type]bool), qf, nil, nil, true, false, false, nil, false}
 }
 
 func newTypeHasher(buf *bytes.Buffer, ctxt *Context) *typeWriter {
 	assert(ctxt != nil)
-	return &typeWriter{buf, make(map[Type]bool), nil, ctxt, nil, false, false, false, nil}
+	return &typeWriter{buf, make(map[Type]bool), nil, ctxt, nil, false, false, false, nil, false}
 }
 
 func (w *typeWriter) byte(b byte) {
@@ -462,7 +463,7 @@ func (w *typeWriter) tParamList(list []*TypeParam) {
 }
 
 func (w *typeWriter) typeName(obj *TypeName) {
-	if w.logosCgoTypeName(obj) {
+	if w.logosTypeName(obj) {
 		return
 	}
 	w.string(packagePrefix(obj.pkg, w.qf))

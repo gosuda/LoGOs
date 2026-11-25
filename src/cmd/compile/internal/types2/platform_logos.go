@@ -7,6 +7,7 @@ package types2
 import (
 	"cmd/compile/internal/syntax"
 	. "internal/types/errors"
+	"slices"
 	"strings"
 )
 
@@ -295,15 +296,102 @@ func logosIsCgoName(name string) bool {
 	return false
 }
 
-// logosIsGoObj reports whether obj is declared outside the current
-// package (a Go-mode declaration), or is cgo-generated: named like a cgo
-// declaration or declared in a cgo-generated Go file of the package.
-// Universe objects (builtins, nil) are never Go-mode.
+// LogosImportedIsLogos reports whether the package at path was compiled
+// from loGo/s source (its export facts carry no lang go record). It is
+// set by cmd/compile/internal/logos/facts; a nil hook or a path without
+// facts fails safe to Go.
+var LogosImportedIsLogos func(path string) bool
+
+// LogosImportedDerivedVar reports whether the named exported variable
+// of the package at path was marked holding a Go-derived value when it
+// was compiled (a `derived` export-facts record). It is set by
+// cmd/compile/internal/logos/facts; a nil hook or a missing record
+// fails safe to not-derived.
+var LogosImportedDerivedVar func(path, object string) bool
+
+// LogosPkgDerived reports whether the package-scope variable name was
+// stamped Go-derived while pkg was checked. The facts writer reads it
+// to emit `derived` records.
+func LogosPkgDerived(pkg *Package, name string) bool {
+	return pkg != nil && pkg.logosDerived[name]
+}
+
+// LogosDerivedVarNames returns the sorted names of the package-scope
+// variables stamped holding Go-derived values. The noder carries the
+// names across a logos recheck, which rebuilds the package.
+func LogosDerivedVarNames(pkg *Package) []string {
+	if pkg == nil || len(pkg.logosDerived) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(pkg.logosDerived))
+	for name := range pkg.logosDerived {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// LogosStampDerived restores derived-var names on a package rebuilt by
+// a recheck pass, which runs without logos marking.
+func LogosStampDerived(pkg *Package, names []string) {
+	if pkg == nil || len(names) == 0 {
+		return
+	}
+	if pkg.logosDerived == nil {
+		pkg.logosDerived = make(map[string]bool, len(names))
+	}
+	for _, name := range names {
+		pkg.logosDerived[name] = true
+	}
+}
+
+// logosImportedDerived reports whether obj is an exported variable of
+// an imported loGo/s package whose declaration carried a Go-derived
+// initializer. Go-mode objects and same-package vars are answered
+// elsewhere.
+func (check *Checker) logosImportedDerived(obj Object) bool {
+	v, ok := obj.(*Var)
+	if !ok || v.pkg == nil || v.pkg == check.pkg || check.logosIsGoPkg(v.pkg) {
+		return false
+	}
+	return LogosImportedDerivedVar != nil && LogosImportedDerivedVar(v.pkg.Path(), v.Name())
+}
+
+// logosOpaqueReceiver reports whether t is or points to an opaque named
+// type: an imported or cgo-generated named type is platform territory
+// (its fields keep the nullable contract) whichever language mode
+// declared it.
+func (check *Checker) logosOpaqueReceiver(t Type) bool {
+	if p, ok := Unalias(t).(*Pointer); ok {
+		t = p.Elem()
+	}
+	return check.logosOpaqueType(t)
+}
+
+// logosIsGoPkg reports whether pkg is a Go-mode package for the
+// platform-pointer rules: any package other than the one being checked
+// that was not compiled from loGo/s source. Packages without export
+// facts (plain Go, or archives from before the facts member existed)
+// fail safe to Go.
+func (check *Checker) logosIsGoPkg(pkg *Package) bool {
+	if pkg == nil || pkg == check.pkg {
+		return false
+	}
+	if LogosImportedIsLogos != nil && LogosImportedIsLogos(pkg.Path()) {
+		return false
+	}
+	return true
+}
+
+// logosIsGoObj reports whether obj is declared in a Go-mode package,
+// or is cgo-generated: named like a cgo declaration or declared in a
+// cgo-generated Go file of the package. Universe objects (builtins,
+// nil) are never Go-mode.
 func (check *Checker) logosIsGoObj(obj Object) bool {
 	if obj == nil {
 		return false
 	}
-	if pkg := obj.Pkg(); pkg != nil && pkg != check.pkg {
+	if pkg := obj.Pkg(); pkg != nil && check.logosIsGoPkg(pkg) {
 		return true
 	}
 	return logosIsCgoName(obj.Name()) || logosGoModePos(obj.Pos())
@@ -365,7 +453,11 @@ func (check *Checker) logosCalleeIsGo(call *syntax.CallExpr) bool {
 					if pn.imported == nil {
 						return false
 					}
-					return pn.imported.cgo || pn.imported != check.pkg
+					if pn.imported.cgo || check.logosIsGoPkg(pn.imported) {
+						return true
+					}
+					exp := pn.imported.scope.Lookup(sel.Sel.Value)
+					return check.logosImportedDerived(exp)
 				}
 			}
 		}
@@ -384,9 +476,144 @@ func (check *Checker) logosCalleeIsGo(call *syntax.CallExpr) bool {
 }
 
 // logosCalleeWasGeneric reports whether call targets a generic function
-// (explicitly or implicitly instantiated). Type-parameter results
-// instantiated with a non-nil pointer are platform pointers.
+// (explicitly or implicitly instantiated) or a method of a generic type
+// whose declared result mentions a receiver type parameter.
+// Type-parameter results instantiated with a non-nil pointer are platform
+// pointers.
 func (check *Checker) logosCalleeWasGeneric(call *syntax.CallExpr) bool {
+	if call == nil || !check.isLogosFile(call) {
+		return false
+	}
+	fn := check.logosFuncOfExpr(call.Fun)
+	if fn == nil {
+		return false
+	}
+	if o := fn.Origin(); o != nil {
+		fn = o
+	}
+	if fn.typ == nil {
+		return false
+	}
+	sig, ok := fn.typ.(*Signature)
+	if !ok {
+		return false
+	}
+	if sig.TypeParams().Len() > 0 {
+		return true
+	}
+	return check.logosReceiverWasGeneric(call, fn)
+}
+
+// logosReceiverWasGeneric reports whether call selects a method of a
+// generic type whose declared result is a receiver type parameter.
+// The method Func of an instantiation carries the expanded signature, so
+// the check reads the declared results and receiver type parameters off
+// the origin Func: identical objects by construction. A result
+// instantiated with a non-nil pointer then counts as a platform pointer.
+// The pointer check itself stays with the callers (logosIsNonNilPointer):
+// a method that returns a concrete pointer, or a T instantiated with a
+// non-pointer, is not platform.
+func (check *Checker) logosReceiverWasGeneric(call *syntax.CallExpr, fn *Func) bool {
+	dsig := check.logosMethodDeclSignature(call, fn)
+	if dsig == nil {
+		return false
+	}
+	tparams := logosRecvTParams(dsig)
+	results := dsig.Results()
+	for i := range results.Len() {
+		if logosResultIsTParam(tparams, results.At(i).Type()) {
+			return true
+		}
+	}
+	return false
+}
+
+// logosCallSelector returns the selector expression a call's function
+// position denotes, looking through parentheses and one level of
+// explicit type arguments (`x.M[T](...)`), or nil for a plain name or
+// any other callee shape.
+func logosCallSelector(fun syntax.Expr) *syntax.SelectorExpr {
+	fun = syntax.Unparen(fun)
+	if ix, ok := fun.(*syntax.IndexExpr); ok {
+		fun = syntax.Unparen(ix.X)
+	}
+	sel, ok := fun.(*syntax.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	return sel
+}
+
+// logosMethodDeclSignature returns the declared signature of the method
+// call selects, or nil when the callee is not a method selection or the
+// origin Func has no signature.
+func (check *Checker) logosMethodDeclSignature(call *syntax.CallExpr, fn *Func) *Signature {
+	sel := logosCallSelector(call.Fun)
+	if sel == nil || check.Info == nil {
+		return nil
+	}
+	selection := check.Selections[sel]
+	if selection == nil {
+		return nil
+	}
+	if _, ok := selection.Obj().(*Func); !ok {
+		return nil
+	}
+	decl := fn.Origin()
+	if decl == nil || decl.typ == nil {
+		return nil
+	}
+	dsig, ok := decl.typ.(*Signature)
+	if !ok {
+		return nil
+	}
+	return dsig
+}
+
+// logosRecvTParams returns the receiver type parameters of a declared
+// method signature: the declaring named type's parameters, read directly
+// so promoted and interface methods see the declaring type, not the
+// operand's. RecvTypeParams is preferred; the receiver's named type is
+// the fallback for declarations that leave it empty.
+func logosRecvTParams(dsig *Signature) []*TypeParam {
+	if rt := dsig.RecvTypeParams(); rt != nil && rt.Len() > 0 {
+		return rt.list()
+	}
+	recv := dsig.Recv()
+	if recv == nil {
+		return nil
+	}
+	t := recv.Type()
+	if ptr, ok := Unalias(t).(*Pointer); ok {
+		t = ptr.base
+	}
+	named, ok := Unalias(t).(*Named)
+	if !ok {
+		return nil
+	}
+	return named.TypeParams().list()
+}
+
+// logosResultIsTParam reports whether the declared result type is
+// exactly one of the given type parameters, or an alias of one. A
+// result that only mentions a parameter inside a composite (say *T)
+// is already a non-nil pointer in LoGOs and substitution cannot make
+// it nilable.
+func logosResultIsTParam(tparams []*TypeParam, t Type) bool {
+	for _, tp := range tparams {
+		if Unalias(t) == tp {
+			return true
+		}
+	}
+	return false
+}
+
+// logosCallResultIsTParam reports whether the call's i-th declared
+// result is exactly a type parameter of the callee — its own type
+// parameters for a generic function, or its receiver's for a method of
+// a generic type. Only such results can substitute to a nilable
+// pointer.
+func (check *Checker) logosCallResultIsTParam(call *syntax.CallExpr, i int) bool {
 	if call == nil || !check.isLogosFile(call) {
 		return false
 	}
@@ -395,7 +622,67 @@ func (check *Checker) logosCalleeWasGeneric(call *syntax.CallExpr) bool {
 		return false
 	}
 	sig, ok := fn.typ.(*Signature)
-	return ok && sig.TypeParams().Len() > 0
+	if !ok {
+		return false
+	}
+	dsig := check.logosMethodDeclSignature(call, fn)
+	if dsig != nil {
+		// A method's declared result is a type-parameter position
+		// when it is one of the method's own parameters or one of
+		// the receiver's. The instantiated signature has already
+		// substituted the receiver's parameters, so the check
+		// reads the declaration.
+		if i >= dsig.Results().Len() {
+			return false
+		}
+		tparams := dsig.TypeParams().list()
+		tparams = append(tparams, logosRecvTParams(dsig)...)
+		return logosResultIsTParam(tparams, dsig.Results().At(i).Type())
+	}
+	if sig.TypeParams().Len() > 0 {
+		results := sig.Results()
+		return i < results.Len() && logosResultIsTParam(sig.TypeParams().list(), results.At(i).Type())
+	}
+	return false
+}
+
+// logosReceiverTypeArgs returns the type arguments of the named type
+// a method call selects on, so substituted parameters count as
+// type-parameter positions (platform arguments pass unchecked).
+// Only a plain method selection qualifies: an explicitly
+// instantiated call (`x.M[T](...)`) resolves its declaration and
+// results through logosCallSelector, but its argument exemption stays
+// type-only, so a concrete parameter that coincides with a receiver
+// argument must keep its nil check. Per-parameter derivation from the
+// declaration is future work.
+func (check *Checker) logosReceiverTypeArgs(call *syntax.CallExpr) []Type {
+	sel, ok := syntax.Unparen(call.Fun).(*syntax.SelectorExpr)
+	if !ok || check.Info == nil {
+		return nil
+	}
+	selection := check.Selections[sel]
+	if selection == nil {
+		return nil
+	}
+	if _, ok := selection.Obj().(*Func); !ok {
+		return nil
+	}
+	recv := selection.Recv()
+	if recv == nil {
+		return nil
+	}
+	if ptr, ok := Unalias(recv).(*Pointer); ok {
+		recv = ptr.base
+	}
+	named, ok := Unalias(recv).(*Named)
+	if !ok {
+		return nil
+	}
+	targs := named.TypeArgs()
+	if targs == nil || targs.Len() == 0 {
+		return nil
+	}
+	return targs.list()
 }
 
 // logosCallIsConversion reports whether e is a type conversion (its
@@ -436,6 +723,14 @@ func (check *Checker) logosMarkDerivedVar(v *Var) {
 		check.logosDerivedVar = make(map[*Var]bool)
 	}
 	check.logosDerivedVar[v] = true
+	// Stamp exported package-scope vars on the package so the facts
+	// writer can carry the marker across imports.
+	if v.pkg == check.pkg && v.parent == check.pkg.scope && v.Exported() {
+		if check.pkg.logosDerived == nil {
+			check.pkg.logosDerived = make(map[string]bool)
+		}
+		check.pkg.logosDerived[v.name] = true
+	}
 }
 
 // logosMarkDerivedExpr records a synthetic tuple dummy as Go-derived.
@@ -476,11 +771,17 @@ func (check *Checker) logosExprDerived(e syntax.Expr) bool {
 		if check.logosDerivedVar[v] {
 			return true
 		}
-		return v.pkg != nil && v.pkg != check.pkg
+		return v.pkg != nil && (check.logosIsGoPkg(v.pkg) || check.logosImportedDerived(v))
 	case *syntax.SelectorExpr:
 		if check.Info != nil {
 			if sel := check.Selections[e]; sel != nil {
 				if obj := sel.Obj(); obj != nil && check.logosIsGoObj(obj) {
+					return true
+				}
+				// A field of an opaque (imported or cgo) named type is
+				// platform territory: the zero value may hold a nil
+				// field, so reads keep derivation and its checks.
+				if sel.Kind() == FieldVal && check.logosOpaqueReceiver(sel.Recv()) {
 					return true
 				}
 			}
@@ -489,7 +790,7 @@ func (check *Checker) logosExprDerived(e syntax.Expr) bool {
 			if obj := check.lookup(xn.Value); obj != nil {
 				if pn, ok := obj.(*PkgName); ok && pn.imported != nil {
 					if exp := pn.imported.scope.Lookup(e.Sel.Value); exp != nil {
-						return true
+						return check.logosIsGoPkg(pn.imported) || check.logosImportedDerived(exp)
 					}
 					return false
 				}
@@ -548,7 +849,7 @@ func (check *Checker) logosIsDerived(x *operand) bool {
 // Such values dereference and compare with nil freely; stores into
 // declared non-nil locations need the run-time check.
 func (check *Checker) logosIsPlatform(x *operand) bool {
-	if !check.logosIsDerived(x) {
+	if !check.logosIsDerived(x) && !check.logosExprIsPlatform(x.expr) {
 		// Generic callees are local, so derivation misses them: a
 		// type-parameter result instantiated with a non-nil pointer
 		// is still a platform pointer.
@@ -564,6 +865,76 @@ func (check *Checker) logosIsPlatform(x *operand) bool {
 	return check.logosIsNonNilPointer(x.typ())
 }
 
+// logosExprIsPlatform reports whether e denotes a platform pointer
+// provenance value: a variable or tuple dummy that inherited a
+// type-parameter result of a generic call. Such values can be nil but
+// are not Go memory, unlike Go-derived values. Fields and elements of
+// a platform value stay platform: a nil stored through a generic call
+// reads back through the field.
+func (check *Checker) logosExprIsPlatform(e syntax.Expr) bool {
+	if e == nil || !check.isLogosFile(e) {
+		return false
+	}
+	if check.logosPlatformExpr[e] {
+		return true
+	}
+	if call, ok := syntax.Unparen(e).(*syntax.CallExpr); ok && check.logosCallIsConversion(call) && len(call.ArgList) == 1 {
+		// A conversion repackages the value without changing its
+		// provenance: `P(x)` of a platform pointer stays platform.
+		return check.logosExprIsPlatform(call.ArgList[0])
+	}
+	if call, ok := syntax.Unparen(e).(*syntax.CallExpr); ok && check.logosCalleeWasGeneric(call) {
+		// A generic call is itself a platform source only when its own
+		// result can be nil: a call returning a concrete value stays
+		// trusted, exactly as when the result first binds a variable.
+		if check.Info != nil {
+			if t := check.Info.TypeOf(e); t != nil && check.logosIsNonNilPointer(t) {
+				return true
+			}
+		}
+	}
+	if name, ok := syntax.Unparen(e).(*syntax.Name); ok {
+		if obj := check.lookup(name.Value); obj != nil {
+			if v, ok := obj.(*Var); ok {
+				return check.logosPlatformVar[v]
+			}
+		}
+	}
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.SelectorExpr:
+		return check.logosExprIsPlatform(e.X)
+	case *syntax.IndexExpr:
+		return check.logosExprIsPlatform(e.X)
+	case *syntax.SliceExpr:
+		return check.logosExprIsPlatform(e.X)
+	}
+	return false
+}
+
+// logosMarkPlatformVar records v as holding a platform pointer from a
+// generic call result.
+func (check *Checker) logosMarkPlatformVar(v *Var) {
+	if v == nil || v.name == "_" {
+		return
+	}
+	if check.logosPlatformVar == nil {
+		check.logosPlatformVar = make(map[*Var]bool)
+	}
+	check.logosPlatformVar[v] = true
+}
+
+// logosMarkPlatformExpr records a synthetic tuple dummy as holding a
+// platform pointer from a generic call result.
+func (check *Checker) logosMarkPlatformExpr(e syntax.Expr) {
+	if e == nil {
+		return
+	}
+	if check.logosPlatformExpr == nil {
+		check.logosPlatformExpr = make(map[syntax.Expr]bool)
+	}
+	check.logosPlatformExpr[e] = true
+}
+
 // logosInheritPlatform marks an inferred variable from its initializer:
 // `x := <derived>` and tuple dummies inherit derivation, and a derived
 // initializer needs no store check (its type was just inferred). A
@@ -574,11 +945,17 @@ func (check *Checker) logosInheritPlatform(lhs *Var, x *operand) bool {
 	if lhs == nil || x == nil || !x.isValid() || !check.isLogosFile(lhs) {
 		return false
 	}
-	if !check.logosIsDerived(x) && !check.logosIsPlatform(x) {
-		return false
+	if check.logosIsDerived(x) {
+		check.logosMarkDerivedVar(lhs)
+		return true
 	}
-	check.logosMarkDerivedVar(lhs)
-	return true
+	if check.logosIsPlatform(x) {
+		// A platform pointer can be nil, but it is not Go memory:
+		// stores through it keep LoGOs's field checks.
+		check.logosMarkPlatformVar(lhs)
+		return true
+	}
+	return false
 }
 
 // logosMarkTupleDummies marks the synthetic result operands of a
@@ -594,21 +971,20 @@ func (check *Checker) logosMarkTupleDummies(e syntax.Expr, list []*operand) {
 		return
 	}
 	isGo := check.logosCalleeIsGo(call)
-	wasGeneric := false
-	if !isGo {
-		wasGeneric = check.logosCalleeWasGeneric(call)
-		if !wasGeneric {
-			return
-		}
-	}
-	for _, item := range list {
+	for i, item := range list {
 		if item == nil || !item.isValid() || item.expr == nil {
 			continue
 		}
 		if isGo {
 			check.logosMarkDerivedExpr(item.expr)
-		} else if check.logosIsNonNilPointer(item.typ()) {
-			check.logosMarkDerivedExpr(item.expr)
+			continue
+		}
+		// Only a result that is itself a type parameter can
+		// substitute to a nilable pointer; a concrete pointer or a
+		// declared *T keeps its non-nil contract. Marked platform,
+		// not derived: the value is not Go memory.
+		if check.logosCallResultIsTParam(call, i) && check.logosIsNonNilPointer(item.typ()) {
+			check.logosMarkPlatformExpr(item.expr)
 		}
 	}
 }

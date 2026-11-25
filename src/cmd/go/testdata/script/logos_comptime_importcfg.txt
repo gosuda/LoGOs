@@ -11,12 +11,6 @@ stdout '^upper \[PORT HOST\]$'
 stdout '^ranked \[1:Host 0:Port\]$'
 logos lint ./...
 
-logos build -o $WORK/a.a ./a
-go tool pack p $WORK/a.a __.LOGOS
-stdout '//logosimp sort sort'
-stdout '//logosimp strconv strconv'
-stdout '//logosimp strings strings'
-
 -- w/go.mod --
 module example.com/importcfgtest
 

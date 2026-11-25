@@ -36,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ["ubuntu-24.04", "ubuntu-26.04-arm"]
+        runner: ["depot-ubuntu-24.04", "ubuntu-26.04-arm"]
         experiment: ["logosarena", "logosarena,nogreenteagc"]
     defaults:
       run:
@@ -151,7 +151,7 @@ jobs:
     concurrency:
       group: logos-heavy-ci
       queue: max
-    runs-on: "ubuntu-24.04"
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 120
     defaults:
       run:

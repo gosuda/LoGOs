@@ -80,7 +80,7 @@ Project tools SHOULD use `tool` directives in `go.mod`, never a Go file admitted
 ### 0.2 No new global keywords
 The language MUST add no new global keywords [T-0.2].
 See Sec 4.1 for contextual words and `const` positions.
-Identifiers that start with `_logos_` or `Logos_` MUST be rejected in `.lgo` [T-203.2].
+Identifiers that start with `_logos_` or `Logos_`, or that contain `_logosct`, MUST be rejected in `.lgo` [T-203.2].
 The compiler MUST report such identifiers with `correctness::reserved_identifier` [T-203.2].
 
 ### 0.3 Pure Go output through eject
@@ -91,6 +91,7 @@ Each `.lgo` file MUST become a `.go` file [T-0.3].
 Completeness MUST include packages absent from the requested host build, including inactive-only tests and dependency modules reached only through an inactive variant [T-0.3].
 Source discovery MUST respect package and module ownership boundaries: nested modules, `vendor`, `testdata`, dot-prefixed and underscore-prefixed paths, module ignore rules, and directory symlinks MUST NOT become additional package roots [T-0.3].
 The physical copy MUST NOT contain a directory that holds its own `go.mod` (it is another module) unless the module's own `go.mod` has a local `replace` that names that directory, which the copy MUST keep so the replace still resolves. A kept module that lies below another nested module MUST be copied without the files of that other module [T-0.3]. Only a `go.mod` file marks a module, as in the go command: a directory named `go.mod` MUST be copied as data with the files beside it [T-0.3].
+The physical copy MUST hold every other regular file of the main module: each Go file that still parses is rewritten to the ejected import paths and formatted, and each remaining file is copied byte for byte. Dot-prefixed and underscore-prefixed paths, `vendor`, `testdata`, and paths a version-control ignore file lists are copied when they lie in the copied module, because `//go:embed` can reach them; only package discovery skips those paths. The copy MUST leave out `.git` contents, `logos.toml` files, `.lgo` sources (emitted as `.go` files), the destination subtree, symlinks and special files, and the files of foreign nested modules [T-0.3].
 Each discovered inactive source MUST be type-checked and lowered by the ordinary compiler path under a context that selects it [T-0.3].
 Inactive discovery, build-constraint selection, and helper compilation MUST use the requested source overlay. Overlay-deleted sources MUST remain absent, and inserted or replaced sources MUST use their effective contents [T-0.3].
 Owned helpers MUST retain the package name selected by their source context; distinct package clauses in one directory MUST NOT be treated as declaration collisions [T-0.3].
@@ -149,6 +150,12 @@ The `[build] cgo` policy (`forbid`, `restricted`, `allow`) and its `forbid` defa
 A Go main module MUST keep the upstream default for `CGO_ENABLED` under `logos`, and a `cgo` key in its `logos.toml` MUST have no effect [T-101.2][R-U1].
 Plain `go` MUST keep the upstream default for `CGO_ENABLED` [T-101.2].
 With cgo off, `net` and `os/user` in the standard library MUST use their pure-Go paths, which is the upstream `CGO_ENABLED=0` behavior [T-101.2].
+On a target whose race runtime links through cgo (every race target except darwin), a build with `-race` in a LoGOs main module whose cgo policy is `forbid`, by key or by default, MUST link the race runtime through `runtime/cgo`, unless the environment sets `CGO_ENABLED=0` [T-101.2].
+In that build, a package outside the standard library with `import "C"` MUST still fail with `restriction::cgo_usage` [T-101.2].
+In that build, `net` and `os/user` MUST keep their pure-Go paths [T-101.2].
+When that build finds neither the C compiler nor `zig` in PATH, it MUST fail before compilation with a message that names the race runtime and `logos.toml` [T-101.2].
+On such a target, when the environment sets `CGO_ENABLED=0`, a build with `-race` in a LoGOs main module MUST fail with a message that names `CGO_ENABLED=0` [T-101.2].
+On darwin the race runtime needs no cgo, and a build with `-race` MUST keep cgo off under that policy [T-101.2].
 
 ### 1.2 RFC-102: Compiler linter and rule set
 The `logos lint` check MUST run inside the compiler on LoGOs packages for syntax and type rules [T-102].
@@ -234,16 +241,21 @@ The command `logos context <pkg>#<Symbol>` MUST print the declaration plus one l
 `logos context` MUST serve `.lgo` and `.go` packages [T-103].
 The package pattern MUST select exactly one package; zero or multiple matches MUST report the pattern and the match count. [T-103]
 `logos context` MUST report an unknown symbol with text that names the package and the missing symbol [T-103].
-The command `logos next --fix` MUST convert a whole Go module to a LoGOs module [T-103][R-U3].
+The command `logos next --fix` MUST print a reviewable unified patch on standard output [T-103][R-U3].
+When the user applies the patch, the patch MUST convert the whole Go module to a LoGOs module [T-103][R-U3].
 `logos next` MUST use byte-span splicing and MUST keep every comment and build line byte-identical outside rewrites [T-103].
 `logos next` MUST keep each non-standard Go import of the module as an import of a Go package [T-103][R-U2].
 `logos next` MUST change nothing while it only prints a diff [T-103].
-`logos next --fix` MUST rename converted files and MUST rewrite matched patterns [T-103].
+`logos next --fix` MUST run build and test compilation preflight checks before it emits the patch [T-103].
+`logos next --fix` MUST leave all source files unchanged [T-103].
+When the user applies the patch, the patch MUST replace each converted `.go` file with a `.lgo` file [T-103].
+`logos next --ai-patch` MUST print the review plan and write it to `next_tasks.json` [T-103].
+`logos next --ai-patch` MUST NOT change source files [T-103].
 `logos next` MUST leave complex refactors unchanged and MUST list them in `next_tasks.json` [T-103].
-`logos next` MUST rewrite an index-range append loop with a pure body to a map chain [T-103].
+`logos next` MUST leave append loops and explicit error returns unchanged [T-103].
+`logos next` MUST list the conversions of those loops and returns as review guidance [T-103].
 `logos next` MUST leave a loop with jump control or side effects unchanged and MUST list it in `next_tasks.json` [T-103].
 The toolchain MUST NOT add a `logos fmt` rewriting command. [T-103]
-No command except `logos next` MUST rewrite `.lgo` files [T-103].
 
 ### 1.4 RFC-104: Syntactic sugar and desugaring
 Error propagation with `?` MUST be a postfix operator [T-104.1].
@@ -275,7 +287,9 @@ When the deferred call's result is nil, the join MUST keep the existing error; o
 A `recover()` call inside `f` of `defer f()?` MUST return nil and MUST NOT stop a panic of the enclosing function, as in the ejected form that calls `f` from a deferred function literal. [T-104.2][T-0.3]
 `errdefer` MUST be allowed only in functions whose last result is `error` [T-104.2].
 Other uses MUST fail with `correctness::errdefer_needs_error_result` [T-104.2].
-`errdefer` MUST run when the frame panics, exits through Goexit, or holds a non-nil error result at pop time [T-104.2].
+`errdefer` MUST run when the frame panics, exits through Goexit, or holds a non-nil error result at pop time, with the one limit that the next two rules give [T-104.2].
+After a successful return, `errdefer` MUST run when a later deferred function literal panics or calls `runtime.Goexit`, if that literal has no results and defers no call of its own. A `recover()` call in that literal MUST keep its Go meaning [T-104.2].
+After a successful return, a panic or Goexit that starts in any other later deferred call MUST leave `errdefer` skipped. This applies to a named function or method, and to a function literal with results or with a deferred call of its own. This is a known limit: a wrapper that sees this exit would make `recover()` in the callee return nil, as it does for `defer f()?` [T-104.2][T-0.3].
 A typed-nil error MUST count as non-nil for `errdefer` [T-104.2].
 The function, receiver, and arguments of a deferred call MUST be evaluated at the statement [T-104.2].
 An indexed function value MUST be captured at that statement, including when its callee expression is parenthesized. [T-104.2]
@@ -323,6 +337,8 @@ A default MUST be checked in its declaration's lexical scope and MUST be assigna
 A default MUST be a constant expression or a composite literal whose values and map keys recursively satisfy this rule [T-104.5].
 Defaults MUST apply in composite literals of the type, including address forms and partial literals [T-104.5].
 An empty composite literal whose type's underlying kind is not a struct, an array, a slice, or a map MUST evaluate to the type's zero value [T-104.5].
+A fill whose literal needs the enclosing default's generated factory — directly or through defaults in other files — MUST be rejected as recursive instead of filled, and literal arguments of `unsafe.Sizeof`, `unsafe.Alignof`, and `unsafe.Offsetof` are folded, not evaluated, so they carry no factory dependency [T-104.5].
+
 A Go struct literal of an exported LoGOs struct MUST get zero values and MUST NOT get the field defaults; this is a documented hole [T-104.5][R-U2][A-GOBOUNDARY].
 `var x T` and `new(T)` MUST trigger `suspicious::unapplied_struct_default` [T-104.5].
 A non-constant default MUST fail with `correctness::default_not_constant` [T-104.5].
@@ -385,7 +401,7 @@ A generator MUST supply one value per `yield` for `iter.Seq[T]` and two values p
 Each yielded value MUST be assignable to its element type [T-104.8].
 A generator body MUST NOT run until the sequence the function returns is iterated, MUST run from its first statement once for each iteration of that sequence, and MUST pass each `yield e` to the consumer; an early `break` in the consumer MUST end the body at that `yield` with no further statement of it running [T-104.8].
 A generator body MUST need no `return`: falling off the end ends the sequence [T-104.8].
-A `return` with values inside a generator MUST act as a bare `return`: the values are discarded [T-104.8].
+A `return` with values inside a generator MUST fail with `correctness::generator_return_value` [T-104.8].
 ```go
 func Count(n int) iter.Seq[int] {
 	for i := range n {
@@ -455,6 +471,101 @@ For a target architecture other than the architecture of the build host, `native
 An explicit GOAMD64 or GOARM64 in the environment MUST win over the level that `native` selects [T-105].
 The default binary MUST NOT run on x86 CPUs older than v3 [T-105].
 Self-aliased calls such as arr = Reverse(arr) MUST return correct results. [T-105]
+
+### 1.6 RFC-106: Concurrency monitor
+`logos conc run` MUST accept the arguments of `logos run`, and `logos conc test` MUST accept the arguments of `logos test` [T-106].
+`logos conc` MUST build the program with the build tag `logosconc` in addition to the build tags that the user gives [T-106].
+A build without the build tag `logosconc` MUST NOT contain the monitor, and an ejected module MUST NOT contain the monitor [T-106].
+The build tag `logosconc` MUST NOT change the build of an ejected module [T-106].
+`logos conc` MUST print each finding while the program runs: the text form on standard output, or with `--json-diagnostics` the object of Section 14 on standard error [T-106][T-Sec14].
+A finding MUST have a rule ID, a message, one or more source positions with the role of each position, and one fix hint [T-106].
+The text form of a finding MUST be the line `<file>:<line>: [<rule>] <message>`, then one line `<tab><file>:<line>: <role>` for each position, then the line `<tab>fix: <hint>` [T-106].
+With `--json-diagnostics`, `logos conc` MUST print each finding as one object of Section 14 with severity `deny` [T-106][T-Sec14].
+In that object, `file` and the two line fields of `span` MUST give the first position, the other fields of `span` MUST be 0, and the field `note` MUST hold the position lines and the fix line of the text form [T-106][T-Sec14].
+`logos conc` MUST print the `--ai-patch` brief on standard output, one JSON object per edit, also with `--json-diagnostics` [T-106].
+When `logos conc test` runs with `-json`, given on the command line or in `GOFLAGS`, `logos conc` MUST write each line that it prints on standard output as one test2json event with the action `output`, so that standard output stays one test2json stream [T-106].
+The exit status of `logos conc` MUST be the exit status of the program or of `logos test` when that status is not 0 [T-106].
+When that status is 0, the exit status MUST be 1 if `logos conc` printed a finding and 0 if it printed no finding [T-106].
+When a signal kills the program, `logos conc run` MUST exit with 128 plus the signal number [T-106].
+A finding line that `logos conc` cannot read MUST count as a finding [T-106].
+The monitor MUST report `conc::lock_order_inversion` when two goroutines took the same two `logos/sync.Locked` values in opposite orders, also when no goroutine waited [T-106].
+The monitor MUST NOT report `conc::lock_order_inversion` when one goroutine took the two values in the two orders [T-106].
+The monitor MUST report one pair of source positions only one time in one process [T-106].
+`logos conc` MUST accept the flag `-stall` with a positive Go duration before the package of `run` and before the program arguments of `test`, and the default MUST be `5s` [T-106].
+`logos conc` MUST accept the flag `-hold` in the same places, with a positive Go duration, and the default MUST be `100ms` [T-106].
+`logos conc` MUST stop with an error before it starts the program when the value of `-stall` or of `-hold` is not a positive duration [T-106].
+The monitor MUST report `conc::group_child_stalled` when a child of a group has not returned at the end of the `-stall` duration after the cancellation of the group context [T-106].
+For a child that started after the cancellation, the duration MUST start when the child starts [T-106].
+The monitor MUST NOT report a child that returned before the end of its duration [T-106].
+The finding MUST give the statement that started the child [T-106].
+When the child has a frame whose source file is not a file of the toolchain, the first position of the finding MUST be the innermost frame of that kind, and its role MUST name the wait state of the goroutine [T-106].
+The monitor MUST report one statement that starts a child only one time in one process [T-106].
+The group MUST hold the record that the monitor keeps of it, and the monitor MUST NOT keep a table of groups [T-106].
+The children of two groups MUST NOT wait for one lock of the monitor when they start and when they return [T-106].
+The monitor MUST NOT start a goroutine for a group whose children all return before the end of their `-stall` durations [T-106].
+A dump of all goroutines for one `conc::group_child_stalled` report MUST NOT be larger than 8 MiB; a child that the dump does not hold MUST get the finding without its frame [T-106].
+The `logos conc` options `--fix` and `--ai-patch` MUST be mutually exclusive [T-106].
+After the program exits, `logos conc --fix` MUST look only at the line of the first position of each `conc::group_child_stalled` finding [T-106].
+`logos conc --fix` MUST rewrite that line only when it is a plain receive statement `<-x` in a `.lgo` file [T-106].
+`logos conc --fix` MUST rewrite that line only when the tokens of `go/scanner` show that `<-` starts a statement and that the operand `x` ends that line [T-106].
+`logos conc --fix` MUST rewrite that line only when its enclosing function has a one-line header with a `context.Context` parameter not named `_` [T-106].
+`logos conc --fix` MUST rewrite that line only when that header is 1 to 21 lines above that line [T-106].
+`logos conc --fix` MUST rewrite that line only when, between that header and that line, no `var` or `const` declaration names the context parameter and no `=` or `:=` assignment has it on the left side [T-106].
+`logos conc --fix` MUST rewrite that line only when that function has no result or one `error` result [T-106].
+`logos conc --fix` MUST replace that line with a `select` that receives from `x` or returns when the `Done` channel of that context closes [T-106].
+For a function with an `error` result, `logos conc --fix` MUST write that return as `return ctx.Err()`, with the name of the context parameter [T-106].
+`logos conc --fix` MUST change no file for a finding that does not meet these conditions, and it MUST NOT print a `cannot fix` line for that finding [T-106].
+Under `-overlay`, from the command line or from `GOFLAGS`, `logos conc --fix` MUST read and rewrite the replacement file that the overlay names [T-106].
+`logos conc --fix` MUST change no file when it cannot read or parse the overlay file [T-106].
+`logos conc --fix` MUST group the edits by the path of each file after it resolves the symbolic links, so that two names of one file give one edit for each line [T-106].
+`logos conc --fix` MUST write all the edits of one file with one rename over that resolved path, from the last line to the first line [T-106].
+For each line that it writes, `logos conc --fix` MUST print `logos conc: fixed <file>:<line>` on standard error [T-106].
+When `logos conc --fix` does not write a file that has an edit, it MUST keep the bytes of that file and print `logos conc: cannot fix <file>: <reason>` on standard error [T-106].
+In these two lines, `<file>` MUST be the file name that the finding or the overlay gives, not the resolved path [T-106].
+When a file system operation fails, the reason MUST be the text of that error [T-106].
+`logos conc --fix` MUST do the checks of the lines that follow in their order, and it MUST print only the reason of the first check that fails [T-106].
+When the `go.mod` search of `logos` from the current directory finds no main module, the reason MUST be `no main module` [T-106].
+When the resolved path is not in the directory tree of the main module, the reason MUST be `outside the main module <dir>`, where `<dir>` is that directory with its symbolic links resolved [T-106].
+When the resolved path is in the directory tree of GOROOT, the reason MUST be `inside GOROOT` [T-106].
+When the resolved path is in the directory tree of the module cache, the reason MUST be `inside the module cache` [T-106].
+When the resolved path does not end in `.lgo`, the reason MUST be `not a .lgo file` [T-106].
+When the file is not a regular file, the reason MUST be `not a regular file` [T-106].
+When the system does not give the owner of the file, the reason MUST be `unknown owner` [T-106].
+When the file has more than one hard link, the reason MUST be `the file has <n> hard links` [T-106].
+When the modification time of the file is not earlier than the time at which `logos conc` started `logos run` or `logos test`, the reason MUST be `changed during the run` [T-106].
+When a line that starts with `// Code generated ` and ends with ` DO NOT EDIT.` comes before the package clause, the reason MUST be `generated file` [T-106].
+`logos conc --fix` MUST prove each edit again on the bytes that it replaces; when an edit fails that proof, the reason MUST be `line <n> no longer holds the receive the run reported` [T-106].
+`logos conc --fix` MUST write the new bytes to a temporary file in the directory of the file and give that temporary file the owner, the group and the mode of the file before the rename [T-106].
+`logos conc --fix` MUST read the file again just before the rename; when its bytes changed, the reason MUST be `changed while the fix was staged` [T-106].
+When a step of the write fails, `logos conc --fix` MUST remove the temporary file and keep the bytes of the file [T-106].
+The `logos conc` option `--ai-patch` MUST NOT modify source files [T-106].
+A command other than `logos conc --fix` MUST NOT rewrite `.lgo` files [T-106].
+The monitor MUST report `conc::group_unbounded` when the children running at one time in a group without a limit reach 10000 [T-106].
+The first position of that finding MUST be the `go group` statement [T-106].
+The second position MUST be the spawn statement of the child that reached the count [T-106].
+The message MUST hold the count of children that ran at one time [T-106].
+The monitor MUST NOT report a group that has a limit [T-106].
+The monitor MUST NOT report the group of a group stage, because the stage bounds its children [T-106].
+The monitor MUST report when the count reaches that number, and MUST NOT report at a larger count [T-106].
+The monitor MUST report one `go group` statement only one time in one process [T-106].
+The monitor MUST NOT take a flag or an environment variable for that count [T-106].
+The monitor MUST NOT keep a timer or a goroutine for that report [T-106].
+`logos conc` MUST link the monitor into the program and into each test binary, also when no package of the program imports `logos/rt` or `logos/sync` [T-106].
+The monitor MUST report `conc::goroutine_leak` for a goroutine that the runtime marks as leaked: the goroutine waits, and no goroutine that can run reaches what it waits for [T-106].
+The first position of that finding MUST be the innermost frame of the goroutine outside the toolchain sources, and its role MUST name the function in which the goroutine waits [T-106].
+The second position MUST be the start of the outermost function of the goroutine outside the toolchain sources [T-106].
+A check MUST read the stacks of the leaked goroutines only [T-106].
+The monitor MUST NOT report a leaked goroutine that has no position outside the toolchain sources [T-106].
+The monitor MUST check for leaked goroutines 0.1 s, 0.3 s, 0.7 s, 1.5 s, 3.1 s and 6.3 s after the program starts [T-106].
+After these six checks the monitor MUST NOT keep a timer, so that the runtime still ends a program in which every goroutine waits [T-106].
+After these six checks the monitor MUST check after a garbage collection of the program, with one minute or more between two checks [T-106].
+The monitor MUST discard the lock orders of a `Locked` value that the garbage collector has freed [T-106].
+The monitor MUST report `conc::lock_held_long` when a goroutine has held a `Locked` value for the `-hold` duration and another goroutine came for the value during that hold [T-106].
+The monitor MUST write that finding when a goroutine comes for the value after the duration, or when the hold ends, and it MUST NOT keep a timer for a hold [T-106].
+The first position of that finding MUST be the `WithLock` call that holds the value, and the second position MUST be the `WithLock` call that waits for it [T-106].
+The monitor MUST NOT report a hold that no other goroutine waited for, and it MUST NOT report a hold that is shorter than the duration [T-106].
+The monitor MUST report one `WithLock` call as the holder only one time in one process [T-106].
+`logos conc` MUST stop with an error on a system that has no named pipes [T-106].
 
 ## 2. Tier 2 specification
 
@@ -595,7 +706,7 @@ A `for _, v := range` loop over a constant slice MUST yield constant elements. [
 
 The equality operators `==` and `!=` MUST be defined on operands whose types carry a const-view or readonly-descendants qualification whenever the unqualified operand types are comparable and one unqualified operand type is assignable to the other. A comparison reads its operands; it MUST NOT be reported as a mutation through the view or as a qualification-erasing escape. [T-201]
 
-A `?.` selector on an element reached through a constant view MUST resolve the field or method on the unqualified element type; a selected field keeps the element's qualification, and a selected method follows the receiver rules of this section. [T-201]
+A `?.` selector on an element reached through a constant view MUST resolve the field or method on the unqualified element type; a selected field keeps the element's qualification, and a selected method follows the receiver rules of this section. A function-typed field read through a constant view keeps its plain type; calling it MUST be allowed. [T-201]
 
 A method call on a readonly-descendants value that fails the reference-free or readonly proof of this section MUST fail with `[correctness::const_view_mutation]`, the same diagnostic as the same call through the enclosing constant view. [T-201]
 
@@ -671,6 +782,8 @@ Taking the address of `x` MUST disable narrowing for `x`. [T-202]
 
 Assigning `x` in a function literal, in a `go group` child block, or in a lambda of a chain that opens with `.group(...)` MUST disable narrowing for `x`. [T-202]
 
+A function whose body contains a `goto` statement MUST NOT narrow any of its variables. [T-202]
+
 A function literal or a `go group` child block MUST NOT read `x` as narrowed when `x` is assigned anywhere besides its declaration. [T-202]
 
 A short variable declaration that names a variable already declared in the same scope, such as a parameter, a named result, or a `var` variable, MUST count as an assignment to it. [T-202]
@@ -683,17 +796,29 @@ Code MUST copy the field to a local first. [T-202]
 
 For a callee declared in `.lgo`, reading a result before the `err == nil` proof MUST fail with `[correctness::result_before_error_check]`. [T-202]
 
+A call that cannot return MUST discharge the `err == nil` proof. The calls that count are the builtin `panic` and a closed list of standard library calls: `os.Exit`; `log.Fatal`, `log.Fatalf`, `log.Fatalln`, `log.Panic`, `log.Panicf`, `log.Panicln`; the methods `Fatal`, `Fatalf`, `FailNow`, `Skip`, `Skipf`, `SkipNow` called through `*testing.T`, `*testing.B`, `*testing.F`, or `testing.TB`; and `runtime.Goexit`. A method with one of those names declared outside its listed package MUST NOT discharge the proof, and a user declared function MUST NOT be inferred as never returning. [T-202]
+
 An `err == nil` proof MUST remain valid for a captured result in a function literal, lambda, or `go group` child when that result is initialized at its declaration, is never assigned again, and never has its address taken. A result assigned anywhere besides its declaration or whose address is taken MUST NOT inherit that proof across the capture boundary. [T-202]
 
 A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result. [T-202]
 
 Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
 
+A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. [T-202]
+
+A read of a result stored in a slice or map element, or reached through a pointer, MAY stay accepted. [T-202]
+
+A plain assignment destination MUST NOT count as a read. [T-202]
+
 A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract, so use of n first stays allowed. [T-202][R-U2]
+
+An `.lgo` method that implements a Go-declared interface and must return `(*T, error)` MUST return a non-nil `*T` with the error on failure. A zero `&T{}` value satisfies this rule only when `T` has a legal zero value; a `T` with required non-nil fields needs a fully-initialized value. The error is authoritative for a call dispatched through the Go interface, whose caller MUST ignore the pointed-to value unless the interface's contract states the value stays usable with a non-nil error; a direct `.lgo` call to the method keeps the error-first rule. [T-202][R-U2]
 
 `nil` MUST be assignable to every `T?`. [T-202]
 
 `T` MUST be assignable to `T?`. [T-202]
+
+A value whose type is a member of a closed union `U` MUST be assignable to `U?`, unless the value's type is itself an option. [T-202]
 
 `T?` MUST NOT be assignable to `T`. An assignment, argument, or result that needs `T` and receives an unnarrowed `T?` MUST fail with `[correctness::nil_deref_unproven]`. [T-202]
 
@@ -806,6 +931,8 @@ The `<T>` of that panic text MUST be the string that `reflect.Type.String` retur
 
 An exhaustive `switch x.(type)` MUST cover every member and `nil`, or carry `default`. [T-203.1]
 
+If the switched operand is a local or parameter that narrowing has proven non-nil from an option whose absence is the interface nil value, an exhaustive `switch x.(type)` MUST cover every member with no `case nil` required. [T-203.1]
+
 A missing member MUST fail with `[correctness::nonexhaustive_switch]` listing misses in declaration order. [T-203.1]
 
 A case naming a sub-union MUST cover its members. [T-203.1]
@@ -897,7 +1024,7 @@ A Go importer MUST see a property interface as the interface of its `Logos_GetF`
 
 A dynamic assertion such as `any(x).(I)` MUST work. [T-203.2]
 
-Identifiers starting with `Logos_` or `_logos_` MUST be reserved in `.lgo`. [T-203.2]
+Identifiers starting with `Logos_` or `_logos_`, and identifiers containing `_logosct`, the infix of ejected comptime instance names (Sec 18.2), MUST be reserved in `.lgo`. [T-203.2]
 
 A use of such an identifier MUST fail with `[correctness::reserved_identifier]`. [T-203.2]
 
@@ -1047,7 +1174,15 @@ A closed union MUST use upstream interface equality. [T-204.1][T-203.1]
 
 A non-constant condition MUST fail with `[comptime::not_constant]`. [T-205]
 
-Both branches MUST type-check, except that a `const for` over the fields of a non-struct in a dead branch is not expanded and reports no `const_for_fields`. [T-205]
+When the condition is a boolean constant, the compiler MUST type-check only the live branch. [T-205]
+
+The compiler MUST NOT report type errors in the dead branch. [T-205]
+
+The compiler MUST count a package as used when the dead branch selects from its package name. [T-205]
+
+Outside the declaration check of a comptime generic, when the condition is not a boolean constant, the compiler MUST type-check both branches. [T-205]
+
+In that declaration check, the compiler MUST type-check both branches of such a condition only in each instantiation. [T-205]
 
 Only the live branch MUST reach lowering. [T-205]
 
@@ -1061,9 +1196,9 @@ Inside a comptime generic its value MUST be taken per instantiation, and a condi
 
 Each of them MUST equal what `unsafe.Sizeof`, `unsafe.Alignof`, and the garbage collector pointer map give for the Go type that the lowering emits for `T` on the target. That holds for every LoGOs type form: an option that the lowering keeps bare or wraps, a const view, a tuple, a closed union, and any struct, array, or option that holds them. [T-205]
 
-A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
+A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, the field facts `f.Name`, `f.Index`, `f.Exported` and `f.Tag.Get(k)` with a constant `k`, the type identity `comptime.TypeOf[X]() == comptime.TypeOf[Y]()`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
 
-Any other non-constant condition MUST fail with `[comptime::not_constant]`, including a condition on `f.Name`, `f.Index`, `f.Exported` or the index variable. [T-205]
+Any other non-constant condition MUST fail with `[comptime::not_constant]`, including a condition on the `const for` index variable. [T-205]
 
 A `const for` in a dead `const if` branch MUST NOT fail with `[comptime::const_for_fields]`. [T-205]
 
@@ -1073,15 +1208,23 @@ Any run-time use of those compile-time-only forms MUST fail with `[comptime::run
 
 A generic function that uses them MUST become a comptime generic. [T-205]
 
-Each instantiation MUST expand into a non-generic copy `<f>_logosct<N>` in the instantiating package. [T-205]
+Each list of type arguments MUST be analyzed once in the scope of the defining package and MUST compile to one non-generic instance. [T-205]
 
-Copies MUST be memoized per type-argument list. [T-205]
+A comptime call inside an instance whose type arguments are concrete after substitution MUST resolve to the same instance, at any depth and across package boundaries. [T-205]
 
-An exported comptime generic MUST travel as source text in `__.LOGOS`. [T-205]
+A use of the switched type parameter inside a `const switch` case body MUST spell the instantiation's type argument in the instance, for tilde and exact cases alike. [T-205]
 
-An exported comptime generic that names an unexported package-level identifier of its own package MUST fail with `[comptime::unexported_in_exported]` at that identifier in the defining package. [T-205]
+Instances MUST be memoized per type-argument list. [T-205]
 
-The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. [T-205]
+`logos eject` MUST print an instance only one time, in a generated file of its defining package, as a non-generic function `<f>_logosct_<h>`, when all of these conditions are true. The defining package is not `main` and is not an external test package. The first element of its import path contains a dot, so it is not a standard-library package. Each named type in the type arguments is a package-level type of the defining package or an exported type of a package that the defining package imports. Each field and each method of a type literal in the type arguments is exported or belongs to the defining package. Each instance that the instance calls obeys this rule too. `h` is the first 12 hexadecimal digits of the instance ID, so each package that needs the instance prints the same file. [T-205]
+
+`logos eject` MUST print each other instance that a package needs as a non-generic function `<f>_logosct<N>` in that package. N counts the instances of one name that the package prints. `logos eject` MUST rename the call sites of all instances. An instance printed outside its defining package that names an unexported identifier, field, or method of another package MUST fail eject with `[comptime::unexported_in_exported]`. [T-205]
+
+An instance printed outside its defining package MUST spell each type declared in its body by its bare name. Such an instance that keeps a variable whose type names a type declared in its body, such as the tables of a const map over that type, MUST fail eject with `[comptime::copied_instance_state]`: the native build holds that variable once per instance, while each package that prints the instance would hold its own copy with its own body type. [T-205]
+
+A comptime generic MAY name the unexported package-level identifiers of its own package. Each instance MUST check them in the scope of the defining package. An unexported identifier of another package MUST stay refused. [T-205]
+
+An instantiation of such a generic in another package MUST build and run. The instance is compiled for the defining package, so it reaches those identifiers; the instantiating package never resolves them. [T-205]
 
 A `const for` range MUST be `comptime.Fields[T]()` over a struct type. [T-205]
 
@@ -1089,11 +1232,13 @@ Any other range operand, and a non-struct `T`, MUST fail with `[comptime::const_
 
 Expansion MUST visit fields in declaration order. [T-205]
 
-It MUST include exported fields and unexported fields of a current-package `T`. [T-205]
+It MUST include exported fields and unexported fields of a `T` declared in the package that defines the generic, wherever the generic is instantiated. [T-205]
 
-It MUST exclude unexported fields of other packages. [T-205]
+It MUST exclude unexported fields of a `T` declared in any other package, the instantiating package included. [T-205]
 
-A `const for` statement MUST be a terminating statement when its body ends in a terminating statement and its range has at least one visible field; over no visible fields it falls through, and over an unresolved generic type parameter it is terminating when its body is terminating with each instantiation rechecked after unrolling. [T-205]
+A `const for` MUST terminate when the body of some visible field terminates; a struct with no visible fields MUST NOT terminate. Over an unresolved generic type parameter it is terminating when its body is terminating with each instantiation rechecked after unrolling. [T-205]
+
+Unrolling MUST stop after the first terminating field. [T-205]
 
 `val.[f]` MUST read and write the named field. [T-205]
 
@@ -1107,7 +1252,19 @@ An assignment to it MUST fail with `[comptime::const_for_assign]`. [T-205]
 
 `f.Tag.Get(k)` MUST constant-fold when `k` is a compile-time constant: a literal, a named constant, an imported constant, or a constant expression. A run-time `k` cannot fold and stays an ordinary call. [T-205]
 
-A live `comptime.Error(msg)` MUST fail compilation with `msg`. [T-205]
+A `comptime.Error(msg)` that is not const-dead MUST fail compilation with `msg`. Termination-dead code is not const-dead. [T-205]
+
+Const-dead code is code that a compile-time choice removes. It is the branch of a `const if` that a boolean constant condition does not select, in any function. In an instance of a comptime generic and in a field iteration of a `const for`, it is also a `const if` branch or a `const switch` case that the instance or the iteration does not take. [T-205]
+
+The compiler MUST NOT type-check const-dead code, count it for termination or `break`, or lower it, and a `comptime.Error` in const-dead code MUST NOT fail compilation. These rules also apply to const-dead code inside termination-dead code. [T-205]
+
+A `const switch` whose tag is a type parameter of a generic function that is not a comptime generic picks its case at run time, so none of its cases is const-dead. The compiler MUST type-check each case body under its case binding and MUST lower it. [T-205]
+
+Termination-dead code is code that is not const-dead and that control flow cannot reach. A statement is termination-dead when an earlier statement of the same statement list is terminating and no labeled statement stands after that earlier statement, up to and including this statement. A field iteration of a `const for` is termination-dead when it comes after the first iteration whose body is terminating. A statement is terminating by the Go rules for terminating statements, with these changes: a `const if` counts only the branch that it takes, a `const switch` terminates only when it takes a case at compile time and that case body terminates, and a `const for` follows the termination rule above. [T-205]
+
+The compiler MUST type-check termination-dead code as it type-checks live code, in a plain function and in an instance, and a `comptime.Error` in termination-dead code MUST fail compilation. Lowering MAY omit termination-dead code, as unrolling omits the iterations after the first terminating field, but the compiler MUST NOT omit the check of that code. [T-205]
+
+The declaration check of a comptime generic MUST leave the statements after a statement that holds a `const switch` to each instantiation, because the declaration cannot decide if that statement completes normally. When one of those statements is a labeled statement, the declaration check MUST check them itself, because a jump can reach them. A comptime generic with no instantiation therefore does not check the statements that it leaves; they are not termination-dead, because no check decides the termination of the `const switch`. [T-205]
 
 `comptime.Error(msg)` MUST take a constant string. [T-205]
 
@@ -1121,7 +1278,23 @@ A circular instantiation MUST fail with `[comptime::circular_instantiation]` nam
 
 A comptime generic MUST be instantiated with concrete type arguments. [T-205]
 
-An instantiation with a type parameter or a call inside an expansion without explicit type arguments MUST fail with `[comptime::generic_targ]`. [T-205]
+An instantiation of a comptime generic with a type parameter MUST occur in the body of a comptime generic or a package-level generic function. A package-level generic function that is not a comptime generic is a forwarding function when it contains such an instantiation, or an instantiation of a forwarding function of its package with a type parameter. [T-205]
+
+A type argument forwards a type parameter when it is the type parameter or a type that contains the type parameter at any depth. That type MAY be a pointer, slice, array, map, channel, option, const view, tuple, struct, function, interface, alias, or instantiated named type. The compiler MUST apply this rule to every forwarding function, exported or not, so that an option, tuple, struct, function, interface, or alias type argument cannot hide an exported forwarding function until run time. [T-205]
+
+The compiler MUST expand a forwarding function once for each list of concrete type arguments, in its defining package. `logos eject` MUST print each such expansion like a comptime instance. [T-205]
+
+The compile-time forms in each expansion MUST evaluate on the substituted type. For example, `*T` with `T` bound to `Triple` gives `*Triple` to the comptime generic. [T-205]
+
+A forwarding function MAY instantiate another forwarding function of its package with its type parameter, to any depth. [T-205]
+
+A forwarding function that instantiates itself with the same type arguments, directly or through other generic functions, MUST fail with `[comptime::circular_instantiation]`. [T-205]
+
+Any other instantiation of a comptime generic with a type parameter MUST fail with `[comptime::generic_targ]`, for example an instantiation in a method of a generic type. [T-205]
+
+A call of a comptime generic without explicit type arguments inside an expansion MUST fail with `[comptime::generic_targ]`. In the expansion of a forwarding function, the compiler MUST instead expand the call with its inferred type arguments. [T-205]
+
+An exported forwarding function MUST fail with `[comptime::exported_forwarder]` at its first instantiation that forwards a type parameter, because a caller in another package cannot instantiate it. The message MUST name the function and the type parameter. The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. `logos eject` MUST refuse such a package with the same diagnostic. [T-205]
 
 A method of a generic type MUST NOT be a comptime generic. [T-205]
 
@@ -1129,7 +1302,7 @@ A method of a generic type that uses `const for` over a type parameter MUST fail
 
 An expansion above the selected `max_comptime_ast_nodes` limit with default 4,096 nodes MUST fail with `[comptime::node_limit]`. [T-205][T-102]
 
-A stack trace MUST print the base name without the `_logosct<N>` suffix. [T-205]
+A stack trace MUST print the base name without the instance suffix `.logosct.<id>`. [T-205]
 
 A shadowed `const switch` case MUST fail with `[comptime::unreachable_case]`. [T-205]
 
@@ -1189,8 +1362,8 @@ Expansion MUST include unexported fields only for the current package. [T-205]
 Exact cases MUST match only the named type. [T-205]
 Tilde cases MUST match underlying types. [T-205]
 Native and ejected output MUST agree. [T-205]
-Comptime generics MUST expand into non-generic copies in the instantiating package. [T-205]
-`Resolve[f.Type](c)` MUST resolve per field in the copy. [T-205]
+Comptime generics MUST compile to non-generic instances in the defining package. [T-205]
+`Resolve[f.Type](c)` MUST resolve per field in the instance. [T-205]
 The check MUST track the active instantiation stack. [T-205]
 Field copies MUST compare compile-time types through `f.Type`. [T-205]
 A copy whose field types differ MUST fail compilation as an ordinary type mismatch. [T-205]
@@ -1232,13 +1405,16 @@ The first failure in completion order MUST win. [T-206]
 
 `Wait` MUST return only after all children exit. [T-206]
 
+`WaitContext(ctx)` MUST join every child and return what `Wait` would return; if `ctx` ends first it MUST stop waiting and return `ctx.Err()`, leaving the children running under the group context and the group joinable by a later `Wait`. [T-206]
+
 The context MUST be cancelled at join. [T-206]
 
 A child panic MUST become `*logos/rt.PanicError` with the value and a stack. [T-206]
 
-`NewGroup`, `Go`, `GoNested`, `Wait`, and `PanicError.Error` MUST form the `Group` API (`NewGroup(ctx, limit)` returns the group and a child context; `Go` and `GoNested` take `func(context.Context) error`, and `GoNested` never blocks its caller on the concurrency limit). [T-206]
+`NewGroup`, `Go`, `GoNested`, `Wait`, `WaitContext`, and `PanicError.Error` MUST form the `Group` API (`NewGroup(ctx, limit)` returns the group and a child context; `Go` and `GoNested` take `func(context.Context) error`, and `GoNested` never blocks its caller on the concurrency limit). [T-206]
 
 A plain channel send, receive, or range directly in a child MUST lower to a `select` with `<-gctx.Done()`. [T-206]
+A plain channel send whose channel can accept the value without blocking MUST complete the send; cancellation MUST preempt only a send that would block. [T-206]
 
 A user `select` with `default` MUST stay unchanged. [T-206]
 
@@ -1875,6 +2051,12 @@ A struct with a field whose JSON tag name `encoding/json` v1 rejects as invalid,
 Generated output MUST be byte-identical to encoding/json for the same value under both `goexperiment.jsonv2` and `!goexperiment.jsonv2`; `json.Marshal` on an eligible value MUST return the same bytes as the generated method. [T-Sec10]
 The default build MUST use the fork baseline with `goexperiment.jsonv2` on. [T-Sec10]
 The generator MUST NOT rewrite any call site. [T-Sec10]
+Under `goexperiment.jsonv2`, the lowering MUST also generate a value-receiver MarshalJSONTo method unless the type declares MarshalJSON or MarshalJSONTo. [T-Sec10.2]
+The generated bytes implement the options `json.DefaultOptionsV1()`. [T-Sec10.2]
+MarshalJSONTo MUST use the generated bytes only when the options of the caller equal `json.DefaultOptionsV1()`. [T-Sec10.2]
+For all other options, MarshalJSONTo MUST encode through the reflective encoder of `encoding/json/v2` with the options of the caller. [T-Sec10.2]
+A struct with an option field at any container depth other than a bare pointer option or a union option, unless a named type on the path declares MarshalJSON, MUST NOT encode through the reflective encoder: its MarshalJSONTo MUST use the generated bytes when the caller options are the v1 or v2 defaults and MUST return an `UnsupportedOptions` diagnostic otherwise. A v1 call that differs from the defaults only in struct-tag flags counts as the v1 defaults. [T-Sec10.2]
+The fast-path options compare MUST NOT allocate; the reflection fallback used when the layout check fails MAY allocate. [T-Sec10.2]
 The generator emits fixed key literals first, computes a size bound, then fills one buffer from a single make. [T-Sec10]
 The buffer is returned to the caller, so it escapes to the heap. [T-Sec10]
 No size threshold and no caller buffer apply. [T-Sec10]
@@ -1892,6 +2074,11 @@ Each instantiation carries its own static helpers. [T-205]
 ### 10.2 Static unmarshaling
 
 For each eligible struct, the lowering generates pointer-receiver UnmarshalJSON. [T-Sec10]
+Under `goexperiment.jsonv2`, the lowering MUST also generate a pointer-receiver UnmarshalJSONFrom method unless the type declares UnmarshalJSON or UnmarshalJSONFrom. [T-Sec10.2]
+UnmarshalJSONFrom MUST use the generated decoder only when the options of the caller equal `json.DefaultOptionsV1()`. [T-Sec10.2]
+For all other options, such as `RejectUnknownMembers(true)`, UnmarshalJSONFrom MUST decode through the reflective decoder of `encoding/json/v2` with the options of the caller. [T-Sec10.2]
+A semantic error from the reflective path MUST name the declared struct type; a legacy UnmarshalTypeError from that path MUST carry the declared type and struct name. [T-Sec10.2]
+A struct with an option field at any container depth other than a bare pointer option or a union option, unless a named type on the path declares UnmarshalJSON or UnmarshalJSONFrom, MUST NOT use the reflective decoder: its UnmarshalJSONFrom MUST decode through the v1 method when the caller options are the v1 or v2 defaults and MUST return an `UnsupportedOptions` diagnostic otherwise. A v1 call that differs from the defaults only in struct-tag flags counts as the v1 defaults. A struct with a union member at any container depth and no such option field MUST take the same refusal path: the reflective decoder cannot dispatch a union member, so the v1 or v2 defaults decode through the v1 method and any other option returns an `UnsupportedOptions` diagnostic. [T-Sec10.2]
 For a scalar field with the `,string` option, generated method dispatch MUST follow the active `encoding/json` profile: classic mode unwraps the outer string, while JSONv2 passes the original JSON token and gives `UnmarshalJSONFrom` precedence over `UnmarshalJSON` and `UnmarshalText`. [T-Sec10]
 The compiler MUST select methods by their complete signatures. If a streaming method declines a value without consuming it, the generated decoder MUST call that method only once and then select the remaining method or scalar decoder at compile time; it MUST NOT construct a methodless type at run time. Non-scalar fields MUST use their ordinary fallback because `,string` does not apply to them. [T-Sec10]
 Generated method helper type arguments MUST retain source-valid C selectors when a checked scalar receiver is instantiated with a C type; private cgo-generated type names MUST NOT appear in ejected Go. [T-Sec10]
@@ -1902,6 +2089,7 @@ Decoding MUST fill defaults first, then parse. [T-Sec10]
 A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a required-mask constant, where K is the number of required non-nil fields of the struct. [T-Sec10]
 At the closing brace, a missing required non-nil field returns MissingFieldError naming type and field. [T-Sec10]
 JSON null for a non-nil field returns the same error. [T-Sec10]
+The option-aware fallback MUST preserve the same required-field checks, scanning member presence over a buffered copy of the object with the fast path fold and duplicate semantics while decoding into the destination's existing allocations, so an omitted member still fails when the destination already holds a non-nil pointer and a present member keeps nested data and pointer aliases. [T-Sec10.2]
 Keys MUST dispatch by switch up to 8 keys and by the Sec 7 const-map table above that. [T-Sec10][T-Sec7]
 Keys whose 64-bit hashes are equal MUST each dispatch to their own field. [T-Sec10][T-Sec7]
 The cost of decoding one key MUST NOT grow with the number of keys the type declares: dispatch MUST NOT scan the key set. [T-Sec10][T-Sec7]
@@ -1913,7 +2101,7 @@ Decoding through json.Decoder uses the same method. [T-Sec10]
 Decoding through a reflection-based decoder other than `encoding/json` lies outside this contract; this is a documented hole. [T-Sec10][A-GOBOUNDARY]
 No validate tags are needed. [T-Sec10]
 Unmarshal of a closed union MUST resolve members declared in another package, whatever the import name of that package in the file and whether or not the file imports it. [T-Sec10][T-203.1]
-A member has a static key set when its type is a struct, or a pointer to a struct, that Sec 10.1 makes eligible. The set holds the JSON key of each visible field, and a field is visible when it is exported and has no `-` tag. A keyed member has a static key set with at least one key. A keyless member has none: its type is not an eligible struct, or the struct has no visible field. A keyed member trial MUST count a success only when at least one key in the object is in that member's static key set and its decode then succeeds. A key in the static key set of a sibling member but not in this member's disqualifies this member trial, while a key in no member's static key set is ignored. Keys MUST decide every keyed member trial, including a member that declares its own UnmarshalJSON. Such a decoder MUST run only after its keys match. A keyless member MUST be tried only when no key of a keyed member occurs in the input. Exactly one such member MUST succeed for the union to select it. A closed union member without an UnmarshalJSON method MUST fail with [correctness::union_member_no_json]. [T-Sec10][T-203.1]
+A member has a static key set when its type is a struct, or a pointer to a struct, that Sec 10.1 makes eligible. The set holds the JSON key of each visible field, and a field is visible when it is exported and has no `-` tag. A keyed member has a static key set with at least one key. A keyless member has none: its type is not an eligible struct, or the struct has no visible field. A keyed member trial MUST count a success only when at least one key in the object is in that member's static key set and its decode then succeeds. A key in the static key set of a sibling member but not in this member's disqualifies this member trial, while a key in no member's static key set is ignored. Keys MUST decide every keyed member trial, including a member that declares its own UnmarshalJSON. Such a decoder MUST run only after its keys match. A keyless member MUST be tried only when no key of a keyed member occurs in the input. Exactly one such member MUST succeed for the union to select it. A closed union member without an UnmarshalJSON method MUST fail with [correctness::union_member_no_json] when the holder struct declares at least one json tag. A holder with no json tag gets no check: a field default is a constructor convenience, not a serialization contract. A member with no UnmarshalJSON method MUST be untriable: the generated decoder MUST NOT call it, and a trial MUST NOT count it as a success, so a holder that a default makes eligible still compiles and its union field then reports zero matches when no other member succeeds. [T-Sec10][T-203.1]
 A closed union member that its own package declares unexported, when that package is not the decoding package, MUST fail a field of that union with [correctness::union_member_no_json] at the field, because the decoding package cannot name the member or reach its UnmarshalJSON method. [T-Sec10][T-203.1]
 It assigns the target only on a single success. [T-Sec10][T-203.1]
 Ambiguity returns an error naming the union and the members. [T-Sec10][T-203.1]
@@ -2122,8 +2310,9 @@ Eject MUST keep ordinary scalar source, so its output needs no SIMD package or e
 
 ### 14.1 Emission
 
-- `--json-diagnostics` on `logos lint`, on `logos build`, and on every other command that accepts it MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files. [T-Sec14][T-102][R-U1]
+- `--json-diagnostics` on `logos lint`, on `logos build`, and on every other command that accepts it MUST write one JSON object per line to stderr for every compiler and lint diagnostic in `.lgo` files and in Go files, and for every finding of `logos conc`. [T-Sec14][T-102][T-106][R-U1]
 - Each line MUST be a complete object with schema version `1.0`. [T-Sec14]
+- `logos conc` MUST keep its review output on stdout: without `--json-diagnostics` the text findings and the `--ai-patch` brief, and under `--json-diagnostics` the `--ai-patch` brief while each finding goes to stderr as a Section 14 record. [T-Sec14][T-106]
 
 ### 14.2 Top-level fields
 
@@ -2283,7 +2472,7 @@ The toolchain is one complete toolchain for Go and LoGOs: Go packages and LoGOs 
 
 ### 18.2 Compiler-made names
 
-Compiler-made names use the `_logos_` prefix; comptime copies use the `_logosct` suffix. The only exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, and the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, which Go importers can call.
+Compiler-made names use the `_logos_` prefix; an ejected comptime instance name puts `_logosct` after the generic's name (`<f>_logosct<N>` or `<f>_logosct_<h>`, Sec 2.5). The only exceptions are the Go-fixed method names `MarshalJSON`, `UnmarshalJSON`, `MarshalBinary`, `AppendBinary`, and `UnmarshalBinary`, and the exported property accessors `Logos_GetF` and `Logos_SetF` of Sec 2.3, which Go importers can call.
 Tuple temporary names MUST be distinct across all files and expansion sites of a package, including sites with identical source coordinates. Repeated compilation of the same ordered inputs MUST produce the same names. Source diagnostics MUST retain the original positions. [T-204.1]
 Separately lowered inactive files MUST retain distinct tuple temporary names when combined in an ejected package. [T-204.1]
 For example, the lowering of `v := parse(s)?` reads as follows (temporary names and site indices vary by position).
