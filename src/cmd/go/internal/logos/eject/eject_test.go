@@ -137,3 +137,66 @@ func TestFindVariantContextPlatformLogosSyntax(t *testing.T) {
 		t.Errorf("plat_windows_arm64.lgo context = %q/%q ok=%v, want windows/arm64", goos, goarch, ok)
 	}
 }
+
+func TestSupportRelPathMapping(t *testing.T) {
+	cases := map[string]string{
+		"logos/rt":      "",
+		"logos/rt/json": "json",
+		"logos/json":    "json",
+		"logos/arena":   "arena",
+		"logos/sync":    "sync",
+		"logos/ascii":   "ascii",
+		"logos/proc":    "proc",
+		"logos/leak":    "leak",
+		"logos/io":      "io",
+	}
+	for path, want := range cases {
+		got, ok := supportRelPath(path)
+		if !ok {
+			t.Errorf("supportRelPath(%q) = not ok, want %q", path, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("supportRelPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+	for _, path := range []string{"fmt", "example.com/logos/rt", "logosrt", ""} {
+		if rel, ok := supportRelPath(path); ok {
+			t.Errorf("supportRelPath(%q) = %q, ok, want not ok", path, rel)
+		}
+	}
+}
+
+func TestSupportDestinationsDistinct(t *testing.T) {
+	dst, err := supportDestinations([]string{"logos/rt", "logos/ascii", "logos/arena"})
+	if err != nil {
+		t.Fatalf("supportDestinations: %v", err)
+	}
+	want := map[string]string{"": "logos/rt", "ascii": "logos/ascii", "arena": "logos/arena"}
+	if len(dst) != len(want) {
+		t.Fatalf("supportDestinations = %v, want %v", dst, want)
+	}
+	for rel, path := range want {
+		if dst[rel] != path {
+			t.Errorf("supportDestinations[%q] = %q, want %q", rel, dst[rel], path)
+		}
+	}
+}
+
+func TestSupportDestinationsCollision(t *testing.T) {
+	want := "support packages logos/json and logos/rt/json map to the same path json"
+	for _, paths := range [][]string{
+		{"logos/json", "logos/rt/json"},
+		{"logos/rt/json", "logos/json"},
+		{"logos/rt", "logos/json", "logos/rt/json"},
+	} {
+		_, err := supportDestinations(paths)
+		if err == nil {
+			t.Errorf("supportDestinations(%v) = nil error, want collision", paths)
+			continue
+		}
+		if err.Error() != want {
+			t.Errorf("supportDestinations(%v) error = %q, want %q", paths, err.Error(), want)
+		}
+	}
+}
