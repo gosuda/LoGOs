@@ -721,6 +721,30 @@ func TestPipeConcurrentAccess(t *testing.T) {
 	_ = c.Close()
 }
 
+// Closing a pipe directly to send EOF must not surface as a cleanup error.
+func TestCloseAfterPipeClosed(t *testing.T) {
+	opts := defaultOpts()
+	opts.Stdin = logosproc.PipeStdIO()
+	opts.Stdout = logosproc.PipeStdIO()
+	c := spawnSelf(t, "exit0", opts)
+	if w := c.StdinPipe(); w != nil {
+		_ = w.Close()
+	}
+	if r := c.StdoutPipe(); r != nil {
+		_ = r.Close()
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close after pipe closed = %v, want nil", err)
+	}
+	term, err := waitDeadline(t, c)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !term.IsSuccess() {
+		t.Fatalf("term = %+v, want success", term)
+	}
+}
+
 // Wait never closes pipes: the parent ends stay readable after Wait and
 // Close releases them exactly once. Planted fault: Wait leaves the parent
 // ends open with no defined owner, so descriptors leak by default.

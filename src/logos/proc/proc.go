@@ -257,7 +257,7 @@ func (c *Child) Close() error {
 		if f == nil {
 			continue
 		}
-		if err := f.Close(); err != nil {
+		if err := f.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 			errs = append(errs, err)
 		}
 	}
