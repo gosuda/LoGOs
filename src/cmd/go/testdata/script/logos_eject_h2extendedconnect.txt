@@ -33,6 +33,8 @@ exists $UPROOT1272/bin/go
 exec $UPROOT1272/bin/go version
 stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ..
+cd ..
 
 # A Go data fixture with overlapping import edits ejects unchanged and
 # does not fail the command: the overlap is a remap failure, so the data
