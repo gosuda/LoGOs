@@ -106,18 +106,34 @@ func rewrittenH2Calls(files []*syntax.File) map[syntax.Pos]bool {
 		if !hasNetHTTP {
 			continue
 		}
-		syntax.Inspect(f, func(n syntax.Node) bool {
-			call, ok := n.(*syntax.CallExpr)
-			if !ok || len(call.ArgList) != 0 {
-				return true
-			}
-			sel, ok := call.Fun.(*syntax.SelectorExpr)
-			if !ok || sel.Sel == nil || sel.Sel.Value != h2extendedConnectMethod {
-				return true
-			}
-			out[sel.Sel.Pos()] = true
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		call, ok := n.(*syntax.CallExpr)
+		if !ok || len(call.ArgList) != 0 {
 			return true
+		}
+		sel, ok := call.Fun.(*syntax.SelectorExpr)
+		if !ok || sel.Sel == nil || sel.Sel.Value != h2extendedConnectMethod {
+			return true
+		}
+		// Eject leaves receivers holding a compiler-temporary _logos_site
+		// name alone: another rewrite renames those temporaries, so its
+		// edits would overlap the call. Exempting the call here would let
+		// the fork-only method reach output upstream Go rejects, so keep
+		// the same boundary eject uses and refuse the call instead.
+		site := false
+		syntax.Inspect(sel.X, func(n syntax.Node) bool {
+			if name, ok := n.(*syntax.Name); ok {
+				rest, isSite := strings.CutPrefix(name.Value, "_logos_site")
+				site = site || isSite && rest != "" && strings.Trim(rest, "0123456789") == ""
+			}
+			return !site
 		})
+		if site {
+			return true
+		}
+		out[sel.Sel.Pos()] = true
+		return true
+	})
 	}
 	return out
 }
