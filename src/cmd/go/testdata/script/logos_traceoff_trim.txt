@@ -1,5 +1,7 @@
-# CI installs the pinned Node runtime; local hosts need it to execute wasm.
-[!exec:node] skip 'node is required to run js/wasm binaries'
+# CI installs the pinned Node runtime; only executing the iterator
+# programs below needs it. Every build-only check runs unconditionally,
+# so a host without Node still verifies when the linker trims or
+# retains tracing.
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
@@ -45,12 +47,16 @@ logos build -trimpath -buildvcs=false -gcflags=all=-l -ldflags='-s -w -v -v' -o 
 # coroutine's GoSwitch call is rewritten to its stub.
 logos build -trimpath -buildvcs=false -ldflags='-s -w -v -v' -o $WORK/pull.wasm ./pull
 stderr 'traceoff: rewrite .* ref to runtime\.traceOffGoSwitch'
-exec node --stack-size=8192 $GOROOT/lib/wasm/wasm_exec_node.js $WORK/pull.wasm
-cmp stdout pull.stdout
 
 # Same for the two-value form.
 logos build -trimpath -buildvcs=false -ldflags='-s -w -v -v' -o $WORK/pull2.wasm ./pull2
 stderr 'traceoff: rewrite .* ref to runtime\.traceOffGoSwitch'
+
+# Only executing the iterator programs needs Node; the rewrite decisions
+# above are already pinned without it.
+[!exec:node] skip 'node is required to execute js/wasm binaries'
+exec node --stack-size=8192 $GOROOT/lib/wasm/wasm_exec_node.js $WORK/pull.wasm
+cmp stdout pull.stdout
 exec node --stack-size=8192 $GOROOT/lib/wasm/wasm_exec_node.js $WORK/pull2.wasm
 cmp stdout pull2.stdout
 
