@@ -4404,14 +4404,17 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 	if eff.deferred != nil {
 		end = end.afterDeferred(eff.deferred)
 	}
-	if p.litCanRecover(lit) {
-		// A recovered panic exits through the literal's cleanups with the
-		// pre-panic stores still visible: join those exits with the
-		// ordinary ones before projecting onto caller-visible bindings.
-		for _, pst := range eff.panicked {
-			if r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true }); r != nil {
-				end = logosEFJoin(end, r)
-			}
+	// A recovered panic exits through the literal's cleanups with the
+	// pre-panic stores still visible: join those exits with the
+	// ordinary ones before projecting onto caller-visible bindings.
+	// Recovery counts only when a recover-capable cleanup was already
+	// registered at the panic, or the literal holds an opaque one.
+	for _, pst := range eff.panicked {
+		if !p.panicCanRecover(pst, lit) {
+			continue
+		}
+		if r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true }); r != nil {
+			end = logosEFJoin(end, r)
 		}
 	}
 	end = end.withoutLocals(inside)
@@ -4527,6 +4530,70 @@ func (p *logosEFPass) litCanRecover(lit *syntax.FuncLit) bool {
 		} else if inner == nil {
 			hit = true
 		} else if inner.Body != nil && bodyHasDirectRecover(p, inner.Body) && !p.bodyAlwaysPanics(inner.Body) {
+			hit = true
+		}
+		return true
+	})
+	return hit
+}
+
+// panicCanRecover reports whether the panic recorded in pst can resume
+// the invocation: a cleanup already registered at the panic must be able
+// to recover it, or the literal must hold an opaque recover-capable
+// deferred call. A recovery defer registered after the panic never ran,
+// so it cannot resume that path.
+func (p *logosEFPass) panicCanRecover(pst *logosEFState, lit *syntax.FuncLit) bool {
+	for node := pst.cleanups; node != nil; node = node.next {
+		if node.call.lit != nil {
+			if node.call.lit.Body != nil && bodyHasDirectRecover(p, node.call.lit.Body) && !p.bodyAlwaysPanics(node.call.lit.Body) {
+				return true
+			}
+			continue
+		}
+		for _, call := range node.choice {
+			if call.lit != nil && call.lit.Body != nil && bodyHasDirectRecover(p, call.lit.Body) && !p.bodyAlwaysPanics(call.lit.Body) {
+				return true
+			}
+		}
+	}
+	return p.litHasOpaqueRecover(lit)
+}
+
+// litHasOpaqueRecover reports whether lit defers a call the scan cannot
+// see through: a named or otherwise non-literal callee may call recover,
+// so those keep the conservative continuation. Unlike litCanRecover it
+// says nothing about literal bodies, whose registration order the panic
+// state decides.
+func (p *logosEFPass) litHasOpaqueRecover(lit *syntax.FuncLit) bool {
+	if lit.Body == nil {
+		return false
+	}
+	hit := false
+	syntax.Inspect(lit.Body, func(n syntax.Node) bool {
+		if hit {
+			return false
+		}
+		var call syntax.Expr
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.CallStmt:
+			if n.Tok != syntax.Defer {
+				return true
+			}
+			call = n.Call
+		case *syntax.ScopeDeferStmt:
+			call = n.Call
+		case *syntax.ErrdeferStmt:
+			call = n.Call
+		default:
+			return true
+		}
+		if _, ok := syntax.Unparen(call).(*syntax.TryExpr); ok {
+			return true
+		}
+		_, inner := unwrapDeferredCall(call)
+		if inner == nil {
 			hit = true
 		}
 		return true
