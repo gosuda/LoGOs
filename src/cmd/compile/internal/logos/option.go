@@ -2339,6 +2339,9 @@ func (fl *fileLower) lowerOptDeferGoIn(block *syntax.BlockStmt) {
 }
 
 func (fl *fileLower) resultOption(r types2.Type) types2.Type {
+	if types2.IsErrorType(r) {
+		return r
+	}
 	if fl.asOption(r) != nil {
 		return r
 	}
@@ -2346,6 +2349,9 @@ func (fl *fileLower) resultOption(r types2.Type) types2.Type {
 }
 
 func (fl *fileLower) bareResult(ro types2.Type) bool {
+	if types2.IsErrorType(ro) {
+		return true
+	}
 	return types2.LogosOptionIsBare(fl.asOption(ro).Elem)
 }
 
