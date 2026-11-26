@@ -110,8 +110,10 @@ func (p *logosEFPass) runCleanup(call logosEFDeferredCall, st *logosEFState) *lo
 // transfer operates on the actual exit state, so nested cleanup and
 // later-registered calls cannot leave stale error pairings behind. A
 // cleanup that panics does not stop earlier cleanups: they run during
-// unwinding, so they are still checked against the pre-panic state. The
-// invocation itself has no normal exit on the unrecovered path.
+// unwinding, so they are still checked against the pre-panic state. An
+// ordinary cleanup return preserves an active panic; only a callback
+// that can recover ends unwinding. The invocation itself has no normal
+// exit on the unrecovered path.
 func (p *logosEFPass) finishCleanups(st *logosEFState, crosses func(logosEFDeferredCall) bool) *logosEFState {
 	if st == nil || st.cleanups == nil {
 		return st
@@ -125,9 +127,11 @@ func (p *logosEFPass) finishCleanups(st *logosEFState, crosses func(logosEFDefer
 			if crosses(node.call) {
 				if next := p.runCleanup(node.call, st); next == nil {
 					panicked = true
-				} else {
+				} else if p.litCanRecover(node.call.lit) {
 					st = next
 					panicked = false
+				} else {
+					st = next
 				}
 			} else {
 				keep = append(keep, logosEFCleanup{call: node.call})
