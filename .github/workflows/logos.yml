@@ -38,15 +38,38 @@ env:
   GOLANGCI_LINT_SHA256: "9b7fe6a6bf6334b98decf8d86b11415ea7889afdabdd1959fdce23af2a9ebcea"
 
 jobs:
+  build:
+    name: "build"
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: "depot-ubuntu-24.04-4"
+    timeout-minutes: 30
+    steps:
+      - name: "Check out the tested revision"
+        run: |
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$LOGOS_EXPECTED_HEAD"
+          git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$LOGOS_EXPECTED_HEAD"
+          git rev-parse HEAD 'HEAD^{tree}' HEAD:src
+      - name: "Build the toolchain once for all suites"
+        run: bash .github/scripts/setup.sh build
+      - name: "Upload the shared toolchain build"
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: toolchain
+          path: "~/tc"
+
   logos:
     name: "${{ matrix.suite }}"
+    needs: [build]
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: "${{ matrix.suite == 'upstream' && 'ubuntu-26.04' || 'depot-ubuntu-24.04' }}"
     timeout-minutes: "${{ matrix.suite == 'scripts' && 180 || 90 }}"
     strategy:
       fail-fast: false
       matrix:
-        # Share one toolchain build across the shorter suites.
+        # All suites share the one toolchain build uploaded by the build job.
         suite: ["unit", "scripts", "upstream", "autovec"]
     defaults:
       run:
@@ -75,34 +98,19 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           shellcheck --version
           "$RUNNER_TEMP/actionlint" -color
-      - name: "Install the pinned Go bootstrap"
-        run: bash ../.github/scripts/install-ci-tool.sh go
-      - name: "Install the pinned Node runtime"
-
-        run: bash ../.github/scripts/install-ci-tool.sh node
-      - name: "Install the upstream oracle toolchains"
-        if: "matrix.suite != 'unit'"
-        run: bash ../.github/scripts/install-upstream-oracles.sh
-      - name: "Install the verified evidence runner"
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: toolchain
+          path: "~/tc"
+      - name: "Restore the shared toolchain build"
         run: |
-          archive="$RUNNER_TEMP/logos-regression-uv.tar.gz"
-          runner="$RUNNER_TEMP/logos-regression-uv"
-          evidence="$RUNNER_TEMP/logos-regression-evidence"
-          mkdir -p "$runner" "$evidence"
-          curl --fail --silent --show-error --location --output "$archive" https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-unknown-linux-gnu.tar.gz
-          printf '%s  %s\n' 5acfd9177cfecf0bf87578f059728215ccc884388988f55f7a65041b57387d91 "$archive" | sha256sum --check --strict - | tee "$evidence/uv-archive.txt"
-          tar -xzf "$archive" -C "$runner" --strip-components=1
-          printf '%s\n' "$runner" >> "$GITHUB_PATH"
-          printf 'PYTHONDONTWRITEBYTECODE=1\nPYTEST_DISABLE_PLUGIN_AUTOLOAD=1\n' >> "$GITHUB_ENV"
-      - name: "Install the Python 3.12 interpreter"
-        if: "matrix.suite == 'unit' || matrix.suite == 'upstream'"
-        run: uv python install 3.12
-      - name: "Build the toolchain"
-        run: |
-          GOROOT_BOOTSTRAP=$(go env GOROOT)
-          export GOROOT_BOOTSTRAP
-          ./make.bash
-          printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+          case "${{ matrix.suite }}" in
+            unit) args="py" ;;
+            upstream) args="oracles py" ;;
+            *) args="oracles" ;;
+          esac
+          # shellcheck disable=SC2086
+          bash .github/scripts/setup.sh restore $args
       - name: "Smoke"
         id: "smoke"
         run: |
