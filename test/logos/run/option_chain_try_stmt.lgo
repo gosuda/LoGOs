@@ -18,9 +18,12 @@ func check(name string, cond bool, got, want any) {
 	fmt.Println("ok", name)
 }
 
+var tryStmtCalls int
+
 type TryStmtM struct{ X int }
 
 func (m *TryStmtM) Get(ok bool) (int, error) {
+	tryStmtCalls++
 	if !ok {
 		return 0, fmt.Errorf("no")
 	}
@@ -41,6 +44,7 @@ func useTryStmt(m *TryStmtM?, ok bool) (int?, error) {
 }
 
 func main() {
+	tryStmtCalls = 0
 	v, err := useTryStmt(mkTryStmt(true), true)
 	if err != nil {
 		check("stmt-ok-err-nil", false, err.Error(), "<nil>")
@@ -48,12 +52,16 @@ func main() {
 		check("stmt-ok-err-nil", true, "<nil>", "<nil>")
 		check("stmt-ok-value", (v ?? -1) == 7, v ?? -1, 7)
 	}
+	check("stmt-ok-calls", tryStmtCalls == 2, tryStmtCalls, 2)
+	tryStmtCalls = 0
 	_, errf := useTryStmt(mkTryStmt(true), false)
 	if errf == nil {
 		check("stmt-fail-err", false, "<nil>", "no")
 	} else {
 		check("stmt-fail-err", errf.Error() == "no", errf.Error(), "no")
 	}
+	check("stmt-fail-calls", tryStmtCalls == 1, tryStmtCalls, 1)
+	tryStmtCalls = 0
 	va, erra := useTryStmt(nil, true)
 	if erra != nil {
 		check("stmt-absent-err-nil", false, erra.Error(), "<nil>")
@@ -61,6 +69,7 @@ func main() {
 		check("stmt-absent-err-nil", true, "<nil>", "<nil>")
 		check("stmt-absent-value", (va ?? -1) == -1, va ?? -1, -1)
 	}
+	check("stmt-absent-calls", tryStmtCalls == 0, tryStmtCalls, 0)
 	if failed {
 		os.Exit(1)
 	}

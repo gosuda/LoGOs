@@ -1,5 +1,8 @@
 ok stmt-ok-err-nil
 ok stmt-ok-value
+ok stmt-ok-calls
 ok stmt-fail-err
+ok stmt-fail-calls
 ok stmt-absent-err-nil
 ok stmt-absent-value
+ok stmt-absent-calls
