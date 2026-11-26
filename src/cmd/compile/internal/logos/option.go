@@ -2039,7 +2039,7 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 	recList := make([]types2.Type, n)
 	for i := range n {
 		r := rs.At(i).Type()
-		ro := fl.resultOption(r)
+		ro := fl.resultOption(r, i == n-1)
 		recList[i] = r
 		roList[i] = ro
 		nt, t, ok := fl.spellLoweredBoth(ro, pos)
@@ -2341,8 +2341,11 @@ func (fl *fileLower) lowerOptDeferGoIn(block *syntax.BlockStmt) {
 	})
 }
 
-func (fl *fileLower) resultOption(r types2.Type) types2.Type {
-	if types2.IsErrorType(r) {
+// resultOption spells the lowered form of one result of a ?. call: every
+// result wraps as an option except a trailing error, which stays unwrapped,
+// matching the checker's logosOptionalCall rule.
+func (fl *fileLower) resultOption(r types2.Type, last bool) types2.Type {
+	if last && types2.IsErrorType(r) {
 		return r
 	}
 	if fl.asOption(r) != nil {
