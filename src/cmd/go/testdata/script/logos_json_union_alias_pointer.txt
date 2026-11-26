@@ -12,6 +12,7 @@ cd good
 logos run .
 stdout '^ok ptr 11$'
 stdout '^ok inverse 12$'
+stdout '^ok direct 13$'
 -- good/go.mod --
 module example.com/unionaliasptr
 
@@ -109,6 +110,7 @@ type H2 struct {
 }
 
 func main() {
+	directPublicPointer()
 	var h H
 	if err := json.Unmarshal([]byte(`{"item":{"x":11}}`), &h); err != nil {
 		fmt.Println("decode err:", err)
@@ -130,4 +132,26 @@ func main() {
 		return
 	}
 	fmt.Printf("WRONG TYPE %T\n", h2.Item)
+}
+
+// The member spells a pointer to the public alias directly, with no
+// outer pointer alias for the checker to accept first.
+type U3 interface {
+	*lib.Public | *Other
+}
+
+type H3 struct {
+	Item U3 `json:"item"`
+}
+
+func directPublicPointer() {
+	var h H3
+	if err := json.Unmarshal([]byte(`{"item":{"x":13}}`), &h); err != nil {
+		panic(err)
+	}
+	if p, ok := h.Item.(*lib.Public); ok {
+		fmt.Println("ok direct", p.X)
+		return
+	}
+	panic("wrong direct public pointer type")
 }

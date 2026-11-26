@@ -1,0 +1,127 @@
+name: Verify complete cleanup and recovery review repairs
+
+on:
+  push:
+    branches: [ci/verify-flow-337-final-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regressions:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the repaired merged compiler
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Unchanged deferred-flow attacks
+        run: go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/error_first_(review263|cleanup_paths|calls337|recovery337|switch_exit337|inline|flow)\.lgo$' 2>&1 | tee review-evidence/attacks-green.log
+      - name: Full affected compiler package suites
+        run: go test -count=1 -short cmd/compile/internal/types2 cmd/compile/internal/logos cmd/compile/internal/walk 2>&1 | tee review-evidence/compiler-green.log
+      - name: Cross-package, alias, and scope-export scripts
+        run: go test -v -race -count=1 cmd/go -run '^TestScript$/logos_(error_first_xpkg|json_union_alias_pointer|eject_goto_defer|eject_try_labeled_scope_defers|eject_group_labeled_scope_defers|eject_group_scope_defer|eject_chain_stage_scope_defer)$' 2>&1 | tee review-evidence/scripts-green.log
+      - name: Prove the skipped errdefer path remains checked
+        run: |
+          file=src/cmd/compile/internal/types2/narrow_defer_logos.go
+          cp "$file" review-evidence/narrow-defer-fixed.go
+          trap 'cp review-evidence/narrow-defer-fixed.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/compile/internal/types2/narrow_defer_logos.go')
+          text = p.read_text()
+          assert text.count('if call.onError {') == 1
+          p.write_text(text.replace('if call.onError {', 'if false && call.onError {'))
+          PYCODE
+          if go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/error_first_review263\.lgo$' > review-evidence/mutation.log 2>&1; then
+            cat review-evidence/mutation.log
+            echo 'skipped errdefer mutation escaped the attack'
+            exit 1
+          fi
+          cat review-evidence/mutation.log
+          grep -F 'unreported errors' review-evidence/mutation.log
+          grep -F 'error_first_review263.lgo:29:' review-evidence/mutation.log
+      - name: Compiler error-first end-to-end controls
+        run: go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/compile/errorfirst_' 2>&1 | tee review-evidence/testdir.log
+      - name: Prove invocation-local state cannot leak
+        run: |
+          file=src/cmd/compile/internal/types2/narrow_logos.go
+          cp "$file" review-evidence/narrow-fixed.go
+          trap 'cp review-evidence/narrow-fixed.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/compile/internal/types2/narrow_logos.go')
+          text = p.read_text()
+          prefix = 'func (s *logosEFState) withoutLocals(inside map[*Var]bool) *logosEFState {'
+          assert text.count(prefix) == 1
+          p.write_text(text.replace(prefix, prefix + '\n\tif inside != nil { return s }'))
+          PYCODE
+          if go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/error_first_calls337\.lgo$' > review-evidence/local-mutation.log 2>&1; then
+            cat review-evidence/local-mutation.log
+            echo 'invocation-local state mutation escaped the attack'
+            exit 1
+          fi
+          cat review-evidence/local-mutation.log
+          grep -F 'no error expected' review-evidence/local-mutation.log
+          grep -F 'error_first_calls337.lgo:83:' review-evidence/local-mutation.log
+      - name: Prove unconditional repanic stays unreachable
+        run: |
+          file=src/cmd/compile/internal/types2/narrow_logos.go
+          cp "$file" review-evidence/narrow-recovery-fixed.go
+          trap 'cp review-evidence/narrow-recovery-fixed.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/compile/internal/types2/narrow_logos.go')
+          source = p.read_text()
+          guard = ' && !p.bodyAlwaysPanics(inner.Body)'
+          assert source.count(guard) == 1
+          p.write_text(source.replace(guard, ''))
+          PYCODE
+          if go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/error_first_recovery337\.lgo$' > review-evidence/recovery-mutation.log 2>&1; then
+            cat review-evidence/recovery-mutation.log
+            echo 'unconditional repanic mutation escaped the attack'
+            exit 1
+          fi
+          cat review-evidence/recovery-mutation.log
+          grep -F 'no error expected' review-evidence/recovery-mutation.log
+          grep -F 'error_first_recovery337.lgo:32:' review-evidence/recovery-mutation.log
+      - name: Vet, formatting, and clean-tree checks
+        run: |
+          go vet cmd/compile/internal/types2 cmd/compile/internal/logos cmd/compile/internal/walk
+          files=$(gofmt -l src/cmd/compile/internal/types2/narrow_logos.go src/cmd/compile/internal/types2/narrow_defer_logos.go src/cmd/compile/internal/types2/static_logos.go src/cmd/compile/internal/types2/union_logos.go src/cmd/compile/internal/logos/json_unmarshal.go)
+          test -z "$files" || { printf '%s\n' "$files"; exit 1; }
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: invocation-green-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
