@@ -57,7 +57,7 @@ func cgoOnlyLogosGap(path string, plan *ejectPlan) (string, bool) {
 			continue
 		}
 		seen[imp] = true
-		if _, ok := plan.provenance[imp]; !ok {
+		if _, ok := plan.provenance[imp]; !ok && imp != load.LogosRTPkg {
 			missing = append(missing, imp)
 		}
 	}
