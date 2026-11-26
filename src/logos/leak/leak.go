@@ -11,12 +11,18 @@
 // Use it as the first line of a test:
 //
 //	func TestTopicDrops(t *testing.T) {
-//		defer leak.Check(t)
+//		leak.Check(t)
 //	}
 //
-// Check samples the three counts when it runs, and the deferred call
-// fails the test unless every count is back at its sample. A test that
-// leaks one goroutine blocked on a never-closed channel fails with
+// The check runs as a cleanup, so resources released with t.Cleanup
+// are closed before it samples. Call Check before registering those
+// cleanups: cleanups run last-registered-first, so the check must be
+// first to run last. The returned func runs the same check immediately
+// for the legacy deferred pattern; prefer the cleanup form.
+//
+// Check samples the three counts when it runs and fails the test unless
+// every count is back at its sample. A test that leaks one goroutine
+// blocked on a never-closed channel fails with
 // "leak: 1 goroutine, 0 fds, 0 timers still live".
 //
 // A check that sees growth waits out a bounded quiescence window and
@@ -63,16 +69,22 @@ type delta struct {
 	fdsOK      bool
 }
 
-// Check arranges a leak assertion for the calling test. Call it first
-// and defer the result; the deferred call fails the test unless the
-// goroutine, fd, and timer counts return to their sampled values.
+// Check arranges a leak assertion for the calling test. Call it first;
+// the check runs as a cleanup, after cleanups registered later, and
+// fails the test unless the goroutine, fd, and timer counts return to
+// their sampled values. The returned func runs the same check
+// immediately, so `defer Check(t)()` keeps working, but the deferred
+// form verifies before t.Cleanup callbacks run and cannot see releases
+// registered with t.Cleanup.
 func Check(t *testing.T) func() {
 	t.Helper()
 	before := sample()
-	return func() {
+	check := func() {
 		t.Helper()
 		verify(before, t.Errorf, sample, sleepQuiesce)
 	}
+	t.Cleanup(check)
+	return check
 }
 
 func sleepQuiesce() {

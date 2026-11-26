@@ -24,9 +24,10 @@ type fixedState struct {
 // New, Make, and Append with the handle bump through buf. A request that
 // does not fit panics with arena: fixed region exhausted (want N, have M)
 // instead of growing. Requests for zero-size types and empty appends never
-// consume the buffer. FixedUsed reports the bytes consumed so far. The
-// handle keeps buf alive. A fixed handle is not safe for concurrent use;
-// open one handle per buffer.
+// consume the buffer. A nonempty allocation of a pointer-bearing type
+// panics. FixedUsed reports the bytes consumed so far. The handle keeps
+// buf alive. A fixed handle is not safe for concurrent use; open one
+// handle per buffer.
 func OpenFixed(buf []byte) Region {
 	return Region{fixed: fixedRef(&fixedState{buf: buf})}
 }
@@ -67,11 +68,18 @@ func appendFixedUint(out []byte, v uint64) []byte {
 	return append(out, digits[i:]...)
 }
 
+func fixedCheckElement[T any]() {
+	if fixedElementHasPointers[T]() {
+		panic("arena: fixed region cannot hold pointers")
+	}
+}
+
 func fixedNew[T any](r Region) *T {
 	var zero T
 	if unsafe.Sizeof(zero) == 0 {
 		return new(T)
 	}
+	fixedCheckElement[T]()
 	size := int(unsafe.Sizeof(zero))
 	align := int(unsafe.Alignof(zero))
 	st := r.fixed
@@ -99,6 +107,7 @@ func fixedMake[T any](r Region, n int) []T {
 	if n == 0 {
 		return unsafe.Slice((*T)(unsafe.Pointer(unsafe.SliceData(st.buf[st.used:]))), 0)
 	}
+	fixedCheckElement[T]()
 	want := n * size
 	if want/n != size {
 		want = int(^uint(0) >> 1)
@@ -115,6 +124,28 @@ func fixedMake[T any](r Region, n int) []T {
 	return out
 }
 
+// fixedSpareAccounted reports whether appending n elements into s's spare
+// capacity stays clear of the region's unallocated space. The write range
+// may sit inside bytes the cursor already accounts for (a reslice of a
+// previous allocation) or entirely outside the region buffer (an unrelated
+// heap slice). Anything else overlaps space a later allocation will claim,
+// so the caller must take the checked path and let the cursor account for
+// the returned bytes.
+func fixedSpareAccounted[T any](st *fixedState, s []T, n, size int) bool {
+	if st == nil {
+		return true
+	}
+	t := s[:len(s)+n]
+	ws := uintptr(unsafe.Pointer(&t[len(s)]))
+	we := ws + uintptr(n)*uintptr(size)
+	base := uintptr(unsafe.Pointer(unsafe.SliceData(st.buf)))
+	front := base + uintptr(st.used)
+	if ws >= base && we <= front {
+		return true
+	}
+	return we <= base || ws >= base+uintptr(len(st.buf))
+}
+
 func fixedAppend[T any](r Region, s []T, v []T) []T {
 	if len(v) == 0 {
 		return s
@@ -123,17 +154,20 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 	if unsafe.Sizeof(zero) == 0 {
 		return append(s, v...)
 	}
+	fixedCheckElement[T]()
 	size := int(unsafe.Sizeof(zero))
 	align := int(unsafe.Alignof(zero))
-	if cap(s)-len(s) >= len(v) {
+	if cap(s)-len(s) >= len(v) && fixedSpareAccounted(r.fixed, s, len(v), size) {
 		return append(s, v...)
 	}
 	st := r.fixed
-	front := uintptr(unsafe.Pointer(unsafe.SliceData(st.buf))) + uintptr(st.used)
+	base := uintptr(unsafe.Pointer(unsafe.SliceData(st.buf)))
+	front := base + uintptr(st.used)
 	last := false
 	if len(s) > 0 {
-		end := uintptr(unsafe.Pointer(&s[0])) + uintptr(len(s))*uintptr(size)
-		last = end == front && front%uintptr(align) == 0
+		start := uintptr(unsafe.Pointer(&s[0]))
+		end := start + uintptr(len(s))*uintptr(size)
+		last = start >= base && end == front && front%uintptr(align) == 0
 	}
 	if last {
 		add := len(v) * size
@@ -149,10 +183,23 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 	if want/total != size {
 		want = int(^uint(0) >> 1)
 	}
-	base := uintptr(unsafe.Pointer(unsafe.SliceData(st.buf)))
 	at := int(fixedAlignUpAddr(base+uintptr(st.used), uintptr(align)) - base)
 	if at > len(st.buf) || want > len(st.buf)-at {
 		panic(fixedExhausted(want, len(st.buf)-st.used))
+	}
+	// Preserve v when it aliases the fresh segment: the s copy below
+	// would otherwise overwrite v before it is copied. Each copy is
+	// memmove, so only the second source needs a temporary.
+	if len(s) > 0 {
+		dst := base + uintptr(at)
+		sBytes := uintptr(len(s)) * uintptr(size)
+		vPtr := uintptr(unsafe.Pointer(unsafe.SliceData(v)))
+		vBytes := uintptr(len(v)) * uintptr(size)
+		if vPtr < dst+sBytes && dst < vPtr+vBytes {
+			tmp := make([]T, len(v))
+			copy(tmp, v)
+			v = tmp
+		}
 	}
 	st.used = at + want
 	out := unsafe.Slice((*T)(unsafe.Pointer(&st.buf[at])), total)

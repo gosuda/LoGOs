@@ -139,6 +139,13 @@ func (g *marshalGen) code(f *jsonField) fieldCode {
 			return g.edgeCode(f, e)
 		}
 	}
+	if f.opt != nil {
+		if _, ok := unionContainerOf(f.typ); !ok {
+			if _, ok := types2.LogosUnionMembers(unaliasConstView(f.opt)); !ok {
+				return g.optionCode(f)
+			}
+		}
+	}
 	var c fieldCode
 	switch f.shape.kind {
 	case shapeFallback:
@@ -330,6 +337,55 @@ func (g *marshalGen) fallbackCode(f *jsonField) fieldCode {
 	c.pre = append(c.pre, ifLines(p, append(inner, check...))...)
 	c.size = ifLines(p, []string{fmt.Sprintf("_logos_n += %d + len(%s)", g.litLen(f, ""), b)})
 	c.emit = ifLines(p, append(g.litStmts(f, ""), fmt.Sprintf("_logos_buf = append(_logos_buf, %s...)", b)))
+	return c
+}
+func (g *marshalGen) optionCode(f *jsonField) fieldCode {
+	local := f.local()
+	pins := []string{local + " := " + g.recv + "." + f.goName}
+	present := local + ".Present"
+	value := local + ".Value"
+	if kind, ok := scalarOf(unaliasConstView(f.opt)); ok {
+		c := scalarCodec{kind: kind, quoted: f.quoted}
+		p := g.scalarParts(f, c, value)
+		var c2 fieldCode
+		c2.pins = pins
+		if chk := c.checkStmt(value); chk != "" {
+			c2.pre = ifLines(present, []string{chk})
+		}
+		if f.optional() {
+			c2.size = ifLines(present, p.inlineSize())
+			c2.emit = ifLines(present, p.emit)
+			return c2
+		}
+		n := g.nullParts(f)
+		c2.size = ifElseLines(present, p.inlineSize(), n.inlineSize())
+		c2.emit = ifElseLines(present, p.emit, n.emit)
+		return c2
+	}
+	b := fmt.Sprintf("_logos_b%d", f.pos)
+	e := fmt.Sprintf("_logos_e%d", f.pos)
+	var c fieldCode
+	c.pins = pins
+	if f.optional() {
+		p := f.presenceName()
+		c.pre = []string{p + " := " + present, "var " + b + " []byte"}
+		inner := []string{fmt.Sprintf("var %s error", e), fmt.Sprintf("%s, %s = %s.MarshalField(%s)", b, e, jsonAlias, value)}
+		check := ifLines(e+" != nil", []string{"return nil, " + e})
+		c.pre = append(c.pre, ifLines(p, append(inner, check...))...)
+		c.size = ifLines(p, []string{fmt.Sprintf("_logos_n += %d + len(%s)", g.litLen(f, ""), b)})
+		c.emit = ifLines(p, append(g.litStmts(f, ""), fmt.Sprintf("_logos_buf = append(_logos_buf, %s...)", b)))
+		return c
+	}
+	c.pre = []string{"var " + b + " []byte"}
+	inner := []string{fmt.Sprintf("var %s error", e), fmt.Sprintf("%s, %s = %s.MarshalField(%s)", b, e, jsonAlias, value)}
+	check := ifLines(e+" != nil", []string{"return nil, " + e})
+	c.pre = append(c.pre, ifLines(present, append(inner, check...))...)
+	nullSize := fmt.Sprintf("_logos_n += %d + 4", g.litLen(f, ""))
+	nullEmit := append(g.litStmts(f, ""), `_logos_buf = append(_logos_buf, "null"...)`)
+	payloadSize := fmt.Sprintf("_logos_n += %d + len(%s)", g.litLen(f, ""), b)
+	payloadEmit := append(g.litStmts(f, ""), fmt.Sprintf("_logos_buf = append(_logos_buf, %s...)", b))
+	c.size = ifElseLines(present, []string{payloadSize}, []string{nullSize})
+	c.emit = ifElseLines(present, payloadEmit, nullEmit)
 	return c
 }
 
@@ -605,6 +661,13 @@ type jsonWalkPlan struct {
 }
 
 func (fl *fileLower) jsonEdgeOf(t types2.Type) jsonEdge {
+	if o := fl.nonBareOptionElem(t); o != nil {
+		if _, ok := unionContainerOf(t); !ok {
+			if _, ok := types2.LogosUnionMembers(unaliasConstView(o)); !ok {
+				return edgeLegacy
+			}
+		}
+	}
 	if fl.classifyJSONField(t).kind != shapeFallback {
 		return edgeLegacy
 	}
@@ -900,6 +963,7 @@ func (fl *fileLower) instHelperModel(core types2.Type) (string, string, *jsonStr
 			typ:       ft,
 		}
 		f.shape = fl.classifyJSONField(ft)
+		f.opt = fl.nonBareOptionElem(ft)
 		f.quoted = info.StringOpt && isQuotableForString(ft, f.shape)
 		if f.shape.nonNil {
 			f.required = len(js.required)

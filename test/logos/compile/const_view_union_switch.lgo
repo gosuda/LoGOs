@@ -34,7 +34,7 @@ type HolderRef struct {
 }
 
 func switchVal(xs const []HolderVal) string {
-	switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	switch xs[0].S.(type) {
 	case Circle:
 		return "circle"
 	case Square:
@@ -47,7 +47,7 @@ func switchVal(xs const []HolderVal) string {
 }
 
 func switchRef(xs const []HolderRef) string {
-	switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	switch xs[0].S.(type) {
 	case Circle:
 		return "circle"
 	case Blob:
@@ -72,5 +72,45 @@ func switchControl() string {
 		return "nil"
 	default:
 		return "other"
+	}
+}
+
+type Other struct {
+	Name string
+}
+
+// Exhaustiveness still applies through the view: Square and nil are missing.
+func switchValMissing(xs const []HolderVal) string {
+	switch xs[0].S.(type) { // ERROR "nonexhaustive_switch"
+	case Circle:
+		return "circle"
+	case Square:
+		return "square"
+	}
+	return "other"
+}
+
+// A case that is not a union member still fails through the view.
+func switchValNonMember(xs const []HolderVal) string {
+	switch xs[0].S.(type) {
+	case Circle:
+		return "circle"
+	case Other: // ERROR "union_nonmember"
+		return "other"
+	default:
+		return "other"
+	}
+}
+
+// A case variable for a reference-bearing member keeps the view: a
+// write through it is still rejected.
+func switchRefWrite(xs const []HolderRef) {
+	switch u := xs[0].S.(type) {
+	case Blob:
+		u.Tags = nil // ERROR "const_view_mutation"
+		_ = u
+	case Circle:
+		_ = u
+	default:
 	}
 }

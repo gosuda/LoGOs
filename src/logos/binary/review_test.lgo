@@ -1,0 +1,110 @@
+package binary
+
+import (
+	"bytes"
+	stdbinary "encoding/binary"
+	"strings"
+	"testing"
+)
+
+func TestTwinDecodeOverlappingBytes(t *testing.T) {
+	twin := []byte{1, 2, 3, 4}
+	original := []byte{1, 2, 3, 4}
+	dst := twin[1:]
+	n, err := Decode(twin[:3], LittleEndian, &dst)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	want, err := stdbinary.Decode(original[:3], LittleEndian, original[1:])
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if n != want || !bytes.Equal(twin, original) {
+		t.Fatalf("overlap: got %x (%d bytes), want %x (%d bytes)", twin, n, original, want)
+	}
+	_, err = Decode([]byte{9, 9}, LittleEndian, &dst)
+	if err == nil || err.Error() != ErrTooSmall.Error() {
+		t.Fatalf("short overlapping-byte destination: got %v, want %q", err, ErrTooSmall.Error())
+		return
+	}
+	if !bytes.Equal(twin, original) {
+		t.Fatalf("short decode modified the destination: %x", twin)
+	}
+}
+
+type anyFieldRec struct {
+	V any
+}
+
+func TestTwinDecodeAnyHeldSliceTrailing(t *testing.T) {
+	var dst any = make([]bool, 1)
+	n, err := Decode([]byte{1, 0}, LittleEndian, &dst)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if n != 1 || !dst.([]bool)[0] {
+		t.Fatalf("any-held []bool with trailing byte: got %v after %d bytes", dst, n)
+	}
+	var ints any = make([]int8, 2)
+	n, err = Decode([]byte{7, 8, 9}, LittleEndian, &ints)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if n != 2 || ints.([]int8)[0] != 7 || ints.([]int8)[1] != 8 {
+		t.Fatalf("any-held []int8 with trailing byte: got %v after %d bytes", ints, n)
+	}
+	var short any = make([]bool, 3)
+	if _, err := Decode([]byte{1, 0}, LittleEndian, &short); err == nil {
+		t.Fatalf("short buffer for any-held []bool: got nil error")
+	}
+	direct := make([]bool, 1)
+	n, err = Decode([]byte{1, 0}, LittleEndian, &direct)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+	if n != 1 || !direct[0] {
+		t.Fatalf("concrete []bool with trailing byte: got %v after %d bytes", direct, n)
+	}
+}
+
+func TestTwinNilAnyHolder(t *testing.T) {
+	var holder any
+	if err := ReadInto(bytes.NewReader([]byte{1}), LittleEndian, &holder); err == nil || !strings.Contains(err.Error(), "binary.Read: invalid type") {
+		t.Fatalf("nil any holder ReadInto: got %v", err)
+	}
+	var holder2 any
+	if _, err := Decode([]byte{1}, LittleEndian, &holder2); err == nil || !strings.Contains(err.Error(), "binary.Decode: invalid type") {
+		t.Fatalf("nil any holder Decode: got %v", err)
+	}
+	var rec anyFieldRec
+	if _, err := Decode([]byte{1}, LittleEndian, &rec); err == nil {
+		t.Fatalf("nil any struct field Decode: got nil error")
+	}
+}
+
+func TestTwinReadIntoInvalidAnyHolderKeepsStream(t *testing.T) {
+	var dst any = uint16(0)
+	r := bytes.NewReader([]byte{1, 2, 3, 4})
+	err := ReadInto(r, LittleEndian, &dst)
+	if err == nil || err.Error() != "binary.Read: invalid type uint16" {
+		t.Fatalf("invalid any holder: got %v", err)
+	}
+	if r.Len() != 4 {
+		t.Fatalf("invalid any holder consumed %d bytes", 4-r.Len())
+	}
+	var word uint16
+	valid := any(&word)
+	r = bytes.NewReader([]byte{1, 2, 3, 4})
+	if err := ReadInto(r, LittleEndian, &valid); err != nil {
+		t.Fatal(err)
+		return
+	}
+	if word != 0x0201 || r.Len() != 2 {
+		t.Fatalf("valid any holder: got %04x with %d bytes left", word, r.Len())
+	}
+}

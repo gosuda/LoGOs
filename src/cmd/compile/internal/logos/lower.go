@@ -944,8 +944,7 @@ func (fl *fileLower) lowerFile() {
 	fl.lowerComptime()      // comptime generic retirement, then const for unrolling, before any rewrite.
 	fl.lowerStructDefaults()
 	fl.scanRodataMarkers() // hand-written //logos:rodata lines.
-	fl.lowerArenaEject()
-	fl.lowerZeroCopy() // zero-copy string/bytes conversions.
+	fl.lowerZeroCopy()     // zero-copy string/bytes conversions.
 	fl.enrollLoweredConstMaps()
 	fl.lowerCTFE()
 	fl.lowerConstMapRanges()

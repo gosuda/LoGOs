@@ -135,7 +135,7 @@ type FeedScanner struct {
 	utfFirst byte
 	utfNeed  int
 	utfGot   int
-	esc      [4]byte
+	esc      [6]byte
 }
 
 // Feed supplies the next input chunk. Call it only when the previous

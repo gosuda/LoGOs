@@ -48,6 +48,35 @@ func logosClosedUnion(t Type) *_TypeSet {
 	return tset
 }
 
+// logosClosedUnionView returns the closed-union term set of t, seeing
+// through a const view (or readonly-descendants) qualifier to the
+// interface it qualifies. A type switch on a qualified interface reads
+// the same dynamic type as on the plain interface, so exhaustiveness
+// and member checks use the same terms. Callers that convert or assign
+// to a union keep logosClosedUnion: qualifying the target is a
+// different obligation from switching on a qualified source.
+func logosClosedUnionView(t Type) *_TypeSet {
+	if t == nil {
+		return nil
+	}
+	base, _ := logosViewBase(t)
+	return logosClosedUnion(base)
+}
+
+// logosAssertSource returns the interface a type assertion enumerates
+// methods over: a qualified source asserts through the interface it
+// views, which carries the method set the view itself does not expose
+// as an underlying interface. An unqualified source is unchanged.
+func (check *Checker) logosAssertSource(V Type) Type {
+	if check == nil || !check.conf.Logos {
+		return V
+	}
+	if base, qualified := logosViewBase(V); qualified {
+		return base
+	}
+	return V
+}
+
 // INVARIANT: a type switch is exhaustive over the values its operand can hold
 // at that point. A nil case is unreachable when the operand is a local or
 // parameter that narrowing has proven non-nil from an option whose absence
@@ -203,7 +232,7 @@ func (check *Checker) logosNonMemberAssert(e syntax.Expr, x *operand, T Type) bo
 			return true
 		}
 	}
-	tset := logosClosedUnion(x.typ())
+	tset := logosClosedUnionView(x.typ())
 	if tset == nil || isTypeParam(T) || logosMemberOf(T, tset) {
 		return false
 	}
@@ -457,6 +486,38 @@ func LogosUnionMembers(t Type) ([]LogosUnionMember, bool) {
 	return out, len(out) > 0
 }
 
+// logosOutermostTypeName returns the type name the holder spelled: the
+// outermost alias when the unwrapped type names one, otherwise the
+// resolved named type. Pointer, const-view and readonly-descendant
+// qualifiers unwrap; aliases never resolve. Recording the alias keeps an
+// exported spelling of an unexported implementation reachable: the trial
+// allocates through the alias, so the export check must see the alias.
+func logosOutermostTypeName(t Type) (*TypeName, bool) {
+	for {
+		switch u := t.(type) {
+		case *Alias:
+			if u.Obj() == nil {
+				return nil, false
+			}
+			return u.Obj(), true
+		case *Named:
+			if u.Obj() == nil {
+				return nil, false
+			}
+			return u.Obj(), true
+		case *Pointer:
+			t = u.Elem()
+		case *ConstView:
+			t = u.Elem
+		default:
+			if rd := logosAsReadonlyDescendants(t); rd != nil {
+				t = rd.Elem
+				continue
+			}
+			return nil, false
+		}
+	}
+}
 func logosAppendTypeMember(term Type, out *[]LogosUnionMember, seen map[string]bool) {
 	key := TypeString(term, nil)
 	if seen[key] {
@@ -475,7 +536,10 @@ func logosAppendTypeMember(term Type, out *[]LogosUnionMember, seen map[string]b
 			elem = Unalias(rd.Elem)
 		}
 	}
-	if named, ok := elem.(*Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
+	if tn, ok := logosOutermostTypeName(term); ok && tn.Pkg() != nil {
+		m.Pkg = tn.Pkg().Path()
+		m.Name = tn.Name()
+	} else if named, ok := elem.(*Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
 		m.Pkg = named.Obj().Pkg().Path()
 		m.Name = named.Obj().Name()
 	}

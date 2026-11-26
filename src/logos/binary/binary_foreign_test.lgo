@@ -1,0 +1,64 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package binary_test
+
+import (
+	"bytes"
+	obinary "encoding/binary"
+	"testing"
+
+	"logos/binary"
+)
+
+// hiddenOnly is foreign to logos/binary and shows it no visible
+// fields: comptime.Fields omits b, so the fast path would size it 0
+// and drop every byte. The original path keeps them instead.
+type hiddenOnly struct {
+	b int32
+}
+
+func TestTwinForeignHiddenRoundTrip(t *testing.T) {
+	v := hiddenOnly{b: 0x01020304}
+	if got, want := binary.Size(v), obinary.Size(v); got != want {
+		t.Fatalf("Size = %d, want original %d", got, want)
+	}
+	tb, terr := binary.Append(nil, binary.LittleEndian, v)
+	if terr != nil {
+		t.Fatalf("twin Append: %v", terr)
+	}
+	ob, oerr := obinary.Append(nil, binary.LittleEndian, v)
+	if oerr != nil {
+		t.Fatalf("original Append: %v", oerr)
+	}
+	if !bytes.Equal(tb, ob) {
+		t.Fatalf("twin bytes %x, original %x: hidden bytes dropped", tb, ob)
+	}
+	twinPanicked := false
+	func() {
+		defer func() {
+			if recover() != nil {
+				twinPanicked = true
+			}
+		}()
+		var back hiddenOnly
+		_, _ = binary.Decode(tb, binary.LittleEndian, &back)
+	}()
+	if !twinPanicked {
+		t.Fatalf("twin Decode did not panic like the original")
+	}
+	origPanicked := false
+	func() {
+		defer func() {
+			if recover() != nil {
+				origPanicked = true
+			}
+		}()
+		var back hiddenOnly
+		_ = obinary.Read(bytes.NewReader(ob), binary.LittleEndian, &back)
+	}()
+	if !origPanicked {
+		t.Fatalf("original Read did not panic")
+	}
+}

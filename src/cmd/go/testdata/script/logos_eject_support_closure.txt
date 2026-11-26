@@ -22,6 +22,8 @@ exists out/_logos_deps/rt/ascii/ascii.go
 exists out/_logos_deps/rt/arena/arena.go
 ! exists out/_logos_deps/rt/enum
 ! exists out/_logos_deps/rt/proc
+! exists out/_logos_deps/rt/leak
+! exists out/_logos_deps/rt/io
 ! exists out/_logos_deps/rt/sync
 ! exists out/_logos_deps/rt/json
 grep 'gosuda/loGos/rt/ascii' out/main.go
@@ -29,6 +31,9 @@ grep 'gosuda/loGos/rt/ascii' out/main.go
 cd out
 go build ./...
 go run .
+cmp stdout $WORK/gorun.txt
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go run .
 cmp stdout $WORK/gorun.txt
 cd ..
 
