@@ -32,7 +32,10 @@ stderr 'cannot use'
 ! logos build -o $WORK/bin/negchan$GOEXE ./negchan
 stderr 'cannot use'
 ! logos build -o $WORK/bin/neggeneric$GOEXE ./neggeneric
-stderr 'cannot use|const_view'
+# The write through the generic const view must be the reported error: a
+# rejection of the legal composite literal above would also fail the build,
+# so accepting any 'cannot use' diagnostic would pass without testing it.
+stderr 'const_view_mutation'
 ! logos build -o $WORK/bin/negmutate$GOEXE ./negmutate
 stderr 'const_view_mutation'
 cd ..
