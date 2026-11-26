@@ -520,9 +520,20 @@ func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGo
 	plan := &callPlan{dots: call.HasDots, end: spanEnd, isMethod: true, method: method}
 	plan.fun = capturePiece{expr: call.Fun, start: xStart, end: selEnd}
 	plan.recv = capturePiece{expr: w.nx, capture: true, single: w.lv, start: xStart, end: xEnd, text: recvText}
-	for _, raw := range call.ArgList {
-		trimmed := trimSpan(fl.src, span{start: fl.off(raw.Pos()), end: fl.off(syntax.EndPos(raw))})
-		arg := capturePiece{expr: raw, start: trimmed.start, end: trimmed.end, text: fl.lazyText(trimmed)}
+	split, ok := splitCall(fl.src, fl.off(call.Pos()))
+	useSplit := ok && len(split.args) == len(call.ArgList)
+	for i, raw := range call.ArgList {
+		var rsp span
+		if useSplit {
+			// Exact token-split spans, as for ordinary deferred
+			// calls. EndPos-derived spans start a binary
+			// expression at its operator, which would eject
+			// `2 + 3` as `+3`.
+			rsp = trimSpan(fl.src, split.args[i])
+		} else {
+			rsp = trimSpan(fl.src, span{start: fl.off(raw.Pos()), end: fl.off(syntax.EndPos(raw))})
+		}
+		arg := capturePiece{expr: raw, start: rsp.start, end: rsp.end, text: fl.lazyText(rsp)}
 		switch argKind(fc, raw) {
 		case argInline:
 		case argMulti:

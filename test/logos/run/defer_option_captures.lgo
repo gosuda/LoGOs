@@ -68,6 +68,21 @@ func useAbsentPanic(m *AC?) error {
 	defer m?.Note(mustPanic())?
 	return nil
 }
+func twice(v int) int {
+	return v * 2
+}
+
+// [10] Argument expressions keep their full span.
+func useSpanArg(m *AC?) error {
+	defer m?.Note(2 + 3)?
+	return nil
+}
+
+func useCallArg(m *AC?) error {
+	defer m?.Note(twice(21))?
+	return nil
+}
+
 
 func mkAC() *AC? {
 	return &AC{}
@@ -89,6 +104,16 @@ func main() {
 	check("arg-present-err", errap == nil, errap, nil)
 	check("arg-present-ran", ids == 1, ids, 1)
 	check("arg-absent-panic", useAbsentPanic(nil) == nil, true, true)
+	mb := mkAC()
+	errb := useSpanArg(mb)
+	check("span-err", errb == nil, errb, nil)
+	vb := mb ?? &AC{}
+	check("span-value", vb.lastArg == 5, vb.lastArg, 5)
+	mc := mkAC()
+	errc := useCallArg(mc)
+	check("callarg-err", errc == nil, errc, nil)
+	vc := mc ?? &AC{}
+	check("callarg-value", vc.lastArg == 42, vc.lastArg, 42)
 	md := mkAC()
 	errd := useMultiArg(md)
 	check("multi-err", errd == nil, errd, nil)
