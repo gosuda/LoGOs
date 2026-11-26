@@ -1231,6 +1231,8 @@ A comptime generic MAY name the unexported package-level identifiers of its own 
 
 An instantiation of such a generic in another package MUST build and run. The instance is compiled for the defining package, so it reaches those identifiers; the instantiating package never resolves them. [T-205]
 
+An instantiated body MUST apply the section 1.4 `?.` error rule: a sole `error` result of a `?.` call stays unwrapped, nil when the receiver is absent. [T-205]
+
 A `const for` range MUST be `comptime.Fields[T]()` over a struct type. [T-205]
 
 Any other range operand, and a non-struct `T`, MUST fail with `[comptime::const_for_fields]`. [T-205]
