@@ -1194,6 +1194,55 @@ func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 	return &logosEFState{m: out, may: st.may, mayErr: st.mayErr, cleanups: st.cleanups}
 }
 
+// projectInvocationMay seeds ordinary entries for field pairings that
+// survive a directly invoked literal: after the invocation, later reads
+// check the guard instead of staying silent. Only invocations that wrote
+// something project, so side-effect-free wrappers never seed. A pairing
+// the invocation broke (empty guard) seeds an entry no check can
+// discharge. Results never paired with a named error stay silent.
+func (p *logosEFPass) projectInvocationMay(st *logosEFState, lit *syntax.FuncLit) *logosEFState {
+	if st == nil || len(st.may) == 0 {
+		return st
+	}
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	var out map[logosEFKey]logosEFEntry
+	for k := range st.may {
+		if _, ok := st.m[k]; ok {
+			continue
+		}
+		paired := false
+		for _, ek := range p.storeErrKey[k] {
+			if ek != (logosEFKey{}) {
+				paired = true
+				break
+			}
+		}
+		if !paired {
+			continue
+		}
+		ek := st.mayErr[k]
+		name := "its error"
+		if ek != (logosEFKey{}) {
+			name = ek.displayName()
+		} else if n, ok := p.tracked[k]; ok {
+			name = n
+		}
+		if out == nil {
+			out = maps.Clone(st.m)
+			if out == nil {
+				out = make(map[logosEFKey]logosEFEntry, 1)
+			}
+		}
+		out[k] = logosEFEntry{name: name, errKey: ek, pos: lit.Pos()}
+	}
+	if out == nil {
+		return st
+	}
+	return &logosEFState{m: out, may: st.may, mayErr: st.mayErr, cleanups: st.cleanups}
+}
+
 // stable reports whether a destination's memory can no longer change
 // before a deferred body runs: a variable written exactly once, at its
 // declaration; a field or element written exactly once, by the tracked
@@ -2546,9 +2595,8 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 		// (field or discarded) still leaves a value that can reach a
 		// deferred read: mark it may-reach. The marker is killed by any
 		// overwrite through dropDest and merged by union across branches.
-		// A field-error store also seeds an ordinary entry so a later
-		// plain read fails without a check; a blank error keeps no
-		// pairing and stays silent for ordinary reads.
+		// Ordinary reads stay silent; the marker is consulted when
+		// seeding a deferred capture or projecting an invocation exit.
 		if !p.errCallShape(lhs, rhs) {
 			return st
 		}
@@ -2576,9 +2624,6 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 				ek = dk
 			}
 			p.noteMay(k, ek)
-			if ek != (logosEFKey{}) {
-				st = st.setSeed(k, logosEFEntry{name: ek.displayName(), errKey: ek, pos: p.logosEFDestPos(lhs, k)})
-			}
 		}
 		return st
 	}
@@ -4416,6 +4461,9 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 		if r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true }); r != nil {
 			end = logosEFJoin(end, r.withCleanups(st.cleanups))
 		}
+	}
+	if len(eff.assigned) != 0 || len(eff.created) != 0 || eff.deferred != nil {
+		end = p.projectInvocationMay(end, lit)
 	}
 	end = end.withoutLocals(inside)
 	if saved != nil {
