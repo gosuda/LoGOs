@@ -19,10 +19,12 @@ cp stdout $WORK/native-default.txt
 env GOEXPERIMENT=nojsonv2,loopvar
 logos run .
 stdout '^\{"title":"hello","count":3\}$'
+stdout '^neg-v1: \{"title":"neg","count":4\}$'
 cp stdout $WORK/native-variant.txt
 env GOEXPERIMENT=jsonv2,loopvar
 logos run .
 stdout '^\{"title":"hello","count":3\}$'
+stdout '^neg-v1: \{"title":"neg","count":4\}$'
 cp stdout $WORK/native-both.txt
 env GOEXPERIMENT=
 
@@ -41,19 +43,24 @@ grep 'goexperiment.loopvar' out/data_neg.go
 ! grep 'jsontext' out/data_neg.go
 grep 'jsontext' out/data_neg_jsonv2.go
 grep 'goexperiment.jsonv2' out/data_neg_jsonv2.go
+cp stream_check.txt out/stream_check_test.go
+cp stream_neg_check.txt out/stream_neg_check_test.go
 
 cd out
 go build ./...
 go run .
 cmp stdout $WORK/native-default.txt
+go test ./...
 env GOEXPERIMENT=nojsonv2,loopvar
 go build ./...
 go run .
 cmp stdout $WORK/native-variant.txt
+go test ./...
 env GOEXPERIMENT=jsonv2,loopvar
 go build ./...
 go run .
 cmp stdout $WORK/native-both.txt
+go test ./...
 
 -- variants/go.mod --
 module example.com/jsonvariant
@@ -93,4 +100,85 @@ package main
 type DataNeg struct {
   Title string `json:"title"`
   Count int32  `json:"count"`
+}
+
+-- variants/stream_neg.lgo --
+//go:build goexperiment.loopvar
+
+package main
+
+import "fmt"
+
+func init() {
+  dn := DataNeg{Title: "neg", Count: 4}
+  nbuf, err := dn.MarshalJSON()
+  if err != nil {
+    fmt.Println("neg marshal err:", err)
+    return
+  }
+  fmt.Println("neg-v1:", string(nbuf))
+}
+
+-- variants/stream_check.txt --
+//go:build goexperiment.jsonv2
+
+package main
+
+import (
+  "bytes"
+  "encoding/json"
+  "encoding/json/jsontext"
+  "strings"
+  "testing"
+)
+
+func TestStreamRoundTrip(t *testing.T) {
+  v := Data{Title: "hello", Count: 3}
+  var buf bytes.Buffer
+  if err := v.MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+    t.Fatal(err)
+  }
+  flat, err := v.MarshalJSON()
+  if err != nil {
+    t.Fatal(err)
+  }
+  // The streaming encoder terminates the value with a newline; the
+  // flat bytes carry none. Compare whitespace-insensitively and prove
+  // the value round trip in the neg test below.
+  if strings.TrimSpace(buf.String()) != string(flat) {
+    t.Fatalf("streaming %q != flat %q", buf.String(), flat)
+  }
+  var m map[string]any
+  if err := json.Unmarshal(flat, &m); err != nil {
+    t.Fatal(err)
+  }
+  if m["title"] != "hello" {
+    t.Fatalf("decoded title %v", m["title"])
+  }
+}
+
+-- variants/stream_neg_check.txt --
+//go:build goexperiment.jsonv2 && goexperiment.loopvar
+
+package main
+
+import (
+  "bytes"
+  "encoding/json/jsontext"
+  "testing"
+)
+
+func TestStreamNegRoundTrip(t *testing.T) {
+  dn := DataNeg{Title: "neg", Count: 4}
+  var buf bytes.Buffer
+  if err := dn.MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+    t.Fatal(err)
+  }
+  var back DataNeg
+  if err := back.UnmarshalJSONFrom(jsontext.NewDecoder(bytes.NewReader(buf.Bytes()))); err != nil {
+    t.Fatal(err)
+  }
+  if back != dn {
+    t.Fatalf("round trip %+v != %+v", back, dn)
+  }
 }

@@ -1,0 +1,7 @@
+ok pos-count
+ok pos-value
+ok pos-fail-value
+ok pos2-second-nil
+ok pos2-first-nil
+ok pos2-fail-second
+ok pos2-fail-first

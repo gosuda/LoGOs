@@ -327,3 +327,12 @@ def test_retained_hosted_outcomes(check: gate.method_gate.Check) -> None:
             gate.method_gate.accept(events, check, code)
     else:
         gate.method_gate.accept(events, check, code)
+
+
+def test_observed_ci_entry_points_exist_and_include_the_driver() -> None:
+    repo = Path(__file__).resolve().parents[3]
+    suite = gate.suite(repo)
+    assert ".github/workflows/ci.yml" in suite.observed
+    assert ".github/scripts/unit-evidence.sh" in suite.observed
+    for relative in suite.observed:
+        assert (repo / relative).is_file(), relative

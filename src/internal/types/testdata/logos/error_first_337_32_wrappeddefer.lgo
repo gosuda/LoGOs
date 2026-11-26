@@ -1,0 +1,26 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_32() (int, error) { return 1, nil }
+func use337_32(n int) {}
+
+// A wrapped call cannot recover the enclosing panic, so the remainder
+// is unreachable and the read stays silent.
+func wrappedDeferCannotRecover337_32() error {
+	n, err := fetch337_32()
+	_ = err
+	func() error { defer func() error { _ = recover(); return nil }()?; panic("x") }()
+	use337_32(n)
+	return nil
+}
+
+// A plain deferred literal still recovers, so the read must fail.
+func plainDeferRecovers337_32() {
+	n, err := fetch337_32()
+	_ = err
+	func() { defer func() { _ = recover() }(); panic("x") }()
+	use337_32(n /* ERROR "[correctness::result_before_error_check]" */)
+}

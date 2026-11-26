@@ -1,0 +1,7 @@
+ok defer-close-err
+ok defer-close-ran
+ok defer-close-absent
+ok defer-run-ok
+ok defer-run-ran
+ok defer-run-err
+ok defer-run-absent

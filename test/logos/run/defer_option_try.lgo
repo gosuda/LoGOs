@@ -1,0 +1,69 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type RC struct {
+	closed bool
+	ran    bool
+}
+
+func (c *RC) Close() error {
+	c.closed = true
+	return nil
+}
+
+func (c *RC) Run(ok bool) error {
+	c.ran = true
+	if !ok {
+		return fmt.Errorf("no run")
+	}
+	return nil
+}
+
+func mkRC() *RC? {
+	return &RC{}
+}
+
+func useClose(c *RC?) error {
+	defer c?.Close()?
+	return nil
+}
+
+func useRun(c *RC?, ok bool) error {
+	defer c?.Run(ok)?
+	return nil
+}
+
+func main() {
+	r := mkRC()
+	check("defer-close-err", useClose(r) == nil, useClose(r), nil)
+	rv := (r ?? &RC{})
+	check("defer-close-ran", rv.closed, rv.closed, true)
+	check("defer-close-absent", useClose(nil) == nil, useClose(nil), nil)
+	m := mkRC()
+	check("defer-run-ok", useRun(m, true) == nil, useRun(m, true), nil)
+	mv := (m ?? &RC{})
+	check("defer-run-ran", mv.ran, mv.ran, true)
+	err := useRun(mkRC(), false)
+	check("defer-run-err", err != nil && err.Error() == "no run", err, "no run")
+	check("defer-run-absent", useRun(nil, false) == nil, useRun(nil, false), nil)
+	if failed {
+		os.Exit(1)
+	}
+}

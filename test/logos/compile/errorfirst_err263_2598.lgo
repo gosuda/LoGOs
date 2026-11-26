@@ -1,0 +1,18 @@
+// errorcheck
+
+package p
+
+func fetch2598() (int, error) { return 1, nil }
+
+// Failed value-case test leaves its store: the default arm reads the
+// stored result without a check, so the read must fail. Default is
+// written first so the no-match state must carry the store to it.
+func ef2598() {
+	n := 0
+	var err error
+	_ = switch 1 {
+	default => n // ERROR "result_before_error_check"
+	case func() int { n, err = fetch2598(); return 0 }() => 0
+	}
+	_ = err
+}
