@@ -16,10 +16,41 @@ name: "autovec stability"
 
 permissions:
   contents: "read"
+concurrency:
+  group: "autovec-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
 
 jobs:
+  build-amd64:
+    name: "build (amd64)"
+    runs-on: "depot-ubuntu-24.04"
+    timeout-minutes: 30
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
+        with:
+          persist-credentials: false
+          ref: "${{ github.event.pull_request.head.sha }}"
+      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - name: "Build and pack the toolchain"
+        run: |
+          GOROOT_BOOTSTRAP=$(go env GOROOT)
+          export GOROOT_BOOTSTRAP
+          (cd src && ./make.bash)
+          git ls-files -z -o -i --exclude-standard | tar --null -T - -czf "$RUNNER_TEMP/toolchain.tgz"
+          du -sh "$RUNNER_TEMP/toolchain.tgz"
+      - name: "Upload the shared toolchain build"
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: "toolchain-autovec-amd64"
+          path: "${{ runner.temp }}/toolchain.tgz"
+
   native:
     name: "autovec native ${{ matrix.arch }}"
+    needs: [build-amd64]
     concurrency:
       group: "autovec-native-${{ github.ref }}-${{ matrix.arch }}"
       cancel-in-progress: true
@@ -64,11 +95,22 @@ jobs:
           diff -u cmd/compile/internal/typecheck/builtin.go "$RUNNER_TEMP/autovec-evidence/builtin.generated.go" > "$RUNNER_TEMP/autovec-evidence/builtin.diff" || builtin_diff_status=$?
           cat "$RUNNER_TEMP/autovec-evidence/builtin.diff"
           test "$builtin_diff_status" -le 1
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        if: matrix.arch == 'amd64'
+        with:
+          name: "toolchain-autovec-amd64"
+          path: "${{ runner.temp }}/tc"
       - name: "Build the toolchain"
         id: "build"
         run: |
-          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
-          printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+          if [ "${{ matrix.arch }}" = "amd64" ]; then
+            test -s "${{ runner.temp }}/tc/toolchain.tgz" || { echo "missing shared toolchain artifact"; exit 1; }
+            tar -xzf "${{ runner.temp }}/tc/toolchain.tgz" -C "$GITHUB_WORKSPACE"
+            printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+          else
+            GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+            printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
+          fi
       - name: "Compare recovered mapped-memory faults"
         if: "!cancelled() && steps.build.outcome == 'success'"
         run: |
@@ -234,6 +276,7 @@ jobs:
 
   regression:
     name: "upstream and SIMD regression"
+    needs: [build-amd64]
     concurrency:
       group: "autovec-upstream-${{ github.ref }}"
       cancel-in-progress: true
@@ -280,10 +323,15 @@ jobs:
             "$compiler_bin/cc" -std=c23 -x c - -o "$RUNNER_TEMP/autovec-c23-check"
           "$RUNNER_TEMP/autovec-c23-check"
           printf '%s\n' "$compiler_bin" >> "$GITHUB_PATH"
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: "toolchain-autovec-amd64"
+          path: "${{ runner.temp }}/tc"
       - name: "Build the toolchain"
         id: "build"
         run: |
-          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+          test -s "${{ runner.temp }}/tc/toolchain.tgz" || { echo "missing shared toolchain artifact"; exit 1; }
+          tar -xzf "${{ runner.temp }}/tc/toolchain.tgz" -C "$GITHUB_WORKSPACE"
           printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Run the complete upstream regression gate"
         if: "!cancelled() && steps.build.outcome == 'success'"

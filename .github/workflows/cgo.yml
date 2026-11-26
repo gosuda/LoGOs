@@ -34,9 +34,87 @@ defaults:
     shell: bash
 
 jobs:
+  build-depot:
+    name: build (depot-ubuntu-24.04)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: depot-ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - name: Install and require C compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gccgo clang
+          command -v gcc
+          command -v g++
+          command -v gccgo
+          command -v clang
+          echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
+          echo "UPROOT1274=$(go env GOROOT)" >> "$GITHUB_ENV"
+      - name: Build and pack LoGOs
+        working-directory: src
+        env:
+          GOMAXPROCS: "2"
+          GOFLAGS: "-p=2"
+        run: |
+          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+          cd "$GITHUB_WORKSPACE"
+          git ls-files -z -o -i --exclude-standard | tar --null -T - -czf "$RUNNER_TEMP/toolchain.tgz"
+          du -sh "$RUNNER_TEMP/toolchain.tgz"
+      - name: Upload the shared toolchain build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: "toolchain-cgo-depot"
+          path: "${{ runner.temp }}/toolchain.tgz"
+  build-2604:
+    name: build (ubuntu-26.04)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.4"
+          cache: false
+      - name: Install and require C compilers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gccgo clang
+          command -v gcc
+          command -v g++
+          command -v gccgo
+          command -v clang
+          echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
+          echo "UPROOT1274=$(go env GOROOT)" >> "$GITHUB_ENV"
+      - name: Build and pack LoGOs
+        working-directory: src
+        env:
+          GOMAXPROCS: "2"
+          GOFLAGS: "-p=2"
+        run: |
+          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+          cd "$GITHUB_WORKSPACE"
+          git ls-files -z -o -i --exclude-standard | tar --null -T - -czf "$RUNNER_TEMP/toolchain.tgz"
+          du -sh "$RUNNER_TEMP/toolchain.tgz"
+      - name: Upload the shared toolchain build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: "toolchain-cgo-2604"
+          path: "${{ runner.temp }}/toolchain.tgz"
+
   focused:
     name: cgo focused and probes
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: [build-depot]
     runs-on: depot-ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -65,13 +143,14 @@ jobs:
           echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
           echo "UPROOT1274=$(go env GOROOT)" >> "$GITHUB_ENV"
 
-      - name: Build LoGOs
-        working-directory: src
-        env:
-          GOMAXPROCS: "2"
-          GOFLAGS: "-p=2"
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: "toolchain-cgo-depot"
+          path: "${{ runner.temp }}/tc"
+      - name: Restore the shared toolchain build
         run: |
-          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+          test -s "${{ runner.temp }}/tc/toolchain.tgz" || { echo "missing shared toolchain artifact"; exit 1; }
+          tar -xzf "${{ runner.temp }}/tc/toolchain.tgz"
           echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
           echo "$GITHUB_WORKSPACE/lib/wasm" >> "$GITHUB_PATH"
       - name: Require formatted sources and full vet checks in both settings
@@ -97,7 +176,7 @@ jobs:
     concurrency:
       group: logos-heavy-ci
       queue: max
-    needs: focused
+    needs: [focused, build-2604]
     runs-on: ubuntu-26.04
     timeout-minutes: 180
     strategy:
@@ -150,13 +229,14 @@ jobs:
             "$destination/bin/go" version
           done
 
-      - name: Build LoGOs
-        working-directory: src
-        env:
-          GOMAXPROCS: "2"
-          GOFLAGS: "-p=2"
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: "toolchain-cgo-2604"
+          path: "${{ runner.temp }}/tc"
+      - name: Restore the shared toolchain build
         run: |
-          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+          test -s "${{ runner.temp }}/tc/toolchain.tgz" || { echo "missing shared toolchain artifact"; exit 1; }
+          tar -xzf "${{ runner.temp }}/tc/toolchain.tgz"
           echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
           echo "$GITHUB_WORKSPACE/lib/wasm" >> "$GITHUB_PATH"
       - name: Record unchanged source and compiler versions
@@ -191,7 +271,7 @@ jobs:
     concurrency:
       group: logos-heavy-ci
       queue: max
-    needs: focused
+    needs: [focused, build-depot]
     runs-on: depot-ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -218,13 +298,14 @@ jobs:
           echo "GCCGO=$(command -v gccgo)" >> "$GITHUB_ENV"
           echo "UPROOT1274=$(go env GOROOT)" >> "$GITHUB_ENV"
 
-      - name: Build LoGOs
-        working-directory: src
-        env:
-          GOMAXPROCS: "2"
-          GOFLAGS: "-p=2"
+      - uses: "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" # v7.0.0
+        with:
+          name: "toolchain-cgo-depot"
+          path: "${{ runner.temp }}/tc"
+      - name: Restore the shared toolchain build
         run: |
-          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
+          test -s "${{ runner.temp }}/tc/toolchain.tgz" || { echo "missing shared toolchain artifact"; exit 1; }
+          tar -xzf "${{ runner.temp }}/tc/toolchain.tgz"
           echo "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
           echo "$GITHUB_WORKSPACE/lib/wasm" >> "$GITHUB_PATH"
       - name: Install verified hyperfine
