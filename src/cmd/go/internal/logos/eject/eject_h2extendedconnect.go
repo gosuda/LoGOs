@@ -75,7 +75,9 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 		}
 		receiver := string(data[recvStart:recvEnd])
 		msg := "net/http: extended CONNECT on server " + strconv.Quote(receiver) + " needs GODEBUG=http2xconnect=1 in the ejected process environment"
-		repl := "func() {\n_ = " + receiver + "\nif !" + stringsName + ".Contains(" + osName + ".Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}()"
+		// Evaluate the receiver as an argument so defer/go preserve
+		// registration-time side effects; only the GODEBUG check runs later.
+		repl := "func(_ any) {\nif !" + stringsName + ".Contains(" + osName + ".Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}(" + receiver + ")"
 		edits = append(edits, textEdit{start, end, repl})
 		return true
 	})
