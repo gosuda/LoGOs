@@ -226,7 +226,9 @@ func scanModule(ctx context.Context, moddir string) *scanState {
 			if nextFix {
 				out = os.Stderr
 			}
-			fmt.Fprintln(out, "logos next: already converted")
+			if _, err := fmt.Fprintln(out, "logos next: already converted"); err != nil {
+				base.Fatalf("logos next: %v", err)
+			}
 			base.Exit()
 		}
 		base.Fatalf("logos next: no Go packages to convert")
@@ -637,10 +639,10 @@ func (s *scanState) checkRenameOrder() {
 		dirs[dir] = append(dirs[dir], rel)
 	}
 	for _, dir := range slices.Sorted(maps.Keys(dirs)) {
-		s.checkDirOrder(dir, dirs[dir])
+		s.checkDirOrder(dirs[dir])
 	}
 }
-func (s *scanState) checkDirOrder(dir string, files []string) {
+func (s *scanState) checkDirOrder(files []string) {
 	if len(files) < 2 {
 		return
 	}
@@ -884,7 +886,7 @@ func applySumOk(data []byte, sum string) bool {
 
 func (s *scanState) reportTasks() {
 	for _, task := range s.tasks {
-		fmt.Fprintf(os.Stderr, "logos next: review only: %s at %s:%d: %s\n", task.Rule, task.File, task.Span.Start, task.AiInstr)
+		_, _ = fmt.Fprintf(os.Stderr, "logos next: review only: %s at %s:%d: %s\n", task.Rule, task.File, task.Span.Start, task.AiInstr)
 	}
 }
 

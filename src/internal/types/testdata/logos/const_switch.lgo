@@ -191,42 +191,46 @@ func caseListCovered[T any](v T) {
 		return
 	case string:
 		return
-	case int, string /* ERROR "comptime::unreachable_case" */ :
+	case int /* ERROR "comptime::unreachable_case" */, string:
 		return
 	}
 	return
 }
 
-func caseDefault[T any](v T) {
+func caseDefault[T any](v T) string {
 	_ = v
+	out := ""
 	const switch T {
 	case int:
-		return "int"
+		out = "int"
 	default:
-		return "other"
+		out = "other"
 	}
+	return out
 }
 
-func caseDefaultShadowed[T any](v T) {
+func caseDefaultShadowed[T any](v T) string {
 	_ = v
+	out := ""
 	const switch T {
 	default:
-		return "d"
+		out = "d"
 	case string /* ERROR "comptime::unreachable_case" */ :
-		return "s"
+		out = "s"
 	}
-	return "other"
+	return out
 }
 
-func caseDefaultCovered[T any](v T) {
+func caseDefaultCovered[T any](v T) string {
 	_ = v
+	out := ""
 	const switch T {
 	case any:
-		return "any"
+		out = "any"
 	default /* ERROR "comptime::unreachable_case" */ :
-		return "d"
+		out = "d"
 	}
-	return "other"
+	return out
 }
 
 func breakInCase[T any](v T) {

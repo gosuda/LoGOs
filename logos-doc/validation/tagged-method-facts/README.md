@@ -140,8 +140,9 @@ identifier tag but does not separately specify its placement on a method.
 source hash, and two named negative controls. `old-optfacts.go.txt` is an
 exact production file from the base commit. `old-facts.go.txt` is the current
 `facts.go` with `ValidObject` reverted to the legacy grammar; it was
-regenerated from the current source after the facts API grew `DualUse`, so
-the overlay compiles while the old codec behavior stays pinned. Restoring
+regenerated from the current source whenever the facts API grows a field the
+package's other files use (`DualUse`, then `Deriveds`), so the overlay
+compiles while the old codec behavior stays pinned. Restoring
 only the old codec must make the
 `TestTaggedMethodCodecGrammar/Box@simd128.Read` control fail. After the codec
 extension, restoring only the old package guard must make

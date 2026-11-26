@@ -1,0 +1,658 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"math"
+	"net"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	twinslog "logos/slog"
+)
+
+func twinTextPlain(w io.Writer) slog.Handler {
+	return twinslog.NewTextHandler(w, new(slog.HandlerOptions))
+}
+func origTextPlain(w io.Writer) slog.Handler { return slog.NewTextHandler(w, new(slog.HandlerOptions)) }
+func twinJSONPlain(w io.Writer) slog.Handler {
+	return twinslog.NewJSONHandler(w, new(slog.HandlerOptions))
+}
+func origJSONPlain(w io.Writer) slog.Handler { return slog.NewJSONHandler(w, new(slog.HandlerOptions)) }
+
+var twinTestTime = time.Date(2000, 1, 2, 3, 4, 5, 0, time.UTC)
+
+type twinText struct{ s string }
+
+func (t twinText) MarshalText() ([]byte, error) {
+	if t.s == "" {
+		return nil, errors.New("twinText: empty string")
+	}
+	return []byte("twinText{" + t.s + "}"), nil
+}
+
+type twinTextAppend struct{ s string }
+
+func (t twinTextAppend) AppendText(b []byte) ([]byte, error) {
+	if t.s == "" {
+		return nil, errors.New("twinTextAppend: empty string")
+	}
+	return append(b, "twinTextAppend{"+t.s+"}"...), nil
+}
+
+type twinNamedBytes []byte
+
+type twinRawJSON []byte
+
+func (m twinRawJSON) MarshalJSON() ([]byte, error) {
+	if len(m) == 0 {
+		return nil, errors.New("twinRawJSON: empty")
+	}
+	return []byte(m), nil
+}
+
+type nilDetectHandler struct{ seenNil bool }
+
+func (h *nilDetectHandler) Enabled(ctx context.Context, _ slog.Level) bool {
+	if ctx == nil {
+		h.seenNil = true
+	}
+	return true
+}
+
+func (h *nilDetectHandler) Handle(_ context.Context, _ slog.Record) error { return nil }
+
+func (h *nilDetectHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+
+func (h *nilDetectHandler) WithGroup(_ string) slog.Handler { return h }
+
+type twinGroupValuer struct{ n int }
+
+func (g twinGroupValuer) LogValue() slog.Value {
+	return slog.GroupValue(slog.Int("n", g.n), slog.String("s", "x"))
+}
+
+type twinScalarValuer struct{ s string }
+
+func (g twinScalarValuer) LogValue() slog.Value {
+	return slog.StringValue("resolved:" + g.s)
+}
+
+type twinPanicValuer struct{}
+
+func (twinPanicValuer) LogValue() slog.Value {
+	panic("valuer boom")
+}
+
+type twinPanicText struct{}
+
+func (twinPanicText) MarshalText() ([]byte, error) {
+	panic("text boom")
+}
+
+func compareBoth(t *testing.T, r slog.Record, newTwin func(io.Writer) slog.Handler, newOrig func(io.Writer) slog.Handler) {
+	t.Helper()
+	var twinBuf, origBuf bytes.Buffer
+	th := newTwin(&twinBuf)
+	oh := newOrig(&origBuf)
+	ctx := context.Background()
+	if err := th.Handle(ctx, r); err != nil {
+		t.Fatalf("twin Handle: %v", err)
+	}
+	if err := oh.Handle(ctx, r); err != nil {
+		t.Fatalf("orig Handle: %v", err)
+	}
+	if twinBuf.String() != origBuf.String() {
+		t.Errorf("output differs:\n twin %q\n orig %q", twinBuf.String(), origBuf.String())
+	}
+}
+
+func TestTwinBehavior(t *testing.T) {
+	attrs := []slog.Attr{
+		slog.String("s", "hello"),
+		slog.Int64("i", -123456789),
+		slog.Int("ni", 42),
+		slog.Uint64("u", 123456789),
+		slog.Float64("f", 3.14159),
+		slog.Float64("big", 1e21),
+		slog.Float64("small", 1.23e-9),
+		slog.Bool("b", true),
+		slog.Duration("d", 123456789*time.Nanosecond),
+		slog.Duration("neg", -90*time.Minute),
+		slog.Time("t", twinTestTime),
+		slog.Any("bs", []byte{1, 2, 3, 4}),
+		slog.Any("named", twinNamedBytes("abc")),
+		slog.Any("raw", twinRawJSON([]byte("1234"))),
+		slog.Any("tm", twinText{s: "abc"}),
+		slog.Any("ta", twinTextAppend{s: "abc"}),
+		slog.Any("err", errors.New("an error occurred")),
+		slog.Any("nilv", nil),
+		slog.Any("gv", twinGroupValuer{n: 3}),
+		slog.Any("sv", twinScalarValuer{s: "q"}),
+		slog.Any("m", map[string]int{"b": 2}),
+		slog.Any("st", struct {
+			A int
+			B string
+		}{A: 1, B: "two"}),
+		slog.Any("dup", 1),
+		slog.Any("dup", 2),
+		slog.String("sp ace", "a=b"),
+		slog.String("quote", "qu\"o"),
+		slog.String("uni", "µåπ\thello\n"),
+		slog.String("badutf", "badutf\xf6key"),
+		slog.String("html", "<escape&>"),
+		slog.String("sep", "  "),
+		slog.String("", "empty key"),
+		slog.Any("", nil),
+		slog.Group("g", slog.Int("a", 1), slog.Group("h", slog.Int("b", 2))),
+		slog.Group("empty"),
+		slog.Group("", slog.Int("inl", 1)),
+	}
+	full := func() slog.Record {
+		r := slog.NewRecord(twinTestTime, slog.LevelInfo, "a message", 0)
+		r.AddAttrs(attrs...)
+		return r
+	}
+	upper := func(_ []string, a slog.Attr) slog.Attr {
+		a.Key = strings.ToUpper(a.Key)
+		return a
+	}
+	cases := []struct {
+		name   string
+		record func() slog.Record
+		twin   func(io.Writer) slog.Handler
+		orig   func(io.Writer) slog.Handler
+	}{
+		{
+			"text full",
+			full,
+			twinTextPlain,
+			origTextPlain,
+		},
+		{
+			"json full",
+			full,
+			twinJSONPlain,
+			origJSONPlain,
+		},
+		{
+			"text empty",
+			func() slog.Record { return slog.NewRecord(twinTestTime, slog.LevelWarn, "", 0) },
+			twinTextPlain,
+			origTextPlain,
+		},
+		{
+			"json empty",
+			func() slog.Record { return slog.NewRecord(twinTestTime, slog.LevelWarn, "", 0) },
+			twinJSONPlain,
+			origJSONPlain,
+		},
+		{
+			"text zero time",
+			func() slog.Record { return slog.NewRecord(time.Time{}, slog.LevelError, "m", 0) },
+			twinTextPlain,
+			origTextPlain,
+		},
+		{
+			"json zero time",
+			func() slog.Record { return slog.NewRecord(time.Time{}, slog.LevelError, "m", 0) },
+			twinJSONPlain,
+			origJSONPlain,
+		},
+		{
+			"text replace upper",
+			full,
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: upper})
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: upper})
+			},
+		},
+		{
+			"json replace upper",
+			full,
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: upper})
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: upper})
+			},
+		},
+		{
+			"text group replace builtin",
+			full,
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+					if a.Key == slog.TimeKey {
+						return slog.Group(slog.TimeKey, slog.Int("mins", 3), slog.Int("secs", 2))
+					}
+					if a.Key == slog.LevelKey {
+						return slog.Attr{}
+					}
+					return a
+				}})
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+					if a.Key == slog.TimeKey {
+						return slog.Group(slog.TimeKey, slog.Int("mins", 3), slog.Int("secs", 2))
+					}
+					if a.Key == slog.LevelKey {
+						return slog.Attr{}
+					}
+					return a
+				}})
+			},
+		},
+		{
+			"json group replace builtin",
+			full,
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+					if a.Key == slog.TimeKey {
+						return slog.Group(slog.TimeKey, slog.Int("mins", 3), slog.Int("secs", 2))
+					}
+					if a.Key == slog.LevelKey {
+						return slog.Attr{}
+					}
+					return a
+				}})
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+					if a.Key == slog.TimeKey {
+						return slog.Group(slog.TimeKey, slog.Int("mins", 3), slog.Int("secs", 2))
+					}
+					if a.Key == slog.LevelKey {
+						return slog.Attr{}
+					}
+					return a
+				}})
+			},
+		},
+		{
+			"text drop all",
+			full,
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: func([]string, slog.Attr) slog.Attr {
+					return slog.Attr{}
+				}})
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: func([]string, slog.Attr) slog.Attr {
+					return slog.Attr{}
+				}})
+			},
+		},
+		{
+			"json drop all",
+			full,
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: func([]string, slog.Attr) slog.Attr {
+					return slog.Attr{}
+				}})
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: func([]string, slog.Attr) slog.Attr {
+					return slog.Attr{}
+				}})
+			},
+		},
+		{
+			"text preformatted groups",
+			full,
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewTextHandler(w, new(slog.HandlerOptions)).WithAttrs([]slog.Attr{slog.Int("p1", 1)}).WithGroup("s1").WithAttrs([]slog.Attr{slog.Int("p2", 2)}).WithGroup("s2")
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewTextHandler(w, new(slog.HandlerOptions)).WithAttrs([]slog.Attr{slog.Int("p1", 1)}).WithGroup("s1").WithAttrs([]slog.Attr{slog.Int("p2", 2)}).WithGroup("s2")
+			},
+		},
+		{
+			"json preformatted groups",
+			full,
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewJSONHandler(w, new(slog.HandlerOptions)).WithAttrs([]slog.Attr{slog.Int("p1", 1)}).WithGroup("s1").WithAttrs([]slog.Attr{slog.Int("p2", 2)}).WithGroup("s2")
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewJSONHandler(w, new(slog.HandlerOptions)).WithAttrs([]slog.Attr{slog.Int("p1", 1)}).WithGroup("s1").WithAttrs([]slog.Attr{slog.Int("p2", 2)}).WithGroup("s2")
+			},
+		},
+		{
+			"text source",
+			func() slog.Record {
+				var pcs [1]uintptr
+				runtime.Callers(1, pcs[:])
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "message", pcs[0])
+				r.AddAttrs(slog.Int("a", 1))
+				return r
+			},
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewTextHandler(w, &slog.HandlerOptions{AddSource: true})
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewTextHandler(w, &slog.HandlerOptions{AddSource: true})
+			},
+		},
+		{
+			"json source",
+			func() slog.Record {
+				var pcs [1]uintptr
+				runtime.Callers(1, pcs[:])
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "message", pcs[0])
+				r.AddAttrs(slog.Int("a", 1))
+				return r
+			},
+			func(w io.Writer) slog.Handler {
+				return twinslog.NewJSONHandler(w, &slog.HandlerOptions{AddSource: true})
+			},
+			func(w io.Writer) slog.Handler {
+				return slog.NewJSONHandler(w, &slog.HandlerOptions{AddSource: true})
+			},
+		},
+		{
+			"text marshaler error",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Any("t", twinText{s: ""}), slog.Any("ta", twinTextAppend{s: ""}))
+				return r
+			},
+			twinTextPlain,
+			origTextPlain,
+		},
+		{
+			"text panic text",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Any("t", twinPanicText{}))
+				return r
+			},
+			twinTextPlain,
+			origTextPlain,
+		},
+		{
+			"text nil pointer marshaler",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Any("t", (*twinPanicText)(nil)))
+				return r
+			},
+			twinTextPlain,
+			origTextPlain,
+		},
+		{
+			"json nil pointer marshaler",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Any("t", (*twinPanicText)(nil)))
+				return r
+			},
+			twinJSONPlain,
+			origJSONPlain,
+		},
+		{
+			"text nan inf",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Float64("nan", math.NaN()), slog.Float64("inf", math.Inf(1)))
+				return r
+			},
+			twinTextPlain,
+			origTextPlain,
+		},
+		{
+			"json nan inf",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Float64("nan", math.NaN()), slog.Float64("inf", math.Inf(1)))
+				return r
+			},
+			twinJSONPlain,
+			origJSONPlain,
+		},
+		{
+			"json error marshaler",
+			func() slog.Record {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+				r.AddAttrs(slog.Any("e", io.EOF), slog.Any("rawerr", twinRawJSON([]byte(""))))
+				return r
+			},
+			twinJSONPlain,
+			origJSONPlain,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			compareBoth(t, tc.record(), tc.twin, tc.orig)
+		})
+	}
+}
+
+func TestTwinPanickingValuer(t *testing.T) {
+	for _, newH := range []struct {
+		name string
+		fn   func(io.Writer) slog.Handler
+	}{
+		{"twin-text", twinTextPlain},
+		{"twin-json", twinJSONPlain},
+	} {
+		t.Run(newH.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			h := newH.fn(&buf)
+			r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+			r.AddAttrs(slog.Any("v", twinPanicValuer{}))
+			if err := h.Handle(context.Background(), r); err != nil {
+				t.Fatal(err)
+			}
+			got := buf.String()
+			if !strings.Contains(got, "LogValue panicked") {
+				t.Errorf("missing panic marker in %q", got)
+			}
+		})
+	}
+}
+
+func TestTwinReplaceAttrGroups(t *testing.T) {
+	replace := func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == "x" {
+			a.Key = "g=" + strings.Join(groups, ".")
+		}
+		return a
+	}
+	var twinBuf, origBuf bytes.Buffer
+	th := twinslog.NewJSONHandler(&twinBuf, &slog.HandlerOptions{ReplaceAttr: replace}).WithGroup("g")
+	oh := slog.NewJSONHandler(&origBuf, &slog.HandlerOptions{ReplaceAttr: replace}).WithGroup("g")
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Int("x", 1))
+	if err := th.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if err := oh.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if twinBuf.String() != origBuf.String() {
+		t.Errorf("ReplaceAttr groups differ:\n twin %q\n orig %q", twinBuf.String(), origBuf.String())
+	}
+}
+
+func TestTwinEmptiedGroupRestoresPath(t *testing.T) {
+	// Dropping every field inside a group must not leak the group's
+	// path into later siblings: the callback group stack, the
+	// separator, and the text prefix rewind with the output.
+	// Standard log/slog leaks the emptied group the same way (the
+	// sibling reaches ReplaceAttr with the dead group's path and is
+	// dropped), so twin-vs-standard equality cannot hold here; the
+	// twin intentionally restores the path and keeps the sibling.
+	for _, tc := range []struct {
+		name    string
+		newTwin func(*[][]string) func(io.Writer) slog.Handler
+		want    string
+	}{
+		{"json",
+			func(seen *[][]string) func(io.Writer) slog.Handler {
+				return func(w io.Writer) slog.Handler {
+					return twinslog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: dropDebug(seen)})
+				}
+			},
+			`"status":200`},
+		{"text",
+			func(seen *[][]string) func(io.Writer) slog.Handler {
+				return func(w io.Writer) slog.Handler {
+					return twinslog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: dropDebug(seen)})
+				}
+			},
+			`status=200`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen [][]string
+			r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+			r.AddAttrs(slog.Group("debug", slog.Int("trace", 1)), slog.Int("status", 200))
+			var twinBuf bytes.Buffer
+			if err := tc.newTwin(&seen)(&twinBuf).Handle(context.Background(), r); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(twinBuf.String(), tc.want) {
+				t.Errorf("sibling after emptied group lost: %q lacks %q", twinBuf.String(), tc.want)
+			}
+			debugPaths := 0
+			for _, groups := range seen {
+				if len(groups) == 1 && groups[0] == "debug" {
+					debugPaths++
+				}
+			}
+			if debugPaths != 1 {
+				t.Errorf("want exactly the dropped trace field under [debug], saw %d: %q", debugPaths, seen)
+			}
+			if len(seen) == 0 || len(seen[len(seen)-1]) != 0 {
+				t.Errorf("sibling status did not reach the callback with a restored path: %q", seen)
+			}
+		})
+	}
+}
+
+// dropDebug records the group path of every field it sees and discards
+// fields inside the debug group. The surviving status field must reach
+// the callback with an empty group path.
+func dropDebug(seen *[][]string) func([]string, slog.Attr) slog.Attr {
+	return func(groups []string, a slog.Attr) slog.Attr {
+		*seen = append(*seen, append([]string(nil), groups...))
+		if len(groups) == 1 && groups[0] == "debug" {
+			return slog.Attr{}
+		}
+		return a
+	}
+}
+
+func TestTwinNilSource(t *testing.T) {
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Any("s", (*slog.Source)(nil)))
+	compareBoth(t, r, twinJSONPlain, origJSONPlain)
+	compareBoth(t, r, twinTextPlain, origTextPlain)
+}
+
+func TestTwinNetIPJSON(t *testing.T) {
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Any("ip", net.ParseIP("192.168.1.1")))
+	compareBoth(t, r, twinJSONPlain, origJSONPlain)
+}
+
+func TestTwinNilBytesJSON(t *testing.T) {
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Any("nilbs", []byte(nil)), slog.Any("empty", []byte{}))
+	compareBoth(t, r, twinJSONPlain, origJSONPlain)
+}
+
+func TestTwinEmptyWithGroup(t *testing.T) {
+	var buf bytes.Buffer
+	l := twinslog.New(twinslog.NewTextHandler(&buf, new(slog.HandlerOptions)))
+	if got := l.WithGroup(""); got != l {
+		t.Errorf("Logger.WithGroup(\"\") should return receiver")
+	}
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	r.AddAttrs(slog.Int("a", 1))
+	var twinBuf, plainBuf bytes.Buffer
+	th := twinslog.NewJSONHandler(&twinBuf, new(slog.HandlerOptions)).WithGroup("")
+	ph := twinslog.NewJSONHandler(&plainBuf, new(slog.HandlerOptions))
+	if err := th.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if err := ph.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if twinBuf.String() != plainBuf.String() {
+		t.Errorf("empty WithGroup should be no-op:\n grouped %q\n plain %q", twinBuf.String(), plainBuf.String())
+	}
+	var twinTextBuf, plainTextBuf bytes.Buffer
+	tth := twinslog.NewTextHandler(&twinTextBuf, new(slog.HandlerOptions)).WithGroup("")
+	pth := twinslog.NewTextHandler(&plainTextBuf, new(slog.HandlerOptions))
+	if err := tth.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if err := pth.Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	if twinTextBuf.String() != plainTextBuf.String() {
+		t.Errorf("empty WithGroup text should be no-op:\n grouped %q\n plain %q", twinTextBuf.String(), plainTextBuf.String())
+	}
+}
+
+func TestTwinWithSliceAlias(t *testing.T) {
+	var buf bytes.Buffer
+	l := twinslog.New(twinslog.NewTextHandler(&buf, new(slog.HandlerOptions)))
+	attrs := []slog.Attr{slog.Int("a", 1)}
+	c := l.With(attrs...)
+	attrs[0] = slog.Int("a", 2)
+	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+	if err := c.Handler().Handle(context.Background(), r); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(buf.String())
+	if !strings.Contains(got, "a=1") {
+		t.Errorf("With should own its slice: got %q, want a=1", got)
+	}
+}
+
+// retainAttrsHandler keeps the exact slice WithAttrs receives, so a
+// caller-side mutation is visible unless Logger.With clones first.
+type retainAttrsHandler struct{ kept []slog.Attr }
+
+func (h *retainAttrsHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *retainAttrsHandler) Handle(context.Context, slog.Record) error { return nil }
+
+func (h *retainAttrsHandler) WithAttrs(as []slog.Attr) slog.Handler { return &retainAttrsHandler{kept: as} }
+
+func (h *retainAttrsHandler) WithGroup(string) slog.Handler { return h }
+
+func TestTwinWithRetainingHandlerSliceAlias(t *testing.T) {
+	l := twinslog.New(new(retainAttrsHandler))
+	attrs := []slog.Attr{slog.Int("a", 1)}
+	c := l.With(attrs...)
+	attrs[0] = slog.Int("a", 2)
+	rh, ok := c.Handler().(*retainAttrsHandler)
+	if !ok {
+		t.Fatalf("With did not keep the retaining handler: %T", c.Handler())
+	}
+	if len(rh.kept) != 1 || rh.kept[0].Value.Int64() != 1 {
+		t.Errorf("With should own its slice: kept %v, want [a=1]", rh.kept)
+	}
+}
+
+func TestTwinEnabledNilContext(t *testing.T) {
+	dh := &nilDetectHandler{}
+	l := twinslog.New(dh)
+	_ = l.Enabled(nil, slog.LevelInfo)
+	if dh.seenNil {
+		t.Errorf("Enabled(nil) passed nil to handler, want Background")
+	}
+}

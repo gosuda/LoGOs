@@ -306,6 +306,11 @@ func (js *jsonStruct) valueLines(f *jsonField) []string {
 		if uc, ok := unionContainerOf(f.typ); ok {
 			return js.unionContainerLines(f, uc, field)
 		}
+		if f.opt != nil {
+			if _, ok := types2.LogosUnionMembers(unaliasConstView(f.opt)); !ok {
+				return js.optionLines(f, field)
+			}
+		}
 		if f.quoted {
 			if isExactNumber(f.typ) {
 				return []string{fmt.Sprintf("%s.FallbackQ(&_logos_s, &%s)", jsonAlias, field)}
@@ -413,7 +418,7 @@ func (js *jsonStruct) unionMembersOf(utyp types2.Type) (jsonUnionClass, bool) {
 			// into a nil value.
 			if p, ok := unaliasConstView(c.typ).(*types2.Pointer); ok {
 				isPtr = true
-				sample = sourceTypeString(unaliasConstView(p.Elem()), js.qualify, js.holderPkg, js.cgoSource)
+				sample = sourceTypeString(p.Elem(), js.qualify, js.holderPkg, js.cgoSource)
 			}
 		}
 		uc.members[i] = trialMember{
@@ -811,6 +816,22 @@ func (f *jsonField) pointerLines(field string) []string {
 		return ifElseLines("_logos_s.QuotedNull()", []string{field + " = nil"}, lines)
 	}
 	return lines
+}
+func (js *jsonStruct) optionLines(f *jsonField, field string) []string {
+	elem := unaliasConstView(f.opt)
+	if kind, ok := scalarOf(elem); ok {
+		c := scalarCodec{kind: kind, quoted: f.quoted}
+		fill := []string{fmt.Sprintf("%s(&_logos_s, &%s.Value)", c.decodeFn(), field), field + ".Present = true"}
+		absent := []string{field + ".Present = false"}
+		lines := ifElseLines("_logos_s.Null()", absent, fill)
+		if f.quoted {
+			return ifElseLines("_logos_s.QuotedNull()", absent, lines)
+		}
+		return lines
+	}
+	absent := []string{field + ".Present = false"}
+	fill := []string{fmt.Sprintf("_logos_s.Fallback(&%s.Value)", field), field + ".Present = true"}
+	return ifElseLines("_logos_s.Null()", absent, fill)
 }
 
 func (js *jsonStruct) requiredCheck() []string {

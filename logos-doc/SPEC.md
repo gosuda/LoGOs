@@ -119,8 +119,9 @@ The output MUST NOT emit `.gen.go` file names [T-0.3].
 The output MUST carry the reserved `_logos_` import aliases that lowering writes, such as `_logos_unsafe "unsafe"` [T-0.3].
 The output MUST NOT emit `_logos_errors` imports [T-0.3].
 Among support imports, lowered files before eject MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases. Ejected files MUST spell those support imports as `_logos_rt "github.com/gosuda/loGos/rt"` and `_logos_json "github.com/gosuda/loGos/rt/json"` (the eject rewrite in `src/cmd/go/internal/logos/eject/eject.go:supportPathEdit`).
-The tool MUST NOT write ejected files into the source tree [T-0.3].
+The tool MUST write ejected files only inside DIR, and it MUST NOT change the source tree outside DIR; DIR MAY be inside the source tree [T-0.3].
 Ejected code MUST build with an upstream Go 1.27.2 toolchain [T-0.3].
+The tool MUST refuse a standard-library selector with no upstream spelling at its source location with `portability::fork_stdlib_api`, instead of writing output that upstream Go rejects [T-0.3].
 A Go package that imports a LoGOs package MUST see each exported declaration with the Go-facing signature that `logos eject` emits for it [T-0.3][R-U2].
 The output MUST NOT emit colliding helper imports. [T-0.3]
 
@@ -705,6 +706,8 @@ A plain value MUST be assignable to its constant view. [T-201]
 A `for _, v := range` loop over a constant slice MUST yield constant elements. [T-201]
 
 The equality operators `==` and `!=` MUST be defined on operands whose types carry a const-view or readonly-descendants qualification whenever the unqualified operand types are comparable and one unqualified operand type is assignable to the other. A comparison reads its operands; it MUST NOT be reported as a mutation through the view or as a qualification-erasing escape. [T-201]
+
+A type switch on a constant view of an interface MUST be allowed; the switch reads the dynamic type without writing through the view. Each case variable for a reference-bearing member MUST hold a constant view of that member; a case variable for a reference-free member keeps the plain member type. [T-201]
 
 A `?.` selector on an element reached through a constant view MUST resolve the field or method on the unqualified element type; a selected field keeps the element's qualification, and a selected method follows the receiver rules of this section. A function-typed field read through a constant view keeps its plain type; calling it MUST be allowed. [T-201]
 
@@ -1556,8 +1559,8 @@ Under plain `go`, only `GOEXPERIMENT=logosarena` MUST enable it. [T-301.1][R-U1]
 
 Placement regions [T-301.2]:
 The std package `logos/arena` MUST provide `Open() Region`, `New[T any](r Region) *T`, `Make[T any](r Region, n int) []T`, and `Append[T any](r Region, s []T, v ...T) []T`. [T-301.2]
-Without `GOEXPERIMENT=logosarena`, these MUST behave exactly as `Region{}`, `new(T)`, `make([]T, n)`, and `append(s, v...)`. [T-301.2]
-Under `logos` with `[build] arena` true, each call MUST resolve at compile time, per type argument, to the noscan region when `comptime.HasPointers[T]()` would be false, and to the scan region otherwise. [T-301.2]
+Without `GOEXPERIMENT=logosarena`, `Open()` MUST behave as `Region{}`. Allocations with this handle MUST behave as `new(T)`, `make([]T, n)`, and `append(s, v...)`, respectively. [T-301.2]
+Under `logos` with `[build] arena` true, each allocation in a lifetime region MUST resolve at compile time, per type argument, to the noscan region when `comptime.HasPointers[T]()` would be false, and to the scan region otherwise. [T-301.2]
 Constant-size noscan objects of at most 512 bytes MUST use the inline bump sequence on amd64 in non-race builds; other targets call the region slow path. [T-301.2]
 `Open` MUST make a region owned by the innermost enclosing block. [T-301.2]
 Exit from that block MUST release the region's objects, and inside a loop body each iteration MUST release them. [T-301.2]
@@ -1567,13 +1570,14 @@ Otherwise the object MUST go on the heap, and `perf::arena_fallback` MUST name t
 A store of a region pointer into a region object whose owner block is the same as, or nested inside, the owner block of the stored pointer's region MUST NOT count as an escape. A store into an object of an enclosing region MUST count as an escape. [T-301.2]
 In a LoGOs package, a `Region` that is stored outside a local variable, returned, sent on a channel, captured by a `go` statement, or captured by an escaping closure MUST fail with `correctness::region_escape`. [T-301.2]
 This return restriction includes bare returns of named results containing a `Region`, directly or through a local holder binding. Returning ordinary values computed using a region does not itself return the region. [T-301.2]
-In a Go package, passing an `r` to a callee is allowed. With `GOEXPERIMENT=logosarena` placement through that region follows the same escape rule as in a LoGOs package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap; a use that would fail with `correctness::region_escape` in a LoGOs package falls back to the heap instead. Under `logos lint` that fallback is reported as `perf::arena_fallback`, naming the call and the escaping flow; `logos build` and plain `go` report no rule ID. Without the experiment every `logos/arena` call behaves as its heap equivalent. [T-301.2][R-U1]
+In a Go package, passing an `r` to a callee is allowed. With `GOEXPERIMENT=logosarena` placement through a lifetime region follows the same escape rule as in a LoGOs package: the compiler places the object in the region only when escape analysis proves no pointer to it outlives the owner block of `r`, otherwise the object goes on the heap; a use that would fail with `correctness::region_escape` in a LoGOs package falls back to the heap instead. Under `logos lint` that fallback is reported as `perf::arena_fallback`, naming the call and the escaping flow; `logos build` and plain `go` report no rule ID. [T-301.2][R-U1]
 A `go group` child MAY read a parent-region object through a const view. [T-301.2]
 A non-const capture MUST count as an escape of that object. [T-301.2]
-`logos eject` MUST lower `arena.Open()` to `_logos_rt.Region{}`, `arena.New[T](r)` to `new(T)`, `arena.Make[T](r, n)` to `make([]T, n)`, and `arena.Append[T](r, s, v...)` to `append(s, v...)`. [T-301.2]
+`logos eject` MUST retain the arena API calls and use the portable implementation in the support module. Ordinary lifetime regions MUST use heap storage in that implementation, and calls MUST preserve the region operand and evaluate all arguments in Go order. [T-301.2]
+`OpenFixed(buf []byte) Region` MUST use the supplied buffer in both native and ejected code, regardless of `GOEXPERIMENT=logosarena`. `FixedUsed(r Region) int` MUST report the bytes consumed, including alignment padding, or zero for a non-fixed handle. [T-301.2]
+A nonempty fixed-region allocation of a pointer-bearing type MUST panic without consuming storage. An allocation that cannot fit MUST panic with `arena: fixed region exhausted (want N, have M)` and MUST NOT fall back to the heap. Requests for zero-size types and empty appends MUST NOT consume the buffer. [T-301.2]
 `logos/rt` MUST provide `type Region = arena.Region`. [T-301.2]
 The shared support module MUST carry the `arena` package. [T-301.2]
-The eject MUST append `_ = r` after each local Region declaration. [T-301.2]
 The toolchain MUST NOT ship the upstream `arena` package, `reflect.ArenaNew`, or `GOEXPERIMENT=arenas`. [T-301.2]
 
 Comptime and escape analysis:
@@ -2066,6 +2070,7 @@ Supported tag options are name, omitempty, omitzero, string, and -. [T-Sec10]
 HTML characters, U+2028, U+2029, invalid UTF-8, and float exponents encode per encoding/json. [T-Sec10]
 NaN and infinities report UnsupportedValueError. [T-Sec10]
 A closed-union value marshals to its dynamic member static bytes. [T-Sec10][T-203.1]
+An option field whose lowered form is `rt.Option[T]` marshals as JSON null when none, or is omitted when none and the field carries `omitempty` or `omitzero`; when present, it marshals as the payload value alone. [T-Sec10]
 A comptime generic that marshals over comptime fields expands once per instantiation. [T-205]
 Each instantiation carries its own static helpers. [T-205]
 
@@ -2087,6 +2092,7 @@ Decoding MUST fill defaults first, then parse. [T-Sec10]
 A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a required-mask constant, where K is the number of required non-nil fields of the struct. [T-Sec10]
 At the closing brace, a missing required non-nil field returns MissingFieldError naming type and field. [T-Sec10]
 JSON null for a non-nil field returns the same error. [T-Sec10]
+JSON null or a missing key for an option field gives none; any other value decodes the payload and gives some. [T-Sec10]
 The option-aware fallback MUST preserve the same required-field checks, scanning member presence over a buffered copy of the object with the fast path fold and duplicate semantics while decoding into the destination's existing allocations, so an omitted member still fails when the destination already holds a non-nil pointer and a present member keeps nested data and pointer aliases. [T-Sec10.2]
 Keys MUST dispatch by switch up to 8 keys and by the Sec 7 const-map table above that. [T-Sec10][T-Sec7]
 Keys whose 64-bit hashes are equal MUST each dispatch to their own field. [T-Sec10][T-Sec7]
@@ -2182,6 +2188,7 @@ A violation at severity `deny` aborts linking with ERROR capabilities::unauthori
 The report MUST list the shortest call chain with file and line per frame. [T-Sec11]
 For the allowlist keys that authorize each sink, see Sec 8.4. [T-Sec8][T-Sec11]
 Unsafe violations use capabilities::unauthorized_unsafe with the shortest import chain. [T-Sec11]
+A transitive_unsafe violation stays silent at the default `allow`, which skips the audit entirely. At `warn` cmd/go prints the violation and continues; at `deny` the violation aborts linking. Both severities audit the same set: dependencies that import `unsafe` and packages that hold linked assembly files or precompiled `.syso` objects, reported as `capabilities::unauthorized_unsafe` and `capabilities::unclassified_assembly`; an entry in `transitive_unsafe_allowlist` authorizes either. [T-Sec11]
 cgo reachability reports capabilities::unauthorized_cgo unless the cgo policy allows the package. [T-Sec11][T-101.2]
 Only a dependency that owns the cgo wrapper is blamed: the standard library's own cgo never blames the dependencies that call it. [T-Sec11]
 The cgo sink is the per-call-site `pkg._Cfunc_*` or `pkg._C2func_*` wrapper of the package that owns it, reported as `runtime.cgocall`, because `runtime.cgocall` itself lies in the runtime and has no owning dependency to blame. [T-Sec11]

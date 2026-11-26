@@ -1,0 +1,439 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog
+
+import (
+	"fmt"
+	"io"
+	"log/slog"
+	"slices"
+	"strconv"
+	"sync"
+	"time"
+)
+
+// commonHandler holds the state shared by TextHandler and JSONHandler.
+// It mirrors log/slog's commonHandler, except the group stack for
+// ReplaceAttr is a plain slice built per record instead of a pooled
+// pointer: the stack exists only when ReplaceAttr is set.
+type commonHandler struct {
+	json              bool
+	opts              slog.HandlerOptions
+	preformattedAttrs []byte
+	groupPrefix       string
+	groups            []string
+	nOpenGroups       int
+	mu                *sync.Mutex
+	w                 io.Writer
+}
+
+func (h *commonHandler) clone() *commonHandler {
+	return &commonHandler{
+		json:              h.json,
+		opts:              h.opts,
+		preformattedAttrs: slices.Clip(h.preformattedAttrs),
+		groupPrefix:       h.groupPrefix,
+		groups:            slices.Clip(h.groups),
+		nOpenGroups:       h.nOpenGroups,
+		w:                 h.w,
+		mu:                h.mu,
+	}
+}
+
+func (h *commonHandler) enabled(l slog.Level) bool {
+	minLevel := slog.LevelInfo
+	if h.opts.Level != nil {
+		minLevel = h.opts.Level.Level()
+	}
+	return l >= minLevel
+}
+
+func (h *commonHandler) withAttrs(as []slog.Attr) *commonHandler {
+	if countEmptyGroups(as) == len(as) {
+		return h
+	}
+	h2 := h.clone()
+	state := h2.newHandleState((*buffer)(&h2.preformattedAttrs), false, "")
+	defer state.free()
+	state.prefix.writeString(h.groupPrefix)
+	if pfa := h2.preformattedAttrs; len(pfa) > 0 {
+		state.sep = h.attrSep()
+		if h2.json && pfa[len(pfa)-1] == '{' {
+			state.sep = ""
+		}
+	}
+	pos := state.buf.length()
+	state.openGroups()
+	if !state.appendAttrs(as) {
+		state.buf.setLength(pos)
+	} else {
+		h2.groupPrefix = string(state.prefix.bytes())
+		h2.nOpenGroups = len(h2.groups)
+	}
+	return h2
+}
+
+func (h *commonHandler) withGroup(name string) *commonHandler {
+	h2 := h.clone()
+	h2.groups = append(h2.groups, name)
+	return h2
+}
+
+func (h *commonHandler) handle(r slog.Record) error {
+	state := h.newHandleState(newBuffer(), true, "")
+	defer state.free()
+	if h.json {
+		state.buf.writeByte('{')
+	}
+	stateGroups := state.groups
+	state.groups = nil
+	rep := h.opts.ReplaceAttr
+	if !r.Time.IsZero() {
+		key := slog.TimeKey
+		val := r.Time.Round(0)
+		if rep == nil {
+			state.appendKey(key)
+			state.appendTime(val)
+		} else {
+			state.appendAttr(slog.Time(key, val))
+		}
+	}
+	key := slog.LevelKey
+	val := r.Level
+	if rep == nil {
+		state.appendKey(key)
+		state.appendString(val.String())
+	} else {
+		state.appendAttr(slog.Any(key, val))
+	}
+	if h.opts.AddSource {
+		src := r.Source()
+		if src == nil {
+			src = &slog.Source{}
+		}
+		state.appendAttr(slog.Any(slog.SourceKey, src))
+	}
+	key = slog.MessageKey
+	msg := r.Message
+	if rep == nil {
+		state.appendKey(key)
+		state.appendString(msg)
+	} else {
+		state.appendAttr(slog.String(key, msg))
+	}
+	state.groups = stateGroups
+	state.appendNonBuiltIns(r)
+	state.buf.writeByte('\n')
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if _, err := h.w.Write(state.buf.bytes()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *handleState) appendNonBuiltIns(r slog.Record) {
+	if pfa := s.h.preformattedAttrs; len(pfa) > 0 {
+		s.buf.writeString(s.sep)
+		s.buf.write(pfa)
+		s.sep = s.h.attrSep()
+		if s.h.json && pfa[len(pfa)-1] == '{' {
+			s.sep = ""
+		}
+	}
+	nOpenGroups := s.h.nOpenGroups
+	if r.NumAttrs() > 0 {
+		s.prefix.writeString(s.h.groupPrefix)
+		pos := s.buf.length()
+		s.openGroups()
+		nOpenGroups = len(s.h.groups)
+		empty := true
+		r.Attrs(func(a slog.Attr) bool {
+			if s.appendAttr(a) {
+				empty = false
+			}
+			return true
+		})
+		if empty {
+			s.buf.setLength(pos)
+			nOpenGroups = s.h.nOpenGroups
+		}
+	}
+	if s.h.json {
+		for range s.h.groups[:nOpenGroups] {
+			s.buf.writeByte('}')
+		}
+		s.buf.writeByte('}')
+	}
+}
+
+func (h *commonHandler) attrSep() string {
+	if h.json {
+		return ","
+	}
+	return " "
+}
+
+// handleState holds the state for a single call to commonHandler.handle.
+// The group stack exists only while ReplaceAttr is set: it feeds the group
+// list argument of the ReplaceAttr callback. Otherwise it stays nil, so
+// opening groups allocates nothing.
+type handleState struct {
+	h       *commonHandler
+	buf     *buffer
+	freeBuf bool
+	sep     string
+	prefix  *buffer
+	groups  []string
+}
+
+func (h *commonHandler) newHandleState(buf *buffer, freeBuf bool, sep string) handleState {
+	s := handleState{
+		h:       h,
+		buf:     buf,
+		freeBuf: freeBuf,
+		sep:     sep,
+		prefix:  newBuffer(),
+	}
+	if h.opts.ReplaceAttr != nil {
+		s.groups = append(s.groups, h.groups[:h.nOpenGroups]...)
+		if s.groups == nil {
+			s.groups = []string{}
+		}
+	}
+	return s
+}
+
+func (s *handleState) free() {
+	if s.freeBuf {
+		s.buf.free()
+	}
+	s.prefix.free()
+}
+
+func (s *handleState) openGroups() {
+	for _, n := range s.h.groups[s.h.nOpenGroups:] {
+		s.openGroup(n)
+	}
+}
+
+// keyComponentSep separates group names and keys in text output.
+const keyComponentSep = '.'
+
+func (s *handleState) openGroup(name string) {
+	if s.h.json {
+		s.appendKey(name)
+		s.buf.writeByte('{')
+		s.sep = ""
+	} else {
+		s.prefix.writeString(name)
+		s.prefix.writeByte(keyComponentSep)
+	}
+	if s.groups != nil {
+		s.groups = append(s.groups, name)
+	}
+}
+
+func (s *handleState) closeGroup(name string) {
+	if s.h.json {
+		s.buf.writeByte('}')
+	} else {
+		trimmed := len(*s.prefix) - len(name) - 1
+		*s.prefix = (*s.prefix)[:trimmed]
+	}
+	s.sep = s.h.attrSep()
+	if s.groups != nil {
+		s.groups = s.groups[:len(s.groups)-1]
+	}
+}
+
+func (s *handleState) appendAttrs(as []slog.Attr) bool {
+	nonEmpty := false
+	for _, a := range as {
+		if s.appendAttr(a) {
+			nonEmpty = true
+		}
+	}
+	return nonEmpty
+}
+
+func (s *handleState) appendAttr(a slog.Attr) bool {
+	a = s.replaceAttr(a)
+	if isEmptyAttr(a) {
+		return false
+	}
+	if a.Value.Kind() == slog.KindAny {
+		var keep bool
+		a.Value, keep = sourceAttrValue(s.h.json, a.Value)
+		if !keep {
+			return false
+		}
+	}
+	if a.Value.Kind() == slog.KindGroup {
+		return s.appendGroupAttr(a)
+	}
+	s.appendKey(a.Key)
+	s.appendValue(a.Value)
+	return true
+}
+
+func (s *handleState) replaceAttr(a slog.Attr) slog.Attr {
+	a.Value = a.Value.Resolve()
+	if rep := s.h.opts.ReplaceAttr; rep != nil && a.Value.Kind() != slog.KindGroup {
+		var gs []string
+		if s.groups != nil {
+			gs = s.groups
+		}
+		a = rep(gs, a)
+		a.Value = a.Value.Resolve()
+	}
+	return a
+}
+
+// sourceAttrValue applies the Source special case: an empty source drops
+// the attribute, otherwise the value becomes the source group for JSON
+// or a file:line string for text.
+func sourceAttrValue(json bool, v slog.Value) (slog.Value, bool) {
+	src, ok := v.Any().(*slog.Source)
+	if !ok {
+		return v, true
+	}
+	if src == nil || (src.Function == "" && src.File == "" && src.Line == 0) {
+		return v, false
+	}
+	if json {
+		return sourceGroup(src), true
+	}
+	return slog.StringValue(src.File + ":" + strconv.Itoa(src.Line)), true
+}
+
+func (s *handleState) appendGroupAttr(a slog.Attr) bool {
+	attrs := a.Value.Group()
+	if len(attrs) == 0 {
+		return true
+	}
+	pos := s.buf.length()
+	groups := len(s.groups)
+	sep := s.sep
+	prefix := s.prefix.length()
+	if a.Key != "" {
+		s.openGroup(a.Key)
+	}
+	if !s.appendAttrs(attrs) {
+		// An emptied group must leave no trace: rewind the output and
+		// restore the callback group stack, the separator, and the
+		// text prefix, so later sibling fields keep the path they
+		// would have without the dropped group.
+		s.buf.setLength(pos)
+		if s.groups != nil {
+			s.groups = s.groups[:groups]
+		}
+		s.sep = sep
+		s.prefix.setLength(prefix)
+		return false
+	}
+	if a.Key != "" {
+		s.closeGroup(a.Key)
+	}
+	return true
+}
+
+// sourceGroup renders a non-empty Source as a group value, mirroring the
+// unexported Source.group method of log/slog.
+func sourceGroup(src *slog.Source) slog.Value {
+	var as []slog.Attr
+	if src.Function != "" {
+		as = append(as, slog.String("function", src.Function))
+	}
+	if src.File != "" {
+		as = append(as, slog.String("file", src.File))
+	}
+	if src.Line != 0 {
+		as = append(as, slog.Int("line", src.Line))
+	}
+	return slog.GroupValue(as...)
+}
+
+func (s *handleState) appendError(err error) {
+	s.appendString(fmt.Sprintf("!ERROR:%v", err))
+}
+
+func (s *handleState) appendKey(key string) {
+	s.buf.writeString(s.sep)
+	if s.prefix != nil && len(s.prefix.bytes()) > 0 {
+		s.appendTwoStrings(string(s.prefix.bytes()), key)
+	} else {
+		s.appendString(key)
+	}
+	if s.h.json {
+		s.buf.writeByte(':')
+	} else {
+		s.buf.writeByte('=')
+	}
+	s.sep = s.h.attrSep()
+}
+
+func (s *handleState) appendTwoStrings(x string, y string) {
+	buf := s.buf.bytes()
+	switch {
+	case s.h.json:
+		buf = append(buf, '"')
+		buf = appendEscapedJSONString(buf, x)
+		buf = appendEscapedJSONString(buf, y)
+		buf = append(buf, '"')
+	case !needsQuoting(x) && !needsQuoting(y):
+		buf = append(buf, x...)
+		buf = append(buf, y...)
+	default:
+		buf = strconv.AppendQuote(buf, x+y)
+	}
+	*s.buf = append((*s.buf)[:0], buf...)
+}
+
+func (s *handleState) appendString(str string) {
+	if s.h.json {
+		s.buf.writeByte('"')
+		*s.buf = appendEscapedJSONString(s.buf.bytes(), str)
+		s.buf.writeByte('"')
+	} else {
+		if needsQuoting(str) {
+			*s.buf = strconv.AppendQuote(s.buf.bytes(), str)
+		} else {
+			s.buf.writeString(str)
+		}
+	}
+}
+
+func (s *handleState) appendTime(t time.Time) {
+	if s.h.json {
+		appendJSONTime(s, t)
+	} else {
+		*s.buf = appendRFC3339Millis(s.buf.bytes(), t)
+	}
+}
+
+func appendRFC3339Millis(b []byte, t time.Time) []byte {
+	const prefixLen = len("2006-01-02T15:04:05.000")
+	n := len(b)
+	t = t.Truncate(time.Millisecond).Add(time.Millisecond / 10)
+	b = t.AppendFormat(b, time.RFC3339Nano)
+	b = append(b[:n+prefixLen], b[n+prefixLen+1:]...)
+	return b
+}
+
+func isEmptyAttr(a slog.Attr) bool {
+	return a.Key == "" && a.Value.Equal(slog.Value{})
+}
+
+func countEmptyGroups(as []slog.Attr) int {
+	n := 0
+	for _, a := range as {
+		if a.Value.Kind() == slog.KindGroup && len(a.Value.Group()) == 0 {
+			n++
+		}
+	}
+	return n
+}

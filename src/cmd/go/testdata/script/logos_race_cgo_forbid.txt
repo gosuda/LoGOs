@@ -132,21 +132,29 @@ cgo = "forbid"
 -- forbid/racy/racy.lgo --
 package racy
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 func Count(ctx context.Context) (int, error) {
 	n := 0
+	var start sync.WaitGroup
+	start.Add(1)
 	go group (ctx) {
 		go {
+			start.Wait()
 			for i := 0; i < 1000; i++ {
 				n++
 			}
 		}
 		go {
+			start.Wait()
 			for i := 0; i < 1000; i++ {
 				n++
 			}
 		}
+		start.Done()
 	}
 	return n, nil
 }
@@ -275,21 +283,29 @@ go 1.27
 -- nokey/racy/racy.lgo --
 package racy
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 func Count(ctx context.Context) (int, error) {
 	n := 0
+	var start sync.WaitGroup
+	start.Add(1)
 	go group (ctx) {
 		go {
+			start.Wait()
 			for i := 0; i < 1000; i++ {
 				n++
 			}
 		}
 		go {
+			start.Wait()
 			for i := 0; i < 1000; i++ {
 				n++
 			}
 		}
+		start.Done()
 	}
 	return n, nil
 }

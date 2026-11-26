@@ -63,8 +63,12 @@ export function benchmarkRows(output, name, iterations, count) {
   return rows;
 }
 
-export function assessRow(name, iterations, phases) {
+export function assessRow(name, iterations, phases, reference) {
   insist(Number.isSafeInteger(iterations) && iterations > 0, "invalid frozen work count");
+  if (reference !== undefined) {
+    insist(reference && Number.isFinite(reference.min) && Number.isFinite(reference.max) &&
+      reference.min > 0 && reference.min <= reference.max, "invalid reference band");
+  }
   const blocked = [];
   const statistics = {};
   for (const phase of ["baseline", "candidate", "integration"]) {
@@ -80,9 +84,17 @@ export function assessRow(name, iterations, phases) {
   }
   const candidateRatio = statistics.baseline.median / statistics.candidate.median;
   const integrationRatio = statistics.baseline.median / statistics.integration.median;
-  const status = blocked.length > 0 ? "measurement-blocked"
-    : candidateRatio >= 1.05 && integrationRatio >= 1.05 ? "latency-pass" : "latency-rejected";
-  return { name, iterations, status, blocked, candidateRatio, integrationRatio, statistics,
+  let status;
+  if (blocked.length > 0) {
+    status = "measurement-blocked";
+  } else if (reference !== undefined) {
+    status = candidateRatio >= reference.min && candidateRatio <= reference.max &&
+      integrationRatio >= reference.min && integrationRatio <= reference.max
+      ? "reference-only" : "reference-rejected";
+  } else {
+    status = candidateRatio >= 1.05 && integrationRatio >= 1.05 ? "latency-pass" : "latency-rejected";
+  }
+  return { name, iterations, status, blocked, candidateRatio, integrationRatio,
     promotion: "not established: latency evidence does not replace parity, admission, or a justified floor" };
 }
 
@@ -133,7 +145,8 @@ export function replaceOnce(source, before, after) {
 
 export function verdict(rows) {
   insist(rows.length > 0, "no benchmark rows were measured");
-  return rows.every((row) => row.status === "latency-pass") ? "latency-pass" : "not-accepted";
+  return rows.every((row) => row.status === "latency-pass" || row.status === "reference-only")
+    ? "latency-pass" : "not-accepted";
 }
 
 export function manifest(value) {
@@ -156,6 +169,15 @@ export function manifest(value) {
     insist(/^BenchmarkCgoOpt[A-Za-z0-9_]*$/.test(row.name) &&
       ["target", "reference"].includes(row.role) && !names.has(row.name),
       "invalid or duplicate benchmark requirement");
+    if (row.role === "reference") {
+      if (row.expected !== undefined) {
+        insist(Number.isFinite(row.expected.min) && Number.isFinite(row.expected.max) &&
+          row.expected.min > 0 && row.expected.min <= row.expected.max,
+          "invalid reference band for " + row.name);
+      }
+    } else {
+      insist(row.expected === undefined, "target benchmark must not carry a reference band: " + row.name);
+    }
     names.add(row.name);
   }
   insist(value.benchmarks.some((row) => row.role === "target"), "no target benchmark configured");

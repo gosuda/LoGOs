@@ -1,0 +1,88 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package slog_test
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"log/slog"
+	"testing"
+
+	twinslog "logos/slog"
+)
+
+// TestTwinConcurrent hammers twin handlers and loggers from grouped
+// goroutines. The group joins every child; run with -race.
+func TestTwinConcurrent(t *testing.T) {
+	if err := hammerTwin(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func hammerTwin() error {
+	ctx := context.Background()
+	opts := new(slog.HandlerOptions)
+	var textBuf, jsonBuf bytes.Buffer
+	textHandler := twinslog.NewTextHandler(&textBuf, opts)
+	jsonHandler := twinslog.NewJSONHandler(&jsonBuf, opts)
+	textGrouped := twinslog.NewTextHandler(io.Discard, opts).WithAttrs([]slog.Attr{slog.Int("p", 1)}).WithGroup("g")
+	jsonGrouped := twinslog.NewJSONHandler(io.Discard, opts).WithAttrs([]slog.Attr{slog.Int("p", 1)}).WithGroup("g")
+	textLogger := twinslog.New(textHandler)
+	jsonLogger := twinslog.New(jsonHandler)
+	go group (ctx, limit = 8) {
+		go {
+			for i := 0; i < 50; i++ {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "text", 0)
+				r.AddAttrs(slog.Int("i", i), slog.String("s", "x"))
+				textHandler.Handle(ctx, r)?
+			}
+		}
+		go {
+			for i := 0; i < 50; i++ {
+				r := slog.NewRecord(twinTestTime, slog.LevelInfo, "json", 0)
+				r.AddAttrs(slog.Float64("f", float64(i)+0.5), slog.Bool("b", true))
+				jsonHandler.Handle(ctx, r)?
+			}
+		}
+		go {
+			for i := 0; i < 50; i++ {
+				textLogger.Info("msg", slog.Int("i", i))
+				jsonLogger.Info("msg", slog.Int("i", i))
+			}
+		}
+		go {
+			for i := 0; i < 50; i++ {
+				r := slog.NewRecord(twinTestTime, slog.LevelWarn, "grouped", 0)
+				r.AddAttrs(slog.Group("g", slog.Int("i", i)))
+				textGrouped.Handle(ctx, r)?
+			}
+		}
+		go {
+			for i := 0; i < 50; i++ {
+				r := slog.NewRecord(twinTestTime, slog.LevelWarn, "grouped", 0)
+				r.AddAttrs(slog.Group("g", slog.Int("i", i)))
+				jsonGrouped.Handle(ctx, r)?
+			}
+		}
+		go {
+			for i := 0; i < 50; i++ {
+				r := slog.NewRecord(twinTestTime, slog.LevelError, "mixed", 0)
+				r.AddAttrs(twinAttrs6()...)
+				textHandler.Handle(ctx, r)?
+				jsonHandler.Handle(ctx, r)?
+			}
+		}
+		go {
+			_ = textGrouped.WithAttrs([]slog.Attr{slog.Int("q", 1)})
+			_ = jsonGrouped.WithGroup("h")
+		}
+		go {
+			_ = textLogger.With(slog.Int("w", 1))
+			_ = jsonLogger.WithGroup("h")
+		}
+	}
+	return nil
+}

@@ -38,10 +38,10 @@ cd ../..
 cd m3
 env GOEXPERIMENT=logosarena
 logos eject -o out
-grep '_ = grouped' out/main.go
-grep '_ = ifRegion' out/main.go
-grep '_ = forRegion' out/main.go
-grep '_ = switchRegion' out/main.go
+grep 'arena\.New\[int\]\(grouped\)' out/main.go
+grep 'arena\.New\[int\]\(ifRegion\)' out/main.go
+grep 'arena\.New\[int\]\(forRegion\)' out/main.go
+grep 'arena\.New\[int\]\(switchRegion\)' out/main.go
 env GOEXPERIMENT=
 cd out
 exists $UPROOT1272/bin/go

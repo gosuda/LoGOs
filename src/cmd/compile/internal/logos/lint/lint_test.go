@@ -164,7 +164,7 @@ func TestPolicyDefaults(t *testing.T) {
 	if got := d.Level("correctness::x", KindGo); got != Deny {
 		t.Errorf("Go cap: Level(correctness::x, go) = %v, want deny", got)
 	}
-	if got := d.Thresholds; got != (Thresholds{3, 15, 60, 4, 4096, 100000}) {
+	if got := d.Thresholds; got != (Thresholds{3, 15, 60, 4, 100000}) {
 		t.Errorf("default thresholds = %+v", got)
 	}
 }

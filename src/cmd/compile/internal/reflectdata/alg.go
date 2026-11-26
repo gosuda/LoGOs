@@ -368,6 +368,7 @@ func eqFunc(sig string) *ir.Func {
 	// offset from np/nq that we're currently working on
 	var off int64
 	var hasCall bool
+	var pendingEqChecks []eqCheck
 
 	// test takes a boolean. If it evaluates to false, short circuit
 	// and return false immediately. Otherwise, keep checking.
@@ -379,6 +380,10 @@ func eqFunc(sig string) *ir.Func {
 			nif := ir.NewIfStmt(pos, lastTest, nil, []ir.Node{ir.NewBranchStmt(pos, ir.OGOTO, neq)})
 			fn.Body.Append(nif)
 		}
+		if emitEqChecks(fn, pos, pendingEqChecks) {
+			hasCall = true
+		}
+		pendingEqChecks = nil
 		lastTest = eq
 	}
 	// load loads data of type t from np+off and nq+off.
@@ -387,6 +392,7 @@ func eqFunc(sig string) *ir.Func {
 		c := ir.NewBasicLit(pos, types.Types[types.TUINTPTR], constant.MakeInt64(off))
 		p := ir.NewBinaryExpr(pos, ir.OUNSAFEADD, np, c)
 		q := ir.NewBinaryExpr(pos, ir.OUNSAFEADD, nq, c)
+		pendingEqChecks = noteEqLoad(pos, pendingEqChecks, p, q, t.Size())
 		x := ir.NewStarExpr(pos, ir.NewConvExpr(pos, ir.OCONVNOP, t.PtrTo(), p))
 		y := ir.NewStarExpr(pos, ir.NewConvExpr(pos, ir.OCONVNOP, t.PtrTo(), q))
 		off += t.Size()
@@ -410,6 +416,9 @@ func eqFunc(sig string) *ir.Func {
 			ptrA, ptrB := load(types.Types[types.TUNSAFEPTR])
 			len, _ := load(types.Types[types.TUINTPTR])
 			// Note: we already checked that the lengths are equal.
+			// Check the contents for ASan; an MSan read here would
+			// be over-approximating, like the old call-site checks.
+			pendingEqChecks = noteEqContent(pendingEqChecks, ptrA, ptrB, len)
 			memeq := typecheck.LookupRuntime("memequal")
 			test(typecheck.Call(pos, memeq, []ir.Node{ptrA, ptrB, len}, false))
 			hasCall = true
@@ -430,6 +439,8 @@ func eqFunc(sig string) *ir.Func {
 				p := ir.NewBinaryExpr(pos, ir.OUNSAFEADD, np, c)
 				q := ir.NewBinaryExpr(pos, ir.OUNSAFEADD, nq, c)
 				len := ir.NewBasicLit(pos, types.Types[types.TUINTPTR], constant.MakeInt64(n))
+				// Check the range for ASan; see the note above.
+				pendingEqChecks = noteEqContent(pendingEqChecks, p, q, len)
 				memeq := typecheck.LookupRuntime("memequal")
 				test(typecheck.Call(pos, memeq, []ir.Node{p, q, len}, false))
 				hasCall = true

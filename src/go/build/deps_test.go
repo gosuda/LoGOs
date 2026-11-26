@@ -885,7 +885,7 @@ var depsRules = `
 	FMT
 	< math/big/internal/asmgen;
 
-	unsafe
+	internal/abi, reflect, unsafe
 	< logos/arena;
 
 	iter, os, runtime, runtime/pprof, strconv, strings, sync, time, unicode/utf8, unsafe
@@ -899,6 +899,24 @@ var depsRules = `
 
 	sync, sync/atomic, unsafe, weak, logos/internal/conc
 	< logos/sync;
+
+	crypto/tls, net/http, log/slog, runtime/debug, golang.org/x/net/http/httpguts, golang.org/x/net/quic
+	< logos/net/http;
+
+	NONE
+	< logos/ascii;
+
+	encoding/binary, errors, io, math, slices, sync
+	< logos/binary;
+
+	errors, fmt, io
+	< logos/io;
+
+	os, runtime, strconv, testing, time
+	< logos/leak;
+
+	context, fmt, os, os/exec, sync, syscall
+	< logos/proc;
 `
 
 // listStdPkgs returns the same list of packages as "go list std".
