@@ -1,0 +1,102 @@
+// run
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+
+	logoslog "logos/log"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+const catalogDebug = false
+const catalogInfo = true
+const itemsDebug = false
+const itemsWarn = true
+
+var catalogLog = logoslog.Scoped("catalog", logoslog.Info).WithOutput(io.Discard)
+var itemsLog = logoslog.Scoped("catalog/items", logoslog.Warn).WithOutput(io.Discard)
+
+var parentBuf bytes.Buffer
+var parentLog = logoslog.Scoped("catalog", logoslog.Info).WithOutput(&parentBuf)
+var childBuf bytes.Buffer
+var childLog = logoslog.Scoped("catalog/items", logoslog.Warn).WithOutput(&childBuf)
+
+var parentDebugCalls int
+var parentInfoCalls int
+var childDebugCalls int
+var childWarnCalls int
+var runtimeCalls int
+
+func markParentDebug(n int) int {
+	parentDebugCalls++
+	return n
+}
+
+func markParentInfo(n int) int {
+	parentInfoCalls++
+	return n
+}
+
+func markChildDebug(n int) int {
+	childDebugCalls++
+	return n
+}
+
+func markChildWarn(n int) int {
+	childWarnCalls++
+	return n
+}
+
+func markRuntime(n int) int {
+	runtimeCalls++
+	return n
+}
+
+func main() {
+	const if catalogDebug {
+		catalogLog.Debugf("bound %d items", markParentDebug(5))
+	}
+	const if catalogInfo {
+		catalogLog.Infof("bound %d items", markParentInfo(5))
+	}
+	const if itemsDebug {
+		itemsLog.Debugf("bound %d items", markChildDebug(5))
+	}
+	const if itemsWarn {
+		itemsLog.Warnf("low %d items", markChildWarn(3))
+	}
+	catalogLog.Debugf("runtime gate %d", markRuntime(7))
+	parentLog.Infof("bound %d items", 5)
+	parentLog.Debugf("noisy %d", 7)
+	childLog.Warnf("low %d items", 3)
+	childLog.Infof("chatty %d", 4)
+	check("parent-disabled-pruned", parentDebugCalls == 0, parentDebugCalls, 0)
+	check("parent-enabled-kept", parentInfoCalls == 1, parentInfoCalls, 1)
+	check("child-disabled-pruned", childDebugCalls == 0, childDebugCalls, 0)
+	check("child-enabled-kept", childWarnCalls == 1, childWarnCalls, 1)
+	check("runtime-gate-evaluates", runtimeCalls == 1, runtimeCalls, 1)
+	check("parent-gate-drops-debug", !catalogLog.Enabled(logoslog.Debug), catalogLog.Enabled(logoslog.Debug), false)
+	check("child-gate-drops-info", !itemsLog.Enabled(logoslog.Info), itemsLog.Enabled(logoslog.Info), false)
+	check("parent-line", parentBuf.String() == "[info] (catalog): bound 5 items\n", parentBuf.String(), "[info] (catalog): bound 5 items\n")
+	check("parent-debug-dropped", parentBuf.String() == "[info] (catalog): bound 5 items\n", parentBuf.String(), "[info] (catalog): bound 5 items\n")
+	check("child-line", childBuf.String() == "[warning] (catalog/items): low 3 items\n", childBuf.String(), "[warning] (catalog/items): low 3 items\n")
+	check("child-info-dropped", childBuf.String() == "[warning] (catalog/items): low 3 items\n", childBuf.String(), "[warning] (catalog/items): low 3 items\n")
+	check("parent-scope", parentLog.Scope() == "catalog", parentLog.Scope(), "catalog")
+	check("child-scope", childLog.Scope() == "catalog/items", childLog.Scope(), "catalog/items")
+	if failed {
+		os.Exit(1)
+	}
+}
