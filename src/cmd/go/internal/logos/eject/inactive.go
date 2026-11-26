@@ -30,6 +30,43 @@ import (
 // of the host package load. Census-only package records describe source paths;
 // they never enter a build root or the declaration-provenance plan. Only actual
 // helper loads supply the packages later used for emission.
+// cgoOnlyLogosGap reports an owned Go source the host build leaves out
+// that imports C together with LoGOs packages the load never reaches.
+// Lowering those packages without cgo would bake the wrong branch, and
+// no helper can lower them with cgo while the host disables it, so the
+// eject must refuse instead of emitting a tree that disagrees with the
+// native build. The second result names the file and the unreachable
+// packages for the refusal.
+func cgoOnlyLogosGap(path string, plan *ejectPlan) (string, bool) {
+	data, err := fsys.ReadFile(path)
+	if err != nil || isBuildIgnored(data) {
+		return "", false
+	}
+	imports := goSourceImports(data)
+	hasCgo := false
+	var missing []string
+	seen := map[string]bool{}
+	for _, imp := range imports {
+		if imp == "C" {
+			hasCgo = true
+			continue
+		}
+		rest, ok := strings.CutPrefix(imp, "logos/")
+		if !ok || rest == "" || seen[imp] {
+			continue
+		}
+		seen[imp] = true
+		if _, ok := plan.provenance[imp]; !ok {
+			missing = append(missing, imp)
+		}
+	}
+	if !hasCgo || len(missing) == 0 {
+		return "", false
+	}
+	slices.Sort(missing)
+	return path + " imports C and unreachable " + strings.Join(missing, ", "), true
+}
+
 func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 	active := map[string]bool{}
 	loaded := map[string]*load.Package{}
@@ -48,6 +85,24 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 			}
 		}
 	}
+	activeGo := map[string]bool{}
+	for _, p := range plan.main.pkgs {
+		for _, files := range [][]string{p.GoFiles, p.CgoFiles} {
+			for _, name := range files {
+				activeGo[filepath.Join(p.Dir, name)] = true
+			}
+		}
+	}
+	for _, m := range plan.deps {
+		for _, p := range m.pkgs {
+			for _, files := range [][]string{p.GoFiles, p.CgoFiles} {
+				for _, name := range files {
+					activeGo[filepath.Join(p.Dir, name)] = true
+				}
+			}
+		}
+	}
+	var cgoGaps []string
 	var out []inactiveFile
 	for _, module := range append([]*ejectModule{plan.main}, plan.deps...) {
 		modFile := parseGoModFile(filepath.Join(module.dir, "go.mod"))
@@ -89,6 +144,11 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 					}
 					continue
 				}
+				if entry.Type().IsRegular() && isSupportCopyFile(name) && !activeGo[path] {
+					if cgoGap, ok := cgoOnlyLogosGap(path, plan); ok {
+						cgoGaps = append(cgoGaps, cgoGap)
+					}
+				}
 				if !entry.Type().IsRegular() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !logosfile.Is(name) || active[path] {
 					continue
 				}
@@ -126,6 +186,10 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 		}
 		if err := walk(root); err != nil {
 			base.Fatalf("logos eject: inventory module %s: %v", module.path, err)
+		}
+		if len(cgoGaps) > 0 {
+			slices.Sort(cgoGaps)
+			base.Fatalf("logos eject: cgo-only Go sources reach logos packages the load cannot see without cgo:\n%s\nexport with CGO_ENABLED=1 and a C compiler", strings.Join(cgoGaps, "\n"))
 		}
 	}
 	collectInactiveGorootLogosFiles(plan, staging, active, loaded, &out)
