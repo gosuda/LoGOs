@@ -140,6 +140,24 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 	if err != nil {
 		return err
 	}
+	// Reserve every output stem in this package up front so JSONv2
+	// companions never collide with an emitted file, mirroring
+	// ejectOutputStems for the staging path.
+	taken := map[string]bool{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || name[0] == '.' || name[0] == '_' {
+			continue
+		}
+		switch {
+		case isSupportCopyFile(name):
+			taken[strings.TrimSuffix(name, ".go")] = true
+		case p.vendored && isVendoredGoFile(name):
+			taken[strings.TrimSuffix(name, ".go")] = true
+		case !p.vendored && isLoweredSupportFile(name):
+			taken[logosStem(name)] = true
+		}
+	}
 	goFiles := 0
 	var embeds []string
 	for _, entry := range entries {
@@ -151,7 +169,7 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 			if !entry.Type().IsRegular() {
 				return fmt.Errorf("go source %s is not a regular file", name)
 			}
-			patterns, copied, err := c.copyPackageGo(p, name)
+			patterns, copied, err := c.copyPackageGo(p, name, taken)
 			if err != nil {
 				return fmt.Errorf("%s: %w", name, err)
 			}
@@ -358,7 +376,7 @@ func isPackageBuildAsset(name string) bool {
 	return false
 }
 
-func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]string, bool, error) {
+func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken map[string]bool) ([]string, bool, error) {
 	src := path.Join(p.src, name)
 	outputName := name
 	var data []byte
@@ -453,7 +471,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 	if !ok {
 		return nil, false, fmt.Errorf("overlapping import edits")
 	}
-	mainBytes, extraBytes := splitJSONv2File(fixed)
+	mainBytes, extraBytes, extraStem := splitJSONv2File(fixed, strings.TrimSuffix(outputName, ".go"), taken)
 	var patterns []string
 	if embeds {
 		patterns, err = packageEmbedPatterns(fset, f.Comments)
@@ -468,7 +486,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 		c.format = append(c.format, dst)
 	}
 	if extraBytes != nil {
-		extraDst := path.Join(p.dst, jsonv2ExtraStem(logosStem(name))+".go")
+		extraDst := path.Join(p.dst, extraStem+".go")
 		if err := c.writeFile(src, extraDst, extraBytes); err != nil {
 			return nil, false, err
 		}
