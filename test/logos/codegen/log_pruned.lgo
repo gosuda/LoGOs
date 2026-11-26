@@ -1,0 +1,49 @@
+// asmcheck
+
+package logcheck
+
+import logoslog "logos/log"
+
+var parentLog = logoslog.Scoped("catalog", logoslog.Info)
+var childLog = logoslog.Scoped("catalog/items", logoslog.Warn)
+
+const catalogDebug = false
+const catalogInfo = true
+const itemsDebug = false
+const itemsWarn = true
+
+func pickParentDisabled() int {
+	const if catalogDebug {
+		parentLog.Debug("noisy") // amd64:-"CALL" arm64:-"CALL"
+		return 0
+	} else {
+		return 1 // amd64:-"CALL" arm64:-"CALL"
+	}
+}
+
+func pickParentEnabled() int {
+	const if catalogInfo {
+		parentLog.Info("state") // amd64:"CALL" arm64:"CALL"
+		return 0
+	} else {
+		return 1 // amd64:-"CALL" arm64:-"CALL"
+	}
+}
+
+func pickChildDisabled() int {
+	const if itemsDebug {
+		childLog.Debug("noisy") // amd64:-"CALL" arm64:-"CALL"
+		return 0
+	} else {
+		return 1 // amd64:-"CALL" arm64:-"CALL"
+	}
+}
+
+func pickChildEnabled() int {
+	const if itemsWarn {
+		childLog.Warn("low") // amd64:"CALL" arm64:"CALL"
+		return 0
+	} else {
+		return 1 // amd64:-"CALL" arm64:-"CALL"
+	}
+}
