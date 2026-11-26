@@ -1,0 +1,50 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+
+cd m
+# Public fields with interface types and fields of generic structs exist
+# upstream. They must survive the verifier and the complete export.
+logos build ./...
+logos eject -o out
+exists out/fields.go
+cd out
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+
+-- m/go.mod --
+module example.com/stdlibfields
+
+go 1.27
+
+-- m/fields.lgo --
+package stdlibfields
+
+import (
+	"container/list"
+	"crypto/x509"
+	"database/sql"
+)
+
+func ElementValue(element *list.Element) any {
+	return element.Value
+}
+
+func CertificateKey(certificate *x509.Certificate) any {
+	return certificate.PublicKey
+}
+
+func NullValue(value sql.Null[int64]) int64 {
+	return value.V
+}
+
+func NullValid(value sql.Null[int64]) bool {
+	return value.Valid
+}
+
+// Existing public methods are the control for the same imported type.
+func Next(element *list.Element) *list.Element? {
+	return element.Next()
+}
