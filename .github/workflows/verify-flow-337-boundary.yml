@@ -1,0 +1,79 @@
+name: Reproduce updated panic boundary findings
+
+on:
+  push:
+    branches: [ci/verify-flow-337-boundary-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  boundaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [replacement-pr, integrated-candidate]
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 20
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Reproduce the latest replacement source
+        if: matrix.source == 'replacement-pr'
+        run: |
+          git fetch --no-tags --depth=1 origin 3e06976f42fd63de273ead7224dd4a9933c15049
+          git show 3e06976f42fd63de273ead7224dd4a9933c15049:src/cmd/compile/internal/types2/narrow_logos.go > src/cmd/compile/internal/types2/narrow_logos.go
+          rm src/cmd/compile/internal/types2/narrow_defer_logos.go
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the selected source
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          sha256sum src/cmd/compile/internal/types2/narrow_logos.go >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Reproduce the published switch crash and recovery errors
+        if: matrix.source == 'replacement-pr'
+        run: |
+          for fixture in switch_exit337 recovery337; do
+            if go test -v -count=1 cmd/compile/internal/types2 -run "^TestLogos\$/error_first_$fixture\\.lgo\$" > "review-evidence/$fixture.log" 2>&1; then
+              cat "review-evidence/$fixture.log"
+              echo "expected published-source failure did not occur: $fixture"
+              exit 1
+            fi
+            cat "review-evidence/$fixture.log"
+            grep -E 'nil pointer dereference|unreported errors|no error expected' "review-evidence/$fixture.log"
+          done
+      - name: Pin the remaining integrated-candidate recovery boundary
+        if: matrix.source == 'integrated-candidate'
+        run: |
+          go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/error_first_switch_exit337\.lgo$' 2>&1 | tee review-evidence/switch-green.log
+          if go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/error_first_recovery337\.lgo$' > review-evidence/recovery-red.log 2>&1; then
+            cat review-evidence/recovery-red.log
+            echo 'expected unconditional-repanic witness failure did not occur'
+            exit 1
+          fi
+          cat review-evidence/recovery-red.log
+          grep -F 'error_first_recovery337.lgo:32:' review-evidence/recovery-red.log
+          grep -F 'no error expected' review-evidence/recovery-red.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: panic-boundaries-${{ matrix.source }}-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
