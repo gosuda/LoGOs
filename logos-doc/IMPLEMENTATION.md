@@ -600,7 +600,7 @@ Anchor: Tony Hoare, David Parnas, Richard Feynman
 ### M0-A-S15 Enforce the upstream Go regression floor in CI
 Anchor: Tony Hoare, Edsger W. Dijkstra
 - Attack: the existing upstream compiler, runtime, standard-library, and command tests run through `src/run.bash`. The previous workflow ran the LoGOs package, script, and testdir suites but did not enforce the upstream regression floor required by T-0.1.
-- Build: `.github/workflows/logos.yml` runs the full Go regression as an independent named step in the `scripts` matrix job after a fresh `make.bash`. M0-A-S18 consolidates the toolchain builds while retaining the pinned upstream oracles, Node runtime, C23 compiler, and ledger prerequisites. A script-test failure does not suppress the full Go step when its prerequisites succeeded and the job was not canceled.
+- Build: `.github/workflows/ci.yml` runs the full Go regression as an independent named step in the `scripts` job after restoring the shared fresh `make.bash` build. M0-A-S18 consolidates the toolchain builds while retaining the pinned upstream oracles, Node runtime, C23 compiler, and ledger prerequisites. A script-test failure does not suppress the full Go step when its prerequisites succeeded and the job was not canceled.
 - Gate: `GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild` must pass on the newly installed toolchain. A successful LoGOs-only suite is not evidence for this gate.
 - Red-team rows: none (runs the existing regression corpus).
 - Docs: SPEC 0.1 and 18.1 name the current Go 1.27.4 compiler base; SPEC 0.3 retains the Go 1.27.2 eject floor.
