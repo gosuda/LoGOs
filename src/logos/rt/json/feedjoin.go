@@ -4,7 +4,6 @@
 
 package json
 
-// AppendTokens appends the payloads of one value's parts and enforces max.
 // Parts are PartialNumber followed by Number, or PartialString pieces
 // followed by String. Any other kind is a syntax error. A negative max
 // selects DefaultMaxValueLen. A value closes exactly once: only the last
@@ -26,18 +25,6 @@ func AppendTokens(dst []byte, toks []Token, max int) ([]byte, error) {
 	switch last.Kind {
 	case TokenNumber:
 		partial = TokenPartialNumber
-		if len(last.Bytes) == 0 {
-			if len(toks) == 1 {
-				return dst, ErrSyntax
-			}
-			total := 0
-			for _, t := range toks[:len(toks)-1] {
-				total += len(t.Bytes)
-			}
-			if total == 0 {
-				return dst, ErrSyntax
-			}
-		}
 	case TokenString:
 		partial = TokenPartialString
 	default:
@@ -45,6 +32,15 @@ func AppendTokens(dst []byte, toks []Token, max int) ([]byte, error) {
 	}
 	for _, t := range toks[:len(toks)-1] {
 		if t.Kind != partial {
+			return dst, ErrSyntax
+		}
+	}
+	if last.Kind == TokenNumber {
+		total := len(last.Bytes)
+		for _, t := range toks[:len(toks)-1] {
+			total += len(t.Bytes)
+		}
+		if total == 0 {
 			return dst, ErrSyntax
 		}
 	}

@@ -175,3 +175,40 @@ func efClosureNestedDeferAfterReset() {
 		println(h.stats) // ERROR "result_before_error_check"
 	}()
 }
+
+// A reset inside the deferred literal itself runs before the literal
+// returns, so the stored value never reaches a later deferred read: the
+// reset kills the write's mark at the deferred exit, and the later read
+// stays accepted. Only marks the deferred literal still holds at return
+// are exported.
+func efClosureDeferredInnerResetAccepted() {
+	h := efClosureHeld{}
+	func() {
+		defer func() {
+			h.stats, _ = efClosureFetch()
+			h.stats = 0
+		}()
+	}()
+	defer func() {
+		println(h.stats)
+	}()
+}
+
+// A nested defer that replaces the result and its error together leaves
+// one pairing on every path: the single deferred call rewrites both in
+// the same assignment, so the guarded read proves the fresh call and
+// stays accepted.
+func efClosureNestedDeferPairingAccepted() {
+	h := efClosureHeld{}
+	h.stats, h.err = efClosureFetch()
+	func() {
+		defer func() {
+			h.stats, h.err = efClosureFetch()
+		}()
+	}()
+	if h.err == nil {
+		defer func() {
+			println(h.stats)
+		}()
+	}
+}

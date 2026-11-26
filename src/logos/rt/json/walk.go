@@ -57,6 +57,17 @@ func cycleError(v reflect.Value) error {
 	return &stdjson.UnsupportedValueError{Value: v, Str: "encountered a cycle via " + v.Type().String()}
 }
 
+// rejectLoneSurrogate returns an encoding error when s holds a lone
+// surrogate code unit. Invalid UTF-8 bytes keep the jsonv2 replacement
+// rule inside AppendEscaped; only surrogates are rejected, because the
+// decoder maps them to U+FFFD and they would not round-trip.
+func rejectLoneSurrogate(s string) error {
+	if hasLoneSurrogate(s) {
+		return &stdjson.UnsupportedValueError{Value: reflect.ValueOf(s), Str: "lone surrogate code unit in string"}
+	}
+	return nil
+}
+
 // EnterFrame records one object or array frame. offset is relative to
 // the current encoding buffer; helper callers rebase a depth error as
 // it unwinds through their exact emitted prefixes.
@@ -246,7 +257,6 @@ func (s *Walk) appendKind(buf []byte, rv reflect.Value) ([]byte, error) {
 	}
 	return appendScalar(buf, rv)
 }
-
 func appendScalar(buf []byte, rv reflect.Value) ([]byte, error) {
 	switch rv.Kind() {
 	case reflect.Bool:
@@ -258,6 +268,9 @@ func appendScalar(buf []byte, rv reflect.Value) ([]byte, error) {
 	case reflect.Float32, reflect.Float64:
 		return appendFloatValue(buf, rv)
 	case reflect.String:
+		if err := rejectLoneSurrogate(rv.String()); err != nil {
+			return buf, err
+		}
 		buf = append(buf, '"')
 		buf = AppendEscaped(buf, rv.String())
 		return append(buf, '"'), nil
@@ -376,6 +389,9 @@ func (s *Walk) appendMap(buf []byte, rv reflect.Value) ([]byte, error) {
 			buf = append(buf, ',')
 		}
 		buf = append(buf, '"')
+		if err := rejectLoneSurrogate(e.Key); err != nil {
+			return buf, err
+		}
 		buf = AppendEscaped(buf, e.Key)
 		buf = append(buf, '"', ':')
 		var err error
@@ -463,6 +479,9 @@ func (s *Walk) appendStringOptionValue(buf []byte, rv reflect.Value) ([]byte, er
 
 func (s *Walk) appendQuotedScalar(buf []byte, rv reflect.Value) ([]byte, error) {
 	if rv.Kind() == reflect.String {
+		if err := rejectLoneSurrogate(rv.String()); err != nil {
+			return buf, err
+		}
 		buf = append(buf, '"')
 		buf = AppendQuoted(buf, rv.String())
 		return append(buf, '"'), nil
