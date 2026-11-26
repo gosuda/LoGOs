@@ -352,18 +352,6 @@ func quoteLines(lines ...string) []string {
 	return append(out, `_logos_buf = append(_logos_buf, '"')`)
 }
 
-// loneSurrogateGuard emits a fail-fast rejection of lone surrogates in s
-// before a generated string append. Every generated encoder returns
-// ([]byte, error), so the guard returns the caller's buffer with the
-// walk-identical error. The if-init scope keeps the error name fresh at
-// every site, including repeated fields of one function.
-func loneSurrogateGuard(s, buf string) []string {
-	return ifLines(
-		"_logos_e := "+jsonAlias+".RejectLoneSurrogate("+s+"); _logos_e != nil",
-		[]string{"return " + buf + ", _logos_e"},
-	)
-}
-
 func marshalFieldStmts(arg string) []string {
 	return ifElseLines("_logos_mb, _logos_me := "+jsonAlias+".MarshalField("+arg+"); _logos_me != nil",
 		[]string{"return _logos_buf, _logos_me"},
@@ -403,7 +391,7 @@ func basicJSONStmts(b *types2.Basic, x string) []string {
 	case info&types2.IsFloat != 0:
 		return floatCheck(x, jsonFloatBits(b), []string{appendFloatLine(jsonFloatBits(b))})
 	case info&types2.IsString != 0:
-		return append(loneSurrogateGuard("string("+x+")", "_logos_buf"), quoteLines("_logos_buf = "+jsonAlias+".AppendEscaped(_logos_buf, string("+x+"))")...)
+		return quoteLines("_logos_buf = " + jsonAlias + ".AppendEscaped(_logos_buf, string(" + x + "))")
 	}
 	return marshalFieldStmts(x)
 }
@@ -419,7 +407,7 @@ func quotedBasicStmts(b *types2.Basic, x string) []string {
 	case info&types2.IsFloat != 0:
 		return floatCheck(x, jsonFloatBits(b), quoteLines(appendFloatLine(jsonFloatBits(b))))
 	case info&types2.IsString != 0:
-		return append(loneSurrogateGuard("string("+x+")", "_logos_buf"), quoteLines("_logos_buf = "+jsonAlias+".AppendQuoted(_logos_buf, string("+x+"))")...)
+		return quoteLines("_logos_buf = " + jsonAlias + ".AppendQuoted(_logos_buf, string(" + x + "))")
 	}
 	return nil
 }
@@ -554,13 +542,12 @@ func (e *jsonEnc) mapBody(lt types2.Type, x string) []string {
 		"_logos_es, _logos_ke := "+jsonAlias+"."+entries+"("+args+")")
 	body = append(body, ifLines("_logos_ke != nil", []string{"return _logos_buf, _logos_ke"})...)
 	body = append(body, "_logos_buf = append(_logos_buf, '{')")
-	loop := loneSurrogateGuard("_logos_es[_logos_i].Key", "_logos_buf")
-	loop = append(loop,
+	loop := []string{
 		elemSeparator(),
 		`_logos_buf = append(_logos_buf, '"')`,
-		"_logos_buf = "+jsonAlias+".AppendEscaped(_logos_buf, _logos_es[_logos_i].Key)",
+		"_logos_buf = " + jsonAlias + ".AppendEscaped(_logos_buf, _logos_es[_logos_i].Key)",
 		`_logos_buf = append(_logos_buf, '"', ':')`,
-	)
+	}
 	loop = append(loop, e.valueStmts(u.Elem(), "_logos_es[_logos_i].Value", "")...)
 	body = append(body, blockLines("for _logos_i := range _logos_es", loop)...)
 	return append(body, "_logos_buf = append(_logos_buf, '}')")

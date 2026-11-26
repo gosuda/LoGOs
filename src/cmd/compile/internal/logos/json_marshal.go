@@ -111,7 +111,7 @@ func (g *marshalGen) scalarParts(f *jsonField, c scalarCodec, x string) valuePar
 	open := c.open()
 	p := valueParts{konst: g.litLen(f, open) + len(open)}
 	p.size = []string{c.sizeStmt(x)}
-	p.emit = append(g.litStmts(f, open), c.emitStmt(x)...)
+	p.emit = append(g.litStmts(f, open), c.emitStmt(x))
 	if open != "" {
 		p.emit = append(p.emit, `_logos_buf = append(_logos_buf, '"')`)
 	}
@@ -309,7 +309,7 @@ func elemEmit(c scalarCodec, x string) []string {
 	if c.open() != "" {
 		lines = append(lines, `_logos_buf = append(_logos_buf, '"')`)
 	}
-	lines = append(lines, c.emitStmt(x)...)
+	lines = append(lines, c.emitStmt(x))
 	if c.open() != "" {
 		lines = append(lines, `_logos_buf = append(_logos_buf, '"')`)
 	}
@@ -548,7 +548,7 @@ func scalarStaticMarshal(kind scalarKind, val, b string) string {
 	case scalarFloat64:
 		return fmt.Sprintf("if %s-%s != 0 { return nil, %s.FloatErr(%s, float64(%s), 64) }; %s = %s.AppendFloat(nil, float64(%s), 64)", val, val, jsonAlias, val, val, b, jsonAlias, val)
 	case scalarString:
-		return fmt.Sprintf("if _logos_e := %s.RejectLoneSurrogate(string(%s)); _logos_e != nil { return nil, _logos_e }; %s = append(%s.AppendEscaped(append([]byte(nil), '\"'), string(%s)), '\"')", jsonAlias, val, b, jsonAlias, val)
+		return fmt.Sprintf("%s = append(%s.AppendEscaped(append([]byte(nil), '\"'), string(%s)), '\"')", b, jsonAlias, val)
 	}
 	return ""
 }
@@ -1307,12 +1307,12 @@ func (fl *fileLower) optionJSONContainerCall(plan *jsonWalkPlan, u types2.Type, 
 		open, close = "'{'", "'}'"
 		body = append(body, sortedJSONMapKeys(x)...)
 		loop = "for _, _logos_key := range _logos_keys"
-		prefix = append(loneSurrogateGuard("_logos_key", "_logos_buf"),
+		prefix = []string{
 			"_logos_buf = append(_logos_buf, '\"')",
-			"_logos_buf = "+jsonAlias+".AppendEscaped(_logos_buf, _logos_key)",
+			"_logos_buf = " + jsonAlias + ".AppendEscaped(_logos_buf, _logos_key)",
 			"_logos_buf = append(_logos_buf, '\"', ':')",
-			"_logos_item := "+x+"["+fl.sourceTypeString(mapType.Key(), fl.genQualifier)+"(_logos_key)]",
-		)
+			"_logos_item := " + x + "[" + fl.sourceTypeString(mapType.Key(), fl.genQualifier) + "(_logos_key)]",
+		}
 	}
 	body = append(body, "_logos_buf := []byte{"+open+"}")
 	inner := []string{"if len(_logos_buf) > 1 { _logos_buf = append(_logos_buf, ',') }"}

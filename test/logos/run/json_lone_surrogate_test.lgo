@@ -3,35 +3,68 @@
 package jsonlonesurrogate
 
 import (
-	"strings"
+	"bytes"
+	"encoding/json"
 	"testing"
 )
 
 type surrogateHolder struct {
 	S string `json:"s"`
 }
+
+type surrogateHolderMirror struct {
+	S string `json:"s"`
+}
+
 type surrogateMapHolder struct {
 	M map[string]string `json:"m"`
 }
 
-func isLoneSurrogateError(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "lone surrogate")
+type surrogateMapHolderMirror struct {
+	M map[string]string `json:"m"`
 }
 
-func TestTypedStringFieldRejectsLoneSurrogate(t *testing.T) {
-	if _, err := (surrogateHolder{S: "\xed\xa0\x80"}).MarshalJSON(); !isLoneSurrogateError(err) {
-		t.Fatalf("typed string field: error = %v, want lone-surrogate rejection", err)
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
 	}
-	if _, err := (surrogateHolder{S: "plain"}).MarshalJSON(); err != nil {
-		t.Fatalf("clean string field: error = %v", err)
+	return b
+}
+
+func matchSurrogate(t *testing.T, got []byte, want []byte) {
+	t.Helper()
+	if !bytes.Equal(got, want) {
+		t.Fatalf("generated differs from encoding/json\n got %s\nwant %s", got, want)
+	}
+	if !json.Valid(got) {
+		t.Fatalf("generated output is not valid JSON: %s", got)
 	}
 }
 
-func TestMapKeyRejectsLoneSurrogate(t *testing.T) {
-	if _, err := (surrogateMapHolder{M: map[string]string{"\xed\xa0\x80": "v"}}).MarshalJSON(); !isLoneSurrogateError(err) {
-		t.Fatalf("surrogate map key: error = %v, want lone-surrogate rejection", err)
+// Lone surrogates follow the encoding/json replacement rule in generated
+// encoders: they encode as U+FFFD, exactly like the standard library,
+// instead of failing. The marshal sweep pins this parity across random
+// inputs; this fixture pins the representative field, map-key and
+// map-value positions directly.
+func TestSurrogateFieldMatchesEncodingJSON(t *testing.T) {
+	for _, s := range []string{"\xed\xa0\x80", "a\xed\xa0\x80b", "plain", "\xff\xfe"} {
+		matchSurrogate(t,
+			must((surrogateHolder{S: s}).MarshalJSON()),
+			must(json.Marshal(surrogateHolderMirror{S: s})))
 	}
-	if _, err := (surrogateMapHolder{M: map[string]string{"k": "\xed\xa0\x80"}}).MarshalJSON(); !isLoneSurrogateError(err) {
-		t.Fatalf("surrogate map value: error = %v, want lone-surrogate rejection", err)
+}
+
+func TestSurrogateMapMatchesEncodingJSON(t *testing.T) {
+	pairs := []struct{ k, v string }{
+		{"\xed\xa0\x80", "v"},
+		{"k", "\xed\xa0\x80"},
+		{"\xed\xa0\x80", "\xed\xa0\x80"},
+		{"k", "v"},
+	}
+	for _, p := range pairs {
+		m := map[string]string{p.k: p.v}
+		matchSurrogate(t,
+			must((surrogateMapHolder{M: m}).MarshalJSON()),
+			must(json.Marshal(surrogateMapHolderMirror{M: m})))
 	}
 }

@@ -57,15 +57,6 @@ func cycleError(v reflect.Value) error {
 	return &stdjson.UnsupportedValueError{Value: v, Str: "encountered a cycle via " + v.Type().String()}
 }
 
-// RejectLoneSurrogate returns the encoding error the dynamic walk
-// reports when s holds a lone surrogate, so generated encoders reject
-// exactly what the walk rejects. Invalid UTF-8 bytes keep the jsonv2
-// replacement rule inside AppendEscaped; only surrogates are rejected,
-// because the decoder maps them to U+FFFD and they would not round-trip.
-func RejectLoneSurrogate(s string) error {
-	return rejectLoneSurrogate(s)
-}
-
 // rejectLoneSurrogate returns an encoding error when s holds a lone
 // surrogate code unit. Invalid UTF-8 bytes keep the jsonv2 replacement
 // rule inside AppendEscaped; only surrogates are rejected, because the
