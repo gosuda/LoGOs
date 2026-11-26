@@ -1,0 +1,105 @@
+name: Verify compiler-free package listings
+
+on:
+  push:
+    branches: [ci/verify-list-333-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  listings:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [depot-ubuntu-24.04-8, depot-windows-2025-4]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Record source
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+      - name: Build Linux toolchain
+        if: runner.os == 'Linux'
+        run: |
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Build Windows toolchain without cgo
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:GOROOT_BOOTSTRAP = (go env GOROOT)
+          $env:CGO_ENABLED = '0'
+          $env:CC = 'review-missing-c-compiler'
+          $log = Join-Path $env:GITHUB_WORKSPACE 'review-evidence/make.log'
+          Push-Location src
+          cmd /c make.bat 2>&1 | Tee-Object -FilePath $log
+          $buildExit = $LASTEXITCODE
+          Pop-Location
+          if ($buildExit -ne 0) { exit $buildExit }
+          (Join-Path $env:GITHUB_WORKSPACE 'bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Race and compiler-free listing controls
+        if: runner.os == 'Linux'
+        run: go test -v -race -count=1 cmd/go -run '^TestScript$/logos_(list_nocgo|race_cgo_forbid)$' 2>&1 | tee review-evidence/listings.log
+      - name: Compiler-free Windows listing controls
+        if: runner.os == 'Windows'
+        env:
+          CGO_ENABLED: '0'
+          CC: review-missing-c-compiler
+        run: go test -v -count=1 cmd/go -run '^TestScript$/logos_list_nocgo$' 2>&1 | tee review-evidence/listings.log
+      - name: Prove the shared preflight guard is covered
+        if: runner.os == 'Linux'
+        run: |
+          file=src/cmd/go/internal/work/logos_settings.go
+          cp "$file" review-evidence/logos-settings-fixed.go
+          trap 'cp review-evidence/logos-settings-fixed.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          path = Path('src/cmd/go/internal/work/logos_settings.go')
+          source = path.read_text()
+          guard = 'if !settings.Current().Cgo.RaceRuntimeOnly || cfg.BuildN {'
+          assert source.count(guard) == 1
+          path.write_text(source.replace(guard, 'if cfg.BuildN {'))
+          PYCODE
+          if go test -v -count=1 cmd/go -run '^TestScript$/logos_list_nocgo$' > review-evidence/mutation.log 2>&1; then
+            cat review-evidence/mutation.log
+            echo 'compiler preflight mutation escaped the listing attack'
+            exit 1
+          fi
+          cat review-evidence/mutation.log
+          grep -F 'needs a C compiler' review-evidence/mutation.log
+          grep -F -- '--- FAIL: TestScript/logos_list_nocgo' review-evidence/mutation.log
+          cp review-evidence/logos-settings-fixed.go "$file"
+          trap - EXIT
+          go test -v -count=1 cmd/go -run '^TestScript$/logos_list_nocgo$' 2>&1 | tee review-evidence/restored.log
+      - name: Vet and clean source
+        run: |
+          go vet cmd/go/internal/list
+          test -z "$(gofmt -l src/cmd/go/internal/list/list.go src/cmd/go/internal/list/logos_compiled.go)"
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: listings-${{ runner.os }}-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
