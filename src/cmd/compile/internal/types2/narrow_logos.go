@@ -2545,10 +2545,10 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 		// A trailing-error call whose error has no tracked identity
 		// (field or discarded) still leaves a value that can reach a
 		// deferred read: mark it may-reach. The marker is killed by any
-		// overwrite through dropDest, merged by union across branches,
-		// and consulted only when seeding a deferred capture, so
-		// ordinary reads (including v, _ := f(); return v) stay as
-		// before.
+		// overwrite through dropDest and merged by union across branches.
+		// A field-error store also seeds an ordinary entry so a later
+		// plain read fails without a check; a blank error keeps no
+		// pairing and stays silent for ordinary reads.
 		if !p.errCallShape(lhs, rhs) {
 			return st
 		}
@@ -2576,6 +2576,9 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 				ek = dk
 			}
 			p.noteMay(k, ek)
+			if ek != (logosEFKey{}) {
+				st = st.setSeed(k, logosEFEntry{name: ek.displayName(), errKey: ek, pos: p.logosEFDestPos(lhs, k)})
+			}
 		}
 		return st
 	}
