@@ -23,3 +23,14 @@ func switchDefaultKeepsErr337_31() {
 	}
 	_ = v
 }
+
+// A case operand that rewrites the tag defeats a later nil match.
+func switchNilAfterTagRewrite337_31() {
+	n, err := fetch337_31()
+	v := switch err {
+	case func() error { err = nil; return err }() => 0
+	case nil => n /* ERROR "[correctness::result_before_error_check]" */
+	default => 0
+	}
+	_ = v
+}
