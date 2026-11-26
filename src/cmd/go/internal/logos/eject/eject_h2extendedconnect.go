@@ -38,25 +38,23 @@ const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 // feature.
 func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []textEdit {
 	hasNetHTTP := false
-	haveOS := false
-	haveStrings := false
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
 			continue
 		}
-		switch path {
-		case "net/http":
+		if path == "net/http" {
 			hasNetHTTP = true
-		case "os":
-			haveOS = true
-		case "strings":
-			haveStrings = true
+			break
 		}
 	}
 	if !hasNetHTTP {
 		return nil
 	}
+	used := h2UsedNames(f)
+	osName := h2FreshName(used, "logosH2Os")
+	used[osName] = true
+	stringsName := h2FreshName(used, "logosH2Strings")
 	var edits []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -77,24 +75,58 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 		}
 		receiver := string(data[recvStart:recvEnd])
 		msg := "net/http: extended CONNECT on server " + strconv.Quote(receiver) + " needs GODEBUG=http2xconnect=1 in the ejected process environment"
-		repl := "func() {\n_ = " + receiver + "\nif !strings.Contains(os.Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}()"
+		repl := "func() {\n_ = " + receiver + "\nif !" + stringsName + ".Contains(" + osName + ".Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}()"
 		edits = append(edits, textEdit{start, end, repl})
 		return true
 	})
 	if len(edits) == 0 {
 		return nil
 	}
-	var missing []string
-	if !haveOS {
-		missing = append(missing, "\"os\"")
-	}
-	if !haveStrings {
-		missing = append(missing, "\"strings\"")
-	}
-	if len(missing) > 0 {
-		edits = append(edits, h2ImportEdit(fset, f, missing))
-	}
+	missing := []string{osName + " \"os\"", stringsName + " \"strings\""}
+	edits = append(edits, h2ImportEdit(fset, f, missing))
 	return edits
+}
+
+// h2UsedNames collects local import names and all identifiers in f so
+// generated bindings cannot collide with an alias, a local variable, or
+// an existing import, generally for any file shape.
+func h2UsedNames(f *ast.File) map[string]bool {
+	used := make(map[string]bool)
+	for _, imp := range f.Imports {
+		if imp.Name != nil {
+			used[imp.Name.Name] = true
+			continue
+		}
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		if i := strings.LastIndex(path, "/"); i >= 0 {
+			used[path[i+1:]] = true
+		} else {
+			used[path] = true
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			used[id.Name] = true
+		}
+		return true
+	})
+	return used
+}
+
+// h2FreshName returns base or the first base+N unused in used.
+func h2FreshName(used map[string]bool, base string) string {
+	if !used[base] {
+		return base
+	}
+	for i := 2; ; i++ {
+		cand := base + strconv.Itoa(i)
+		if !used[cand] {
+			return cand
+		}
+	}
 }
 
 // h2OverlapOffset returns the start offset of the first h2 edit that
