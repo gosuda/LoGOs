@@ -231,18 +231,18 @@ func TestSupportRelPathMapping(t *testing.T) {
 	cases := map[string]string{
 		"logos/rt":              "",
 		"logos/rt/json":         "json",
-		"logos/json":            "json",
+		"logos/json":            "logos/json",
 		"logos/arena":           "arena",
 		"logos/sync":            "sync",
-		"logos/ascii":           "ascii",
-		"logos/enum":            "enum",
-		"logos/proc":            "proc",
-		"logos/leak":            "leak",
-		"logos/io":              "io",
-		"logos/log":             "log",
-		"logos/strconv":         "strconv",
-		"logos/net/uri":         "net/uri",
-		"logos/encoding/base64": "encoding/base64",
+		"logos/ascii":           "logos/ascii",
+		"logos/enum":            "logos/enum",
+		"logos/proc":            "logos/proc",
+		"logos/leak":            "logos/leak",
+		"logos/io":              "logos/io",
+		"logos/log":             "logos/log",
+		"logos/strconv":         "logos/strconv",
+		"logos/net/uri":         "logos/net/uri",
+		"logos/encoding/base64": "logos/encoding/base64",
 	}
 	for path, want := range cases {
 		got, ok := supportRelPath(path)
@@ -262,11 +262,11 @@ func TestSupportRelPathMapping(t *testing.T) {
 }
 
 func TestSupportDestinationsDistinct(t *testing.T) {
-	dst, err := supportDestinations([]string{"logos/rt", "logos/ascii", "logos/arena"})
+	dst, err := supportDestinations([]string{"logos/rt", "logos/rt/json", "logos/json", "logos/arena"})
 	if err != nil {
 		t.Fatalf("supportDestinations: %v", err)
 	}
-	want := map[string]string{"": "logos/rt", "ascii": "logos/ascii", "arena": "logos/arena"}
+	want := map[string]string{"": "logos/rt", "json": "logos/rt/json", "logos/json": "logos/json", "arena": "logos/arena"}
 	if len(dst) != len(want) {
 		t.Fatalf("supportDestinations = %v, want %v", dst, want)
 	}
@@ -278,11 +278,11 @@ func TestSupportDestinationsDistinct(t *testing.T) {
 }
 
 func TestSupportDestinationsCollision(t *testing.T) {
-	want := "support packages logos/json and logos/rt/json map to the same path json"
+	want := "support packages logos/json and logos/rt/logos/json map to the same path logos/json"
 	for _, paths := range [][]string{
-		{"logos/json", "logos/rt/json"},
-		{"logos/rt/json", "logos/json"},
-		{"logos/rt", "logos/json", "logos/rt/json"},
+		{"logos/json", "logos/rt/logos/json"},
+		{"logos/rt/logos/json", "logos/json"},
+		{"logos/rt", "logos/json", "logos/rt/logos/json"},
 	} {
 		_, err := supportDestinations(paths)
 		if err == nil {

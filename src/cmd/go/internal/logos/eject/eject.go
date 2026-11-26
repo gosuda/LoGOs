@@ -2055,17 +2055,14 @@ func groupedImportEdits(data []byte, fset *token.FileSet, gen *ast.GenDecl, uses
 	return edits
 }
 
-// supportRelPath maps a logos/ import path to its directory relative to
-// the support module root, the same mapping the import rewrite and the
-// support copy share. logos/rt is the root itself, so it maps to "".
-// A leading rt/ segment is trimmed, so logos/rt/json and logos/json both
-// map to "json". It reports false for paths outside logos/.
+// supportRelPath maps a toolchain package to its directory in the support
+// module. The runtime stays at the root; its json package is distinct
+// from the logos/json twin. Arena and sync keep their existing paths.
 
 // supportDestinations maps each closure member to its destination directory
 // relative to the support module root. Two distinct members mapping to one
-// destination stop the eject, so logos/json and logos/rt/json can never
-// silently overwrite each other. The input order does not matter: members
-// are considered in sorted order, so the reported pair is deterministic.
+// destination stop eject instead of silently overwriting each other.
+// Members are considered in sorted order so the reported pair is deterministic.
 func supportDestinations(paths []string) (map[string]string, error) {
 	sorted := slices.Clone(paths)
 	slices.Sort(sorted)
@@ -2085,13 +2082,21 @@ func supportDestinations(paths []string) (map[string]string, error) {
 
 func supportRelPath(path string) (string, bool) {
 	rest, ok := strings.CutPrefix(path, "logos/")
-	if !ok {
+	if !ok || rest == "" {
 		return "", false
 	}
 	if rest == "rt" {
 		return "", true
 	}
-	return strings.TrimPrefix(rest, "rt/"), true
+	if sub, ok := strings.CutPrefix(rest, "rt/"); ok {
+		return sub, true
+	}
+	for _, fixed := range []string{"arena", "sync"} {
+		if rest == fixed || strings.HasPrefix(rest, fixed+"/") {
+			return rest, true
+		}
+	}
+	return "logos/" + rest, true
 }
 func supportPathEdit(fset *token.FileSet, imp *ast.ImportSpec, uses *bool) (textEdit, bool) {
 	path, err := strconv.Unquote(imp.Path.Value)
