@@ -112,6 +112,59 @@ def test_benchmark_uses_event_base_after_the_branch_moves(tmp_path: Path) -> Non
     ] * 6
 
 
+def test_benchmark_fetches_missing_base_in_shallow_checkout(tmp_path: Path) -> None:
+    # The CI checkout is shallow and may lack the event base; the driver
+    # must retrieve a missing commit via fetch, not rely on a full clone.
+    upstream, root = tmp_path / "upstream", tmp_path / "candidate"
+    upstream.mkdir()
+    git(upstream, "init", "-q", "-b", "main")
+    write(upstream / "src/make.bash", "#!/bin/bash\nexit 0\n", executable=True)
+    base = commit(upstream, "event base")
+    write(upstream / "later.txt", "base branch moved\n")
+    moved = commit(upstream, "new base tip")
+    subprocess.run(
+        ("git", "clone", "-q", "--depth=1", str(upstream), str(root)), check=True
+    )
+    assert base not in git(root, "rev-list", "HEAD"), "fixture must lack base"
+    driver = copy_driver(root, "bench-autovec.sh")
+    write(
+        root / "test/logos/bench/autovec_measure.sh",
+        '#!/bin/bash\nset -eu\nprintf "%s %s\\n" "$6" "$7" >> "$RUNNER_TEMP/measured-shas"\n',
+    )
+    candidate = commit(root, "candidate")
+    env = environment(root, tmp_path)
+    env.update(
+        AUTOVEC_BASE_SHA=base,
+        AUTOVEC_CAND_SHA=candidate,
+        GITHUB_BASE_REF="main",
+        GITHUB_SHA=candidate,
+    )
+    for command, body in {
+        "curl": "exit 0",
+        "sha256sum": "cat >/dev/null",
+        "tar": "exit 0",
+        "go": "printf 'amd64\\n'",
+        "jq": "printf '1\\n'",
+    }.items():
+        write(
+            tmp_path / "commands" / command, f"#!/bin/bash\n{body}\n", executable=True
+        )
+    result = subprocess.run(
+        ("bash", str(driver)),
+        check=False,
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    checked_out = git(tmp_path / "runner/autovec-base", "rev-parse", "HEAD")
+    assert checked_out == base, (checked_out, base, moved)
+    assert (tmp_path / "runner/measured-shas").read_text().splitlines() == [
+        f"{base} {candidate}"
+    ] * 6
+
+
 @pytest.mark.parametrize("status", (0, 37))
 def test_cgo_transcript_keeps_both_streams_and_exit_status(
     tmp_path: Path, status: int
