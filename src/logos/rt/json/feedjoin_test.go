@@ -11,7 +11,9 @@ import (
 )
 
 // A one-value join closes exactly once: partial input, two closing
-// tokens, and a digit-free closing number are all syntax errors.
+// tokens, and a digit-free joined number are all syntax errors. An empty
+// final Number only closes digits that arrived in earlier chunks, which is
+// how the scanner encodes a number split across chunk boundaries.
 // Planted fault: Join checks token families but not where the value
 // ends, so partial-only input succeeds and two finals concatenate.
 func TestJoinValueShape(t *testing.T) {
@@ -36,7 +38,9 @@ func TestJoinValueShape(t *testing.T) {
 		{"partial only", []rtjson.Token{pnum("12")}, "", true},
 		{"two finals", []rtjson.Token{num("12"), num("34")}, "", true},
 		{"final before partial", []rtjson.Token{num("12"), pnum("34")}, "", true},
-		{"empty final number", []rtjson.Token{pnum("12"), num("")}, "", true},
+		{"split number closes empty", []rtjson.Token{pnum("12"), num("")}, "12", false},
+		{"single empty number", []rtjson.Token{num("")}, "", true},
+		{"empty pieces", []rtjson.Token{pnum(""), num("")}, "", true},
 		{"mixed families", []rtjson.Token{pnum("1"), str("x")}, "", true},
 	}
 	for _, row := range rows {
