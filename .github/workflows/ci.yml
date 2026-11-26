@@ -62,7 +62,7 @@ jobs:
           name: toolchain
           path: "~/tc"
 
-  # Core suites unit / scripts / upstream / autovec (tagged-facts runs inside unit)
+  # logos.yml suites unit / scripts / upstream / autovec (and tagged-facts, which unit already runs)
   unit:
     needs: [route, build]
     if: needs.route.outputs.core == 'true'
