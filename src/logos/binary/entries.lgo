@@ -47,6 +47,8 @@ func Size[T any](v T) int {
 		if n := StructSizeOf[T](); n >= 0 {
 			return n
 		}
+		// No provably complete visible layout: answer with the
+		// original, which sees every byte including hidden fields.
 		return stdbinary.Size(v)
 	}
 	if n := FixedSizeNonStruct[T](); n >= 0 {

@@ -24,11 +24,13 @@
   "benchmarks": [
     {
       "name": "BenchmarkCgoOptNocallback",
-      "role": "target"
+      "role": "reference",
+      "expected": { "min": 1.009, "max": 1.033 }
     },
     {
       "name": "BenchmarkCgoOptLateContract",
-      "role": "target"
+      "role": "reference",
+      "expected": { "min": 1.009, "max": 1.033 }
     },
     {
       "name": "BenchmarkCgoOptSpanLookup",

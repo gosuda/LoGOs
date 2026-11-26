@@ -486,6 +486,38 @@ func LogosUnionMembers(t Type) ([]LogosUnionMember, bool) {
 	return out, len(out) > 0
 }
 
+// logosOutermostTypeName returns the type name the holder spelled: the
+// outermost alias when the unwrapped type names one, otherwise the
+// resolved named type. Pointer, const-view and readonly-descendant
+// qualifiers unwrap; aliases never resolve. Recording the alias keeps an
+// exported spelling of an unexported implementation reachable: the trial
+// allocates through the alias, so the export check must see the alias.
+func logosOutermostTypeName(t Type) (*TypeName, bool) {
+	for {
+		switch u := t.(type) {
+		case *Alias:
+			if u.Obj() == nil {
+				return nil, false
+			}
+			return u.Obj(), true
+		case *Named:
+			if u.Obj() == nil {
+				return nil, false
+			}
+			return u.Obj(), true
+		case *Pointer:
+			t = u.Elem()
+		case *ConstView:
+			t = u.Elem
+		default:
+			if rd := logosAsReadonlyDescendants(t); rd != nil {
+				t = rd.Elem
+				continue
+			}
+			return nil, false
+		}
+	}
+}
 func logosAppendTypeMember(term Type, out *[]LogosUnionMember, seen map[string]bool) {
 	key := TypeString(term, nil)
 	if seen[key] {
@@ -504,7 +536,10 @@ func logosAppendTypeMember(term Type, out *[]LogosUnionMember, seen map[string]b
 			elem = Unalias(rd.Elem)
 		}
 	}
-	if named, ok := elem.(*Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
+	if tn, ok := logosOutermostTypeName(term); ok && tn.Pkg() != nil {
+		m.Pkg = tn.Pkg().Path()
+		m.Name = tn.Name()
+	} else if named, ok := elem.(*Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
 		m.Pkg = named.Obj().Pkg().Path()
 		m.Name = named.Obj().Name()
 	}

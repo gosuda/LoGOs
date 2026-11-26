@@ -27,6 +27,45 @@ test("requires every integration row to reach the unchanged 1.05 gate", () => {
   assert.equal(verdict([good, rejected]), "not-accepted");
 });
 
+const band = { min: 1.009, max: 1.033 };
+const atRatio = (value) => ({ baseline: phase(2 * value), candidate: phase(2), integration: phase(2) });
+
+test("reference rows inside their stated band no longer gate acceptance", () => {
+  const inBand = assessRow(name, iterations, atRatio(1.02), band);
+  assert.equal(inBand.status, "reference-only");
+  const good = assessRow(name, iterations, phases());
+  assert.equal(verdict([good, inBand]), "latency-pass");
+});
+
+test("reference rows outside their stated band are rejected", () => {
+  const outside = assessRow(name, iterations, atRatio(1.1), band);
+  assert.equal(outside.status, "reference-rejected");
+  const good = assessRow(name, iterations, phases());
+  assert.equal(verdict([good, outside]), "not-accepted");
+});
+
+test("a target row at 1.03 is still rejected", () => {
+  const low = assessRow(name, iterations, atRatio(1.03));
+  assert.equal(low.status, "latency-rejected");
+  const good = assessRow(name, iterations, phases());
+  assert.equal(verdict([good, low]), "not-accepted");
+});
+
+test("manifest reference bands are validated", () => {
+  const base = { version: 1, runtimeFamilies: [], benchmarks: [
+    { name: "BenchmarkCgoOptNocallback", role: "reference", expected: { min: 1.009, max: 1.033 } },
+    { name: "BenchmarkCgoOptSpanLookup", role: "target" },
+  ], fixtures: [{ name: "ordinary-frame", path: "src/cmd/cgo/internal/testlogos/testdata/cgoopt",
+    args: [], stdout: "ok" }] };
+  assert.equal(manifest(base).benchmarks.length, 2);
+  const inverted = JSON.parse(JSON.stringify(base));
+  inverted.benchmarks[0].expected = { min: 1.04, max: 1.033 };
+  assert.throws(() => manifest(inverted), /band/);
+  const onTarget = JSON.parse(JSON.stringify(base));
+  onTarget.benchmarks[1].expected = { min: 1, max: 2 };
+  assert.throws(() => manifest(onTarget), /band/);
+});
+
 test("blocks noise instead of selecting favorable samples", () => {
   const input = phases();
   input.candidate.hyperfine.results[0].measurements[9].time_wall_clock.value = 8;

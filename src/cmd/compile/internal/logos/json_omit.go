@@ -80,7 +80,7 @@ func joinOmit(tests ...string) string {
 func jsonEmptyTest(t types2.Type, x string) string {
 	lt := jsonLowered(t)
 	if jsonOptionOf(lt) != nil {
-		return ""
+		return "!" + x + ".Present"
 	}
 	switch u := lt.Underlying().(type) {
 	case *types2.Array, *types2.Map, *types2.Slice:
@@ -167,6 +167,9 @@ func (z *jsonZero) importedMemberSpell(m types2.LogosUnionMember) string {
 }
 
 func (z *jsonZero) plainZero(lt types2.Type, x string) string {
+	if jsonOptionOf(lt) != nil {
+		return "!" + x + ".Present"
+	}
 	if st, ok := jsonStructOf(lt); ok {
 		return z.structZero(st, x)
 	}

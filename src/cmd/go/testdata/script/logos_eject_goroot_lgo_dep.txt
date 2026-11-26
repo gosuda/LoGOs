@@ -9,6 +9,7 @@ cd m
 
 logos run .
 stdout '^count: 42$'
+stdout 'expect: values differ'
 cp stdout $WORK/native.txt
 
 logos eject -o out
@@ -38,7 +39,26 @@ import (
 
 	"logos/expect"
 )
-
 func main() {
 	fmt.Println(expect.FieldText("count", 42))
+	rep := &depReporter{}
+	expect.Equal(rep, depProbe{Count: 1}, depProbe{Count: 2})
+	if !rep.failed {
+		fmt.Println("equal-specialization: not exercised")
+	}
+}
+
+type depProbe struct {
+	Count int
+}
+
+type depReporter struct {
+	failed bool
+}
+
+func (r *depReporter) Helper() {}
+
+func (r *depReporter) Errorf(format string, args ...any) {
+	r.failed = true
+	fmt.Printf(format, args...)
 }

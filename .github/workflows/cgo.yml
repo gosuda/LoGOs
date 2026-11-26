@@ -98,7 +98,7 @@ jobs:
       group: logos-heavy-ci
       queue: max
     needs: focused
-    runs-on: ubuntu-26.04
+    runs-on: depot-ubuntu-24.04
     timeout-minutes: 180
     strategy:
       fail-fast: false
