@@ -108,7 +108,10 @@ func (p *logosEFPass) runCleanup(call logosEFDeferredCall, st *logosEFState) *lo
 // finishCleanups consumes only calls whose boundary is being crossed.
 // Retained registrations keep their original order and ownership. The
 // transfer operates on the actual exit state, so nested cleanup and
-// later-registered calls cannot leave stale error pairings behind.
+// later-registered calls cannot leave stale error pairings behind. A
+// cleanup that panics does not stop earlier cleanups: they run during
+// unwinding, so they are still checked against the pre-panic state. The
+// invocation itself has no normal exit on the unrecovered path.
 func (p *logosEFPass) finishCleanups(st *logosEFState, crosses func(logosEFDeferredCall) bool) *logosEFState {
 	if st == nil || st.cleanups == nil {
 		return st
@@ -116,10 +119,16 @@ func (p *logosEFPass) finishCleanups(st *logosEFState, crosses func(logosEFDefer
 	stack := st.cleanups
 	st = st.withCleanups(nil)
 	var keep []logosEFCleanup
+	panicked := false
 	for node := stack; node != nil; node = node.next {
 		if node.call.lit != nil {
 			if crosses(node.call) {
-				st = p.runCleanup(node.call, st)
+				if next := p.runCleanup(node.call, st); next == nil {
+					panicked = true
+				} else {
+					st = next
+					panicked = false
+				}
 			} else {
 				keep = append(keep, logosEFCleanup{call: node.call})
 			}
@@ -155,6 +164,9 @@ func (p *logosEFPass) finishCleanups(st *logosEFState, crosses func(logosEFDefer
 		node := keep[i]
 		node.next = remaining
 		remaining = &node
+	}
+	if panicked {
+		return nil
 	}
 	return st.withCleanups(remaining)
 }
