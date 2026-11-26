@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          fetch-depth: 2
+          fetch-depth: 3
           persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
         with:
@@ -84,10 +84,17 @@ jobs:
           file=src/cmd/compile/internal/logos/defer.go
           cp -p "$file" review-evidence/fixed-tuple-defer.go
           trap 'cp -p review-evidence/fixed-tuple-defer.go "$file"' EXIT
-          git show HEAD^:"$file" > "$file"
+          git show 9fc95b96fdb16de4f7bb5300f7250b1e8b708b42:"$file" > "$file"
           touch -r review-evidence/fixed-tuple-defer.go "$file"
           go install cmd/compile
-          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_defer_multi_review335\.lgo        run: |
+          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_defer_multi_review335\.lgo$' > review-evidence/tuple-mutation-red.log 2>&1; then
+            cat review-evidence/tuple-mutation-red.log
+            exit 1
+          fi
+          cat review-evidence/tuple-mutation-red.log
+          grep -F 'assignment mismatch: 3 variables but 2 values' review-evidence/tuple-mutation-red.log
+      - name: Restore the compiler and verify the checked-in source
+        run: |
           export GOENV=off GOCACHEPROG=''
           go install cmd/compile
           go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/(option_chain_try_assignment|option_(errdefer|defer)_capture_review335|option_defer_(binding|multi)_review335|comptime_option_resultless_review335)\.lgo$' 2>&1 | tee review-evidence/restored-green.log
@@ -98,27 +105,6 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: optional-review-edges-green-${{ github.sha }}
-          path: review-evidence/
-          if-no-files-found: error
-          retention-days: 7
- > review-evidence/tuple-mutation-red.log 2>&1; then
-            cat review-evidence/tuple-mutation-red.log
-            exit 1
-          fi
-          cat review-evidence/tuple-mutation-red.log
-          grep -F 'assignment mismatch: 3 variables but 2 values' review-evidence/tuple-mutation-red.log
-      - name: Restore the compiler and verify the checked-in source
-        run: |
-          export GOENV=off GOCACHEPROG=''
-          go install cmd/compile
-          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/(option_chain_try_assignment|option_(errdefer|defer)_capture_review335)\.lgo$' 2>&1 | tee review-evidence/restored-green.log
-          go vet cmd/compile/internal/logos
-          test -z "$(gofmt -l src/cmd/compile/internal/logos/defer.go src/cmd/compile/internal/logos/option.go)"
-          git diff --exit-code
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        if: ${{ !cancelled() }}
-        with:
-          name: optional-review-green-${{ github.sha }}
           path: review-evidence/
           if-no-files-found: error
           retention-days: 7
