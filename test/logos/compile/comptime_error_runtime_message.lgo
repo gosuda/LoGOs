@@ -1,0 +1,16 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+func pickmsg[F any](msg string) int {
+	const switch F {
+	case int:
+		return 1
+	}
+	comptime.Error(msg) // ERROR "comptime::error_not_constant"
+	return 0
+}
+
+var _ = pickmsg[int]("boom")

@@ -1,0 +1,25 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func pick[F any]() int {
+	const switch F {
+	case int:
+		return 1
+	}
+	const switch F {
+	case string:
+		return 2
+	}
+	comptime.Error("unsupported")
+	return 0
+}
+
+func main() {
+	fmt.Println(pick[int](), pick[string]())
+}
