@@ -231,10 +231,6 @@ func logosTargetCPU(p *load.Package) string {
 	return m.File.Build.TargetCPU
 }
 
-func logosListNeedsRaceCompilerCheck() bool {
-	return settings.Current().Cgo.RaceRuntimeOnly
-}
-
 func logosListNeedsBuildAction(p *load.Package) bool {
 	if p.Standard && (p.ImportPath == "builtin" || p.ImportPath == "unsafe") {
 		return false

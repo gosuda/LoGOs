@@ -1,0 +1,49 @@
+# This gate must run on hosts with no cgo toolchain, including Windows.
+# Unlike the race-runtime script, it has no race or cgo prerequisite.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+env CC=review-missing-c-compiler
+env PATH=$WORK/no-compiler
+
+cd plain
+go list -export -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}} export={{if .Export}}yes{{else}}no{{end}}{{end}}' .
+stdout '^example.com/plain export=yes$'
+go list -e -compiled -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}}{{end}}' .
+stdout '^example.com/plain$'
+go list -f '{{if .Error}}{{.Error.Err}}{{else}}stale={{.Stale}}{{end}}' .
+stdout '^stale=(true|false)$'
+go list -export -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}}{{end}}' fmt
+stdout '^fmt$'
+
+cd ../logos
+logos list -export -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}} export={{if .Export}}yes{{else}}no{{end}}{{end}}' .
+stdout '^example.com/logos export=yes$'
+logos list -e -compiled -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}}{{end}}' .
+stdout '^example.com/logos$'
+logos list -f '{{if .Error}}{{.Error.Err}}{{else}}stale={{.Stale}}{{end}}' .
+stdout '^stale=(true|false)$'
+
+-- plain/go.mod --
+module example.com/plain
+
+go 1.27
+
+-- plain/plain.go --
+package plain
+
+func Sum(a, b int) int { return a + b }
+
+-- logos/go.mod --
+module example.com/logos
+
+go 1.27
+
+-- logos/logos.toml --
+[build]
+cgo = "forbid"
+
+-- logos/logos.lgo --
+package logos
+
+func Sum(a, b int) int { return a + b }

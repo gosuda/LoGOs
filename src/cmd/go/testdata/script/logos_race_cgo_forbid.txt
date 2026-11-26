@@ -116,7 +116,7 @@ stderr 'logos.toml'
 # Without -race the same listings need no C compiler.
 logos list -export -f '{{.ImportPath}}' ./racy
 stdout '^example.com/nokey/racy$'
-logos list -e -compiled -f '{{.ImportPath}}' ./racy
+logos list -e -compiled -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}}{{end}}' ./racy
 stdout '^example.com/nokey/racy$'
 logos list -f '{{.Stale}}' ./racy
 go list -export -f '{{.ImportPath}}' fmt
