@@ -9,11 +9,17 @@ env GOTOOLCHAIN=local
 cd m
 logos run .
 stdout '^h2 extended connect ready$'
+stdout '^deferred registered: true$'
+stdout '^async registered: true$'
 cp stdout $WORK/native.txt
 logos eject -o out
 exists out/main.go
 ! grep 'EnableHTTP2ExtendedConnect' out/main.go
-grep 'http2xconnect=1' out/main.go
+grep 'RequireExtendedConnect' out/main.go
+grep 'ejectedhttp "github.com/gosuda/loGos/rt/net/http"' out/main.go
+! grep 'os.Getenv' out/main.go
+! grep 'strings.Contains' out/main.go
+grep 'func RequireExtendedConnect' out/_logos_deps/rt/net/http/h2extendedconnect.go
 cd out
 go build ./...
 env GODEBUG=http2xconnect=1
@@ -32,6 +38,17 @@ stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
 cd ..
 
+# A receiver that carries error-tracing temporaries from '?' inside an
+# inline callback cannot be rewritten without overlapping the tracing
+# edits, so eject leaves it alone. Verification must refuse it instead of
+# passing a fork-only method into output upstream Go rejects.
+cd ../trace
+logos run .
+stdout '^trace receiver stays native$'
+! logos eject -o out
+stderr 'fork_stdlib_api'
+cd ..
+
 -- m/go.mod --
 module example.com/h2xconnect
 
@@ -46,7 +63,25 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	sys "os"
 )
+
+var registry = map[string]*http.Server{}
+
+var mode = sys.Getenv("H2XCONNECT_MODE")
+
+func getOrCreate(name string) *http.Server {
+	if s, ok := registry[name]; ok {
+		return s
+	}
+	s := &http.Server{
+		Addr:      "127.0.0.1:0",
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13},
+		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+	}
+	registry[name] = s
+	return s
+}
 
 func main() {
 	srv := &http.Server{
@@ -55,5 +90,44 @@ func main() {
 		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
 	}
 	srv.EnableHTTP2ExtendedConnect()
+	strings := "shadow"
+	_ = strings
+	_ = mode
+	defer getOrCreate("deferred").EnableHTTP2ExtendedConnect()
+	getOrCreate("async").EnableHTTP2ExtendedConnect()
 	fmt.Println("h2 extended connect ready")
+	fmt.Println("deferred registered:", registry["deferred"] != nil)
+	fmt.Println("async registered:", registry["async"] != nil)
+}
+
+-- trace/go.mod --
+module example.com/h2trace
+
+go 1.27
+
+-- trace/main.lgo --
+
+// Command h2tracedemo covers the unrewritable receiver: '?' inside the
+// inline callback leaves tracing temporaries in the receiver subtree.
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func loadConfig() (string, error) {
+	return "cfg", nil
+}
+
+func makeServer(init func() error) *http.Server {
+	if err := init(); err != nil {
+		panic(err)
+	}
+	return &http.Server{Addr: "127.0.0.1:0"}
+}
+
+func main() {
+	makeServer(func() error { loadConfig()?; return nil }).EnableHTTP2ExtendedConnect()
+	fmt.Println("trace receiver stays native")
 }

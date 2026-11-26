@@ -1996,6 +1996,9 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 		h2edits = nil
 	}
 	edits = append(edits, h2edits...)
+	if len(h2edits) > 0 {
+		uses = true
+	}
 	out, ok := applyTextEdits(data, edits)
 	if !ok {
 		return nil, false, false
@@ -2216,8 +2219,8 @@ func ejectSupportRoots(plan *ejectPlan) []string {
 		seeds = append(seeds, m.pkgs...)
 	}
 	seeds = append(seeds, plan.testRoots...)
-	seen := map[string]bool{load.LogosRTPkg: true}
-	roots := []string{load.LogosRTPkg}
+	seen := map[string]bool{load.LogosRTPkg: true, "logos/net/http": true}
+	roots := []string{load.LogosRTPkg, "logos/net/http"}
 	for _, p := range load.PackageList(seeds) {
 		if p == nil || !strings.HasPrefix(p.ImportPath, "logos/") || seen[p.ImportPath] {
 			continue

@@ -18,28 +18,34 @@ import (
 // line may set (the key is unregistered, so the build rejects it).
 const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 
+// h2SupportImport is the local name and path the rewrite uses for the
+// ejected support module. The support package owns the os, strings and
+// GODEBUG parsing privately, so rewritten call sites stay correct when
+// the file aliases os or strings or declares those names itself.
+const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/net/http"`
+
 // h2ExtendedConnectEdits rewrites direct EnableHTTP2ExtendedConnect calls to
-// a self-contained stock form: an immediately-invoked check that requires
-// GODEBUG=http2xconnect=1 and panics otherwise, naming the server and the
-// setting. It fires only in files importing net/http; the method name is
-// fork-specific, so a user type with the same zero-argument method name in
-// such a file would also be rewritten (no such type exists in the wild).
-// A call whose receiver needs another rewrite (a compiler-temporary
-// _logos_site name) is left alone. The rewrite keeps the receiver text
-// verbatim, so go and defer statements wrapping the call keep working, and
-// the receiver still counts as used. Needed os and strings imports are added
-// when missing; the gofmt pass normalizes layout.
+// a call into the ejected support module, which requires
+// GODEBUG=http2xconnect=1 and panics naming the server otherwise. The
+// receiver passes as a call argument, so go and defer statements wrapping
+// the call evaluate it in the calling goroutine at the call site, exactly
+// like the native method call. It fires only in files importing net/http;
+// the method name is fork-specific, so a user type with the same
+// zero-argument method name in such a file would also be rewritten (no such
+// type exists in the wild). A call whose receiver needs another rewrite (a
+// compiler-temporary _logos_site name) is left alone. When the file already
+// imports the support package, the rewrite uses that binding; otherwise the
+// support import is added. The gofmt pass normalizes layout.
 //
 // Widening: the fork enables extended CONNECT per server, while stock Go
 // offers only the process-global GODEBUG=http2xconnect=1, so after eject
 // the per-server intent becomes a process-global requirement. Every
-// rewritten call in the process checks the same setting, and a process
-// without it fails fast at the first call instead of serving without the
-// feature.
+// rewritten call in the process checks the same startup setting, and a
+// process without it fails fast at the first call instead of serving
+// without the feature.
 func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []textEdit {
 	hasNetHTTP := false
-	haveOS := false
-	haveStrings := false
+	supportLocal := ""
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
@@ -48,10 +54,14 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 		switch path {
 		case "net/http":
 			hasNetHTTP = true
-		case "os":
-			haveOS = true
-		case "strings":
-			haveStrings = true
+		case "logos/net/http":
+			// A blank or dot import binds no usable call prefix; fall
+			// through to the fresh ejectedhttp import below.
+			if imp.Name == nil {
+				supportLocal = "http"
+			} else if imp.Name.Name != "_" && imp.Name.Name != "." {
+				supportLocal = imp.Name.Name
+			}
 		}
 	}
 	if !hasNetHTTP {
@@ -76,23 +86,19 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 			return true
 		}
 		receiver := string(data[recvStart:recvEnd])
-		msg := "net/http: extended CONNECT on server " + strconv.Quote(receiver) + " needs GODEBUG=http2xconnect=1 in the ejected process environment"
-		repl := "func() {\n_ = " + receiver + "\nif !strings.Contains(os.Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}()"
+		local := supportLocal
+		if local == "" {
+			local = "ejectedhttp"
+		}
+		repl := local + ".RequireExtendedConnect(" + strconv.Quote(receiver) + ", " + receiver + ")"
 		edits = append(edits, textEdit{start, end, repl})
 		return true
 	})
 	if len(edits) == 0 {
 		return nil
 	}
-	var missing []string
-	if !haveOS {
-		missing = append(missing, "\"os\"")
-	}
-	if !haveStrings {
-		missing = append(missing, "\"strings\"")
-	}
-	if len(missing) > 0 {
-		edits = append(edits, h2ImportEdit(fset, f, missing))
+	if supportLocal == "" {
+		edits = append(edits, h2ImportEdit(fset, f, []string{h2SupportImport}))
 	}
 	return edits
 }

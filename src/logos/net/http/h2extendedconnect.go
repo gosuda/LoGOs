@@ -7,6 +7,7 @@ package http
 import (
 	stdhttp "net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -30,6 +31,20 @@ import (
 // answers it with 501 and never passes it to the router.
 func EnableHTTP2ExtendedConnect(s *stdhttp.Server) error {
 	return h2extendedConnectEnable(s)
+}
+
+// RequireExtendedConnect is the eject spelling of
+// (*net/http.Server).EnableHTTP2ExtendedConnect. The textual eject rewrite
+// calls it with the source receiver text and value, so the receiver keeps
+// its evaluation point (including under defer and go) and the call site
+// needs no os or strings binding of its own; only this package's private
+// imports serve the guard. It panics naming the server unless the process
+// enables the stock GODEBUG setting.
+func RequireExtendedConnect(name string, recv any) {
+	s, _ := recv.(*stdhttp.Server)
+	if err := h2extendedConnectEnable(s); err != nil {
+		panic("logos/net/http: extended CONNECT on server " + strconv.Quote(name) + " needs GODEBUG=http2xconnect=1 in the ejected process environment")
+	}
 }
 
 // godebugHas reports whether key's last GODEBUG setting equals value.
