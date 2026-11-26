@@ -43,8 +43,30 @@ func (c *AC) Note2(a, b int) error {
 	return nil
 }
 
+var ids int
+
+func nextID() int {
+	ids++
+	return ids
+}
+
+func mustPanic() int {
+	panic("must not evaluate")
+}
+
 func pair() (int, int) {
 	return 4, 2
+}
+
+// [8] Side-effecting arguments must not run when the receiver is absent.
+func useAbsentArg(m *AC?) error {
+	defer m?.Note(nextID())?
+	return nil
+}
+
+func useAbsentPanic(m *AC?) error {
+	defer m?.Note(mustPanic())?
+	return nil
 }
 
 func mkAC() *AC? {
@@ -58,6 +80,15 @@ func useMultiArg(m *AC?) error {
 }
 
 func main() {
+	ids = 0
+	erra := useAbsentArg(nil)
+	check("arg-absent-err", erra == nil, erra, nil)
+	check("arg-absent-skipped", ids == 0, ids, 0)
+	ids = 0
+	errap := useAbsentArg(mkAC())
+	check("arg-present-err", errap == nil, errap, nil)
+	check("arg-present-ran", ids == 1, ids, 1)
+	check("arg-absent-panic", useAbsentPanic(nil) == nil, true, true)
 	md := mkAC()
 	errd := useMultiArg(md)
 	check("multi-err", errd == nil, errd, nil)

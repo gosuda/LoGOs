@@ -498,6 +498,7 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 // wrapper span instead of deriving positions from a synthetic Fun.
 func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGoWork, cpos syntax.Pos, stmtOff, spanEnd int) []syntax.Stmt {
 	fl := fc.fl
+	fc.fl.needRT = true
 	pos := w.osel.Pos()
 	method := w.osel.Sel.Value
 	xStart := fl.off(w.rpos)
@@ -528,17 +529,36 @@ func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGo
 		}
 		plan.args = append(plan.args, arg)
 	}
+	tw := &twin{}
 	funN, argN, _, _ := fc.planUses(plan, nil)
-	nativeCall := callOf(cpos, funN, argN)
-	nativeCall.HasDots = call.HasDots
-	nativeStmts, textStmts, tw := fc.checkPair(plan, cpos)
-	nativeInit := nativeStmts[:len(nativeStmts)-1]
-	headN := []syntax.Stmt{deferOf(cpos, callOf(cpos, rtSel(cpos, "DeferTry"), []syntax.Expr{addrOf(cpos, nameOf(cpos, fc.errName)), nativeCall}))}
-	closureT := deferClosure(cpos, []syntax.Stmt{textStmts[len(textStmts)-1]})
-	headT := append(slices.Clone(textStmts[:len(textStmts)-1]), deferOf(cpos, callOf(cpos, closureT, nil)))
+	funT, argT, _, _ := fc.planUses(plan, tw)
+	inner := "_logos_e"
+	callN := callOf(cpos, funN, argN)
+	callN.HasDots = call.HasDots
+	deferN := deferOf(cpos, callOf(cpos, rtSel(cpos, "DeferTry"), []syntax.Expr{addrOf(cpos, nameOf(cpos, fc.errName)), callN}))
+	callT := callOf(cpos, funT, argT)
+	callT.HasDots = call.HasDots
+	checkT := ifOf(cpos, defineOf(cpos, []syntax.Expr{nameOf(cpos, inner)}, []syntax.Expr{callT}), notNil(cpos, nameOf(cpos, inner)), joinAssign(cpos, fc.errName, inner))
+	closureT := deferClosure(cpos, []syntax.Stmt{checkT})
+	// Only the receiver binds before the presence test. The callee
+	// selection and every argument bind inside the guard, at defer
+	// registration, so an absent receiver evaluates nothing else in
+	// either output.
+	recvDefN := defineOf(cpos, nameList(plan.recv), valList(plan.recv, nil))
+	recvDefT := defineOf(cpos, nameList(plan.recv), valList(plan.recv, tw))
+	var inGuardN, inGuardT []syntax.Stmt
+	for _, piece := range plan.args {
+		if !piece.capture {
+			continue
+		}
+		inGuardN = append(inGuardN, defineOf(cpos, nameList(piece), valList(piece, nil)))
+		inGuardT = append(inGuardT, defineOf(cpos, nameList(piece), valList(piece, tw)))
+	}
+	inGuardN = append(inGuardN, deferN)
+	inGuardT = append(inGuardT, deferOf(cpos, callOf(cpos, closureT, nil)))
 	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
-	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(headT[:len(headT)-1], tw.subs), gen("if "+condT+" { "), renderText(headT[len(headT)-1:], tw.subs), gen(" }")))
-	return scoped(cpos, append(nativeInit, ifOf(cpos, nil, cond, headN)))
+	fl.addT(stmtOff, spanEnd, cat(prefix, renderText([]syntax.Stmt{recvDefT}, tw.subs), gen("if "+condT+" { "), renderText(inGuardT, tw.subs), gen(" }")))
+	return scoped(cpos, []syntax.Stmt{recvDefN, ifOf(cpos, nil, cond, inGuardN)})
 }
 
 func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {

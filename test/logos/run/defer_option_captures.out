@@ -1,3 +1,8 @@
+ok arg-absent-err
+ok arg-absent-skipped
+ok arg-present-err
+ok arg-present-ran
+ok arg-absent-panic
 ok multi-err
 ok multi-value
 ok multi-absent-err
