@@ -1,0 +1,56 @@
+// run
+
+package main
+
+import "fmt"
+
+var arguments, calls, continued int
+
+type Value struct{ N int }
+
+func (v *Value) Get(ok bool) (int, error) {
+	calls++
+	if !ok {
+		return 0, fmt.Errorf("assignment failure")
+	}
+	return v.N, nil
+}
+
+func argument(ok bool) bool {
+	arguments++
+	return ok
+}
+
+func assign(v *Value?, ok bool) (int?, error) {
+	result := v?.Get(argument(ok))?
+	continued++
+	return result, nil
+}
+
+func verify(name string, v *Value?, ok bool, wantValue int, wantError bool, wantArguments, wantCalls, wantContinued int) {
+	arguments, calls, continued = 0, 0, 0
+	value, err := assign(v, ok)
+	if err != nil {
+		if !wantError || err.Error() != "assignment failure" {
+			panic(fmt.Sprintf("%s error = %v, failure = %v", name, err, wantError))
+		}
+	} else {
+		if wantError {
+			panic(name + " lost assignment error")
+		}
+		if got := value ?? -1; got != wantValue {
+			panic(fmt.Sprintf("%s value = %d, want %d", name, got, wantValue))
+		}
+	}
+	if arguments != wantArguments || calls != wantCalls || continued != wantContinued {
+		panic(fmt.Sprintf("%s effects = %d/%d/%d, want %d/%d/%d", name, arguments, calls, continued, wantArguments, wantCalls, wantContinued))
+	}
+	fmt.Println(name)
+}
+
+func main() {
+	verify("present success", &Value{N: 7}, true, 7, false, 1, 1, 1)
+	verify("assignment failure", &Value{N: 7}, false, -1, true, 1, 1, 0)
+	verify("absent success", nil, true, -1, false, 0, 0, 1)
+	verify("absent failing argument", nil, false, -1, false, 0, 0, 1)
+}

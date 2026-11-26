@@ -1,0 +1,49 @@
+// run
+
+package main
+
+import "fmt"
+
+var events string
+
+type Resource struct{}
+
+func (r *Resource) Finish(value int) error {
+	if value != 7 {
+		panic("lost captured argument")
+	}
+	events += "C"
+	return fmt.Errorf("cleanup")
+}
+
+func receiver(present bool) *Resource? {
+	events += "R"
+	if !present {
+		return nil
+	}
+	return &Resource{}
+}
+
+func argument() int {
+	events += "A"
+	return 7
+}
+
+func run(present bool) error {
+	defer receiver(present)?.Finish(argument())?
+	events += "B"
+	return nil
+}
+
+func main() {
+	err := run(true)
+	if err == nil || err.Error() != "cleanup" {
+		panic("lost deferred cleanup error")
+	}
+	fmt.Println("present", events)
+	events = ""
+	if err := run(false); err != nil {
+		panic(err)
+	}
+	fmt.Println("absent", events)
+}

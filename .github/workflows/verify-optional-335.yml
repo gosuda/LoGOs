@@ -1,0 +1,83 @@
+name: Reproduce optional cleanup review boundaries
+
+on:
+  push:
+    branches: [ci/verify-optional-335-red-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  review_cases:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 30
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build unchanged production from the refreshed head
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          go env GOENV GOCACHEPROG | tee review-evidence/cache-env.txt
+          test -z "$(go env GOCACHEPROG)"
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Verify the isolated assignment control
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_chain_try_assignment\.lgo$' 2>&1 | tee review-evidence/assignment-control.log
+      - name: Reproduce argument evaluation for an absent cleanup receiver
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_defer_capture_review335\.lgo$' > review-evidence/defer-red.log 2>&1; then
+            cat review-evidence/defer-red.log
+            exit 1
+          fi
+          cat review-evidence/defer-red.log
+          grep -F 'absent RAB' review-evidence/defer-red.log
+      - name: Reproduce optional errdefer lowering
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_errdefer_capture_review335\.lgo$' > review-evidence/errdefer-red.log 2>&1; then
+            cat review-evidence/errdefer-red.log
+            exit 1
+          fi
+          cat review-evidence/errdefer-red.log
+      - name: Record export behavior independently
+        if: ${{ !cancelled() }}
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          set +e
+          go test -v -race -count=1 cmd/go -run '^TestScript$/logos_option_chain_review335$' > review-evidence/export-baseline.log 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > review-evidence/export-status.txt
+          cat review-evidence/export-baseline.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: optional-review-red-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7

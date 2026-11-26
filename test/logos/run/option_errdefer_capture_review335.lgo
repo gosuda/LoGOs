@@ -1,0 +1,60 @@
+// run
+
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+var events string
+var bodyFailure = errors.New("body")
+var cleanupFailure = errors.New("cleanup")
+
+type Resource struct{}
+
+func (r *Resource) Finish(value int) error {
+	if value != 7 {
+		panic("lost captured argument")
+	}
+	events += "C"
+	return cleanupFailure
+}
+
+func receiver(present bool) *Resource? {
+	events += "R"
+	if !present {
+		return nil
+	}
+	return &Resource{}
+}
+
+func argument() int {
+	events += "A"
+	return 7
+}
+
+func run(present, fail bool) error {
+	errdefer receiver(present)?.Finish(argument())?
+	events += "B"
+	if fail {
+		return bodyFailure
+	}
+	return nil
+}
+
+func verify(name string, present, fail bool) {
+	events = ""
+	err := run(present, fail)
+	if errors.Is(err, bodyFailure) != fail || errors.Is(err, cleanupFailure) != (present && fail) {
+		panic(fmt.Sprintf("%s error = %v", name, err))
+	}
+	fmt.Println(name, events)
+}
+
+func main() {
+	verify("present success", true, false)
+	verify("present failure", true, true)
+	verify("absent success", false, false)
+	verify("absent failure", false, true)
+}
