@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -23,7 +24,7 @@ import (
 // would report success for output that upstream Go rejects. Each miss is
 // reported at its source location; the staging build failure makes logos
 // eject exit nonzero before it writes any output.
-func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info) {
+func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
 	if base.LogosEject == "" {
 		return
 	}
@@ -34,6 +35,7 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info) {
 	if t == nil {
 		return
 	}
+	rewritten := rewrittenH2Calls(files)
 	check := func(name *syntax.Name, obj types2.Object) {
 		if obj == nil {
 			return
@@ -51,6 +53,9 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info) {
 		if t.hasName(p.Path(), obj.Name()) {
 			return
 		}
+		if p.Path() == "net/http" && obj.Name() == h2extendedConnectMethod && rewritten[name.Pos()] {
+			return
+		}
 		base.Errorf("%s: [portability::fork_stdlib_api] logos eject: %s.%s has no upstream spelling (absent from the Go 1.27 API files); ejected output must build with upstream Go (SPEC T-0.3)", name.Pos(), p.Path(), obj.Name())
 	}
 	for name, obj := range info.Uses {
@@ -64,6 +69,57 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info) {
 			check(name, obj)
 		}
 	}
+}
+
+// h2extendedConnectMethod is the fork-only per-server opt-in for HTTP/2
+// extended CONNECT. logos eject rewrites direct calls to the GODEBUG-guarded
+// stock form (see cmd/go/internal/logos/eject/eject_h2extendedconnect.go),
+// so the verifier must not refuse those calls: the rewritten output builds
+// with upstream Go. Every other use (method values, calls with arguments,
+// or calls eject leaves alone) still has no upstream spelling and fails.
+const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
+
+// rewrittenH2Calls records the selector positions of direct zero-argument
+// EnableHTTP2ExtendedConnect calls in files importing net/http. Those are
+// exactly the calls eject rewrites, so the verifier exempts them.
+func rewrittenH2Calls(files []*syntax.File) map[syntax.Pos]bool {
+	out := make(map[syntax.Pos]bool)
+	for _, f := range files {
+		if f == nil {
+			continue
+		}
+		hasNetHTTP := false
+		for _, d := range f.DeclList {
+			imp, ok := d.(*syntax.ImportDecl)
+			if !ok || imp.Path == nil {
+				continue
+			}
+			path, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				continue
+			}
+			if path == "net/http" {
+				hasNetHTTP = true
+				break
+			}
+		}
+		if !hasNetHTTP {
+			continue
+		}
+		syntax.Inspect(f, func(n syntax.Node) bool {
+			call, ok := n.(*syntax.CallExpr)
+			if !ok || len(call.ArgList) != 0 {
+				return true
+			}
+			sel, ok := call.Fun.(*syntax.SelectorExpr)
+			if !ok || sel.Sel == nil || sel.Sel.Value != h2extendedConnectMethod {
+				return true
+			}
+			out[sel.Sel.Pos()] = true
+			return true
+		})
+	}
+	return out
 }
 
 // verifyEjectStdlibDone keeps VerifyEjectStdlib to one report per package:
