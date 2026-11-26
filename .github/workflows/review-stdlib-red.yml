@@ -1,0 +1,77 @@
+name: Verify stdlib ejection boundary attacks
+
+on:
+  push:
+    branches: [ci/verify-stdlib-eject-red-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regressions:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the exact verifier baseline
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Public API member parsing attacks
+        run: |
+          if go test -v -count=1 -short cmd/compile/internal/logos -run '^TestUpstreamAPIFields$' > review-evidence/members-red.log 2>&1; then
+            cat review-evidence/members-red.log
+            echo 'public member attacks unexpectedly passed'
+            exit 1
+          fi
+          cat review-evidence/members-red.log
+          grep -F 'upstream API omitted public member container/list.Value' review-evidence/members-red.log
+          grep -F 'upstream API omitted public member database/sql.V' review-evidence/members-red.log
+      - name: Public fields and mapped call ejection attacks
+        if: ${{ !cancelled() }}
+        run: |
+          python3 - <<'PYCODE'
+          import subprocess
+          from pathlib import Path
+          for script in ('logos_eject_stdlib_fields', 'logos_eject_h2extendedconnect'):
+              result = subprocess.run(['go', 'test', '-v', '-count=1', 'cmd/go', '-run', '^TestScript/' + script + '$'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+              Path('review-evidence/' + script + '-red.log').write_text(result.stdout)
+              print(result.stdout)
+              if result.returncode == 0 or 'fork_stdlib_api' not in result.stdout:
+                  raise SystemExit(script + ': expected verifier rejection did not occur')
+          PYCODE
+      - name: Unmapped methods remain rejected
+        if: ${{ !cancelled() }}
+        run: go test -v -count=1 cmd/go -run '^TestScript/logos_eject_fork_stdlib$' 2>&1 | tee review-evidence/control.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: stdlib-red-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
