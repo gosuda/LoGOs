@@ -1,0 +1,100 @@
+name: Verify enum and log conformance coverage
+
+on:
+  push:
+    branches: [ci/verify-helpers-331-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  conformance:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 30
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the exact conformance source
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Run the actual upstream enum export
+        run: go test -v -race -count=1 cmd/go -run '^TestScript$/logos_enum_table$' 2>&1 | tee review-evidence/enum.log
+      - name: Preserve native log behavior and cross-architecture pruning
+        run: |
+          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/log_scoped\.lgo$' 2>&1 | tee review-evidence/log-scoped.log
+          go test -v -count=1 cmd/internal/testdir -all_codegen -run '^Test$/logos/codegen/log_pruned\.lgo$' 2>&1 | tee review-evidence/log-pruned.log
+      - name: Reject a fork toolchain substituted for the upstream oracle
+        run: |
+          if UPROOT1272="$(go env GOROOT)" go test -v -count=1 cmd/go -run '^TestScript$/logos_enum_table$' > review-evidence/oracle-mutation.log 2>&1; then
+            cat review-evidence/oracle-mutation.log
+            echo 'fork compiler escaped the upstream version boundary'
+            exit 1
+          fi
+          cat review-evidence/oracle-mutation.log
+          grep -F 'go version go1.27.4' review-evidence/oracle-mutation.log
+          grep -F -- '--- FAIL: TestScript/logos_enum_table' review-evidence/oracle-mutation.log
+      - name: Prove the former guard-line blind spot and the new checks
+        run: |
+          file=test/logos/codegen/log_pruned.lgo
+          cp "$file" review-evidence/log-pruned-fixed.lgo
+          trap 'cp review-evidence/log-pruned-fixed.lgo "$file"' EXIT
+          git show d0957065e9f791004407042b652da050c9dc7014:"$file" > review-evidence/log-pruned-original.lgo
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          for name in ('original', 'fixed'):
+              source = Path(f'review-evidence/log-pruned-{name}.lgo').read_text()
+              for gate, call in (('catalogDebug', 'parentLog.Info'), ('itemsDebug', 'childLog.Warn')):
+                  guard = f'const if {gate} {{'
+                  assert source.count(guard) == 1
+                  source = source.replace(guard, f'{call}("guard mutation"); {guard}')
+              Path(f'review-evidence/log-pruned-{name}-mutant.lgo').write_text(source)
+          PYCODE
+          cp review-evidence/log-pruned-original-mutant.lgo "$file"
+          go test -v -count=1 cmd/internal/testdir -all_codegen -run '^Test$/logos/codegen/log_pruned\.lgo$' 2>&1 | tee review-evidence/old-blind-spot.log
+          cp review-evidence/log-pruned-fixed-mutant.lgo "$file"
+          if go test -v -count=1 cmd/internal/testdir -all_codegen -run '^Test$/logos/codegen/log_pruned\.lgo$' > review-evidence/guard-mutation.log 2>&1; then
+            cat review-evidence/guard-mutation.log
+            echo 'guard-line calls escaped the negative assembly checks'
+            exit 1
+          fi
+          cat review-evidence/guard-mutation.log
+          grep -E 'linux/amd64.*wrong opcode found.*CALL' review-evidence/guard-mutation.log
+          grep -E 'linux/arm64.*wrong opcode found.*CALL' review-evidence/guard-mutation.log
+          cp review-evidence/log-pruned-fixed.lgo "$file"
+          trap - EXIT
+          go test -v -count=1 cmd/internal/testdir -all_codegen -run '^Test$/logos/codegen/log_pruned\.lgo$' 2>&1 | tee review-evidence/restored.log
+      - name: Clean source
+        run: git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: helpers-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
