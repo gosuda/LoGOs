@@ -560,20 +560,33 @@ func reparseCswBody(text string, pos syntax.Pos) (*syntax.BlockStmt, *syntax.Pos
 func (fl *fileLower) composeRegionNow(r *cfRegion) otext {
 	inner := make([]splice, 0, len(r.splices)+4)
 	inner = append(inner, r.splices...)
-	var nested, kept []splice
+	// Fast path: regions without nested hosts need no file-wide copy.
+	// Partitioning fl.splices here copies the whole edit list for every
+	// unrolled const-for iteration, so skip it unless this region
+	// actually contains a nested host.
+	hasNested := false
 	for _, sp := range fl.splices {
 		if sp.host != nil && sp.start >= r.start && sp.end <= r.end {
-			nested = append(nested, sp)
-		} else {
-			kept = append(kept, sp)
+			hasNested = true
+			break
 		}
 	}
-	// Remove these hosts before composing them: recursive composition may
-	// consume their descendants from the remaining global splice list.
-	fl.splices = kept
-	for _, sp := range nested {
-		text := fl.retireHost(sp.host)
-		inner = append(inner, splice{start: sp.start, end: sp.end, text: text.s, chunks: text.chunks})
+	if hasNested {
+		var nested, kept []splice
+		for _, sp := range fl.splices {
+			if sp.host != nil && sp.start >= r.start && sp.end <= r.end {
+				nested = append(nested, sp)
+			} else {
+				kept = append(kept, sp)
+			}
+		}
+		// Remove these hosts before composing them: recursive composition may
+		// consume their descendants from the remaining global splice list.
+		fl.splices = kept
+		for _, sp := range nested {
+			text := fl.retireHost(sp.host)
+			inner = append(inner, splice{start: sp.start, end: sp.end, text: text.s, chunks: text.chunks})
+		}
 	}
 	adj := make([]splice, len(inner))
 	for i, sp := range inner {
@@ -587,7 +600,6 @@ func (fl *fileLower) composeRegionNow(r *cfRegion) otext {
 	}
 	return out
 }
-
 func (c *cswLower) lowerRuntimeSync() []syntax.Stmt {
 	c.cases = make([]cswCase, 0, len(c.stmt.Cases))
 	for _, syn := range c.stmt.Cases {
