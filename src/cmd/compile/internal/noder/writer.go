@@ -75,6 +75,10 @@ type pkgWriter struct {
 	info                  *types2.Info
 	rangeFuncBodyClosures map[*syntax.FuncLit]bool // non-public information, e.g., which functions are closures range function bodies?
 
+	// logosExport caches the state for erasing inferred option types
+	// at the export boundary (see writer_hooks_logos.go).
+	logosExport *logosExportState
+
 	// Indices for previously written syntax and types2 things.
 
 	posBasesIdx map[*syntax.PosBase]index
@@ -585,7 +589,7 @@ func (pw *pkgWriter) typIdx(typ types2.Type, dict *writerDict) typeInfo {
 	// bodies anyway. Otherwise, they can cause types.Sym collisions
 	// (e.g., "main.C" for both of the local type aliases in
 	// test/fixedbugs/issue50190.go).
-	typ = logosWriterNormalizeType(typ)
+	typ = logosWriterNormalizeType(typ, pw.logosExportState())
 
 	if idx, ok := pw.typsIdx[typ]; ok {
 		return typeInfo{idx: idx, derived: false}

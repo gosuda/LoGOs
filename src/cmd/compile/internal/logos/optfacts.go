@@ -480,6 +480,13 @@ func insertOverlayDecl(out *types2.Package, graph *overlayGraph, byObj map[strin
 		return nil
 	case *types2.Var:
 		t := graph.constMapView(name, substType(graph.sub, obj.Type()))
+		for _, p := range byObj[name] {
+			steps := strings.Split(p.path, ".")
+			if len(steps) == 0 || steps[0] != "V" {
+				continue
+			}
+			t = wrapAtQual(graph.sub.pkg, t, steps[1:], p.qual)
+		}
 		if t == obj.Type() {
 			out.Scope().Insert(obj)
 			return nil
@@ -674,6 +681,10 @@ func (g *overlayGraph) route(t types2.Type, steps []string, q qualKind) {
 	if t == nil || len(steps) == 0 {
 		return
 	}
+	if steps[0] == "V" {
+		g.route(t, steps[1:], q)
+		return
+	}
 	if steps[0] == "O" {
 		// Root marker for a dropped top-level option; it selects no node
 		// of the decoded base. Descend through a present option, else skip
@@ -688,6 +699,14 @@ func (g *overlayGraph) route(t types2.Type, steps []string, q qualKind) {
 	switch n := t.(type) {
 	case *types2.Named:
 		if n.Obj().Pkg() != g.orig {
+			return
+		}
+		if args := n.TypeArgs(); args != nil && args.Len() > 0 {
+			// An instantiation is a use of its generic origin, not the
+			// declaration itself. A qualifier that selects a type argument
+			// belongs to the referring object and is rebuilt per use when
+			// the overlay wraps that object; recording it under the origin
+			// would share it across every instantiation.
 			return
 		}
 		name := n.Origin().Obj().Name()
@@ -2359,6 +2378,9 @@ func wrapAtQual(pkg *types2.Package, t types2.Type, steps []string, q qualKind) 
 	if len(steps) == 0 {
 		return applyQual(t, q)
 	}
+	if steps[0] == "V" {
+		return wrapAtQual(pkg, t, steps[1:], q)
+	}
 	if t == nil {
 		return t
 	}
@@ -2461,9 +2483,261 @@ func wrapAtQual(pkg *types2.Package, t types2.Type, steps []string, q qualKind) 
 		}
 		return cloneInterfaceMethods(pkg, u, []qualPath{{path: joinPath(steps), qual: q}})
 	case *types2.Named:
+		if args := u.TypeArgs(); args != nil && args.Len() > 0 {
+			return wrapGenericInstance(pkg, u, steps, q)
+		}
 		return t
 	default:
 		return t
+	}
+}
+
+// wrapGenericInstance rebuilds an instantiated generic named type with the
+// qualifier applied to the type arguments selected by steps, leaving the
+// shared origin untouched. Each instantiation keeps its own option shape:
+// a fact for Box[int?] wraps that variable's argument without making the
+// origin's field optional for Box[int]. Positions owned by (nested)
+// declarations record no hit and are restored by their own facts.
+func wrapGenericInstance(pkg *types2.Package, t *types2.Named, steps []string, q qualKind) types2.Type {
+	orig := t.Origin()
+	if orig == nil || len(steps) == 0 {
+		return t
+	}
+	oUnder := orig.Underlying()
+	aUnder := t.Underlying()
+	if oUnder == nil || aUnder == nil {
+		return t
+	}
+	idx := typeParamIndex(orig)
+	if idx == nil {
+		return t
+	}
+	hits := make(map[int][][]string)
+	if !collectArgHits(oUnder, aUnder, steps, idx, hits) || len(hits) == 0 {
+		return t
+	}
+	args := t.TypeArgs()
+	newArgs := make([]types2.Type, args.Len())
+	changed := false
+	for i := range args.Len() {
+		a := args.At(i)
+		for _, s := range hits[i] {
+			a = wrapAtQual(pkg, a, s, q)
+		}
+		newArgs[i] = a
+		if newArgs[i] != args.At(i) {
+			changed = true
+		}
+	}
+	if !changed {
+		return t
+	}
+	if tp := orig.TypeParams(); tp == nil || tp.Len() != len(newArgs) {
+		return t
+	}
+	inst, err := types2.Instantiate(nil, orig, newArgs, false)
+	if err != nil {
+		return t
+	}
+	named, ok := inst.(*types2.Named)
+	if !ok {
+		return t
+	}
+	return named
+}
+
+func typeParamIndex(orig *types2.Named) map[*types2.TypeParam]int {
+	tp := orig.TypeParams()
+	if tp == nil || tp.Len() == 0 {
+		return nil
+	}
+	out := make(map[*types2.TypeParam]int, tp.Len())
+	for i := range tp.Len() {
+		out[tp.At(i)] = i
+	}
+	return out
+}
+
+func structFieldByName(u *types2.Struct, name string) *types2.Var {
+	for i := range u.NumFields() {
+		if f := u.Field(i); f != nil && f.Name() == name {
+			return f
+		}
+	}
+	return nil
+}
+
+func ifaceMethodSig(u *types2.Interface, name string) *types2.Signature {
+	for i := range u.NumExplicitMethods() {
+		if m := u.ExplicitMethod(i); m != nil && m.Name() == name {
+			if sig, ok := m.Type().(*types2.Signature); ok {
+				return sig
+			}
+		}
+	}
+	return nil
+}
+
+func sigTupleAt(sig *types2.Signature, head string) (types2.Type, bool) {
+	if len(head) < 2 || (head[0] != 'P' && head[0] != 'R') {
+		return nil, false
+	}
+	var index int
+	if _, err := fmt.Sscanf(head[1:], "%d", &index); err != nil {
+		return nil, false
+	}
+	var tup *types2.Tuple
+	if head[0] == 'P' {
+		tup = sig.Params()
+	} else {
+		tup = sig.Results()
+	}
+	if tup == nil || index < 0 || index >= tup.Len() {
+		return nil, false
+	}
+	return tup.At(index).Type(), true
+}
+
+// collectArgHits walks an origin-space type and its actual instantiation in
+// parallel along steps. When steps select a position whose origin type is one
+// of the origin's type parameters, it records the parameter index with the
+// remaining steps. Concrete positions belong to (nested) declarations and
+// record nothing: their own facts restore them.
+func collectArgHits(oT, aT types2.Type, steps []string, idx map[*types2.TypeParam]int, hits map[int][][]string) bool {
+	oT = types2.Unalias(oT)
+	aT = types2.Unalias(aT)
+	if p, ok := oT.(*types2.TypeParam); ok {
+		i, ok := idx[p]
+		if !ok {
+			return false
+		}
+		hits[i] = append(hits[i], slices.Clone(steps))
+		return true
+	}
+	if len(steps) == 0 {
+		return true
+	}
+	head, rest := steps[0], steps[1:]
+	if oN, ok := oT.(*types2.Named); ok {
+		aN, ok := aT.(*types2.Named)
+		if !ok {
+			return false
+		}
+		oArgs, aArgs := oN.TypeArgs(), aN.TypeArgs()
+		if oArgs == nil || oArgs.Len() == 0 {
+			return true
+		}
+		if aArgs == nil || aArgs.Len() != oArgs.Len() {
+			return false
+		}
+		innerIdx := typeParamIndex(oN.Origin())
+		if innerIdx == nil {
+			return false
+		}
+		innerHits := make(map[int][][]string)
+		if !collectArgHits(oN.Origin().Underlying(), aN.Underlying(), steps, innerIdx, innerHits) {
+			return false
+		}
+		for ii, subs := range innerHits {
+			if ii < 0 || ii >= oArgs.Len() {
+				return false
+			}
+			op, ok := types2.Unalias(oArgs.At(ii)).(*types2.TypeParam)
+			if !ok {
+				return false
+			}
+			oi, ok := idx[op]
+			if !ok {
+				return false
+			}
+			hits[oi] = append(hits[oi], subs...)
+		}
+		return true
+	}
+	if _, ok := aT.(*types2.Named); ok {
+		return false
+	}
+	switch oU := oT.(type) {
+	case *types2.Struct:
+		aU, ok := aT.(*types2.Struct)
+		if !ok || len(head) < 2 || head[0] != 'F' {
+			return false
+		}
+		of := structFieldByName(oU, head[1:])
+		af := structFieldByName(aU, head[1:])
+		if of == nil || af == nil {
+			return false
+		}
+		return collectArgHits(of.Type(), af.Type(), rest, idx, hits)
+	case *types2.Slice:
+		aU, ok := aT.(*types2.Slice)
+		if !ok || head != "E" {
+			return false
+		}
+		return collectArgHits(oU.Elem(), aU.Elem(), rest, idx, hits)
+	case *types2.Array:
+		aU, ok := aT.(*types2.Array)
+		if !ok || head != "E" {
+			return false
+		}
+		return collectArgHits(oU.Elem(), aU.Elem(), rest, idx, hits)
+	case *types2.Map:
+		aU, ok := aT.(*types2.Map)
+		if !ok || (head != "K" && head != "E") {
+			return false
+		}
+		if head == "K" {
+			return collectArgHits(oU.Key(), aU.Key(), rest, idx, hits)
+		}
+		return collectArgHits(oU.Elem(), aU.Elem(), rest, idx, hits)
+	case *types2.Pointer:
+		aU, ok := aT.(*types2.Pointer)
+		if !ok || head != "D" {
+			return false
+		}
+		return collectArgHits(oU.Elem(), aU.Elem(), rest, idx, hits)
+	case *types2.Chan:
+		aU, ok := aT.(*types2.Chan)
+		if !ok || head != "D" {
+			return false
+		}
+		return collectArgHits(oU.Elem(), aU.Elem(), rest, idx, hits)
+	case *types2.Signature:
+		aU, ok := aT.(*types2.Signature)
+		if !ok {
+			return false
+		}
+		oPos, ok1 := sigTupleAt(oU, head)
+		aPos, ok2 := sigTupleAt(aU, head)
+		if !ok1 || !ok2 {
+			return false
+		}
+		return collectArgHits(oPos, aPos, rest, idx, hits)
+	case *types2.Interface:
+		aU, ok := aT.(*types2.Interface)
+		if !ok || len(head) < 2 || head[0] != 'M' {
+			return false
+		}
+		oSig := ifaceMethodSig(oU, head[1:])
+		aSig := ifaceMethodSig(aU, head[1:])
+		if oSig == nil || aSig == nil {
+			return false
+		}
+		return collectArgHits(oSig, aSig, rest, idx, hits)
+	case *types2.Option:
+		aU, ok := aT.(*types2.Option)
+		if !ok || head != "E" {
+			return false
+		}
+		return collectArgHits(oU.Elem, aU.Elem, rest, idx, hits)
+	case *types2.ConstView:
+		aU, ok := aT.(*types2.ConstView)
+		if !ok || head != "E" {
+			return false
+		}
+		return collectArgHits(oU.Elem, aU.Elem, rest, idx, hits)
+	default:
+		return true
 	}
 }
 
@@ -2660,9 +2934,30 @@ func toOption(t types2.Type) types2.Type {
 		return o
 	}
 	if n, ok := types2.Unalias(t).(*types2.Named); ok {
+		if u := n.Underlying(); u != nil {
+			if _, ok := u.(*types2.Option); ok {
+				// A defined option type already carries its option on its
+				// declaration (restored from its O fact). Wrapping it again
+				// would give the importer a foreign extra option.
+				return t
+			}
+		}
 		if obj := n.Obj(); obj != nil && obj.Name() == "Option" && obj.Pkg() != nil && obj.Pkg().Path() == "logos/rt" {
 			if targs := n.TypeArgs(); targs != nil && targs.Len() == 1 {
 				return &types2.Option{Elem: targs.At(0)}
+			}
+		}
+	}
+	// Unwrap the lowered wrapped-option representation
+	// struct{Value E; Present bool} so restoring an option fact
+	// yields Option[E] instead of Option[struct{...}].
+	if st, ok := types2.Unalias(t).(*types2.Struct); ok {
+		if st.NumFields() == 2 &&
+			st.Field(0) != nil && st.Field(0).Name() == "Value" &&
+			st.Field(1) != nil && st.Field(1).Name() == "Present" &&
+			!st.Field(0).Embedded() && !st.Field(1).Embedded() {
+			if b, ok := st.Field(1).Type().(*types2.Basic); ok && b.Kind() == types2.Bool {
+				return &types2.Option{Elem: st.Field(0).Type()}
 			}
 		}
 	}

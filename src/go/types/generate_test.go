@@ -740,6 +740,15 @@ func stripLogosHooks(f *ast.File) {
 					}
 				}
 			}
+		case *ast.CallExpr:
+			// Without the logos configuration the source of a type
+			// assertion is the asserted value itself, so the hook
+			// strips to its only argument.
+			for i, arg := range n.Args {
+				if call, _ := arg.(*ast.CallExpr); call != nil && logosCallName(call) == "logosAssertSource" && len(call.Args) == 1 {
+					n.Args[i] = call.Args[0]
+				}
+			}
 		}
 		return true
 	})

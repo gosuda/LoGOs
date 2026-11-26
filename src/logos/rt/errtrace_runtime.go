@@ -6,7 +6,10 @@
 
 package rt
 
-import "unsafe"
+import (
+	"strconv"
+	"unsafe"
+)
 
 //go:linkname logosTraceRecord runtime.logosTraceRecord
 func logosTraceRecord(site unsafe.Pointer, errTyp unsafe.Pointer, errData uintptr)
@@ -38,4 +41,22 @@ func ErrorTrace() []Site {
 		out[i] = *(*Site)(buf[i])
 	}
 	return out
+}
+
+// FormatTrace renders trace as one File:Line per site in propagation
+// order, joined by newline. An empty trace renders as empty string.
+func FormatTrace(trace []Site) string {
+	if len(trace) == 0 {
+		return ""
+	}
+	buf := make([]byte, 0, len(trace)*32)
+	for i, s := range trace {
+		if i > 0 {
+			buf = append(buf, '\n')
+		}
+		buf = append(buf, s.File...)
+		buf = append(buf, ':')
+		buf = strconv.AppendInt(buf, int64(s.Line), 10)
+	}
+	return string(buf)
 }

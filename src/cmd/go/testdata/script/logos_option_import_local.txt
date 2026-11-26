@@ -1,0 +1,214 @@
+# Imported bare options bound to inferred locals must cross the export
+# boundary as their representation. Lowering rewrites spelled option
+# types, so a package whose lowering makes no edit keeps the inferred
+# *types2.Option in its inline bodies; the export writer erases it.
+# A nested neg module (own go.mod, outside ./...) proves callers still
+# see T?: assigning the exported result to a plain pointer must fail.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd src
+logos build ./...
+logos lint ./...
+logos run ./cmd
+stderr 'body false: nil'
+stderr 'body true: opt'
+stderr 'var false: nil'
+stderr 'var true: opt'
+stderr 'ifinit false: nil'
+stderr 'ifinit true: opt'
+stderr 'switch false: nil'
+stderr 'switch true: opt'
+stderr 'closure false: nil'
+stderr 'closure true: opt'
+stderr 'param false: nil'
+stderr 'param true: opt'
+stderr 'local false: nil'
+stderr 'local true: local'
+stderr 'pass false: nil'
+stderr 'pass true: opt'
+cd neg
+! logos build ./...
+stderr 'cannot use'
+stderr 'MyError\?'
+cd ..
+
+logos eject -o out
+exists out/cmd/main.go
+cd out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+-- src/go.mod --
+module example.com/optimportlocal
+
+go 1.27
+
+-- src/beta/beta.lgo --
+package beta
+
+type MyError struct {
+	Msg string
+}
+
+func (e MyError) Error() string {
+	return e.Msg
+}
+
+func New(msg string) *MyError {
+	return &MyError{Msg: msg}
+}
+
+func GetOpt(make bool) *MyError? {
+	if !make {
+		return nil
+	}
+	return New("opt")
+}
+
+-- src/hole/hole.lgo --
+package hole
+
+import "example.com/optimportlocal/beta"
+
+func Body(make bool) error {
+	e := beta.GetOpt(make)
+	if e == nil {
+		return nil
+	}
+	return e
+}
+
+func VarNoType(make bool) error {
+	var e = beta.GetOpt(make)
+	if e == nil {
+		return nil
+	}
+	return e
+}
+
+func IfInit(make bool) error {
+	if e := beta.GetOpt(make); e != nil {
+		return e
+	}
+	return nil
+}
+
+func SwitchInit(make bool) error {
+	switch e := beta.GetOpt(make); true {
+	default:
+		if e == nil {
+			return nil
+		}
+		return e
+	}
+}
+
+func Closure(make bool) func() error {
+	e := beta.GetOpt(make)
+	return func() error {
+		if e == nil {
+			return nil
+		}
+		return e
+	}
+}
+
+func PassThrough(make bool) *beta.MyError? {
+	e := beta.GetOpt(make)
+	return e
+}
+
+-- src/ok/ok.lgo --
+package ok
+
+import "example.com/optimportlocal/beta"
+
+func UseOpt(e *beta.MyError?) error {
+	if e == nil {
+		return nil
+	}
+	return e
+}
+
+func ReturnViaParam(make bool) error {
+	return UseOpt(beta.GetOpt(make))
+}
+
+type LocalErr struct {
+	Msg string
+}
+
+func (e LocalErr) Error() string {
+	return e.Msg
+}
+
+func localOpt(make bool) *LocalErr? {
+	if !make {
+		return nil
+	}
+	return &LocalErr{Msg: "local"}
+}
+
+func ReturnLocal(make bool) error {
+	e := localOpt(make)
+	if e == nil {
+		return nil
+	}
+	return e
+}
+
+-- src/cmd/main.lgo --
+package main
+
+import "example.com/optimportlocal/hole"
+import "example.com/optimportlocal/ok"
+
+func show(tag string, err error) {
+	if err == nil {
+		println(tag + ": nil")
+	} else {
+		println(tag + ": " + err.Error())
+	}
+}
+
+func main() {
+	show("body false", hole.Body(false))
+	show("body true", hole.Body(true))
+	show("var false", hole.VarNoType(false))
+	show("var true", hole.VarNoType(true))
+	show("ifinit false", hole.IfInit(false))
+	show("ifinit true", hole.IfInit(true))
+	show("switch false", hole.SwitchInit(false))
+	show("switch true", hole.SwitchInit(true))
+	show("closure false", hole.Closure(false)())
+	show("closure true", hole.Closure(true)())
+	show("param false", ok.ReturnViaParam(false))
+	show("param true", ok.ReturnViaParam(true))
+	show("local false", ok.ReturnLocal(false))
+	show("local true", ok.ReturnLocal(true))
+	show("pass false", ok.UseOpt(hole.PassThrough(false)))
+	show("pass true", ok.UseOpt(hole.PassThrough(true)))
+}
+
+-- src/neg/go.mod --
+module example.com/optneg
+
+go 1.27
+
+require example.com/optimportlocal v0.0.0
+
+replace example.com/optimportlocal => ..
+
+-- src/neg/neg.lgo --
+package neg
+
+import "example.com/optimportlocal/beta"
+import "example.com/optimportlocal/hole"
+
+// The caller still sees the option: assigning the exported option
+// result to a plain pointer must not compile.
+var _ *beta.MyError = hole.PassThrough(true)

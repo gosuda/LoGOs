@@ -7,6 +7,7 @@ package eject
 import (
 	"fmt"
 	"internal/logosfile"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -121,6 +122,7 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 			base.Fatalf("logos eject: inventory module %s: %v", module.path, err)
 		}
 	}
+	collectInactiveGorootLogosFiles(plan, staging, active, loaded, &out)
 	slices.SortFunc(out, func(a, b inactiveFile) int {
 		if order := strings.Compare(a.pkg.ImportPath, b.pkg.ImportPath); order != 0 {
 			return order
@@ -128,4 +130,81 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 		return strings.Compare(a.name, b.name)
 	})
 	return out
+}
+
+// collectInactiveGorootLogosFiles inventories inactive .lgo files of the
+// reached GOROOT logos/* packages. Their host-inactive files need helper
+// lowering like owned variants, so the support module emits them with
+// their build constraints intact. Test files stay out: the support
+// module ships no tests, and an unstageable test file would keep the
+// variant fixed point from converging.
+func collectInactiveGorootLogosFiles(plan *ejectPlan, staging string, active map[string]bool, loaded map[string]*load.Package, out *[]inactiveFile) {
+	dirs := map[string]*load.Package{}
+	for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
+		for _, p := range plan.provenance[path] {
+			if !isGorootLogos(p) {
+				continue
+			}
+			for _, files := range [][]string{p.GoFiles, p.CgoFiles, p.TestGoFiles, p.XTestGoFiles} {
+				for _, name := range files {
+					active[filepath.Join(p.Dir, name)] = true
+				}
+			}
+			if _, ok := loaded[p.Dir]; !ok {
+				loaded[p.Dir] = p
+			}
+			if _, ok := dirs[p.Dir]; !ok {
+				dirs[p.Dir] = p
+			}
+		}
+	}
+	var walk func(string) error
+	walk = func(dir string) error {
+		entries, err := fsys.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			path := filepath.Join(dir, name)
+			if entry.IsDir() {
+				if name == "vendor" || name == "testdata" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+					continue
+				}
+				if err := walk(path); err != nil {
+					return err
+				}
+				continue
+			}
+			if !entry.Type().IsRegular() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !logosfile.Is(name) || active[path] {
+				continue
+			}
+			if strings.HasSuffix(logosStem(name), "_test") {
+				continue
+			}
+			p := loaded[dir]
+			if p == nil {
+				continue
+			}
+			staged := filepath.Join(staging, filepath.FromSlash(p.ImportPath), logosStem(name)+".go")
+			if _, err := os.Stat(staged); err == nil {
+				continue
+			} else if !os.IsNotExist(err) {
+				base.Fatalf("logos eject: stat staged source %s: %v", staged, err)
+			}
+			data, err := fsys.ReadFile(path)
+			if err != nil {
+				base.Fatalf("logos eject: read inactive source %s: %v", path, err)
+			}
+			if !isBuildIgnored(data) {
+				*out = append(*out, inactiveFile{pkg: p, name: name})
+			}
+		}
+		return nil
+	}
+	for _, dir := range slices.Sorted(maps.Keys(dirs)) {
+		if err := walk(dir); err != nil {
+			base.Fatalf("logos eject: inventory GOROOT package %s: %v", dirs[dir].ImportPath, err)
+		}
+	}
 }

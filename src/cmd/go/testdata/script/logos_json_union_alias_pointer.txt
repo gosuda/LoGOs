@@ -1,0 +1,90 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A union member that is an alias for a pointer to an accessible alias of
+# an unexported decoder type decodes through the accessible spelling: the
+# trial allocates new(lib.Public), not new(lib.hidden), which the holder
+# package cannot name.
+cd good
+logos run .
+stdout '^ok ptr 11$'
+
+-- good/go.mod --
+module example.com/unionaliasptr
+
+go 1.27
+-- good/lib/lib.lgo --
+package lib
+
+import (
+	"encoding/json"
+	"errors"
+)
+
+type hidden struct {
+	X int64 `json:"x"`
+}
+
+func (h *hidden) UnmarshalJSON(data []byte) error {
+	var m map[string]int64
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	v, ok := m["x"]
+	if !ok {
+		return errors.New("hidden requires x")
+	}
+	h.X = v
+	return nil
+}
+
+type Public = hidden
+
+type Ptr = *Public
+-- good/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"example.com/unionaliasptr/lib"
+)
+
+type Other struct {
+	Y string `json:"y"`
+}
+
+func (o *Other) UnmarshalJSON(data []byte) error {
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	v, ok := m["y"]
+	if !ok {
+		return fmt.Errorf("Other requires y")
+	}
+	o.Y = v
+	return nil
+}
+
+type U interface {
+	lib.Ptr | *Other
+}
+
+type H struct {
+	Item U `json:"item"`
+}
+
+func main() {
+	var h H
+	if err := json.Unmarshal([]byte(`{"item":{"x":11}}`), &h); err != nil {
+		fmt.Println("decode err:", err)
+		return
+	}
+	if p, ok := h.Item.(lib.Ptr); ok {
+		fmt.Println("ok ptr", p.X)
+		return
+	}
+	fmt.Printf("WRONG TYPE %T\n", h.Item)
+}

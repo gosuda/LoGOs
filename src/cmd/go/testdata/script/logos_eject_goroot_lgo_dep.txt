@@ -1,0 +1,64 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+
+# Materialize a shipped .lgo package outside the fixed support set.
+# Use the real port so the test does not write into GOROOT.
+
+cd m
+
+logos run .
+stdout '^count: 42$'
+stdout 'expect: values differ'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+exists out/main.go
+exists out/_logos_deps/rt/go.mod
+exists out/_logos_deps/rt/expect/expect.go
+! exists out/_logos_deps/rt/expect/expect_test.go
+! grep '^//go:build' out/_logos_deps/rt/expect/expect.go
+grep 'gosuda/loGos/rt/expect' out/main.go
+
+cd out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native.txt
+
+-- m/go.mod --
+module example.com/gorootdep
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/expect"
+)
+func main() {
+	fmt.Println(expect.FieldText("count", 42))
+	rep := &depReporter{}
+	expect.Equal(rep, depProbe{Count: 1}, depProbe{Count: 2})
+	if !rep.failed {
+		fmt.Println("equal-specialization: not exercised")
+	}
+}
+
+type depProbe struct {
+	Count int
+}
+
+type depReporter struct {
+	failed bool
+}
+
+func (r *depReporter) Helper() {}
+
+func (r *depReporter) Errorf(format string, args ...any) {
+	r.failed = true
+	fmt.Printf(format, args...)
+}

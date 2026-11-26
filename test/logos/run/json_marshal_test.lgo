@@ -130,8 +130,8 @@ type everyMirror struct {
 	PInt      *int64?   `json:"pi,string"`
 	PFloat    *float64? `json:"pf,omitzero"`
 	PBool     *bool?    `json:"pb"`
-	OptInt    int64?    `json:"optint"`
-	OptStr    string?   `json:"optstr,omitempty"`
+	OptInt    *int64?    `json:"optint"`
+	OptStr    *string?   `json:"optstr,omitempty"`
 	Req       *innerMirror `json:"req"`
 	ReqInt    *int64       `json:"reqi"`
 	Strs      []string     `json:"strs"`
@@ -189,8 +189,14 @@ func mirrorScalars(m *everyMirror, v Every) {
 	m.PInt = v.PInt
 	m.PFloat = v.PFloat
 	m.PBool = v.PBool
-	m.OptInt = v.OptInt
-	m.OptStr = v.OptStr
+	if v.OptInt != nil {
+		x := v.OptInt ?? 0
+		m.OptInt = &x
+	}
+	if v.OptStr != nil {
+		s := v.OptStr ?? ""
+		m.OptStr = &s
+	}
 }
 
 func mirrorEvery(v Every) everyMirror {

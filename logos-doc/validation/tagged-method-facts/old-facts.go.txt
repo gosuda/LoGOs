@@ -72,11 +72,6 @@ type ConformsFact struct {
 	Iface     string
 }
 
-type ComptimeFact struct {
-	Object string
-	Source []byte
-}
-
 type ConstFuncFact struct {
 	Object string
 	Source []byte
@@ -104,34 +99,36 @@ type AllocFreeFact struct {
 }
 
 type Facts struct {
-	Fingerprint  goobj.FingerprintType
-	Opts         []PathFact
-	Consts       []PathFact
-	Fns          []FnFact
-	Readonlys    []ReadonlyFact
-	Props        []PropFact
-	Conforms     []ConformsFact
-	Comptimes    []ComptimeFact
-	ConstFuncs   []ConstFuncFact
-	ConstMaps    []ConstMapFact
-	ConstComps   []string
-	Defaults     []DefaultFact
-	Locks        []LockFact
-	AllocFrees   []AllocFreeFact
-	JsonMetas    []JsonMetaFact
-	JsonKeys     []JsonKeyFact
-	UnionMembers []UnionMemberFact
-	BareUnions   []string
-	DualUse      []string
-	GoPackage    bool
+	Fingerprint       goobj.FingerprintType
+	Opts              []PathFact
+	Consts            []PathFact
+	Fns               []FnFact
+	Readonlys         []ReadonlyFact
+	Props             []PropFact
+	Conforms          []ConformsFact
+	ConstFuncs        []ConstFuncFact
+	ConstMaps         []ConstMapFact
+	ConstComps        []string
+	Defaults          []DefaultFact
+	Locks             []LockFact
+	AllocFrees        []AllocFreeFact
+	JsonMetas         []JsonMetaFact
+	JsonKeys          []JsonKeyFact
+	UnionMembers      []UnionMemberFact
+	BareUnions        []string
+	DualUse           []string
+	Deriveds          []string
+	CheckedUnionTypes bool
+	GoPackage         bool
 }
 
 func (f *Facts) empty() bool {
 	return len(f.Opts) == 0 && len(f.Consts) == 0 && len(f.Fns) == 0 &&
 		len(f.Readonlys) == 0 && len(f.Props) == 0 && len(f.Conforms) == 0 &&
-		len(f.Comptimes) == 0 && len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
+		len(f.ConstFuncs) == 0 && len(f.Defaults) == 0 &&
 		len(f.Locks) == 0 && len(f.AllocFrees) == 0 && len(f.JsonMetas) == 0 &&
-		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.BareUnions) == 0 && len(f.DualUse) == 0 && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && !f.GoPackage
+		len(f.JsonKeys) == 0 && len(f.UnionMembers) == 0 && len(f.BareUnions) == 0 && len(f.DualUse) == 0 &&
+		!f.CheckedUnionTypes && len(f.ConstMaps) == 0 && len(f.ConstComps) == 0 && len(f.Deriveds) == 0 && !f.GoPackage
 }
 
 type DefaultFact struct {
@@ -243,11 +240,6 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 				recs = append(recs, factRecord{line: "conforms " + c.Type + " " + c.IfacePath + " " + c.Iface})
 			}
 		}
-		for _, c := range f.Comptimes {
-			if c.Object != "" && len(c.Source) > 0 {
-				recs = append(recs, factRecord{line: "comptime " + c.Object + " " + strconv.Itoa(len(c.Source)), body: c.Source})
-			}
-		}
 		for _, c := range f.ConstFuncs {
 			if c.Object != "" && len(c.Source) > 0 {
 				recs = append(recs, factRecord{line: "constfn " + c.Object + " " + strconv.Itoa(len(c.Source)), body: c.Source})
@@ -290,6 +282,14 @@ func Encode(fp goobj.FingerprintType, f *Facts) []byte {
 			if isIdent(u) {
 				recs = append(recs, factRecord{line: "dualuse " + u})
 			}
+		}
+		for _, d := range f.Deriveds {
+			if ValidObject(d) {
+				recs = append(recs, factRecord{line: "derived " + d})
+			}
+		}
+		if f.CheckedUnionTypes {
+			recs = append(recs, factRecord{line: "union-types 1"})
 		}
 		recs = append(recs, f.jsonRecords()...)
 	}
@@ -667,6 +667,14 @@ func Decode(data []byte) (*Facts, error) {
 				return nil, err
 			}
 			f.AllocFrees = append(f.AllocFrees, AllocFreeFact{Object: fields[1]})
+		case strings.HasPrefix(line, "union-types "):
+			if line != "union-types 1" {
+				return nil, fmt.Errorf("logos facts line %d: unsupported checked union types record %q", ln, line)
+			}
+			if err := d.dup(ln, "union-types", "", "union-types"); err != nil {
+				return nil, err
+			}
+			f.CheckedUnionTypes = true
 		case strings.HasPrefix(line, "unionbare "):
 			if len(fields) != 2 {
 				return nil, fmt.Errorf(`logos facts line %d: bad unionbare record %q (want "unionbare <type>")`, ln, line)
@@ -689,6 +697,17 @@ func Decode(data []byte) (*Facts, error) {
 				return nil, err
 			}
 			f.DualUse = append(f.DualUse, fields[1])
+		case strings.HasPrefix(line, "derived "):
+			if len(fields) != 2 {
+				return nil, fmt.Errorf(`logos facts line %d: bad derived record %q (want "derived <object>")`, ln, line)
+			}
+			if !ValidObject(fields[1]) {
+				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
+			}
+			if err := d.dup(ln, "derived", fields[1], fields[1]); err != nil {
+				return nil, err
+			}
+			f.Deriveds = append(f.Deriveds, fields[1])
 		case strings.HasPrefix(line, "fn "):
 			if len(fields) != 3 {
 				return nil, fmt.Errorf("logos facts line %d: bad fn record %q (want %q)", ln, line, "fn <object> <flag>[,<flag>...]")
@@ -763,25 +782,6 @@ func Decode(data []byte) (*Facts, error) {
 				return nil, err
 			}
 			f.Defaults = append(f.Defaults, DefaultFact{Type: fields[1], Field: fields[2], Text: string(text)})
-		case strings.HasPrefix(line, "comptime "):
-			if len(fields) != 3 {
-				return nil, fmt.Errorf(`logos facts line %d: bad comptime record %q (want "comptime <object> <length>")`, ln, line)
-			}
-			if !ValidObject(fields[1]) {
-				return nil, fmt.Errorf("logos facts line %d: bad object %q", ln, fields[1])
-			}
-			n, aerr := strconv.Atoi(fields[2])
-			if aerr != nil || n < 0 {
-				return nil, fmt.Errorf("logos facts line %d: bad comptime length %q", ln, fields[2])
-			}
-			if err := d.dup(ln, "comptime", fields[1], fields[1]); err != nil {
-				return nil, err
-			}
-			src, err := d.takeBody(ln, "comptime", fields[1], n)
-			if err != nil {
-				return nil, err
-			}
-			f.Comptimes = append(f.Comptimes, ComptimeFact{Object: fields[1], Source: src})
 		case strings.HasPrefix(line, "constfn "):
 			if len(fields) != 3 {
 				return nil, fmt.Errorf(`logos facts line %d: bad constfn record %q (want "constfn <object> <length>")`, ln, line)
@@ -913,7 +913,7 @@ func validStep(s string) bool {
 		return isDigits(s[1:])
 	case 'F', 'M':
 		return isIdent(s[1:])
-	case 'D', 'E', 'K':
+	case 'D', 'E', 'K', 'O', 'V':
 		return len(s) == 1
 	}
 	return false

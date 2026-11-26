@@ -24,6 +24,9 @@ func writeOpts(pkg *types2.Package, f *Facts) {
 	eachExportedNamed(pkg, func(name string, named *types2.Named) {
 		walkNamedQuals(name, named, emit, nil)
 	})
+	eachExportedVar(pkg, func(object string, v *types2.Var) {
+		walkQualType(v.Type(), []string{"V"}, object, emit, nil, make(map[types2.Type]bool))
+	})
 	eachExportedAlias(pkg, func(name string, rhs types2.Type) {
 		walkAliasQuals(name, rhs, emit, nil)
 	})
@@ -54,6 +57,17 @@ func walkNamedQuals(name string, named *types2.Named, emitOpt, emitConst func(st
 	u := named.Underlying()
 	if tuple, ok := u.(*types2.LogosTuple); ok {
 		u = tuple.Underlying()
+	}
+	if opt, ok := unaliasAs[*types2.Option](u); ok {
+		// A defined option type owns its option: record it on the
+		// declaration with the root marker so the overlay restores the
+		// underlying option there. Variable facts then keep pointing at
+		// the declaration instead of wrapping it a second time.
+		if emitOpt != nil {
+			emitOpt(name, "O")
+		}
+		walkQualType(opt.Elem, []string{"O", "E"}, name, emitOpt, emitConst, make(map[types2.Type]bool))
+		return
 	}
 	switch u := u.(type) {
 	case *types2.Struct:

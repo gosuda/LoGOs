@@ -368,6 +368,28 @@ func TestValueSizeBoundaries(t *testing.T) {
 	}
 }
 
+func TestExactValueSizeBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, expr string
+		bytes      int64
+	}{
+		{"denominator", "1.0 / 0x1p128", 17},
+		{"numerator", "0x1p128 / 7.0", 17},
+		{"complex", "complex(1.0 / 0x1p64, 0x1p64 / 7.0)", 18},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newFakeHost(t)
+			expr := parseExpr(t, tc.expr)
+			if _, _, err := Eval(h, Config{MaxValueBytes: tc.bytes}, expr); err != nil {
+				t.Fatalf("Eval with %d-byte limit: %v", tc.bytes, err)
+			}
+			if err := evalErr(t, h, Config{MaxValueBytes: tc.bytes - 1}, expr); err.Code != CodeTooLarge {
+				t.Fatalf("Eval with %d-byte limit: %v, want CodeTooLarge", tc.bytes-1, err)
+			}
+		})
+	}
+}
+
 func TestFloatMapKeys(t *testing.T) {
 	h := newFakeHost(t)
 	neg := parseFunc(t, `package p
