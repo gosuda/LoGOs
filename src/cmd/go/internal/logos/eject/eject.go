@@ -245,7 +245,6 @@ func ejectToDir(ctx context.Context, out string) {
 	}
 	plan := arrangeEjectPlan(pkgs)
 	builds := collectTestBuilds(moduleLoader, ctx, opts, plan)
-	discoverGoImportLogos(moduleLoader, ctx, opts, plan)
 	plan.gorootLogos = collectGorootLogos(plan.provenance)
 	makeEjectStagingDirs(plan, staging, builds)
 	buildEjectRoots(moduleLoader, ctx, phaseOneRoots(plan))
@@ -1717,6 +1716,7 @@ func stageInactiveVariantsIntoStaging(ctx context.Context, plan *ejectPlan, stag
 	var outs []string
 	for {
 		files := collectInactiveLogosFiles(plan, staging)
+		files = append(files, collectInactiveGoImports(plan)...)
 		if len(files) == 0 {
 			return outs
 		}
@@ -1736,6 +1736,21 @@ func stageInactiveVariantsIntoStaging(ctx context.Context, plan *ejectPlan, stag
 			outs = append(outs, out)
 		}
 		for _, f := range files {
+			if strings.HasSuffix(f.name, ".go") {
+				// Copied Go files have no lowered output. Require an actual
+				// helper load to have selected the requested importer.
+				selected := false
+				for _, p := range plan.provenance[f.pkg.ImportPath] {
+					if p.Dir == f.pkg.Dir && (slices.Contains(p.GoFiles, f.name) || slices.Contains(p.CgoFiles, f.name)) {
+						selected = true
+						break
+					}
+				}
+				if !selected {
+					base.Fatalf("logos eject: variant did not load Go source %s", filepath.Join(f.pkg.Dir, f.name))
+				}
+				continue
+			}
 			dst := filepath.Join(staging, filepath.FromSlash(f.pkg.ImportPath), logosStem(f.name)+".go")
 			if _, err := os.Stat(dst); err != nil {
 				base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(f.pkg.Dir, f.name), err)

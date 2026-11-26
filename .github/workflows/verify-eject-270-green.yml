@@ -1,0 +1,62 @@
+name: Verify eject support review repairs
+
+on:
+  push:
+    branches: [ci/verify-eject-270-green-20261126]
+
+permissions:
+  contents: read
+
+jobs:
+  regressions:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record the upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the exact repaired toolchain
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+          tar -czf review-evidence/toolchain.tar.gz bin pkg/tool
+          sha256sum review-evidence/toolchain.tar.gz > review-evidence/toolchain.sha256
+      - name: Eject package race tests
+        run: go test -race -count=1 -short cmd/go/internal/logos/eject 2>&1 | tee review-evidence/unit.log
+      - name: Export, overlay, and inactive-variant regression scripts
+        if: ${{ !cancelled() }}
+        run: |
+          go test -race -count=1 cmd/go -run 'Script/^logos_eject_(arena_variant|go_test_support|goroot_lgo_dep|inactive_file|inactive_go_import|inactive_owned|inactive_packages|inactive_support|json_variant|lgo_runtime_pair|overlay_sources|overlay_toolchain|support_closure|variant_package_names|variant_tags|variant_test_imports|vendor_support)$' 2>&1 | tee review-evidence/scripts.log
+      - name: Vet and formatting
+        if: ${{ !cancelled() }}
+        run: |
+          go vet cmd/go/internal/logos/eject
+          files=$(gofmt -l src/cmd/go/internal/logos/eject/eject.go src/cmd/go/internal/logos/eject/eject_vendor.go src/cmd/go/internal/logos/eject/inactive.go src/cmd/go/internal/logos/eject/support_overlay_review_test.go)
+          test -z "$files" || { printf '%s\n' "$files"; exit 1; }
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: eject-green-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7

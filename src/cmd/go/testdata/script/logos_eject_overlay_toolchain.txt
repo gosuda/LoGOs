@@ -149,8 +149,13 @@ func main() {
 		"inserted.h": "inserted header\n",
 		"replaced.h": "replacement header\n",
 	} {
-		if err := os.WriteFile(filepath.Join(out, name), []byte(content), 0666); err != nil {
+		file := filepath.Join(out, name)
+		if err := os.WriteFile(file, []byte(content), 0666); err != nil {
 			fmt.Fprintf(os.Stderr, "mkovl: write %s: %v\n", name, err)
+			os.Exit(1)
+		}
+		if err := os.Chtimes(file, old, old); err != nil {
+			fmt.Fprintf(os.Stderr, "mkovl: chtimes %s: %v\n", name, err)
 			os.Exit(1)
 		}
 	}

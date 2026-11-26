@@ -161,7 +161,26 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 			continue
 		}
 		if isPackageBuildAsset(name) {
-			if err := c.copyRaw(path.Join(p.src, name), path.Join(p.dst, name)); err != nil {
+			src, dst := path.Join(p.src, name), path.Join(p.dst, name)
+			logical := filepath.Join(c.absSrcDir(p), name)
+			if !p.vendored && fsys.Replaced(logical) {
+				// Explicit toolchain overlays select the effective asset.
+				// Other assets keep rooted physical reads and symlink checks.
+				info, err := fsys.Stat(logical)
+				if err != nil {
+					return err
+				}
+				if !info.Mode().IsRegular() {
+					return fmt.Errorf("support asset %s is not a regular file", src)
+				}
+				data, err := fsys.ReadFile(logical)
+				if err != nil {
+					return err
+				}
+				if err := c.writeFile(src, dst, data); err != nil {
+					return err
+				}
+			} else if err := c.copyRaw(src, dst); err != nil {
 				return err
 			}
 		}
