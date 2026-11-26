@@ -43,10 +43,21 @@
 // for unexported fields that need no assignment: a zero-width field
 // such as struct{} decodes without a store, matching the original's
 // recursive walk.
-// Structs with unexported fields from another package only encode
-// their exported fields: comptime cannot see the rest. Structs with
-// blank (_) fields do not compile: Go cannot select a blank field,
-// so no projection can name it.
+// A struct from another package that mixes exported and unexported
+// fixed-size fields is truncated: Size counts only the exported
+// fields, Write/Encode/Append emit only those bytes, and Decode reads
+// only those fields, so later fields decode from the wrong bytes. A
+// struct whose fields are all hidden still takes the original path
+// (see above); only the mixed shape truncates. The twin cannot reject
+// this shape: comptime has no predicate that reports hidden fields
+// (the const-if condition set is fixed), and the const-for walk skips
+// foreign unexported fields by design, so no per-field check can
+// observe them. A loud rejection needs a language change (a predicate
+// such as comptime.HasUnexported[T]) that sends every
+// possibly-incomplete layout down the original path; until then the
+// truncation pinned by TestTwinForeignMixedTruncation is the
+// documented behavior. Structs with blank (_) fields do not compile:
+// Go cannot select a blank field, so no projection can name it.
 //
 // Mapping from the original (data any) to the twin: ReadInto and
 // Decode take *T where the original takes a pointer or slice operand,
