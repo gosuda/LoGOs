@@ -723,7 +723,7 @@ func runList(ctx context.Context, cmd *base.Command, args []string) {
 	needStale := (listJson && listJsonFields.needAny("Stale", "StaleReason")) || strings.Contains(*listFmt, ".Stale")
 	if needStale || *listExport || *listCompiled {
 		for _, p := range pkgs {
-			if logosListNeedsBuildAction(p) {
+			if logosListNeedsBuildAction(p) && logosListNeedsRaceCompilerCheck() {
 				work.CheckRaceRuntimeCompiler()
 				break
 			}
