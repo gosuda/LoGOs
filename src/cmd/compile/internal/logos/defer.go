@@ -339,12 +339,14 @@ func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, 
 	return append(native, checkN), append(text, checkT), tw
 }
 
-// definePieces binds the captured operands in use order. Consecutive
-// single-valued pieces share one short declaration, so the ejected
-// evaluation matches the native single-assignment spill: an argument
-// call runs before a plain function variable is read. A multi-result
-// argument keeps its own declaration, since combining it with another
-// value rejects programs the language accepts.
+// definePieces binds the captured operands so the ejected evaluation
+// order matches the native single-assignment spill: calls and early
+// interface copies first in use order, plain reads last. An argument
+// call runs before a plain function variable is read, and a composite
+// literal boxed into an interface is copied before a later call mutates
+// the fields it reads. A multi-result argument keeps its own declaration,
+// since combining it with another value rejects programs the language
+// accepts.
 func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []syntax.Stmt {
 	var pieces []capturePiece
 	if plan.isMethod {
@@ -353,6 +355,25 @@ func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []s
 		pieces = append(pieces, plan.fun)
 	}
 	pieces = append(pieces, plan.args...)
+	const (
+		piecePure = iota
+		pieceCall
+		pieceAlone
+	)
+	kind := make([]int, len(pieces))
+	for j, piece := range pieces {
+		if !piece.capture {
+			continue
+		}
+		if len(piece.multi) > 0 {
+			kind[j] = pieceAlone
+			continue
+		}
+		if fc.groupHasCall(piece.expr) {
+			kind[j] = pieceCall
+			continue
+		}
+	}
 	var out []syntax.Stmt
 	var names, vals []syntax.Expr
 	flush := func() {
@@ -361,11 +382,11 @@ func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []s
 			names, vals = nil, nil
 		}
 	}
-	for _, piece := range pieces {
-		if !piece.capture {
+	for j, piece := range pieces {
+		if !piece.capture || kind[j] == piecePure {
 			continue
 		}
-		if len(pieceNames(piece)) != 1 {
+		if kind[j] == pieceAlone {
 			flush()
 			out = append(out, defineOf(cpos, nameList(piece), valList(piece, tw)))
 			continue
@@ -374,6 +395,17 @@ func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []s
 		vals = append(vals, valList(piece, tw)...)
 	}
 	flush()
+	var pnames, pvals []syntax.Expr
+	for j, piece := range pieces {
+		if !piece.capture || kind[j] != piecePure {
+			continue
+		}
+		pnames = append(pnames, nameList(piece)...)
+		pvals = append(pvals, valList(piece, tw)...)
+	}
+	if len(pnames) > 0 {
+		out = append(out, defineOf(cpos, pnames, pvals))
+	}
 	return out
 }
 
