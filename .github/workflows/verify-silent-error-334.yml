@@ -1,0 +1,86 @@
+name: Verify silenced diagnostic dependencies
+
+on:
+  push:
+    branches: [ci/verify-silent-error-334-green-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 40
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the candidate toolchain
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Check compiler packages and existing live and dead diagnostic cases
+        run: |
+          go test -count=1 -short cmd/compile/internal/types2 cmd/compile/internal/logos cmd/compile/internal/noder 2>&1 | tee review-evidence/compiler.log
+          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/(compile|run)/comptime_error.*\.lgo$' 2>&1 | tee review-evidence/diagnostic-controls.log
+      - name: Export and execute the frozen caller-owned instance
+        run: |
+          go test -v -race -count=1 cmd/go -run '^TestScript$/logos_comptime_(silent_error_eject|unexported|scope|forward|copy_shadow)$' 2>&1 | tee review-evidence/scripts-green.log
+          grep -F '> exec $UPROOT1272/bin/go$GOEXE run .' review-evidence/scripts-green.log
+      - name: Prove the fixture requires local-use preservation
+        run: |
+          file=src/cmd/compile/internal/logos/comptime.go
+          cp -p "$file" review-evidence/fixed-comptime.go
+          trap 'cp -p review-evidence/fixed-comptime.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/compile/internal/logos/comptime.go')
+          s = p.read_text()
+          old = 'if len(rhs) == 0 {\n\t\treturn at(&syntax.EmptyStmt{}, pos)'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, 'if true {\n\t\treturn at(&syntax.EmptyStmt{}, pos)'))
+          PYCODE
+          touch -r review-evidence/fixed-comptime.go "$file"
+          go install cmd/compile
+          if go test -v -race -count=1 cmd/go -run '^TestScript$/logos_comptime_silent_error_eject$' > review-evidence/mutation-red.log 2>&1; then
+            cat review-evidence/mutation-red.log
+            exit 1
+          fi
+          cat review-evidence/mutation-red.log
+          grep -E '(declared and not used|declared but not used)' review-evidence/mutation-red.log
+      - name: Restore and verify the exact checked-in tree
+        run: |
+          go install cmd/compile
+          go test -v -race -count=1 cmd/go -run '^TestScript$/logos_comptime_silent_error_eject$' 2>&1 | tee review-evidence/restored-green.log
+          go vet cmd/compile/internal/logos
+          test -z "$(gofmt -l src/cmd/compile/internal/logos/comptime.go)"
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: silent-error-green-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
