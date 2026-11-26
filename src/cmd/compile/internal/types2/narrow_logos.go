@@ -2644,7 +2644,29 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 			return false
 		case *syntax.SwitchExpr:
 			st = p.stmt(x.Init, st)
-			st = p.expr(x.Tag, st)
+			var tagErr *Var
+			switch tag := x.Tag.(type) {
+			case *syntax.TypeSwitchGuard:
+				tagErr = p.errVar(tag.X)
+				st = p.expr(tag.X, st)
+			case nil:
+			default:
+				tagErr = p.errVar(tag)
+				st = p.expr(tag, st)
+			}
+			// Case operands run after the tag was read, so a store they
+			// make can replace the value the tag described. Collect their
+			// writes in a scratch summary exactly like a statement switch:
+			// once the tag destination was rewritten, a later nil match
+			// proves nothing, and a result rewritten since the tag was
+			// read stays unproven.
+			var tagKey logosEFKey
+			if x.Tag != nil {
+				tagKey, _ = p.destKey(x.Tag)
+			}
+			savedEff := p.eff
+			scratch := &logosEFEffects{inside: make(map[*Var]bool), assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
+			p.eff = scratch
 			enter := make([]*logosEFState, len(x.Arms))
 			miss := st
 			for i, arm := range x.Arms {
@@ -2652,11 +2674,25 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 					var hit *logosEFState
 					if x.Tag == nil {
 						hit, miss = p.cond(operand, miss)
-					} else {
+					} else if _, isGuard := x.Tag.(*syntax.TypeSwitchGuard); isGuard {
 						miss = p.expr(operand, miss)
 						hit = miss
+					} else {
+						hit, miss = p.caseCond(x.Tag, tagErr, tagKey, operand, miss, scratch)
 					}
 					enter[i] = logosEFJoin(enter[i], hit)
+				}
+			}
+			p.eff = savedEff
+			if savedEff != nil {
+				for k := range scratch.assigned {
+					p.noteAssigned(k)
+				}
+				for k, v := range scratch.created {
+					p.noteCreated(k, v)
+				}
+				for k, v := range scratch.may {
+					p.noteMay(k, v)
 				}
 			}
 			var out *logosEFState
