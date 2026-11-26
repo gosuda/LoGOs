@@ -1,0 +1,25 @@
+// run
+
+package main
+
+import "fmt"
+
+func classify2[T, U any]() int {
+	n := 0
+	const switch T {
+	case string:
+		type Tag = U
+		const switch Tag {
+		case int, ~string:
+			n++
+		}
+	}
+	return n
+}
+
+func main() {
+	fmt.Println(classify2[string, int]())
+	fmt.Println(classify2[string, string]())
+	fmt.Println(classify2[string, bool]())
+	fmt.Println(classify2[int, int]())
+}

@@ -209,7 +209,7 @@ func (check *Checker) logosDeadCopyCase(c *syntax.ConstSwitchCase, tag Type, inf
 	if !check.logosCopy && !deadFlag {
 		return false
 	}
-	if _, ok := tag.(*TypeParam); ok {
+	if isTypeParam(tag) {
 		return false
 	}
 	for i := range seen {
@@ -392,7 +392,11 @@ func logosConstElemMatches(tag Type, typ Type, tilde bool, isDefault bool) bool 
 		iface, _ := Unalias(typ).Underlying().(*Interface)
 		return iface != nil && Implements(tag, iface)
 	default:
-		return Identical(typ, tag)
+		// Exact dispatch sees through aliases: `case int:` selects a
+		// tag of `type Tag = int` the way the tilde and interface
+		// arms already do via Unalias. Defined types stay distinct
+		// because Unalias preserves them.
+		return Identical(Unalias(typ), Unalias(tag))
 	}
 }
 
@@ -476,7 +480,7 @@ func (info *logosCaseInfo) iface() *Interface {
 }
 
 func (check *Checker) logosCaseSatisfiable(c, tag Type, tagPend bool) bool {
-	if tpar, ok := tag.(*TypeParam); ok {
+	if tpar, ok := Unalias(tag).(*TypeParam); ok {
 		return check.implements(c, tpar.iface(), false, nil)
 	}
 	// An unbound field type is the comptime any: every case stays
@@ -485,7 +489,11 @@ func (check *Checker) logosCaseSatisfiable(c, tag Type, tagPend bool) bool {
 	if tagPend && Identical(tag, logosComptimeAny) {
 		return true
 	}
-	return Identical(c, tag)
+	// Exact satisfiability sees through aliases the way the tilde and
+	// interface arms already do via Unalias: `case int:` stays
+	// reachable for a tag of `type Tag = int`. Defined types stay
+	// distinct because Unalias preserves them.
+	return Identical(Unalias(c), Unalias(tag))
 }
 
 func logosUnderlyingIs(t, b Type) bool {
