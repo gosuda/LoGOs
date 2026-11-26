@@ -237,7 +237,7 @@ func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, op
 			}
 			for _, entry := range entries {
 				name := entry.Name()
-				if entry.IsDir() || !isSupportCopyFile(name) {
+				if entry.IsDir() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !isSupportCopyFile(name) {
 					continue
 				}
 				data, err := fsys.ReadFile(filepath.Join(dir, name))
