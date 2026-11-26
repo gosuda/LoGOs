@@ -1,0 +1,72 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetchRecovery337() (int, error) { return 1, nil }
+func useRecovery337(n int) {}
+
+// A conditional return after recovery can bypass the later panic.
+func conditionalRecover337() {
+	n, err := fetchRecovery337()
+	_ = err
+	func() {
+		defer func() {
+			r := recover()
+			if r != nil { return }
+			panic("again")
+		}()
+		panic("first")
+	}()
+	useRecovery337(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// An unconditional panic after recover has no normal continuation.
+func unconditionalRepanic337() {
+	n, err := fetchRecovery337()
+	_ = err
+	func() {
+		defer func() { _ = recover(); panic("again") }()
+	}()
+	useRecovery337(n)
+}
+
+func recoveredScopeCleanup337() {
+	n, err := fetchRecovery337()
+	_ = err
+	{
+		scope defer func() {
+			defer func() { _ = recover() }()
+			panic("cleanup")
+		}()
+	}
+	useRecovery337(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func panickingFirstSwitchArm337(flag bool) {
+	n, err := fetchRecovery337()
+	_ = err
+	_ = switch flag {
+	case true => switch panic("stop"); 0 { default => 0 }
+	default => n /* ERROR "[correctness::result_before_error_check]" */
+	}
+}
+
+func deferredConstantArgument337() {
+	n, err := fetchRecovery337()
+	_ = err
+	func() { defer func(value int) { n = value }(0) }()
+	useRecovery337(n)
+}
+
+// Both registrations run, with the earlier reset taking effect last.
+func pairedScopeCleanup337() {
+	n, err := fetchRecovery337()
+	_ = err
+	{
+		scope defer func() { n = 0 }()
+		scope defer func() { n, err = fetchRecovery337() }()
+	}
+	useRecovery337(n)
+}

@@ -306,6 +306,7 @@ def source_identity(root: Path, expected_head: str) -> dict[str, object]:
         "frozen_sha256": verify_frozen(root),
         "helper_sha256": digest(Path(__file__)),
         "workflow_sha256": digest(root / ".github/workflows/ci.yml"),
+        "driver_sha256": digest(root / ".github/scripts/unit-evidence.sh"),
     }
 
 

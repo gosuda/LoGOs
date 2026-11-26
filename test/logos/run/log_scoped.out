@@ -1,0 +1,13 @@
+ok parent-disabled-pruned
+ok parent-enabled-kept
+ok child-disabled-pruned
+ok child-enabled-kept
+ok runtime-gate-evaluates
+ok parent-gate-drops-debug
+ok child-gate-drops-info
+ok parent-line
+ok parent-debug-dropped
+ok child-line
+ok child-info-dropped
+ok parent-scope
+ok child-scope

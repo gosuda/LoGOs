@@ -64,6 +64,22 @@ func join2() (err error) {
 	defer failAt(3)?
 	return nil
 }
+type optNote struct{ last int }
+
+func (o *optNote) Note(v int) error {
+	o.last = v
+	return nil
+}
+
+func mkOptNote() *optNote? {
+	return &optNote{}
+}
+
+func spanOpt(m *optNote?) (err error) {
+	defer m?.Note(2 + 3)?
+	return nil
+}
+
 
 var seen any = "unset"
 
@@ -103,6 +119,12 @@ func main() {
 	} else {
 		fmt.Println("join ok")
 	}
+	mn := mkOptNote()
+	if err := spanOpt(mn); err != nil {
+		fmt.Println("span err:", err)
+	} else {
+		fmt.Println("span", (mn ?? &optNote{}).last)
+	}
 	recoverProbe()
 }
 
@@ -111,4 +133,5 @@ loop err: fail 1
 method ok 1
 join err: fail 3
 fail 1
+span 5
 recover in f: <nil> outer: boom

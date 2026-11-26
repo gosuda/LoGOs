@@ -1,0 +1,127 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337() (int, error) { return 1, nil }
+func use337(n int) {}
+func two337(a, b int) {}
+func index337(n int) int { return n }
+func sink337(n int) func(int) { return func(int) {} }
+
+// The early return never registers the cleanup.
+func earlyReturn337(skip bool) {
+	n, err := fetch337()
+	_ = err
+	func() {
+		if skip { return }
+		defer func() { n = 0 }()
+	}()
+	use337(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// Cleanup reads only occur on paths that registered it after the check.
+func checkedRegistration337() {
+	n, err := fetch337()
+	func() {
+		if err != nil { return }
+		defer func() { use337(n) }()
+	}()
+}
+
+// Registration operands run once, from the callee to the last argument.
+func deferredArgumentOrder337() {
+	n, err := fetch337()
+	_ = err
+	defer two337(index337(n /* ERROR "[correctness::result_before_error_check]" */), func() int { n = 0; return 0 }())
+}
+
+func ordinaryCalleeOrder337() {
+	n, err := fetch337()
+	_ = err
+	sink337(n /* ERROR "[correctness::result_before_error_check]" */)(func() int { n = 0; return 0 }())
+}
+
+func deferredCalleeOrder337() {
+	n, err := fetch337()
+	_ = err
+	defer sink337(n /* ERROR "[correctness::result_before_error_check]" */)(func() int { n = 0; return 0 }())
+}
+
+func readBeforePanickingArgument337() {
+	n, err := fetch337()
+	_ = err
+	two337(n /* ERROR "[correctness::result_before_error_check]" */, func() int { panic("stop") }())
+}
+
+func deferredReadBeforePanickingArgument337() {
+	n, err := fetch337()
+	_ = err
+	defer two337(n /* ERROR "[correctness::result_before_error_check]" */, func() int { panic("stop") }())
+}
+
+// A later write cannot retroactively invalidate an earlier operand.
+func checkedBeforeLaterWrite337() {
+	n := 0
+	var err error
+	two337(n, func() int { n, err = fetch337(); return 0 }())
+	_ = err
+}
+
+func deferredCheckedBeforeLaterWrite337() {
+	n := 0
+	var err error
+	defer two337(n, func() int { n, err = fetch337(); return 0 }())
+	_ = err
+}
+
+// Every invocation receives fresh parameters, including loop iterations.
+func freshParameters337() {
+	for i := 0; i < 2; i++ {
+		func(n int, err error) {
+			use337(n)
+			n, err = fetch337()
+			_ = err
+		}(0, nil)
+	}
+}
+
+// Captured writes still reach the caller of a parameterized literal.
+func capturedReset337() {
+	n, err := fetch337()
+	_ = err
+	func(value int) { n = value }(0)
+	use337(n)
+}
+
+// A local error cannot approve a captured result after the call returns.
+func capturedUnchecked337() {
+	n := 0
+	func(localErr error) { n, localErr = fetch337(); _ = localErr }(nil)
+	use337(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// Rebinding the local error on the next call never proves a prior result.
+func localGuardAcrossCalls337() {
+	n := 0
+	for i := 0; i < 2; i++ {
+		func(localErr error) {
+			if localErr == nil {
+				use337(n /* ERROR "[correctness::result_before_error_check]" */)
+			}
+			n, localErr = fetch337()
+			_ = localErr
+		}(nil)
+	}
+}
+
+// The checked result is separate from the assignment destination, so
+// dropping the destination alone cannot make this termination test pass.
+func distinctPanicResult337() {
+	n, err := fetch337()
+	_ = err
+	other := func() int { panic("stop") }()
+	_ = other
+	use337(n)
+}
