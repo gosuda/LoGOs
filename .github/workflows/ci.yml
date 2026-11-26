@@ -1,6 +1,6 @@
 name: CI
 
-# Native GitHub Actions CI (see .github/scripts/*.sh). One run per commit:
+# Canonical CI on Depot runners (see .github/scripts/*.sh). One event owner:
 # route picks suites from the changed paths, build compiles the toolchain once, the suites reuse it.
 on:
   push:
@@ -40,7 +40,18 @@ jobs:
           ref: "${{ github.event.pull_request.head.sha || github.sha }}"
           fetch-depth: 2
           persist-credentials: false
-      - run: for f in .github/scripts/*.sh; do bash -n "$f"; done
+      - name: Validate workflows and shell scripts
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location --output "$archive" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --strict -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          shellcheck --version
+          "$RUNNER_TEMP/actionlint" -color
+          for f in .github/scripts/*.sh; do bash -n "$f"; done
       - id: route
         run: GITHUB_SHA="${{ github.event.pull_request.head.sha || github.sha }}" bash .github/scripts/route.sh
         env:
@@ -62,7 +73,7 @@ jobs:
           name: toolchain
           path: "~/tc"
 
-  # logos.yml suites unit / scripts / upstream / autovec (and tagged-facts, which unit already runs)
+  # Core suites share one toolchain; unit also owns the tagged-fact checks.
   unit:
     needs: [route, build]
     if: needs.route.outputs.core == 'true'
@@ -110,7 +121,13 @@ jobs:
           name: toolchain
           path: "~/tc"
       - run: bash .github/scripts/setup.sh restore oracles c23
-      - name: Full upstream and LoGOs regression (run.bash; includes every cmd/go script test)
+      - name: Full LoGOs script tests (including non-short cases)
+        run: |
+          . .github/scripts/env.sh
+          cd src
+          ../.github/scripts/logos-test-env.sh go test -count=1 -timeout 60m cmd/go -run 'Script/^logos_'
+      - name: Full upstream and LoGOs regression (run.bash)
+        if: always()
         run: bash .github/scripts/scripts-regression.sh
       - name: Installed test subprocess behavior and inline capability ownership
         if: always()
@@ -262,6 +279,14 @@ jobs:
         if: always()
         run: bash .github/scripts/ssa-av3.sh
 
+      - name: Retain ssa evidence
+        if: always()
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: "ssa-evidence-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/*-evidence"
+          retention-days: 30
+
   # The runner kills a silent job; the heartbeat keeps the log alive (cause not found), so manual runs only.
   simdstd:
     needs: [route, build]
@@ -300,6 +325,14 @@ jobs:
       - name: "cgo focused: lint, compat, probes, families, sanitizers, stock oracle"
         if: always()
         run: bash .github/scripts/cgo-focused.sh
+      - name: Retain cgo evidence
+        if: always()
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: "cgo-evidence-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/cgo-evidence"
+          retention-days: 30
+
   cgofull:
     needs: [route, build, cgo]
     if: github.event_name == 'push' && needs.route.outputs.cgo == 'true'
@@ -325,6 +358,14 @@ jobs:
         env:
           CGO_EXPERIMENT: ${{ matrix.experiment }}
         run: bash .github/scripts/cgofull-dist.sh
+      - name: Retain cgofull evidence
+        if: always()
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: "cgofull-evidence-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/cgo-evidence"
+          retention-days: 30
+
   cgobench:
     needs: [route, build, cgo]
     if: github.event_name == 'push' && needs.route.outputs.cgo == 'true'
@@ -344,6 +385,14 @@ jobs:
         run: bash .github/scripts/cgo-compilers.sh
       - name: "cgo benchmark: one frozen sequential campaign per declared row"
         run: bash .github/scripts/cgobench-benchmark.sh
+      - name: Retain cgobench evidence
+        if: always()
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: "cgobench-evidence-${{ strategy.job-index }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: "${{ runner.temp }}/cgo-evidence"
+          retention-days: 30
+
   dogfood:
     needs: [route, build]
     if: needs.route.outputs.dogfood == 'true'

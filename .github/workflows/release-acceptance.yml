@@ -94,10 +94,9 @@ jobs:
         run: *retain
 
   repro-b:
-    name: "repro-host-ubuntu-current"
-    # This leg tracks the moving Ubuntu image while repro-a stays pinned,
-    # so a pass still covers two different host images.
-    runs-on: "ubuntu-latest"
+    name: "repro-host-depot-b"
+    # A separate Depot VM preserves the independent-host reproducibility check.
+    runs-on: "depot-ubuntu-24.04"
     timeout-minutes: 180
     outputs:
       result: "${{ steps.repro.outputs.result }}"
