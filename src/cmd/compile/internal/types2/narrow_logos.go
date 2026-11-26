@@ -2656,6 +2656,24 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 				st = logosEFJoin(absent, st)
 				return false
 			}
+		case *syntax.TryExpr:
+			// A ?-call propagates its error: the failure edge exits
+			// through the applicable cleanup, so a cleanup read on that
+			// edge must see the pre-reset state. Keep only the success
+			// edge for subsequent statements. A TryExpr that marks an
+			// absent optional receiver is not an exit: evaluate it
+			// transparently and let the optional-chain call join the
+			// skipping path itself.
+			if _, ok := syntax.Unparen(x.X).(*syntax.CallExpr); !ok {
+				st = p.expr(x.X, st)
+				return false
+			}
+			st = p.expr(x.X, st)
+			if st == nil {
+				return false
+			}
+			p.finishCleanups(st, func(logosEFDeferredCall) bool { return true })
+			return false
 		case *syntax.CoalesceExpr:
 			// The fallback runs only when the option is absent: join the
 			// path that skips it with the path that runs it, so a store
