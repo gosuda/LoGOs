@@ -134,9 +134,29 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		return true
 	}
 	for _, root := range roots {
+		if f, ok := root.(*syntax.File); ok && !fileImportsNetHTTP(f) {
+			continue
+		}
 		syntax.Inspect(root, inspect)
 	}
 	return mapped
+}
+
+// fileImportsNetHTTP reports whether f directly imports net/http.
+// The eject rewrite only fires in files with a local net/http import,
+// so verification must not exempt alias calls from other files that
+// the emitter will leave behind for upstream Go to reject.
+func fileImportsNetHTTP(f *syntax.File) bool {
+	for _, decl := range f.DeclList {
+		imp, ok := decl.(*syntax.ImportDecl)
+		if !ok || imp.Path == nil {
+			continue
+		}
+		if imp.Path.Value == "\"net/http\"" {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyEjectStdlibDone keeps VerifyEjectStdlib to one report per package:
