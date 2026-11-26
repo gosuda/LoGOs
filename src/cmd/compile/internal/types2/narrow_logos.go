@@ -1349,6 +1349,11 @@ type logosEFEffects struct {
 	created  map[logosEFKey]string
 	may      map[logosEFKey]logosEFKey
 	deferred *logosEFEffects
+	// panicked collects the pre-panic states of builtin panic calls
+	// executed while this summary was on top. A directly invoked
+	// literal joins the recovered exits with its ordinary exits;
+	// summaries that never inline drop the inventory with the effects.
+	panicked []*logosEFState
 	// lit names the deferred literal this summary describes, or nil.
 	// exit is that literal's exit state. Both are set only while the
 	// summary describes exactly one deferred call; merging a second
@@ -3425,6 +3430,12 @@ func (p *logosEFPass) exprStmt(s *syntax.ExprStmt, st *logosEFState) *logosEFSta
 	}
 	if fun, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok {
 		if b, ok := p.check.Uses[fun].(*Builtin); ok && b.Name() == "panic" {
+			if p.eff != nil {
+				// A recovered panic resumes the caller after running the
+				// literal's cleanups: keep the pre-panic state so an
+				// enclosing direct invocation can join the recovered exit.
+				p.eff.panicked = append(p.eff.panicked, st)
+			}
 			p.finishCleanups(st, func(logosEFDeferredCall) bool { return true })
 			return nil
 		}
@@ -4339,6 +4350,16 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 	}
 	if eff.deferred != nil {
 		end = end.afterDeferred(eff.deferred)
+	}
+	if p.litCanRecover(lit) {
+		// A recovered panic exits through the literal's cleanups with the
+		// pre-panic stores still visible: join those exits with the
+		// ordinary ones before projecting onto caller-visible bindings.
+		for _, pst := range eff.panicked {
+			if r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true }); r != nil {
+				end = logosEFJoin(end, r)
+			}
+		}
 	}
 	end = end.withoutLocals(inside)
 	if saved != nil {
