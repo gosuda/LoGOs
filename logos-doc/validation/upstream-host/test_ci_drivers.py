@@ -110,6 +110,8 @@ def test_benchmark_uses_event_base_after_the_branch_moves(tmp_path: Path) -> Non
     assert (tmp_path / "runner/measured-shas").read_text().splitlines() == [
         f"{base} {candidate}"
     ] * 6
+
+
 @pytest.mark.parametrize("extra", (0, 1))
 def test_benchmark_fetches_missing_base_in_shallow_checkout(
     tmp_path: Path, extra: int
