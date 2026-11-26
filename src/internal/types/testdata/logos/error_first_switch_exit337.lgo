@@ -1,0 +1,24 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetchExit337() (int, error) { return 1, nil }
+func useExit337(n int) {}
+
+func switchInitAssignment337() {
+	n, err := fetchExit337()
+	if err != nil { return }
+	useExit337(n)
+	x := switch panic("stop"); 0 { default => 0 }
+	useExit337(x)
+}
+
+func switchInitDeclaration337() {
+	n, err := fetchExit337()
+	if err != nil { return }
+	useExit337(n)
+	var x = switch panic("stop"); 0 { default => 0 }
+	useExit337(x)
+}

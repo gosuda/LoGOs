@@ -611,8 +611,14 @@ func logosImportedBareUnion(t Type) bool {
 // that the importer restores, so the export check runs first.
 func (check *Checker) logosCheckUnionMemberJSON(fld *Var, m LogosUnionMember) {
 	if m.Name != "" && !isExported(m.Name) && (check.pkg == nil || check.pkg.Path() != m.Pkg) {
-		check.errorf(fld, BadDecl, "%s union member %s.%s is not exported, so no UnmarshalJSON method of it is reachable here", logosNoUnionJSON, m.Pkg, m.Name)
-		return
+		// An alias can hide the unexported name behind an accessible one
+		// (such as Public in Ptr = *Public over hidden): the member is
+		// reachable when the alias chain offers a spelling the holder
+		// can name. Only a member with no accessible spelling fails here.
+		if _, ok := logosAccessibleAlias(m.Type, check.pkg); !ok {
+			check.errorf(fld, BadDecl, "%s union member %s.%s is not exported, so no UnmarshalJSON method of it is reachable here", logosNoUnionJSON, m.Pkg, m.Name)
+			return
+		}
 	}
 	if m.Type != nil {
 		check.logosCheckUnionTermJSON(fld, m.Type)

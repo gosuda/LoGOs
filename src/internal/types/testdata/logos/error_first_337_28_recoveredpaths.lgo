@@ -1,0 +1,36 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_28() (int, error) { return 1, nil }
+func use337_28(n int) {}
+
+// The recovered stop path skips the reset, so the read must fail.
+func recoveredPathSkipsReset337_28(stop bool) {
+	n, err := fetch337_28()
+	_ = err
+	func() {
+		defer func() { _ = recover() }()
+		if stop {
+			panic("stop")
+		}
+		n = 0
+	}()
+	use337_28(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// A reset on every path proves the read after recovery.
+func resetOnAllPaths337_28(stop bool) {
+	n, err := fetch337_28()
+	_ = err
+	n = 0
+	func() {
+		defer func() { _ = recover() }()
+		if stop {
+			panic("stop")
+		}
+	}()
+	use337_28(n)
+}

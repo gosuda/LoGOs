@@ -1,0 +1,26 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_27() (int, error) { return 1, nil }
+func use337_27(n int) {}
+
+func handlePanic337_27() { _ = recover() }
+
+// The named helper recovers, so the remainder runs with n unchecked.
+func namedRecoverReaches337_27() {
+	n, err := fetch337_27()
+	_ = err
+	func() { defer handlePanic337_27(); panic("x") }()
+	use337_27(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// A literal recover keeps the conservative path as well.
+func literalRecoverReaches337_27() {
+	n, err := fetch337_27()
+	_ = err
+	func() { defer func() { _ = recover() }(); panic("x") }()
+	use337_27(n /* ERROR "[correctness::result_before_error_check]" */)
+}

@@ -1,0 +1,31 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_36() (int, error) { return 1, nil }
+func use337_36(n int) {}
+
+type Box337_36 struct{ val int }
+
+func pick337_36(v int?) func(int) { return func(int) {} }
+
+// The factory call is eager: its argument always runs when the factory
+// returns, so the reset applies and the read stays silent.
+func factoryEagerResets337_36(b *Box337_36?) {
+	n, err := fetch337_36()
+	_ = err
+	pick337_36(b?.val)(func() int { n = 0; return 0 }())
+	use337_36(n)
+}
+
+// A genuine optional call skips its argument on the absent path.
+func genuineOptionalSkips337_36(b *Box337_36?) {
+	n, err := fetch337_36()
+	_ = err
+	b?.Reset337_36(func() int { n = 0; return 0 }())
+	use337_36(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func (b *Box337_36) Reset337_36(v int) { b.val = v }
