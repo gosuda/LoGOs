@@ -602,7 +602,7 @@ func (fl *fileLower) reduceComptimeInstance(rec *types2.LogosCtInst) (*syntax.Fu
 	name := nameOf(rec.Decl.Name.Pos(), rec.Sym)
 	fn := types2.NewFunc(name.Pos(), rec.Pkg, rec.Sym, rec.Sig)
 	info.Defs[name] = fn
-	r := ctReducer{fl: fl, owner: rec.Pkg, info: info, binders: make(map[types2.Object]types2.Type, len(rec.Decl.TParamList))}
+	r := ctReducer{fl: fl, owner: rec.Pkg, info: info, binders: make(map[types2.Object]types2.Type, len(rec.Decl.TParamList)), decl: rec.Decl}
 	for i, param := range rec.Decl.TParamList {
 		if binder := fn.Scope().Lookup(param.Name.Value); binder != nil && i < len(rec.Targs) {
 			r.binders[binder] = rec.Targs[i]
@@ -632,6 +632,7 @@ type ctReducer struct {
 	binders   map[types2.Object]types2.Type
 	nextLabel int
 	err       error
+	decl      *syntax.FuncDecl
 }
 
 type ctFrame struct {
@@ -747,6 +748,8 @@ func (r *ctReducer) clone(n syntax.Node, f *ctFrame) syntax.Node {
 	case *syntax.ExprStmt:
 		if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && f.info.LogosTagGet[call].Value != nil {
 			out = assignOf(n.Pos(), []syntax.Expr{nameOf(n.Pos(), "_")}, []syntax.Expr{r.clone(call, f).(syntax.Expr)})
+		} else if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && cfComptimeCall(call, f.info) == "Error" && r.isErrorAfterTerminatingSwitch(call, f) {
+			out = at(&syntax.EmptyStmt{}, n.Pos())
 		}
 	}
 	if out == nil {
@@ -957,6 +960,9 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 		switch cfComptimeCall(e, f.info) {
 		case "Error":
 			if len(e.ArgList) == 1 {
+				if r.isErrorAfterTerminatingSwitch(e, f) {
+					return nil
+				}
 				if msg, ok := cfComptimeErrorMsg(f.info, e.ArgList[0]); ok {
 					r.invalid(e, "[comptime::error] "+msg)
 				} else {
@@ -973,6 +979,60 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 		}
 	}
 	return nil
+}
+
+// isErrorAfterTerminatingSwitch reports whether an Error call sits in the
+// tail after a const switch whose selected case terminates, as a direct
+// child of the instance function body. The tail is still type-checked for
+// other errors; only the Error is omitted. Labels between the switch and
+// the Error keep it live.
+func (r *ctReducer) isErrorAfterTerminatingSwitch(e *syntax.CallExpr, f *ctFrame) bool {
+	if r.decl == nil || r.decl.Body == nil {
+		return false
+	}
+	list := r.decl.Body.List
+	idx := -1
+	for i, s := range list {
+		found := false
+		syntax.Inspect(s, func(n syntax.Node) bool {
+			if n == e {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
+		return false
+	}
+	for i := idx - 1; i >= 0; i-- {
+		if _, ok := list[i].(*syntax.LabeledStmt); ok {
+			return false
+		}
+		if cs, ok := list[i].(*syntax.ConstSwitchStmt); ok {
+			sel, static := types2.LogosConstSelectedCase(f.info, cs)
+			if !static || sel == nil || len(sel.Body) == 0 {
+				return false
+			}
+			last := sel.Body[len(sel.Body)-1]
+			if _, ok := last.(*syntax.ReturnStmt); ok {
+				return true
+			}
+			if es, ok := last.(*syntax.ExprStmt); ok {
+				if call, ok := syntax.Unparen(es.X).(*syntax.CallExpr); ok {
+					if name, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok && name.Value == "panic" {
+						return true
+					}
+				}
+			}
+			return false
+		}
+	}
+	return false
 }
 
 func (f *ctFrame) caseType(c *syntax.ConstSwitchCase) types2.Type {
