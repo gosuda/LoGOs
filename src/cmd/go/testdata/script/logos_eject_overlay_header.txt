@@ -105,7 +105,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 func quote(s string) string {
@@ -140,13 +139,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "mkovl: write %s: %v\n", extraPath, err)
 		os.Exit(1)
 	}
-	// Age the replacement like mkgoroot ages the private tree, so the
-	// package index sees the effective file instead of bypassing it.
-	old := time.Now().Add(-2 * time.Hour)
-	if err := os.Chtimes(extraPath, old, old); err != nil {
-		fmt.Fprintf(os.Stderr, "mkovl: chtimes %s: %v\n", extraPath, err)
-		os.Exit(1)
-	}
+	// Keep the replacement recent so dirHash sees a file newer than
+	// modTimeCutoff and returns ErrNotIndexed: the build must exercise
+	// the unindexed overlay fallback, not a cached index entry. Aging
+	// it (as mkgoroot does for physical copies) would let the package
+	// become indexable after 2s and pass without covering the fallback.
 	header := "#pragma once\n"
 	headerPath := filepath.Join(out, "extra.h")
 	if err := os.WriteFile(headerPath, []byte(header), 0666); err != nil {
