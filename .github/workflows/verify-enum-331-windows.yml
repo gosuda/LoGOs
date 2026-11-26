@@ -1,0 +1,77 @@
+name: Verify Windows enum ejection oracle
+
+on:
+  push:
+    branches: [ci/verify-enum-331-windows-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  enum:
+    runs-on: depot-windows-2025-4
+    timeout-minutes: 30
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Record source
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+      - name: Build Windows toolchain
+        shell: pwsh
+        run: |
+          $env:GOROOT_BOOTSTRAP = (go env GOROOT)
+          $log = Join-Path $env:GITHUB_WORKSPACE 'review-evidence/make.log'
+          Push-Location src
+          cmd /c make.bat 2>&1 | Tee-Object -FilePath $log
+          $buildExit = $LASTEXITCODE
+          Pop-Location
+          if ($buildExit -ne 0) { exit $buildExit }
+          (Join-Path $env:GITHUB_WORKSPACE 'bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Reproduce the missing executable suffix
+        run: |
+          file=src/cmd/go/testdata/script/logos_enum_table.txt
+          cp "$file" review-evidence/fixed-script.txt
+          trap 'cp review-evidence/fixed-script.txt "$file"' EXIT
+          sed 's,bin/go$GOEXE,bin/go,g' review-evidence/fixed-script.txt > "$file"
+          if go test -v -count=1 cmd/go -run '^TestScript$/logos_enum_table$' > review-evidence/windows-red.log 2>&1; then
+            cat review-evidence/windows-red.log
+            echo 'missing Windows executable suffix unexpectedly passed'
+            exit 1
+          fi
+          cat review-evidence/windows-red.log
+          grep -F 'logos_enum_table.txt:26:' review-evidence/windows-red.log
+      - name: Run the corrected script with real upstream Go
+        run: go test -v -count=1 cmd/go -run '^TestScript$/logos_enum_table$' 2>&1 | tee review-evidence/windows-green.log
+      - name: Confirm source restoration
+        run: git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: enum-windows-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7

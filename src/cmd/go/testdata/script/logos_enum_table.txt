@@ -23,11 +23,11 @@ exists out/_logos_deps/rt/enum/enum.go
 grep 'gosuda/loGos/rt/enum' out/main.go
 
 cd out
-exists $UPROOT1272/bin/go
-exec $UPROOT1272/bin/go version
+exists $UPROOT1272/bin/go$GOEXE
+exec $UPROOT1272/bin/go$GOEXE version
 stdout '^go version go1\.27\.2 '
 env GOROOT=$UPROOT1272
-exec $UPROOT1272/bin/go run .
+exec $UPROOT1272/bin/go$GOEXE run .
 cmp stdout $WORK/gorun.txt
 
 -- m/go.mod --
