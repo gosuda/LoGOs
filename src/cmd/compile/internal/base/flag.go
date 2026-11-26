@@ -143,6 +143,12 @@ type CmdFlags struct {
 		// Whether we are adding any sort of code instrumentation, such as
 		// when the race detector is enabled.
 		Instrumenting bool
+		// Sanitizer mode requested on the command line, before the
+		// NoInstrument exemption for runtime packages forces Flag
+		// off. Generated equality payloads are shared across all
+		// packages, so they key their explicit checks off these.
+		ASanRequested bool
+		MSanRequested bool
 	}
 }
 
