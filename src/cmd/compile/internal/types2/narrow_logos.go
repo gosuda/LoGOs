@@ -1399,6 +1399,7 @@ type logosEFPass struct {
 	loopDepth     int
 	carve         map[syntax.Node]*logosEFState
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
+	inlined       map[syntax.Node]bool
 	trackedByRoot map[*Var][]logosEFKey
 	results       map[*Var]bool
 }
@@ -2593,6 +2594,9 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 			st = logosEFJoin(t, f)
 			return false
 		case *syntax.FuncLit:
+			if p.inlined[x] {
+				return false
+			}
 			st = p.later(x, x.Body, st)
 			return false
 		case *syntax.LambdaExpr:
@@ -3009,6 +3013,29 @@ func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 // call runs when the literal returns, after its exit state, so its writes
 // are also kept apart for the literal's summary.
 func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFState {
+	if s.Tok == syntax.Defer {
+		// A deferred call's arguments evaluate when the defer registers,
+		// not when it runs: analyze directly invoked literals in argument
+		// position now, so a store they make joins the caller before the
+		// deferred body treatment. The literals are marked, so the walk
+		// below does not analyze them a second time as deferred bodies.
+		if call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr); ok {
+			for _, arg := range call.ArgList {
+				inner, ok := syntax.Unparen(arg).(*syntax.CallExpr)
+				if !ok {
+					continue
+				}
+				lit, ok := syntax.Unparen(inner.Fun).(*syntax.FuncLit)
+				if !ok || lit.Body == nil {
+					continue
+				}
+				st = p.inlineFuncLit(lit, inner.ArgList, st)
+				if st == nil {
+					return nil
+				}
+			}
+		}
+	}
 	outer := p.eff
 	if outer == nil || s.Tok != syntax.Defer {
 		return p.expr(s, st)
@@ -3085,11 +3112,35 @@ func (p *logosEFPass) labeled(s *syntax.LabeledStmt, st *logosEFState) *logosEFS
 	}
 	return p.stmt(s.Stmt, st)
 }
-
 func (p *logosEFPass) exprStmt(s *syntax.ExprStmt, st *logosEFState) *logosEFState {
-	st = p.expr(s.X, st)
-	call, ok := syntax.Unparen(s.X).(*syntax.CallExpr)
-	if !ok {
+	call, isCall := syntax.Unparen(s.X).(*syntax.CallExpr)
+	if isCall {
+		if lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit); ok && lit.Body != nil {
+			// A directly invoked literal runs exactly once, right now:
+			// analyze its body with the caller's state instead of the
+			// deferred may-run-later treatment, so the stores it makes
+			// join the caller without a join.
+			st = p.inlineFuncLit(lit, call.ArgList, st)
+		} else {
+			// Arguments evaluate when the call registers: analyze
+			// directly invoked literals in argument position now, so
+			// a body that never returns ends the caller here. The
+			// walk below skips the marked literals.
+			for _, arg := range call.ArgList {
+				st = p.inlineArg(arg, st)
+				if st == nil {
+					return nil
+				}
+			}
+			st = p.expr(s.X, st)
+		}
+	} else {
+		st = p.expr(s.X, st)
+	}
+	if st == nil {
+		return nil
+	}
+	if !isCall {
 		return st
 	}
 	if fun, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok {
@@ -4127,4 +4178,148 @@ func (p *logosEFPass) inPlace(lam *syntax.LambdaExpr, st *logosEFState) *logosEF
 		}
 		in = next
 	}
+}
+
+// inlineFuncLit analyzes a directly invoked function literal with the
+// caller's state: arguments evaluate now and the body runs exactly once,
+// right now, so its stores join the caller without the deferred
+// may-run-later treatment. The literal is marked so the generic
+// expression walk does not analyze it a second time as a deferred body.
+func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, args []syntax.Expr, st *logosEFState) *logosEFState {
+	if st == nil {
+		return nil
+	}
+	for _, arg := range args {
+		st = p.inlineArg(arg, st)
+		if st == nil {
+			return nil
+		}
+	}
+	if p.inlined == nil {
+		p.inlined = make(map[syntax.Node]bool)
+	}
+	p.inlined[lit] = true
+	if inlineableLit(lit) {
+		return p.run(lit.Body, st)
+	}
+	if d, ok := singleDirectDefer(lit); ok && !p.deferredRecovers(d) {
+		end := p.run(lit.Body, st)
+		if end == nil {
+			return nil
+		}
+		return p.run(d.Body, end)
+	}
+	return p.later(lit, lit.Body, st)
+}
+
+// deferredRecovers reports whether a deferred literal body may call the
+// recover builtin: a panic in the invoking literal is then caught, so the
+// caller continues instead of unwinding. Sequential analysis must not
+// treat the invocation as dead.
+func (p *logosEFPass) deferredRecovers(lit *syntax.FuncLit) bool {
+	found := false
+	syntax.Inspect(lit.Body, func(n syntax.Node) bool {
+		call, ok := n.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
+		if !ok {
+			return true
+		}
+		if b, ok := p.check.Uses[name].(*Builtin); ok && b.Name() == "recover" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// singleDirectDefer returns the body of the only deferred call in a
+// directly invoked literal when that call names a literal: the outer
+// literal completes, so its one deferred call runs exactly once at
+// exit and can be analyzed sequentially. Anything else reports false.
+func singleDirectDefer(lit *syntax.FuncLit) (*syntax.FuncLit, bool) {
+	var found *syntax.CallStmt
+	bad := false
+	syntax.Inspect(lit.Body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.CallStmt:
+			if n.Tok == syntax.Go {
+				bad = true
+				return false
+			}
+			if n.Tok != syntax.Defer {
+				return true
+			}
+			if found != nil {
+				bad = true
+				return false
+			}
+			found = n
+		case *syntax.ErrdeferStmt:
+			bad = true
+			return false
+		}
+		return true
+	})
+	if bad || found == nil {
+		return nil, false
+	}
+	top := false
+	for _, s := range lit.Body.List {
+		if s == found {
+			top = true
+			break
+		}
+	}
+	if !top {
+		return nil, false
+	}
+	c, ok := syntax.Unparen(found.Call).(*syntax.CallExpr)
+	if !ok {
+		return nil, false
+	}
+	d, ok := syntax.Unparen(c.Fun).(*syntax.FuncLit)
+	if !ok || d.Body == nil {
+		return nil, false
+	}
+	return d, true
+}
+
+// inlineArg analyzes one call argument with immediate semantics: a
+// directly invoked literal in argument position runs when the call
+// registers, so its body joins the caller and a body that never
+// returns ends the caller there. Anything else uses the ordinary walk.
+func (p *logosEFPass) inlineArg(arg syntax.Expr, st *logosEFState) *logosEFState {
+	if inner, ok := syntax.Unparen(arg).(*syntax.CallExpr); ok {
+		if lit, ok := syntax.Unparen(inner.Fun).(*syntax.FuncLit); ok && lit.Body != nil {
+			return p.inlineFuncLit(lit, inner.ArgList, st)
+		}
+	}
+	return p.expr(arg, st)
+}
+
+// inlineableLit reports whether a directly invoked literal body runs
+// exactly where it stands: it holds no deferred or spawned execution,
+// so immediate analysis neither loses a cleanup nor adopts a write that
+// only a later capture may see. Anything else keeps the may-run-later
+// treatment.
+func inlineableLit(lit *syntax.FuncLit) bool {
+	deferred := false
+	syntax.Inspect(lit.Body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.CallStmt:
+			if n.Tok == syntax.Defer || n.Tok == syntax.Go {
+				deferred = true
+				return false
+			}
+		case *syntax.ErrdeferStmt:
+			deferred = true
+			return false
+		}
+		return true
+	})
+	return !deferred
 }
