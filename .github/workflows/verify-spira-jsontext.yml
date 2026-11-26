@@ -1,0 +1,86 @@
+name: Verify integrated Spira exporter fixes
+
+on:
+  push:
+    branches: [ci/verify-spira-jsontext-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        source: [prior-integration, combined-repairs]
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Restore the previous exporter for the witness
+        if: matrix.source == 'prior-integration'
+        run: |
+          git fetch --no-tags --depth=1 origin 05f2570fce079d467556979a3d599c3e892d6876
+          git show 05f2570fce079d467556979a3d599c3e892d6876:src/cmd/go/internal/logos/eject/eject.go > src/cmd/go/internal/logos/eject/eject.go
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the exact compiler source
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          sha256sum src/cmd/go/internal/logos/eject/eject.go >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Reproduce missing source-owned jsontext imports
+        if: matrix.source == 'prior-integration'
+        run: |
+          if go test -v -race -count=1 cmd/go -run '^TestScript$/logos_eject_jsontext_(alias_)?struct$' > review-evidence/struct-import-red.log 2>&1; then
+            cat review-evidence/struct-import-red.log
+            echo 'prior exporter unexpectedly passed both struct import attacks'
+            exit 1
+          fi
+          cat review-evidence/struct-import-red.log
+          grep -E 'undefined: (jsontext|jt)' review-evidence/struct-import-red.log
+      - name: Prove native and upstream struct output agree
+        if: matrix.source == 'combined-repairs'
+        run: go test -v -race -count=1 cmd/go -run '^TestScript$/logos_eject_jsontext_(alias_)?struct$' 2>&1 | tee review-evidence/struct-import-green.log
+      - name: Combined exporter package gates
+        if: matrix.source == 'combined-repairs'
+        run: go test -v -race -count=1 -short cmd/go/internal/logos/eject 2>&1 | tee review-evidence/unit.log
+      - name: Combined support, JSON, and verifier scripts
+        if: matrix.source == 'combined-repairs'
+        run: go test -v -race -count=1 cmd/go -run '^TestScript$/logos_eject_(json.*|arena_variant|go_test_support|goroot_lgo_dep|inactive_file|inactive_go_import|inactive_owned|inactive_packages|inactive_support|lgo_runtime_pair|overlay_sources|overlay_toolchain|support_closure|variant_package_names|variant_tags|variant_test_imports|vendor_support|stdlib_fields|h2extendedconnect|fork_stdlib|struct_default)$' 2>&1 | tee review-evidence/scripts.log
+      - name: Vet, formatting, and exact source
+        if: matrix.source == 'combined-repairs'
+        run: |
+          go vet cmd/go/internal/logos/eject
+          test -z "$(gofmt -l src/cmd/go/internal/logos/eject/eject.go src/cmd/go/internal/logos/eject/jsonv2_review_test.go)"
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: spira-jsontext-${{ matrix.source }}-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
