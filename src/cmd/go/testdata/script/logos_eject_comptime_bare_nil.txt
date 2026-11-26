@@ -1,0 +1,86 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^first 0 nil$'
+stdout '^second 3 ok$'
+stdout '^plain nil$'
+cp stdout $WORK/native.txt
+
+mkdir $WORK/orig
+cp main.lgo $WORK/orig/main.lgo
+
+logos eject -o out
+exists out/main.go
+# A bare-option nil comparison inside a comptime instance keeps its
+# direct form; it must not become a negated inequality.
+grep 'if rows == nil' out/main.go
+! grep '!rows' out/main.go
+
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+cd ..
+
+cmp main.lgo $WORK/orig/main.lgo
+
+-- m/go.mod --
+module example.com/ejectctbarenil
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Row struct {
+	N int
+}
+
+type DB struct{}
+
+func (db *DB) Query(key string) (*Row?, error) {
+	if key == "" {
+		return nil, nil
+	}
+	return &Row{N: 7}, nil
+}
+
+func (r *Row) State() string {
+	return "ok"
+}
+
+func Get[T any](db *DB, key string, dflt T) (T, string) {
+	rows, err := db.Query(key)
+	if err != nil {
+		var zero T
+		return zero, "fail"
+	}
+	if rows == nil {
+		var zero T
+		return zero, "nil"
+	}
+	const if comptime.IsStruct[T]() {
+		return dflt, "struct:" + rows.State()
+	} else {
+		return dflt, rows.State()
+	}
+}
+
+func main() {
+	db := &DB{}
+	v, s := Get[int](db, "", 3)
+	fmt.Println("first", v, s)
+	v2, s2 := Get[int](db, "k", 3)
+	fmt.Println("second", v2, s2)
+	u, _ := db.Query("")
+	if u == nil {
+		fmt.Println("plain nil")
+	}
+}

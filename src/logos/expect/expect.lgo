@@ -35,7 +35,9 @@ type Reporter interface {
 // test with a unified diff otherwise. Struct values compare field by
 // field through comptime iteration; every other value compares through
 // LeafText. Strings compare line by line so the diff shows the exact
-// line that changed.
+// line that changed. Equal leaf texts of different dynamic types still
+// fail, with both types named, so an ambiguous value such as the
+// string "nil" never compares equal to nil.
 func Equal[T any](r Reporter, want T, got T) {
 	r.Helper()
 	const if comptime.IsStruct[T]() {
@@ -53,6 +55,12 @@ func Equal[T any](r Reporter, want T, got T) {
 		gotText := LeafText(any(got))
 		if wantText != gotText {
 			r.Errorf("expect: values differ\n%s", Diff(wantText, gotText))
+		} else if fmt.Sprintf("%T", any(want)) != fmt.Sprintf("%T", any(got)) {
+			// A string "nil" renders like nil and equal texts can hide
+			// different types, so a text match across types fails with
+			// both types named.
+		r.Errorf("expect: ambiguous values differ in type\n- (%T) %s\n+ (%T) %s\n",
+				any(want), wantText, any(got), gotText)
 		}
 	}
 }
@@ -112,26 +120,27 @@ func Diff(want string, got string) string {
 	for tail < len(w)-head && tail < len(g)-head && w[len(w)-1-tail] == g[len(g)-1-tail] {
 		tail++
 	}
-	out := "--- want\n+++ got\n"
+	var out strings.Builder
+	out.WriteString("--- want\n+++ got\n")
 	start := head - 2
 	if start < 0 {
 		start = 0
 	}
 	for i := start; i < head; i++ {
-		out += "  " + w[i] + "\n"
+		out.WriteString("  " + w[i] + "\n")
 	}
 	for i := head; i < len(w)-tail; i++ {
-		out += "- " + w[i] + "\n"
+		out.WriteString("- " + w[i] + "\n")
 	}
 	for i := head; i < len(g)-tail; i++ {
-		out += "+ " + g[i] + "\n"
+		out.WriteString("+ " + g[i] + "\n")
 	}
 	end := len(w) - tail + 2
 	if end > len(w) {
 		end = len(w)
 	}
 	for i := len(w) - tail; i < end; i++ {
-		out += "  " + w[i] + "\n"
+		out.WriteString("  " + w[i] + "\n")
 	}
-	return out
+	return out.String()
 }

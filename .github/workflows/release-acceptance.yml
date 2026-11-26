@@ -43,9 +43,13 @@ jobs:
         level: ["1", "2", "3"]
     steps:
       - name: "Check out the exact clean candidate tip"
-        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          ref: "${{ env.TESTED_REVISION }}"
+        run: &checkout |
+          [[ "$TESTED_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          git init --quiet .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          git -c protocol.version=2 fetch --no-tags --depth=1 origin "$TESTED_REVISION"
+          git -c advice.detachedHead=false checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$TESTED_REVISION"
       - name: "Build and execute the complete no-short cell"
         env:
           MATRIX_DRIVER: "${{ matrix.driver }}"
@@ -66,9 +70,7 @@ jobs:
     timeout-minutes: 300
     steps:
       - name: "Check out the exact clean candidate tip"
-        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          ref: "${{ env.TESTED_REVISION }}"
+        run: *checkout
       - name: "Build, run all parity tiers and verify the release stamp"
         run: bash .github/scripts/release-acceptance.sh parity
       - name: "Retain source identities and recoverable raw evidence"
@@ -83,9 +85,7 @@ jobs:
       result: "${{ steps.repro.outputs.result }}"
     steps:
       - name: "Check out the exact clean candidate tip"
-        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          ref: "${{ env.TESTED_REVISION }}"
+        run: *checkout
       - name: "Build and record both deterministic programs on host A"
         id: repro
         run: bash .github/scripts/release-acceptance.sh repro
@@ -94,18 +94,16 @@ jobs:
         run: *retain
 
   repro-b:
-    name: "repro-host-ubuntu-current"
-    # This leg tracks the moving Ubuntu image while repro-a stays pinned,
-    # so a pass still covers two different host images.
-    runs-on: "ubuntu-latest"
+    name: "repro-host-depot-4cpu"
+    # Use a distinct supported runner configuration; both hosts retain GCC 14.
+    # The comparison also rejects matching VM fingerprints.
+    runs-on: "depot-ubuntu-24.04-4"
     timeout-minutes: 180
     outputs:
       result: "${{ steps.repro.outputs.result }}"
     steps:
       - name: "Check out the exact clean candidate tip"
-        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          ref: "${{ env.TESTED_REVISION }}"
+        run: *checkout
       - name: "Build and record both deterministic programs on host B"
         id: repro
         run: bash .github/scripts/release-acceptance.sh repro
@@ -120,9 +118,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Check out the exact clean candidate tip"
-        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          ref: "${{ env.TESTED_REVISION }}"
+        run: *checkout
       - name: "Require distinct hosts and identical source, recipe and digests"
         env:
           REPRO_A: "${{ needs.repro-a.outputs.result }}"
@@ -138,9 +134,7 @@ jobs:
     timeout-minutes: 240
     steps:
       - name: "Check out the exact clean candidate tip"
-        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          ref: "${{ env.TESTED_REVISION }}"
+        run: *checkout
       - name: "Build and execute all guarded runtime legs"
         run: bash .github/scripts/release-acceptance.sh runtimes
       - name: "Retain runtime identities and recoverable raw evidence"
@@ -153,9 +147,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Check out the exact clean candidate tip"
-        uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          ref: "${{ env.TESTED_REVISION }}"
+        run: *checkout
       - name: "Report unresolved language closure without suppressing independent gates"
         run: bash .github/scripts/release-acceptance.sh closure
       - name: "Retain closure evidence"

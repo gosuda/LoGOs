@@ -30,7 +30,7 @@ import (
 
 const supportVendorDir = "internal/toolchainvendor"
 
-func copyEjectedSupport(src, staging, dst string, roots []string) error {
+func copyEjectedSupport(src, staging, dst string, roots []string) (err error) {
 	destinations, err := supportDestinations(roots)
 	if err != nil {
 		return err
@@ -39,7 +39,11 @@ func copyEjectedSupport(src, staging, dst string, roots []string) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 	c := supportCopy{
 		src:          root,
 		srcDir:       src,
@@ -144,7 +148,7 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 		}
 		if isSupportCopyFile(name) || p.vendored && isVendoredGoFile(name) || !p.vendored && isLoweredSupportFile(name) {
 			if !entry.Type().IsRegular() {
-				return fmt.Errorf("Go source %s is not a regular file", name)
+				return fmt.Errorf("go source %s is not a regular file", name)
 			}
 			patterns, copied, err := c.copyPackageGo(p, name)
 			if err != nil {
@@ -157,7 +161,26 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 			continue
 		}
 		if isPackageBuildAsset(name) {
-			if err := c.copyRaw(path.Join(p.src, name), path.Join(p.dst, name)); err != nil {
+			src, dst := path.Join(p.src, name), path.Join(p.dst, name)
+			logical := filepath.Join(c.absSrcDir(p), name)
+			if !p.vendored && fsys.Replaced(logical) {
+				// Explicit toolchain overlays select the effective asset.
+				// Other assets keep rooted physical reads and symlink checks.
+				info, err := fsys.Stat(logical)
+				if err != nil {
+					return err
+				}
+				if !info.Mode().IsRegular() {
+					return fmt.Errorf("support asset %s is not a regular file", src)
+				}
+				data, err := fsys.ReadFile(logical)
+				if err != nil {
+					return err
+				}
+				if err := c.writeFile(src, dst, data); err != nil {
+					return err
+				}
+			} else if err := c.copyRaw(src, dst); err != nil {
 				return err
 			}
 		}

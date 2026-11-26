@@ -23,6 +23,8 @@ stdout '^ovl base plus ovl extra$'
 logos build -overlay=$WORK/ovl/overlay.json --emit-go=out .
 exists out/_logos_deps/rt/logos/ejecttestovl/extra.go
 ! exists out/_logos_deps/rt/logos/ejecttestovl/removed.go
+grep '^inserted header$' out/_logos_deps/rt/logos/ejecttestovl/inserted.h
+grep '^replacement header$' out/_logos_deps/rt/logos/ejecttestovl/replaced.h
 
 env GOROOT=$TESTGO_GOROOT
 cd out
@@ -93,7 +95,6 @@ func main() {
 		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
 	}
 }
-
 -- mkovl.go --
 package main
 
@@ -144,17 +145,32 @@ func main() {
 		fmt.Fprintf(os.Stderr, "mkovl: chtimes %s: %v\n", extraPath, err)
 		os.Exit(1)
 	}
+	for name, content := range map[string]string{
+		"inserted.h": "inserted header\n",
+		"replaced.h": "replacement header\n",
+	} {
+		file := filepath.Join(out, name)
+		if err := os.WriteFile(file, []byte(content), 0666); err != nil {
+			fmt.Fprintf(os.Stderr, "mkovl: write %s: %v\n", name, err)
+			os.Exit(1)
+		}
+		if err := os.Chtimes(file, old, old); err != nil {
+			fmt.Fprintf(os.Stderr, "mkovl: chtimes %s: %v\n", name, err)
+			os.Exit(1)
+		}
+	}
 	removed := filepath.Join(fake, "src", "logos", "ejecttestovl", "removed.lgo")
 	inserted := filepath.Join(fake, "src", "logos", "ejecttestovl", "extra.lgo")
 	doc := "{\n\"Replace\": {\n" +
 		quote(removed) + ": \"\",\n" +
-		quote(inserted) + ": " + quote(extraPath) + "\n}\n}\n"
+		quote(inserted) + ": " + quote(extraPath) + ",\n" +
+		quote(filepath.Join(fake, "src", "logos", "ejecttestovl", "inserted.h")) + ": " + quote(filepath.Join(out, "inserted.h")) + ",\n" +
+		quote(filepath.Join(fake, "src", "logos", "ejecttestovl", "replaced.h")) + ": " + quote(filepath.Join(out, "replaced.h")) + "\n}\n}\n"
 	if err := os.WriteFile(filepath.Join(out, "overlay.json"), []byte(doc), 0666); err != nil {
 		fmt.Fprintf(os.Stderr, "mkovl: write overlay.json: %v\n", err)
 		os.Exit(1)
 	}
 }
-
 -- dep/ejecttestovl/base.lgo --
 package ejecttestovl
 
@@ -182,3 +198,6 @@ import (
 func main() {
 	fmt.Println(ejecttestovl.Base() + " plus " + ejecttestovl.Extra())
 }
+
+-- dep/ejecttestovl/replaced.h --
+physical header

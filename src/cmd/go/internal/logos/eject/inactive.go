@@ -5,7 +5,6 @@
 package eject
 
 import (
-	"context"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -21,7 +20,6 @@ import (
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
-	"cmd/go/internal/modload"
 	"cmd/go/internal/search"
 )
 
@@ -137,75 +135,45 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 	return out
 }
 
-// discoverGoImportLogos loads GOROOT logos/* packages that only inactive
-// Go sources import. The loader never sees those imports, so without this
-// the packages miss phase-one lowering and the support copy fails on their
-// missing staged output even for the default build. Only files the support
-// copy would read seed the search, and ignore-tagged files stay out exactly
-// as in the copy.
-func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, plan *ejectPlan) {
-	for {
-		dirs := map[string]bool{}
-		for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
-			for _, p := range plan.provenance[path] {
-				if !isGorootLogos(p) {
-					continue
-				}
-				dirs[p.Dir] = true
-			}
-		}
-		known := map[string]bool{}
-		for path := range plan.provenance {
-			known[path] = true
-		}
-		added := map[string]bool{}
-		var newPaths []string
-		for _, dir := range slices.Sorted(maps.Keys(dirs)) {
-			entries, err := fsys.ReadDir(dir)
-			if err != nil {
-				base.Fatalf("logos eject: inventory GOROOT sources in %s: %v", dir, err)
-			}
-			for _, entry := range entries {
-				name := entry.Name()
-				if entry.IsDir() || !isSupportCopyFile(name) {
-					continue
-				}
-				data, err := fsys.ReadFile(filepath.Join(dir, name))
-				if err != nil {
-					base.Fatalf("logos eject: read GOROOT source %s: %v", filepath.Join(dir, name), err)
-				}
-				for _, imp := range goSourceImports(data) {
-					rest, ok := strings.CutPrefix(imp, "logos/")
-					if !ok || rest == "" || known[imp] || added[imp] {
-						continue
-					}
-					added[imp] = true
-					newPaths = append(newPaths, imp)
-				}
-			}
-		}
-		if len(newPaths) == 0 {
-			return
-		}
-		slices.Sort(newPaths)
-		pkgs := load.PackagesAndErrors(moduleLoader, ctx, opts, newPaths)
-		load.CheckPackageErrors(pkgs)
-		for _, p := range load.PackageList(pkgs) {
-			if p == nil {
-				continue
-			}
-			found := false
-			for _, q := range plan.provenance[p.ImportPath] {
-				if q == p {
-					found = true
-					break
-				}
-			}
-			if !found {
-				plan.provenance[p.ImportPath] = append(plan.provenance[p.ImportPath], p)
+// collectInactiveGoImports retains the importing source when a copied GOROOT
+// Go file reaches a logos/* package absent from actual loads. Loading only the
+// import path in the host context loses platform and tag constraints. The
+// existing variant helpers instead load the importer in a context that selects
+// this file, and contribute the resulting dependency closure to the plan.
+func collectInactiveGoImports(plan *ejectPlan) []inactiveFile {
+	dirs := map[string]*load.Package{}
+	for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
+		for _, p := range plan.provenance[path] {
+			if isGorootLogos(p) {
+				dirs[p.Dir] = p
 			}
 		}
 	}
+	var out []inactiveFile
+	for _, dir := range slices.Sorted(maps.Keys(dirs)) {
+		entries, err := fsys.ReadDir(dir)
+		if err != nil {
+			base.Fatalf("logos eject: inventory GOROOT sources in %s: %v", dir, err)
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || !isSupportCopyFile(name) {
+				continue
+			}
+			data, err := fsys.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				base.Fatalf("logos eject: read GOROOT source %s: %v", filepath.Join(dir, name), err)
+			}
+			for _, imp := range goSourceImports(data) {
+				rest, ok := strings.CutPrefix(imp, "logos/")
+				if ok && rest != "" && len(plan.provenance[imp]) == 0 {
+					out = append(out, inactiveFile{pkg: dirs[dir], name: name})
+					break
+				}
+			}
+		}
+	}
+	return out
 }
 
 // goSourceImports returns the import paths of one Go source, or nil when

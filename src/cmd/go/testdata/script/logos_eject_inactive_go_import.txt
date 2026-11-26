@@ -19,6 +19,10 @@ stdout '^goimp$'
 
 logos eject -o out
 exists out/_logos_deps/rt/logos/ejecttestgoleaf/leaf.go
+exists out/_logos_deps/rt/logos/ejecttestwinhelper/helper_windows.go
+exists out/_logos_deps/rt/logos/ejecttestwinlgo/helper_windows.go
+exists out/_logos_deps/rt/logos/ejecttestlinhelper/helper_linux.go
+exists out/_logos_deps/rt/logos/ejecttestlinlgo/helper_linux.go
 
 env GOROOT=$TESTGO_GOROOT
 cd out
@@ -26,6 +30,14 @@ go build -mod=readonly ./...
 go run .
 stdout '^goimp$'
 go build -mod=readonly -tags pr270goimp ./...
+
+# The importing filename selects the target for both a Go-only leaf and
+# a LoGOs-only leaf. Neither alternate target may be loaded as the host.
+env GOOS=windows
+go build -mod=readonly -o windows.exe .
+env GOOS=linux
+go build -mod=readonly -o linux.bin .
+env GOOS=$TESTGO_GOHOSTOS
 
 -- mkgoroot.go --
 package main
@@ -90,12 +102,10 @@ func main() {
 		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
 	}
 }
-
 -- dep/ejecttestgoimp/base.go --
 package ejecttestgoimp
 
 func Name() string { return "goimp" }
-
 -- dep/ejecttestgoimp/extra.go --
 //go:build pr270goimp
 
@@ -104,7 +114,6 @@ package ejecttestgoimp
 import "logos/ejecttestgoleaf"
 
 func ExtraName() string { return ejecttestgoleaf.Leaf() }
-
 -- dep/ejecttestgoleaf/leaf.lgo --
 package ejecttestgoleaf
 
@@ -127,3 +136,39 @@ import (
 func main() {
 	fmt.Println(ejecttestgoimp.Name())
 }
+
+-- dep/ejecttestgoimp/feature_windows.go --
+package ejecttestgoimp
+
+import (
+	"logos/ejecttestwinhelper"
+	"logos/ejecttestwinlgo"
+)
+
+func WindowsName() string { return ejecttestwinhelper.Name() + ejecttestwinlgo.Name() }
+-- dep/ejecttestwinhelper/helper_windows.go --
+package ejecttestwinhelper
+
+func Name() string { return "windows-go" }
+-- dep/ejecttestwinlgo/helper_windows.lgo --
+package ejecttestwinlgo
+
+func Name() string { return "windows-logos" }
+
+-- dep/ejecttestgoimp/feature_linux.go --
+package ejecttestgoimp
+
+import (
+	"logos/ejecttestlinhelper"
+	"logos/ejecttestlinlgo"
+)
+
+func LinuxName() string { return ejecttestlinhelper.Name() + ejecttestlinlgo.Name() }
+-- dep/ejecttestlinhelper/helper_linux.go --
+package ejecttestlinhelper
+
+func Name() string { return "linux-go" }
+-- dep/ejecttestlinlgo/helper_linux.lgo --
+package ejecttestlinlgo
+
+func Name() string { return "linux-logos" }

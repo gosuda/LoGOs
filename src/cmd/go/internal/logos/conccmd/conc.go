@@ -171,7 +171,7 @@ func Register(root *base.Command) {
 				if seed, err := strconv.ParseUint(inv.shake, 10, 64); err != nil || seed == 0 {
 					base.Fatalf("logos conc %s: -shake %q is not a seed", verb, inv.shake)
 				}
-				fmt.Fprintf(os.Stderr, "logos conc: shake seed %s\n", inv.shake)
+				_, _ = fmt.Fprintf(os.Stderr, "logos conc: shake seed %s\n", inv.shake)
 			}
 			if inv.fix && inv.aiPatch {
 				base.Fatalf("logos conc %s: --fix and --ai-patch are exclusive", verb)

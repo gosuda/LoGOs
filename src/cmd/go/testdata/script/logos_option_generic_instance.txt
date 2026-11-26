@@ -1,0 +1,70 @@
+# Generic option instances must not leak across instantiations: a fact for
+# Box[int?] restores that variable's Value only; Box[int].Value stays int.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd src
+logos build ./...
+logos lint ./...
+logos run ./cmd
+stderr '^0$'
+stderr '^nil$'
+cd neg
+! logos build ./...
+stderr 'cannot use'
+cd ..
+
+logos eject -o out
+exists out/cmd/main.go
+cd out
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ../..
+
+-- src/go.mod --
+module example.com/optgeneric
+
+go 1.27
+
+-- src/lib/lib.lgo --
+package lib
+
+type Box[T any] struct {
+	Value T
+}
+
+var Optional Box[int?]
+
+var Plain Box[int]
+
+-- src/cmd/main.lgo --
+package main
+
+import "example.com/optgeneric/lib"
+
+func main() {
+	var n int = lib.Plain.Value
+	println(n)
+	if lib.Optional.Value == nil {
+		println("nil")
+	}
+}
+
+-- src/neg/go.mod --
+module example.com/optgenericneg
+
+go 1.27
+
+require example.com/optgeneric v0.0.0
+
+replace example.com/optgeneric => ..
+
+-- src/neg/neg.lgo --
+package neg
+
+import "example.com/optgeneric/lib"
+
+// Optional.Value is optional: assigning it to int must not compile.
+var _ int = lib.Optional.Value
