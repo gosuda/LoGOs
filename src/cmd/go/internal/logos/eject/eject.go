@@ -1613,7 +1613,7 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 		// all 2^n overrides up front, and the platform fallback below
 		// reuses the same stream instead of rebuilding a stored list.
 		preferJSONv2 := slices.Contains(expKnown, "jsonv2")
-		for pass := 0; pass < 2; pass++ {
+		for pass := range 2 {
 			if pass == 1 && !preferJSONv2 {
 				break
 			}
