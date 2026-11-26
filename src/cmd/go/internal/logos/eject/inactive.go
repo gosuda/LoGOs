@@ -5,18 +5,24 @@
 package eject
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"internal/logosfile"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
+	"cmd/go/internal/modload"
 	"cmd/go/internal/search"
 )
 
@@ -129,6 +135,125 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 		}
 		return strings.Compare(a.name, b.name)
 	})
+	return out
+}
+
+// discoverGoImportLogos loads GOROOT logos/* packages that only inactive
+// Go sources import. The loader never sees those imports, so without this
+// the packages miss phase-one lowering and the support copy fails on their
+// missing staged output even for the default build. Only files the support
+// copy would read seed the search, and ignore-tagged files stay out exactly
+// as in the copy.
+func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, plan *ejectPlan) {
+	unloadable := map[string]bool{}
+	for {
+		dirs := map[string]bool{}
+		for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
+			for _, p := range plan.provenance[path] {
+				if !isGorootLogos(p) {
+					continue
+				}
+				dirs[p.Dir] = true
+			}
+		}
+		known := map[string]bool{}
+		for path := range plan.provenance {
+			known[path] = true
+		}
+		for path := range unloadable {
+			known[path] = true
+		}
+		added := map[string]bool{}
+		var newPaths []string
+		for _, dir := range slices.Sorted(maps.Keys(dirs)) {
+			entries, err := fsys.ReadDir(dir)
+			if err != nil {
+				base.Fatalf("logos eject: inventory GOROOT sources in %s: %v", dir, err)
+			}
+			for _, entry := range entries {
+				name := entry.Name()
+				if entry.IsDir() || !isSupportCopyFile(name) {
+					continue
+				}
+				data, err := fsys.ReadFile(filepath.Join(dir, name))
+				if err != nil {
+					base.Fatalf("logos eject: read GOROOT source %s: %v", filepath.Join(dir, name), err)
+				}
+				for _, imp := range goSourceImports(data) {
+					rest, ok := strings.CutPrefix(imp, "logos/")
+					if !ok || rest == "" || known[imp] || added[imp] {
+						continue
+					}
+					added[imp] = true
+					newPaths = append(newPaths, imp)
+				}
+			}
+		}
+		if len(newPaths) == 0 {
+			return
+		}
+		slices.Sort(newPaths)
+		pkgs := load.PackagesAndErrors(moduleLoader, ctx, opts, newPaths)
+		checkDiscoveredPackageErrors(pkgs, added, unloadable)
+		for _, p := range load.PackageList(pkgs) {
+			if p == nil || p.Error != nil {
+				continue
+			}
+			found := false
+			for _, q := range plan.provenance[p.ImportPath] {
+				if q == p {
+					found = true
+					break
+				}
+			}
+			if !found {
+				plan.provenance[p.ImportPath] = append(plan.provenance[p.ImportPath], p)
+			}
+		}
+	}
+}
+
+// checkDiscoveredPackageErrors fatals on failures loading discovered
+// packages, except a discovered package with no Go files for the current
+// target. A platform-only dependency (for example a helper holding only a
+// windows-tagged file) cannot load on this target, and aborting would
+// reject the valid alternate build the variant helpers lower. Skipped
+// packages stay out of provenance; anything they would have contributed
+// to the current target fails loudly where it is used.
+func checkDiscoveredPackageErrors(pkgs []*load.Package, discovered, unloadable map[string]bool) {
+	load.PackageErrors(pkgs, func(p *load.Package) {
+		var nogo *load.NoGoError
+		if discovered[p.ImportPath] && errors.As(p.Error, &nogo) {
+			unloadable[p.ImportPath] = true
+			return
+		}
+		load.DefaultPrinter().Errorf(p, "%v", p.Error)
+	})
+	base.ExitIfErrors()
+}
+
+// goSourceImports returns the import paths of one Go source, or nil when
+// the file does not parse or carries an ignore constraint. Unparseable and
+// ignored files stay out of the discovery exactly as they stay out of the
+// copy, which still fails loudly on them when it matters.
+func goSourceImports(data []byte) []string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", data, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		return nil
+	}
+	expr, err := ownedHeaderExpr(f)
+	if err == nil && hasIgnoreTag(expr) {
+		return nil
+	}
+	var out []string
+	for _, imp := range f.Imports {
+		impPath, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		out = append(out, impPath)
+	}
 	return out
 }
 
