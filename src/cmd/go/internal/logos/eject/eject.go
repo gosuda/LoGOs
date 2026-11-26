@@ -1991,9 +1991,9 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
 	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f)
 	uses = uses || h2uses
-	if off, overlap := h2OverlapOffset(edits, h2edits); overlap {
-		pos := fset.Position(token.Pos(fset.File(f.Pos()).Base() + off))
-		base.Errorf("logos eject: overlapping h2extendedconnect import edit at line %d: EnableHTTP2ExtendedConnect left unrewritten", pos.Line)
+	if _, overlap := h2OverlapOffset(edits, h2edits); overlap {
+		// The caller owns failure policy: compiled output fails loudly,
+		// while an uncompiled data fixture keeps its original bytes.
 		return nil, false, false
 	}
 	edits = append(edits, h2edits...)

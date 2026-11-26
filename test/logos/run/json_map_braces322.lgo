@@ -1,0 +1,28 @@
+// run
+
+package main
+
+type mapBox322 struct {
+	M map[string]string `json:"m"`
+}
+
+func checkMap322(name string, value map[string]string, want string) {
+	got, err := (mapBox322{M: value}).MarshalJSON()
+	if err != nil {
+		panic("map braces " + name + ": " + err.Error())
+	}
+	if string(got) != want {
+		panic("map braces " + name + ": got " + string(got) + ", want " + want)
+	}
+}
+
+func main() {
+	checkMap322("nil", nil, `{"m":null}`)
+	checkMap322("empty", map[string]string{}, `{"m":{}}`)
+	checkMap322("one", map[string]string{"k": "v"}, `{"m":{"k":"v"}}`)
+	checkMap322("ordered", map[string]string{"b": "two", "a": "one"}, `{"m":{"a":"one","b":"two"}}`)
+	_, err := (mapBox322{M: map[string]string{"\xed\xa0\x80": "bad"}}).MarshalJSON()
+	if err == nil {
+		panic("map key surrogate was accepted")
+	}
+}

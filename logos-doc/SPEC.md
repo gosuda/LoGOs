@@ -121,7 +121,7 @@ The output MUST NOT emit `_logos_errors` imports [T-0.3].
 Among support imports, lowered files before eject MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases. Ejected files MUST spell those support imports as `_logos_rt "github.com/gosuda/loGos/rt"` and `_logos_json "github.com/gosuda/loGos/rt/json"` (the eject rewrite in `src/cmd/go/internal/logos/eject/eject.go:supportPathEdit`).
 The tool MUST write ejected files only inside DIR, and it MUST NOT change the source tree outside DIR; DIR MAY be inside the source tree [T-0.3].
 Ejected code MUST build with an upstream Go 1.27.2 toolchain [T-0.3].
-The tool MUST refuse a standard-library selector with no upstream spelling at its source location with `portability::fork_stdlib_api`, instead of writing output that upstream Go rejects [T-0.3].
+The tool MUST refuse a standard-library selector with no upstream spelling at its source location with `portability::fork_stdlib_api`, instead of writing output that upstream Go rejects [T-0.3]. Public upstream fields, including interface-valued fields and fields of generic structs, MUST remain valid. A selector occurrence with an explicit ejection rewrite is valid only in the supported call shape; the direct `net/http.Server.EnableHTTP2ExtendedConnect()` call is mapped, while escaping method values and method expressions remain rejected [T-0.3].
 A Go package that imports a LoGOs package MUST see each exported declaration with the Go-facing signature that `logos eject` emits for it [T-0.3][R-U2].
 The output MUST NOT emit colliding helper imports. [T-0.3]
 
@@ -1193,21 +1193,23 @@ The condition MUST end at the `{` that opens the branch, so a name or `true` bef
 
 `comptime.IsStruct[T]()` MUST be a constant `const if` condition, true when the underlying type of `T` is a struct. [T-205]
 
+`comptime.IsInterface[T]()` MUST be a constant `const if` condition, true when the underlying type of `T`, after removing transparent const-view and read-only-descendant wrappers, is an interface. It includes named interfaces and value unions; pointers and other containers are not interfaces. The predicate MUST fold per instantiation or field, so a library MAY restrict runtime type-identity checks to interface values. [T-205]
+
 Inside a comptime generic its value MUST be taken per instantiation, and a condition built from it with `!`, `&&`, `||`, `==`, `!=` and constants MUST NOT fail `[comptime::not_constant]`. [T-205]
 
 `comptime.SizeOf[T]()`, `comptime.AlignOf[T]()`, and `comptime.HasPointers[T]()` are compile-time constants describing the size, alignment, and pointer-containing status of `T`.
 
-`comptime.HasUnexported[T]()` is a compile-time constant, true when the layout of `T` holds an unexported field, including a blank field, in a struct or array element at any depth. Slice, map, pointer, and interface elements are separate values with their own instantiations and do not count toward the container. [T-205]
+`comptime.HasUnexported[T]()` is a compile-time constant, true when the layout of `T` holds a source-declared unexported field, including a blank field, in a struct or array element at any depth, including inline option, tuple, const-view, and read-only-descendant wrappers. A zero-length array has no element storage. Slice, map, pointer, and interface elements are separate values with their own instantiations and do not count toward the container. [T-205]
 
-The three size, alignment, and pointer intrinsics MUST equal what `unsafe.Sizeof`, `unsafe.Alignof`, and the garbage collector pointer map give for the Go type that the lowering emits for `T` on the target. [T-205] `comptime.HasUnexported[T]()` MUST be true exactly when that emitted type holds an unexported field, including a blank field, in a struct or array element at any depth. [T-205] That holds for every LoGOs type form: an option that the lowering keeps bare or wraps, a const view, a tuple, a closed union, and any struct, array, or option that holds them. [T-205]
+The three size, alignment, and pointer intrinsics MUST equal what `unsafe.Sizeof`, `unsafe.Alignof`, and the garbage collector pointer map give for the Go type that the lowering emits for `T` on the target. That holds for every LoGOs type form: an option that the lowering keeps bare or wraps, a const view, a tuple, a closed union, and any struct, array, or option that holds them. [T-205]
 
-A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, the field facts `f.Name`, `f.Index`, `f.Exported` and `f.Tag.Get(k)` with a constant `k`, the type identity `comptime.TypeOf[X]() == comptime.TypeOf[Y]()`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
+A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, the field facts `f.Name`, `f.Index`, `f.Exported` and `f.Tag.Get(k)` with a constant `k`, `comptime.IsInterface[X]()` over the same type forms, the type identity `comptime.TypeOf[X]() == comptime.TypeOf[Y]()`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
 
 Any other non-constant condition MUST fail with `[comptime::not_constant]`, including a condition on the `const for` index variable. [T-205]
 
 A `const for` in a dead `const if` branch MUST NOT fail with `[comptime::const_for_fields]`. [T-205]
 
-`comptime.Fields[T]()`, `f.Type` used as a value, `comptime.IsStruct[T]()`, `comptime.TypeOf[X]()`, and `comptime.Error(msg)` MUST be compile-time only. `val.[f]`, `f.Name`, and `f.Tag.Get(k)` inside a `const for` body expand to per-field code; outside the body they are scope or projection errors, not run-time uses. [T-205]
+`comptime.Fields[T]()`, `f.Type` used as a value, `comptime.IsStruct[T]()`, `comptime.IsInterface[T]()`, `comptime.TypeOf[X]()`, and `comptime.Error(msg)` MUST be compile-time only. `val.[f]`, `f.Name`, and `f.Tag.Get(k)` inside a `const for` body expand to per-field code; outside the body they are scope or projection errors, not run-time uses. [T-205]
 
 Any run-time use of those compile-time-only forms MUST fail with `[comptime::runtime_use]`. A use of `val.[f]`, `f.Name`, or `f.Tag` outside a `const for` body fails with the scope or projection diagnostic. [T-205]
 

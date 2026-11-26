@@ -5,6 +5,8 @@
 package eject
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -65,7 +67,7 @@ func enable(s *http.Server) {
 	}
 }
 
-func TestH2ExtendedConnectOverlapFailsRemap(t *testing.T) {
+func TestH2ExtendedConnectRejectsOverlappingImportEdit(t *testing.T) {
 	const in = `package main
 
 import "net/http"
@@ -75,11 +77,29 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	// An overlap must fail the remap so the caller preserves the
-	// original bytes; reporting success writes a partial rewrite.
-	out, _, ok := remapEjectedFile([]byte(in), "")
-	if ok || out != nil {
-		t.Errorf("overlapping remap reported success (ok=%v out=%q); copyDataFile would write a partial rewrite", ok, out)
+	out, uses, ok := remapEjectedFile([]byte(in), "")
+	if ok || uses || out != nil {
+		t.Fatalf("overlapping edit reported partial success: ok=%v uses=%v output=%q", ok, uses, out)
+	}
+
+	saved := ejectGofmtFiles
+	t.Cleanup(func() { ejectGofmtFiles = saved })
+	ejectGofmtFiles = nil
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "input.go"), filepath.Join(dir, "out", "input.go")
+	if err := os.WriteFile(src, []byte(in), 0666); err != nil {
+		t.Fatal(err)
+	}
+	uses, err := copyDataFile(src, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uses || string(got) != in || len(ejectGofmtFiles) != 0 {
+		t.Errorf("copy changed rejected source: uses=%v format=%v output=%q", uses, ejectGofmtFiles, got)
 	}
 }
 
