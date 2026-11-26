@@ -693,7 +693,7 @@ func TestSpawnResolvesRelativeCwd(t *testing.T) {
 }
 
 func TestSpawnAbsolutePathIgnoresCwdShadow(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "plan9" {
 		t.Skip("fixture executables use a Unix shell")
 	}
 	root := t.TempDir()
