@@ -21,7 +21,7 @@ Two packages are not a fixture. The logos testdir harness writes one source file
 | dead_error_silent.lgo | I3. `comptime.Error` in an untaken arm is silent. | basic.zig:353 |
 | dead_break_ignored.lgo | I3. `break` in an untaken arm does not affect the loop. | |
 | dead_false_error.lgo | I3. `comptime.Error` in a `const if false` arm is silent. | basic.zig:353 |
-| switch_tail_type_error.lgo | I3 and SPEC 2.5. Code after a returning taken case is termination-dead: its type error and its `comptime.Error` both report. | |
+| switch_tail_type_error.lgo | I3 and SPEC 2.5. Code after a returning taken case is termination-dead: its type error reports while its `comptime.Error` is silent. | |
 | switch_dead_case_type_error.lgo | I3. A type error in an untaken `const switch` case is not checked. | |
 | switch_untaken_error_silent.lgo | I3. `comptime.Error` in an untaken case is silent. | |
 | dead_error_taken.lgo | I3 and SPEC 2.5. A taken `comptime.Error` fails with its message. | |
