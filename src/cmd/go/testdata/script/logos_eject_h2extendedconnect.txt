@@ -59,5 +59,15 @@ func main() {
 		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
 	}
 	srv.EnableHTTP2ExtendedConnect()
+	app{Server: srv}.start()
 	fmt.Println("h2 extended connect ready")
+}
+
+// app exercises the promoted opt-in: the call records the outer struct
+// as its receiver, but the method object is the Server method the
+// textual rewrite accepts.
+type app struct{ *http.Server }
+
+func (a app) start() {
+	a.EnableHTTP2ExtendedConnect()
 }

@@ -100,11 +100,22 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		if selection == nil || selection.Kind() != types2.MethodVal {
 			return true
 		}
-		obj := selection.Obj()
-		if obj.Pkg() == nil || obj.Pkg().Path() != "net/http" {
+		// Decide from the method object, not the receiver type: a call
+		// through an embedded *http.Server records the outer struct as
+		// selection.Recv, but the method object is still the Server method
+		// the textual eject rewrite accepts. Embedding paths stay allowed.
+		fn, ok := selection.Obj().(*types2.Func)
+		if !ok || fn.Name() != "EnableHTTP2ExtendedConnect" {
 			return true
 		}
-		recv := types2.Unalias(selection.Recv())
+		if fn.Pkg() == nil || fn.Pkg().Path() != "net/http" {
+			return true
+		}
+		sig, ok := fn.Type().(*types2.Signature)
+		if !ok || sig.Recv() == nil {
+			return true
+		}
+		recv := types2.Unalias(sig.Recv().Type())
 		if pointer, ok := recv.(*types2.Pointer); ok {
 			recv = types2.Unalias(pointer.Elem())
 		}
