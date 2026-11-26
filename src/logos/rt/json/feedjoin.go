@@ -36,11 +36,19 @@ func AppendTokens(dst []byte, toks []Token, max int) ([]byte, error) {
 		}
 	}
 	if last.Kind == TokenNumber {
-		total := len(last.Bytes)
-		for _, t := range toks[:len(toks)-1] {
-			total += len(t.Bytes)
+		hasDigit := false
+		for _, t := range toks {
+			for _, c := range t.Bytes {
+				if isDigit(c) {
+					hasDigit = true
+					break
+				}
+			}
+			if hasDigit {
+				break
+			}
 		}
-		if total == 0 {
+		if !hasDigit {
 			return dst, ErrSyntax
 		}
 	}

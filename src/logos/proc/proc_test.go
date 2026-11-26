@@ -692,6 +692,39 @@ func TestSpawnResolvesRelativeCwd(t *testing.T) {
 	}
 }
 
+func TestSpawnAbsolutePathIgnoresCwdShadow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture executables use a Unix shell")
+	}
+	root := t.TempDir()
+	requested := filepath.Join(root, "requested")
+	shadow := filepath.Join(root, "child", requested)
+	if err := os.MkdirAll(filepath.Dir(shadow), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(requested, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shadow, []byte("#!/bin/sh\nexit 3\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	opts := defaultOpts()
+	opts.Cwd = logosproc.PathCwd("child")
+	c, err := logosproc.Spawn(requested, nil, opts)
+	if err != nil {
+		t.Fatalf("spawn absolute path: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	term, err := waitDeadline(t, c)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !term.IsSuccess() {
+		t.Fatalf("absolute path ran its child-directory shadow: %+v", term)
+	}
+}
+
 // Pipe accessors must not race with cleanup. Close clears the pipe fields
 // under a lock, so retrieving a pipe concurrently must take the same lock.
 func TestPipeConcurrentAccess(t *testing.T) {

@@ -387,7 +387,7 @@ func resolvePath(path string, cwd Cwd) (string, error) {
 // isExplicitRelative reports whether path names a file relative to a
 // directory instead of through PATH lookup.
 func isExplicitRelative(path string) bool {
-	return strings.ContainsRune(path, '/') || strings.ContainsRune(path, filepath.Separator)
+	return !filepath.IsAbs(path) && (strings.ContainsRune(path, '/') || strings.ContainsRune(path, filepath.Separator))
 }
 
 // isExecutableFile reports whether cand exists and is not a directory.

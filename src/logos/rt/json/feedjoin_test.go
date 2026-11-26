@@ -43,6 +43,8 @@ func TestJoinValueShape(t *testing.T) {
 		{"split number closes empty", []rtjson.Token{pnum("12"), num("")}, "12", false},
 		{"single empty number", []rtjson.Token{num("")}, "", true},
 		{"empty pieces", []rtjson.Token{pnum(""), num("")}, "", true},
+		{"minus without digits", []rtjson.Token{pnum("-"), num("")}, "", true},
+		{"split negative number", []rtjson.Token{pnum("-"), num("1")}, "-1", false},
 		{"mixed families", []rtjson.Token{pnum("1"), str("x")}, "", true},
 	}
 	for _, row := range rows {
