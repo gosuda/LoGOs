@@ -191,7 +191,7 @@ func caseListCovered[T any](v T) {
 		return
 	case string:
 		return
-	case int, string /* ERROR "comptime::unreachable_case" */ :
+	case int /* ERROR "comptime::unreachable_case" */, string:
 		return
 	}
 	return
