@@ -183,12 +183,13 @@ func isSupportLogosFile(name string) bool {
 }
 
 // isLoweredSupportFile reports whether a LoGOs source belongs in the
-// support copy. The copy is the ejected form: a lowered file whose output
-// name the support copy would not keep as hand-written Go (such as a
-// *_runtime.go twin of a logosejected-selected file) stays out, exactly
-// like its hand-written counterpart.
+// support copy. The copy is the ejected form, so membership follows the
+// source's effective build constraint specialized with logosejected=true,
+// not the output file name. Handwritten _runtime.go exclusion applies only
+// to Go sources via isSupportCopyFile; a LoGOs stem ending in _runtime is
+// ordinary when its constraint selects the ejected build.
 func isLoweredSupportFile(name string) bool {
-	return isSupportLogosFile(name) && isSupportCopyFile(logosStem(name)+".go")
+	return isSupportLogosFile(name)
 }
 
 func isVendoredGoFile(name string) bool {
