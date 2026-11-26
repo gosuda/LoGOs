@@ -1,0 +1,97 @@
+# Run receiver-sensitive comptime methods natively and with upstream Go.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+exists $UPROOT1272/bin/go$GOEXE
+exec $UPROOT1272/bin/go$GOEXE version
+stdout '^go version go1\.27\.2 '
+
+cp $GOROOT/test/logos/run/comptime_method_nested_review328.lgo comptime_method_nested_review328/main.lgo
+cp $GOROOT/test/logos/run/comptime_method_nested_review328.out comptime_method_nested_review328/expected.txt
+cd comptime_method_nested_review328
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+cp $GOROOT/test/logos/run/comptime_method_receiver_review328.lgo comptime_method_receiver_review328/main.lgo
+cp $GOROOT/test/logos/run/comptime_method_receiver_review328.out comptime_method_receiver_review328/expected.txt
+cd comptime_method_receiver_review328
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+cp $GOROOT/test/logos/run/comptime_method_renamed_review328.lgo comptime_method_renamed_review328/main.lgo
+cp $GOROOT/test/logos/run/comptime_method_renamed_review328.out comptime_method_renamed_review328/expected.txt
+cd comptime_method_renamed_review328
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+cp $GOROOT/test/logos/run/comptime_method_promoted_review328.lgo comptime_method_promoted_review328/main.lgo
+cp $GOROOT/test/logos/run/comptime_method_promoted_review328.out comptime_method_promoted_review328/expected.txt
+cd comptime_method_promoted_review328
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+cp $GOROOT/test/logos/run/comptime_method_forward_review328.lgo comptime_method_forward_review328/main.lgo
+cp $GOROOT/test/logos/run/comptime_method_forward_review328.out comptime_method_forward_review328/expected.txt
+cd comptime_method_forward_review328
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+-- comptime_method_nested_review328/go.mod --
+module example.com/comptime_method_nested_review328
+
+go 1.27
+
+-- comptime_method_receiver_review328/go.mod --
+module example.com/comptime_method_receiver_review328
+
+go 1.27
+
+-- comptime_method_renamed_review328/go.mod --
+module example.com/comptime_method_renamed_review328
+
+go 1.27
+
+-- comptime_method_promoted_review328/go.mod --
+module example.com/comptime_method_promoted_review328
+
+go 1.27
+
+-- comptime_method_forward_review328/go.mod --
+module example.com/comptime_method_forward_review328
+
+go 1.27
+

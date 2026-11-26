@@ -1,0 +1,27 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Probe struct{ X int }
+type Box[T any] struct{}
+
+func (b Box[T]) Count() int {
+	n := 0
+	const for _, field := range comptime.Fields[T]() {
+		_ = field.Name
+		n++
+	}
+	return n
+}
+
+type Counter interface{ Count() int }
+type Wrapper struct{ Box[Probe] }
+
+var _ Counter = Box[Probe]{} // ERROR "comptime::method_value"
+var _ Counter = &Box[Probe]{} // ERROR "comptime::method_value"
+var _ Counter = Wrapper{} // ERROR "comptime::method_value"
+var _ any = Box[Probe]{} // ERROR "comptime::method_value"
+var _ any = &Box[Probe]{} // ERROR "comptime::method_value"
+var _ any = Wrapper{} // ERROR "comptime::method_value"

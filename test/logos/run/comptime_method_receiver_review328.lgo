@@ -1,0 +1,34 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Probe struct{ X int }
+type Box[T any] struct{ Count int }
+
+func (b *Box[T]) Increment() {
+	const if comptime.IsStruct[T]() {
+	}
+	b.Count++
+}
+
+func (b Box[T]) CopyIncrement() int {
+	const if comptime.IsStruct[T]() {
+	}
+	b.Count++
+	return b.Count
+}
+
+func main() {
+	b := Box[Probe]{Count: 7}
+	b.Increment()
+	fmt.Println("pointer", b.Count)
+	fmt.Println("copy", (&b).CopyIncrement(), b.Count)
+	(*Box[Probe]).Increment(&b)
+	fmt.Println("explicit pointer", b.Count)
+	fmt.Println("explicit copy", Box[Probe].CopyIncrement(b), b.Count)
+}

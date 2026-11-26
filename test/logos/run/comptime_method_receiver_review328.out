@@ -1,0 +1,4 @@
+pointer 8
+copy 9 8
+explicit pointer 9
+explicit copy 10 9

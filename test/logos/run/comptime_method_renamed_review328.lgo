@@ -1,0 +1,24 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Box[T any] struct{ Value T }
+type Probe struct{ X int }
+
+func (b Box[U]) Describe() string {
+	const if comptime.IsStruct[U]() {
+		return "struct"
+	} else {
+		return "other"
+	}
+}
+
+func main() {
+	fmt.Println(Box[Probe]{}.Describe())
+	fmt.Println(Box[int]{}.Describe())
+}

@@ -1,0 +1,38 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Probe struct{ X int }
+type Box[T any] struct{}
+type Wrapper[T any] struct{ Box Box[T] }
+
+func (b Box[T]) Count() int {
+	n := 0
+	const for _, field := range comptime.Fields[T]() {
+		_ = field.Name
+		n++
+	}
+	return n
+}
+
+func (b Box[T]) Add(value int) int {
+	const if comptime.IsStruct[T]() {
+	}
+	return value + 1
+}
+
+func (w Wrapper[T]) Inner() Box[T] {
+	const if comptime.IsStruct[T]() {
+	}
+	return w.Box
+}
+
+func main() {
+	fmt.Println("argument", Box[Probe]{}.Add(Box[Probe]{}.Count()))
+	fmt.Println("receiver", Wrapper[Probe]{}.Inner().Count())
+}

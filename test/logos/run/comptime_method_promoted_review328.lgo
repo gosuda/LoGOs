@@ -1,0 +1,39 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Probe struct{ X int }
+type Box[T any] struct{ Count int }
+
+func (b Box[T]) Fields() int {
+	n := 0
+	const for _, field := range comptime.Fields[T]() {
+		_ = field.Name
+		n++
+	}
+	return n
+}
+
+func (b *Box[T]) Increment() {
+	const if comptime.IsStruct[T]() {
+	}
+	b.Count++
+}
+
+type ValueWrapper struct{ Box[Probe] }
+type PointerWrapper struct{ *Box[Probe] }
+
+func main() {
+	value := ValueWrapper{Box: Box[Probe]{Count: 7}}
+	value.Increment()
+	fmt.Println("value", value.Fields(), value.Count)
+	pointer := PointerWrapper{Box: &Box[Probe]{Count: 11}}
+	pointer.Increment()
+	fmt.Println("pointer", pointer.Fields(), pointer.Count)
+	fmt.Println("expression", ValueWrapper.Fields(value))
+}

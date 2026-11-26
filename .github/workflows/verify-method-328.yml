@@ -1,0 +1,86 @@
+name: Verify comptime method review witnesses
+
+on:
+  push:
+    branches: [ci/verify-method-328-red-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  review_cases:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Freeze production sources and build the baseline compiler
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          git diff --exit-code 5862329f01f82581a3dd7c893dd3363e7e8cd504 HEAD -- src/cmd/compile
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          go env GOENV GOCACHEPROG | tee review-evidence/cache-env.txt
+          test -z "$(go env GOCACHEPROG)"
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Execute each frozen native witness independently
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          python3 - <<'PYCODE'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          names = ["receiver", "renamed", "promoted", "forward", "interface", "nested"]
+          records = []
+          for name in names:
+              directory = "compile" if name == "interface" else "run"
+              pattern = f"^Test$/logos/{directory}/comptime_method_{name}_review328\\.lgo$"
+              command = ["go", "test", "-v", "-count=1", "cmd/internal/testdir", "-run", pattern]
+              result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+              Path(f"review-evidence/{name}.log").write_text(result.stdout)
+              print(f"--- {name}: exit {result.returncode} ---", flush=True)
+              print(result.stdout, flush=True)
+              records.append({"case": name, "command": command, "exit": result.returncode})
+          Path("review-evidence/native-results.json").write_text(json.dumps(records, indent=2) + "\n")
+          assert all(record["exit"] != 0 for record in records if record["case"] != "nested")
+          assert records[-1]["exit"] == 0
+          PYCODE
+      - name: Execute the nested-call export witness with upstream Go
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          if go test -v -race -count=1 cmd/go -run '^TestScript$/logos_comptime_method_review328$' > review-evidence/export-red.log 2>&1; then
+            cat review-evidence/export-red.log
+            exit 1
+          fi
+          cat review-evidence/export-red.log
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: method-review-red-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
