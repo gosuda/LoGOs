@@ -11,7 +11,7 @@ type Cfg struct {
 
 func Load[T any](out T) T {
 	const for _, f := range comptime.Fields[T]() {
-		Parse[f.Type](&out.[f])
+		Parse[f.Type](&out.[f]) // ERROR "unsupported(?s:.*)instantiated here comptime_nested_error.lgo:28:[0-9]+(?s:.*)instantiated here comptime_nested_error.lgo:14:[0-9]+"
 	}
 	return out
 }
@@ -25,4 +25,4 @@ func Parse[F any](dst *F) {
 	comptime.Error("unsupported")
 }
 
-var _ = Load[Cfg](Cfg{}) // ERROR "unsupported"
+var _ = Load[Cfg](Cfg{})
