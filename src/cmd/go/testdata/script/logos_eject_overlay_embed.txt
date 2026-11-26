@@ -171,7 +171,10 @@ const Version = "original"
 -- dep/ejecttestembed/embed.go --
 package ejecttestembed
 
-import _ "embed"
+import (
+	_ "embed"
+	"strings"
+)
 
 //go:embed version.go
 var versionFile string
@@ -179,10 +182,10 @@ var versionFile string
 func Which() string { return Version }
 
 func WhichFile() string {
-	if versionFile == "package ejecttestembed\n\nconst Version = \"patched\"\n" {
+	if strings.Contains(versionFile, "const Version = \"patched\"") {
 		return "patched-file"
 	}
-	if versionFile == "package ejecttestembed\n\nconst Version = \"original\"\n" {
+	if strings.Contains(versionFile, "const Version = \"original\"") {
 		return "original-file"
 	}
 	return "other-file"
