@@ -815,7 +815,7 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string)
 	var rtDir string
 	if usedRT {
 		rtDir = filepath.Join(out, "_logos_deps", "rt")
-		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan)
+		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan, staging)
 		addSupportRequire(filepath.Join(out, "go.mod"), "./_logos_deps/rt")
 		materializeGorootLogos(plan, staging, out, rtDir)
 	}
@@ -2200,10 +2200,12 @@ func applyTextEdits(data []byte, edits []textEdit) ([]byte, bool) {
 }
 
 // writeSupportModule writes the shared, self-contained support module.
-func writeSupportModule(out, goVer string, plan *ejectPlan) {
+// Staging carries the lowered toolchain outputs the copy reads for
+// LoGOs sources; overlay insertions and deletions resolve through it.
+func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) {
 	src := filepath.Join(cfg.GOROOT, "src")
 	dst := filepath.Join(out, "_logos_deps", "rt")
-	if err := copyEjectedSupport(src, dst, ejectSupportRoots(plan)); err != nil {
+	if err := copyEjectedSupport(src, staging, dst, ejectSupportRoots(plan)); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 	copyJSONScanSupport(filepath.Join(src, "internal", "jsonscan"), filepath.Join(dst, "internal", "jsonscan"))

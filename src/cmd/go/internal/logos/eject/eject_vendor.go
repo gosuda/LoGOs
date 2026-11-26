@@ -23,13 +23,14 @@ import (
 
 	"golang.org/x/mod/module"
 
+	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/search"
 )
 
 const supportVendorDir = "internal/toolchainvendor"
 
-func copyEjectedSupport(src, dst string, roots []string) (err error) {
+func copyEjectedSupport(src, staging, dst string, roots []string) (err error) {
 	destinations, err := supportDestinations(roots)
 	if err != nil {
 		return err
@@ -45,6 +46,8 @@ func copyEjectedSupport(src, dst string, roots []string) (err error) {
 	}()
 	c := supportCopy{
 		src:          root,
+		srcDir:       src,
+		staging:      staging,
 		dst:          dst,
 		pending:      roots,
 		destinations: destinations,
@@ -73,6 +76,8 @@ func copyEjectedSupport(src, dst string, roots []string) (err error) {
 
 type supportCopy struct {
 	src          *os.Root
+	srcDir       string
+	staging      string
 	dst          string
 	pending      []string
 	destinations map[string]string
@@ -80,6 +85,29 @@ type supportCopy struct {
 	notices      map[string]bool
 	embedded     map[string]bool
 	format       []string
+}
+
+// absSrcDir returns the host path of one support source package.
+func (c *supportCopy) absSrcDir(p supportSourcePackage) string {
+	return filepath.Join(c.srcDir, filepath.FromSlash(p.src))
+}
+
+// readDir lists one support source package. Toolchain packages read the
+// effective directory, so an overlay-inserted LoGOs file is copied from
+// its lowered output and an overlay-deleted file is never requested from
+// staging. Vendored packages keep the rooted physical listing.
+func (c *supportCopy) readDir(p supportSourcePackage) ([]fs.DirEntry, error) {
+	if p.vendored {
+		return fs.ReadDir(c.src.FS(), p.src)
+	}
+	return fsys.ReadDir(c.absSrcDir(p))
+}
+
+// readOriginal reads one toolchain support source through the effective
+// filesystem, so overlay replacements govern ignore checks and inserted
+// files read their overlaid content.
+func (c *supportCopy) readOriginal(p supportSourcePackage, name string) ([]byte, error) {
+	return fsys.ReadFile(filepath.Join(c.absSrcDir(p), name))
 }
 
 type supportSourcePackage struct {
@@ -107,19 +135,18 @@ func ejectedSupportPackage(importPath string) (supportSourcePackage, error) {
 }
 
 func (c *supportCopy) copyPackage(p supportSourcePackage) error {
-	entries, err := fs.ReadDir(c.src.FS(), p.src)
+	entries, err := c.readDir(p)
 	if err != nil {
 		return err
 	}
-	goFiles, hasLogos := 0, false
+	goFiles := 0
 	var embeds []string
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || name[0] == '.' || name[0] == '_' {
 			continue
 		}
-		hasLogos = hasLogos || logosfile.Is(name)
-		if isSupportCopyFile(name) || p.vendored && isVendoredGoFile(name) {
+		if isSupportCopyFile(name) || p.vendored && isVendoredGoFile(name) || !p.vendored && isLoweredSupportFile(name) {
 			if !entry.Type().IsRegular() {
 				return fmt.Errorf("go source %s is not a regular file", name)
 			}
@@ -134,17 +161,12 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 			continue
 		}
 		if isPackageBuildAsset(name) {
-			if err := c.copyRaw(path.Join(p.src, name), path.Join(p.dst, name)); err != nil {
+			if err := c.copyAsset(p, name); err != nil {
 				return err
 			}
 		}
 	}
 	if goFiles == 0 {
-		if !p.vendored && hasLogos {
-			// Packages holding LoGOs sources are lowered from compiler
-			// staging by materializeGorootLogos after the support copy.
-			return nil
-		}
 		return fmt.Errorf("holds no Go sources")
 	}
 	if err := c.copyPackageEmbeds(p, embeds); err != nil {
@@ -154,6 +176,19 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 		return c.copyVendorNotices(p)
 	}
 	return nil
+}
+
+func isSupportLogosFile(name string) bool {
+	return logosfile.Is(name) && !strings.HasSuffix(logosStem(name), "_test")
+}
+
+// isLoweredSupportFile reports whether a LoGOs source belongs in the
+// support copy. The copy is the ejected form: a lowered file whose output
+// name the support copy would not keep as hand-written Go (such as a
+// *_runtime.go twin of a logosejected-selected file) stays out, exactly
+// like its hand-written counterpart.
+func isLoweredSupportFile(name string) bool {
+	return isSupportLogosFile(name) && isSupportCopyFile(logosStem(name)+".go")
 }
 
 func isVendoredGoFile(name string) bool {
@@ -170,14 +205,40 @@ func isPackageBuildAsset(name string) bool {
 
 func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]string, bool, error) {
 	src := path.Join(p.src, name)
-	dst := path.Join(p.dst, name)
-	data, err := c.src.ReadFile(src)
-	if err != nil {
-		return nil, false, err
+	outputName := name
+	var data []byte
+	var err error
+	lowered := !p.vendored && isSupportLogosFile(name)
+	if lowered {
+		outputName = logosStem(name) + ".go"
+		data, err = os.ReadFile(filepath.Join(c.staging, filepath.FromSlash(p.src), outputName))
+		if os.IsNotExist(err) {
+			original, readErr := c.readOriginal(p, name)
+			if readErr != nil {
+				return nil, false, readErr
+			}
+			if isBuildIgnored(original) {
+				return nil, false, nil
+			}
+		}
+		if err != nil {
+			return nil, false, fmt.Errorf("read lowered output: %w", err)
+		}
+	} else {
+		data, err = c.src.ReadFile(src)
+		if err != nil && !p.vendored && os.IsNotExist(err) {
+			// An overlay-inserted Go source has no physical file; the
+			// rooted read above stays the rule for ordinary assets.
+			data, err = c.readOriginal(p, name)
+		}
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	if !p.vendored {
 		data = stripEjectedBuildTag(data)
 	}
+	dst := path.Join(p.dst, outputName)
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, src, data, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
@@ -194,6 +255,9 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 		return nil, false, nil
 	}
 	edits, _ := ejectedImportEdits(data, fset, f)
+	if lowered {
+		edits = append(edits, siteIdentEdits(fset, f, siteNamespace(logosStem(name)))...)
+	}
 	embeds := false
 	for _, imp := range f.Imports {
 		importPath, err := strconv.Unquote(imp.Path.Value)
@@ -229,6 +293,22 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 		c.format = append(c.format, dst)
 	}
 	return patterns, true, nil
+}
+
+// copyAsset copies one non-Go build asset. Vendored assets keep the rooted
+// physical read. Toolchain assets read through the effective filesystem,
+// so an overlay-inserted header is copied from its overlaid content
+// instead of aborting on the missing physical file.
+func (c *supportCopy) copyAsset(p supportSourcePackage, name string) error {
+	src, dst := path.Join(p.src, name), path.Join(p.dst, name)
+	if p.vendored {
+		return c.copyRaw(src, dst)
+	}
+	data, err := c.readOriginal(p, name)
+	if err != nil {
+		return err
+	}
+	return c.writeFile(src, dst, data)
 }
 
 func (c *supportCopy) supportImport(importPath string) (string, error) {
