@@ -23,6 +23,10 @@ exists out/_logos_deps/rt/logos/ejecttestwinhelper/helper_windows.go
 exists out/_logos_deps/rt/logos/ejecttestwinlgo/helper_windows.go
 exists out/_logos_deps/rt/logos/ejecttestlinhelper/helper_linux.go
 exists out/_logos_deps/rt/logos/ejecttestlinlgo/helper_linux.go
+exists out/_logos_deps/rt/logos/ejecttestexplicitcgo/helper.go
+exists out/_logos_deps/rt/logos/ejecttestimplicitcgo/helper.go
+exists out/_logos_deps/rt/logos/ejecttestgoimp/explicit_cgo.go
+exists out/_logos_deps/rt/logos/ejecttestgoimp/implicit_cgo.go
 
 env GOROOT=$TESTGO_GOROOT
 cd out
@@ -34,10 +38,22 @@ go build -mod=readonly -tags pr270goimp ./...
 # The importing filename selects the target for both a Go-only leaf and
 # a LoGOs-only leaf. Neither alternate target may be loaded as the host.
 env GOOS=windows
+env GOARCH=amd64
 go build -mod=readonly -o windows.exe .
 env GOOS=linux
 go build -mod=readonly -o linux.bin .
 env GOOS=$TESTGO_GOHOSTOS
+env GOARCH=$TESTGO_GOHOSTARCH
+
+# Both cgo-only sources survive export even when discovery runs without cgo.
+# On a cgo-capable host the same output builds with the upstream oracle.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build -mod=readonly ./...
+[cgo] env CGO_ENABLED=1
+[cgo] exec env -u GOROOT $UPROOT1272/bin/go build -mod=readonly ./...
+env CGO_ENABLED=0
 
 -- mkgoroot.go --
 package main
@@ -172,3 +188,28 @@ func Name() string { return "linux-go" }
 package ejecttestlinlgo
 
 func Name() string { return "linux-logos" }
+
+-- dep/ejecttestgoimp/explicit_cgo.go --
+//go:build cgo
+
+package ejecttestgoimp
+
+import "C"
+import "logos/ejecttestexplicitcgo"
+
+func ExplicitCgoName() string { return ejecttestexplicitcgo.Name() }
+-- dep/ejecttestexplicitcgo/helper.go --
+package ejecttestexplicitcgo
+
+func Name() string { return "explicit-cgo" }
+-- dep/ejecttestgoimp/implicit_cgo.go --
+package ejecttestgoimp
+
+import "C"
+import "logos/ejecttestimplicitcgo"
+
+func ImplicitCgoName() string { return ejecttestimplicitcgo.Name() }
+-- dep/ejecttestimplicitcgo/helper.go --
+package ejecttestimplicitcgo
+
+func Name() string { return "implicit-cgo" }

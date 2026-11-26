@@ -24,9 +24,10 @@ func TestSupportCopyOverlayAssets(t *testing.T) {
 		}
 		return
 	}
-	src, backing, out := t.TempDir(), t.TempDir(), t.TempDir()
+	src, backing := t.TempDir(), t.TempDir()
 	for name, contents := range map[string]string{
-		"logos/p/p.go":                  "package p\n\nimport _ \"example.com/v\"\n",
+		"logos/p/p.go":                  "package p\n\nimport _ \"example.com/v\"\nimport _ \"embed\"\n\n//go:embed replaced.h\nvar Header string\n",
+		"logos/inserted/inserted.go":    "package inserted\n\nimport _ \"embed\"\n\n//go:embed inserted.h\nvar Header string\n",
 		"logos/p/replaced.h":            "physical header\n",
 		"logos/p/untouched.h":           "untouched header\n",
 		"vendor/example.com/v/v.go":     "package v\n",
@@ -43,6 +44,7 @@ func TestSupportCopyOverlayAssets(t *testing.T) {
 	replacements := map[string]string{}
 	for name, contents := range map[string]string{
 		"logos/p/inserted.h":            "inserted header\n",
+		"logos/inserted/inserted.h":     "inserted header\n",
 		"logos/p/replaced.h":            "replacement header\n",
 		"vendor/example.com/v/vendor.h": "overlay vendor header\n",
 	} {
@@ -63,20 +65,31 @@ func TestSupportCopyOverlayAssets(t *testing.T) {
 	if err := fsys.Init(); err != nil {
 		t.Fatal(err)
 	}
-	if err := copyEjectedSupport(src, "", out, []string{"logos/p"}); err != nil {
-		t.Fatal(err)
-	}
-	for name, want := range map[string]string{
-		"logos/p/inserted.h":                              "inserted header\n",
-		"logos/p/replaced.h":                              "replacement header\n",
-		"logos/p/untouched.h":                             "untouched header\n",
-		"internal/toolchainvendor/example.com/v/vendor.h": "physical vendor header\n",
+	for _, tc := range []struct {
+		path string
+		want map[string]string
+	}{
+		{"logos/p", map[string]string{
+			"logos/p/inserted.h":                              "inserted header\n",
+			"logos/p/replaced.h":                              "replacement header\n",
+			"logos/p/untouched.h":                             "untouched header\n",
+			"internal/toolchainvendor/example.com/v/vendor.h": "physical vendor header\n",
+		}},
+		{"logos/inserted", map[string]string{"logos/inserted/inserted.h": "inserted header\n"}},
 	} {
-		data, err := os.ReadFile(filepath.Join(out, filepath.FromSlash(name)))
-		if err != nil {
-			t.Error(err)
-		} else if string(data) != want {
-			t.Errorf("%s = %q, want %q", name, data, want)
-		}
+		t.Run(tc.path, func(t *testing.T) {
+			out := t.TempDir()
+			if err := copyEjectedSupport(src, "", out, []string{tc.path}); err != nil {
+				t.Fatal(err)
+			}
+			for name, want := range tc.want {
+				data, err := os.ReadFile(filepath.Join(out, filepath.FromSlash(name)))
+				if err != nil {
+					t.Error(err)
+				} else if string(data) != want {
+					t.Errorf("%s = %q, want %q", name, data, want)
+				}
+			}
+		})
 	}
 }

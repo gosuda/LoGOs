@@ -1,0 +1,72 @@
+name: Verify support export follow-up failures
+
+on:
+  push:
+    branches: [ci/verify-eject-270-followup-red-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regressions:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the unchanged driver with attack tests
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Prove embed and ignored-name failures
+        run: |
+          if go test -race -count=1 -short cmd/go/internal/logos/eject -run '^Test(InactiveGoImportsSkipIgnoredNames|SupportCopyOverlayAssets)$' > review-evidence/unit-red.log 2>&1; then
+            cat review-evidence/unit-red.log
+            echo 'attack tests unexpectedly passed unchanged code'
+            exit 1
+          fi
+          cat review-evidence/unit-red.log
+          grep -F -- '--- FAIL: TestInactiveGoImportsSkipIgnoredNames ' review-evidence/unit-red.log
+          grep -F 'inactive Go imports = [".ignored.go" "_ignored.go" "extra.go"]' review-evidence/unit-red.log
+          grep -F 'cannot be emitted both as rewritten Go and as a verbatim asset' review-evidence/unit-red.log
+          grep -F 'logos/inserted/inserted.h: no such file or directory' review-evidence/unit-red.log
+      - name: Prove cgo-disabled importer failure
+        run: |
+          if go test -race -count=1 cmd/go -run 'Script/^logos_eject_inactive_go_import$' > review-evidence/cgo-red.log 2>&1; then
+            cat review-evidence/cgo-red.log
+            echo 'cgo-disabled export unexpectedly passed unchanged code'
+            exit 1
+          fi
+          cat review-evidence/cgo-red.log
+          grep -E 'no build context selects inactive file .*explicit_cgo.go' review-evidence/cgo-red.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: eject-followup-red-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
