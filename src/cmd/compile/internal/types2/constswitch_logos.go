@@ -38,6 +38,7 @@ type logosCaseInfo struct {
 }
 
 type LogosConstCase struct {
+	Live     bool
 	Target   *TypeName
 	Vars     map[*Var]Type
 	Switched *TypeParam
@@ -508,6 +509,13 @@ func logosMethodSetCovers(super, sub *Interface) bool {
 }
 
 func (check *Checker) logosConstCaseBody(ctxt stmtContext, c *syntax.ConstSwitchCase, info *logosCaseInfo, body []syntax.Stmt, tag Type, narrow *LogosConstFor) {
+	// Liveness is distinct from narrowing: an interface case is live even
+	// though it introduces no replacement type or variable binding.
+	if check.Info.LogosConstCases == nil {
+		check.Info.LogosConstCases = make(map[LogosConstCaseKey]LogosConstCase)
+	}
+	key := LogosConstCaseKey{Case: c, Elem: info.elem}
+	check.Info.LogosConstCases[key] = LogosConstCase{Live: true}
 	if ctxt&continueOk != 0 {
 		ctxt |= logosConstSwitchContinue
 	}
@@ -588,7 +596,7 @@ func (check *Checker) logosShadowConstTarget(tpar *TypeParam, info *logosCaseInf
 		shadow = NewTypeName(pos, check.pkg, tpar.Obj().Name(), bind)
 	}
 	check.scope.Insert(shadow)
-	rec := LogosConstCase{Target: shadow, Vars: make(map[*Var]Type), Switched: switched}
+	rec := LogosConstCase{Live: true, Target: shadow, Vars: make(map[*Var]Type), Switched: switched}
 	seen := make(map[string]bool)
 	for sc := check.scope.Parent(); sc != nil; sc = sc.Parent() {
 		for _, objName := range sc.Names() {

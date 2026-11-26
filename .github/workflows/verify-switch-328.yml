@@ -1,8 +1,8 @@
-name: Reproduce type-switch review dispatch
+name: Verify type-switch dispatch and nested export
 
 on:
   push:
-    branches: [ci/verify-switch-328-red-20261126]
+    branches: [ci/verify-switch-328-green-20261126]
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ defaults:
 jobs:
   dispatch:
     runs-on: depot-ubuntu-24.04-8
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       GOENV: 'off'
       GOCACHEPROG: ''
@@ -23,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
         with:
@@ -33,9 +34,13 @@ jobs:
         with:
           go-version: '1.27.4'
           cache: false
-      - name: Build unchanged source with the frozen regression cases
+      - name: Build the candidate with unchanged regression cases
         run: |
           export GOENV=off GOCACHEPROG=''
+          files=(src/cmd/compile/internal/logos/constswitch.go src/cmd/compile/internal/logos/constfor.go src/cmd/compile/internal/types2/constswitch_logos.go)
+          gofmt -d "${files[@]}"
+          test -z "$(gofmt -l "${files[@]}")"
+          git diff --exit-code 729d63b99cd658f81ef4b957400bd4606f335702 HEAD -- src/cmd/go/testdata/script/logos_switch_dispatch_review328.txt 'test/logos/run/*review328*'
           mkdir -p review-evidence
           git rev-parse HEAD > review-evidence/source.txt
           go env GOENV GOCACHEPROG | tee review-evidence/cache-env.txt
@@ -43,33 +48,60 @@ jobs:
           export GOROOT_BOOTSTRAP=$(go env GOROOT)
           (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
           printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
-      - name: Capture each dispatch result independently
+      - name: Check compiler packages and switch and loop controls
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          go test -count=1 -short cmd/compile/internal/types2 cmd/compile/internal/logos cmd/compile/internal/noder 2>&1 | tee review-evidence/compiler.log
+          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/(run|compile)/(const_switch.*|constswitch.*|const_for.*)\.lgo$' 2>&1 | tee review-evidence/runtime.log
+      - name: Check exported dispatch with the actual upstream compiler
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          go test -v -race -count=1 cmd/go -run '^TestScript$/logos_(switch_dispatch_review328|eject_const_switch|comptime_const_for_call|eject_const_store_shadow|eject_constswitch_select_nested_recv)$' 2>&1 | tee review-evidence/export-green.log
+      - name: Prove each regression catches its dispatch fault
         run: |
           export GOENV=off GOCACHEPROG=''
           python3 - <<'PYCODE'
           import json
+          import os
           import subprocess
           from pathlib import Path
-          cases = [
-              ('nested-native', ['go', 'test', '-v', '-count=1', 'cmd/internal/testdir', '-run', r'^Test$/logos/run/const_switch_nested_list_review328\.lgo$'], True),
-              ('mixed-native', ['go', 'test', '-v', '-count=1', 'cmd/internal/testdir', '-run', r'^Test$/logos/run/const_switch_mixed_default_review328\.lgo$'], False),
-              ('live-native', ['go', 'test', '-v', '-count=1', 'cmd/internal/testdir', '-run', r'^Test$/logos/run/const_switch_live_list_review328\.lgo$'], False),
-              ('nested-export', ['go', 'test', '-v', '-race', '-count=1', 'cmd/go', '-run', '^TestScript$/logos_switch_dispatch_review328$'], False),
+          mutations = [
+              ('default', Path('src/cmd/compile/internal/logos/constswitch.go'), 'c.hasDef && done == ""', 'c.hasDef', 2, ['go', 'test', '-v', '-count=1', 'cmd/internal/testdir', '-run', r'^Test$/logos/run/const_switch_mixed_default_review328\.lgo$'], 'output does not match expected'),
+              ('liveness', Path('src/cmd/compile/internal/logos/constswitch.go'), 'if !c.info.LogosConstCases[types2.LogosConstCaseKey{Case: syn, Elem: i}].Live {', 'if false {', 1, ['go', 'test', '-v', '-count=1', 'cmd/internal/testdir', '-run', r'^Test$/logos/run/const_switch_live_list_review328\.lgo$'], 'invalid operation: value +'),
+              ('composer', Path('src/cmd/compile/internal/logos/constfor.go'), 'if h.compose != nil {', 'if false {', 1, ['go', 'test', '-v', '-race', '-count=1', 'cmd/go', '-run', '^TestScript$/logos_switch_dispatch_review328$'], 'listlistdefault'),
           ]
-          results = []
-          for name, command, expect_success in cases:
-              result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-              Path(f'review-evidence/{name}.log').write_text(result.stdout)
-              print(name, result.returncode, flush=True)
-              print(result.stdout, flush=True)
-              results.append({'name': name, 'command': command, 'exit': result.returncode, 'expected_success': expect_success})
-          Path('review-evidence/results.json').write_text(json.dumps(results, indent=2) + '\n')
-          assert all((r['exit'] == 0) == r['expected_success'] for r in results), results
+          records: list[dict[str, str | int]] = []
+          for name, path, old, new, count, command, expected in mutations:
+              source = path.read_text()
+              stamp = path.stat()
+              assert source.count(old) == count, name
+              try:
+                  path.write_text(source.replace(old, new))
+                  os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                  subprocess.run(['go', 'install', 'cmd/compile'], check=True)
+                  result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                  Path(f'review-evidence/{name}-mutation.log').write_text(result.stdout)
+                  print(result.stdout, flush=True)
+                  records.append({'name': name, 'exit': result.returncode, 'expected': expected})
+                  Path('review-evidence/mutations.json').write_text(json.dumps(records, indent=2) + '\n')
+                  assert result.returncode != 0 and expected in result.stdout, name
+              finally:
+                  path.write_text(source)
+                  os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                  subprocess.run(['go', 'install', 'cmd/compile'], check=True)
           PYCODE
+      - name: Verify restored behavior, formatting, vet and exact source
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/const_switch_(mixed_default|nested_list|live_list)_review328\.lgo$' 2>&1 | tee review-evidence/restored-native.log
+          go test -v -race -count=1 cmd/go -run '^TestScript$/logos_switch_dispatch_review328$' 2>&1 | tee review-evidence/restored-export.log
+          go vet cmd/compile/internal/logos cmd/compile/internal/types2
+          test -z "$(gofmt -l src/cmd/compile/internal/logos/constswitch.go src/cmd/compile/internal/logos/constfor.go src/cmd/compile/internal/types2/constswitch_logos.go)"
+          git diff --exit-code
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: ${{ !cancelled() }}
         with:
-          name: switch-review-red-${{ github.sha }}
+          name: switch-review-green-${{ github.sha }}
           path: review-evidence/
           if-no-files-found: error
           retention-days: 7
