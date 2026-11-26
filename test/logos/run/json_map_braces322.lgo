@@ -13,6 +13,10 @@ type mapBox322 struct {
 
 type mapBox322Mirror struct {
 	M map[string]string `json:"m"`
+	// NoGen defeats static MarshalJSON generation (any is not a static
+	// kind), so json.Marshal takes the reflective path and stays an
+	// independent oracle instead of a second copy of the generator.
+	NoGen any `json:"-"`
 }
 
 func checkMap322(name string, value map[string]string, want string) {
