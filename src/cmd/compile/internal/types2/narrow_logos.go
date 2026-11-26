@@ -2576,6 +2576,9 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 	}
 	syntax.Inspect(n, func(x syntax.Node) bool {
 		switch x := x.(type) {
+		case *syntax.SwitchExpr:
+			st = p.switchExpr(x, st)
+			return false
 		case *syntax.Name:
 			p.read(x, st)
 		case *syntax.SelectorExpr:
@@ -2969,6 +2972,62 @@ func (p *logosEFPass) remainderHazards(rest []syntax.Stmt, dropped map[*Var]bool
 	}
 	return false
 }
+// scopeExits runs unconditional scope cleanups at block exit in LIFO
+// order: a scope defer registered straight-line in the block definitely
+// runs before later reads after the block, so an unconditional plain
+// reset there satisfies the deferred read. Conditional registration or
+// bodies that can do more than a quiet write stay on the may path
+// (already recorded via p.expr), so they never silence a read here.
+func (p *logosEFPass) scopeExits(b *syntax.BlockStmt, st *logosEFState) *logosEFState {
+	if st == nil || p.loopDepth > 0 {
+		return st
+	}
+	var lits []*syntax.FuncLit
+	for i, s := range b.List {
+		sd, ok := s.(*syntax.ScopeDeferStmt)
+		if !ok {
+			continue
+		}
+		call, ok := syntax.Unparen(sd.Call).(*syntax.CallExpr)
+		if !ok {
+			return st
+		}
+		lit, ok := syntax.Unparen(call.Fun).(*syntax.FuncLit)
+		if !ok || lit.Body == nil || len(call.ArgList) != 0 {
+			return st
+		}
+		for _, prev := range b.List[:i] {
+			blocked := false
+			syntax.Inspect(prev, func(n syntax.Node) bool {
+				if blocked {
+					return false
+				}
+				switch n := n.(type) {
+				case *syntax.CallStmt:
+					if n.Tok == syntax.Go || n.Tok == syntax.Defer {
+						blocked = true
+						return false
+					}
+				case *syntax.BranchStmt, *syntax.ReturnStmt, *syntax.LabeledStmt, *syntax.ForStmt, *syntax.IfStmt, *syntax.SwitchStmt, *syntax.SelectStmt, *syntax.FuncLit, *syntax.LambdaExpr, *syntax.ErrdeferStmt, *syntax.ScopeDeferStmt:
+					blocked = true
+					return false
+				}
+				return true
+			})
+			if blocked {
+				return st
+			}
+		}
+		lits = append(lits, lit)
+	}
+	for i := len(lits) - 1; i >= 0; i-- {
+		st = p.run(lits[i].Body, st)
+		if st == nil {
+			return nil
+		}
+	}
+	return st
+}
 
 func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	if s == nil {
@@ -2982,7 +3041,11 @@ func (p *logosEFPass) stmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	}
 	switch s := s.(type) {
 	case *syntax.BlockStmt:
-		return p.stmts(s.List, st, s == p.body)
+		st = p.stmts(s.List, st, s == p.body)
+		if st == nil {
+			return nil
+		}
+		return p.scopeExits(s, st)
 	case *syntax.ExprStmt:
 		return p.exprStmt(s, st)
 	case *syntax.SendStmt:
@@ -3536,6 +3599,84 @@ func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, tagKey logosEFKey, 
 	}
 	miss = p.expr(e, miss)
 	return miss, miss
+}
+func (p *logosEFPass) switchExpr(s *syntax.SwitchExpr, st *logosEFState) *logosEFState {
+	if st == nil {
+		return nil
+	}
+	if s.Init != nil {
+		st = p.stmt(s.Init, st)
+		if st == nil {
+			return nil
+		}
+	}
+	var tagErr *Var
+	switch tag := s.Tag.(type) {
+	case *syntax.TypeSwitchGuard:
+		tagErr = p.errVar(tag.X)
+		st = p.expr(tag.X, st)
+	case nil:
+	default:
+		tagErr = p.errVar(tag)
+		st = p.expr(tag, st)
+	}
+	if st == nil {
+		return nil
+	}
+	if _, ok := s.Tag.(*syntax.TypeSwitchGuard); ok {
+		var out *logosEFState
+		for _, arm := range s.Arms {
+			out = logosEFJoin(out, p.expr(arm.Body, st))
+		}
+		return out
+	}
+	var tagKey logosEFKey
+	if s.Tag != nil {
+		tagKey, _ = p.destKey(s.Tag)
+	}
+	savedEff := p.eff
+	scratch := &logosEFEffects{inside: make(map[*Var]bool), assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
+	p.eff = scratch
+	enter := make([]*logosEFState, len(s.Arms))
+	miss := st
+	hasDefault := false
+	for i, arm := range s.Arms {
+		if arm.Cases == nil {
+			hasDefault = true
+			continue
+		}
+		for _, e := range syntax.UnpackListExpr(arm.Cases) {
+			var hit *logosEFState
+			hit, miss = p.caseCond(s.Tag, tagErr, tagKey, e, miss, scratch)
+			enter[i] = logosEFJoin(enter[i], hit)
+		}
+	}
+	p.eff = savedEff
+	if savedEff != nil {
+		for k := range scratch.assigned {
+			p.noteAssigned(k)
+		}
+		for k, v := range scratch.created {
+			p.noteCreated(k, v)
+		}
+		for k, v := range scratch.may {
+			p.noteMay(k, v)
+		}
+	}
+	var out *logosEFState
+	for i, arm := range s.Arms {
+		if arm.Cases == nil {
+			enter[i] = miss
+		}
+		out = logosEFJoin(out, p.expr(arm.Body, enter[i]))
+		if out == nil {
+			break
+		}
+	}
+	if !hasDefault {
+		out = logosEFJoin(out, miss)
+	}
+	return out
 }
 
 func (p *logosEFPass) selectStmt(s *syntax.SelectStmt, label string, st *logosEFState) *logosEFState {
@@ -4202,21 +4343,45 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, args []syntax.Expr, st 
 	if inlineableLit(lit) {
 		return p.run(lit.Body, st)
 	}
-	if d, ok := singleDirectDefer(lit); ok && !p.deferredRecovers(d) {
-		end := p.run(lit.Body, st)
-		if end == nil {
-			return nil
+	if ds, ok := directDefers(lit); ok {
+		recovers := false
+		for _, d := range ds {
+			if p.deferredRecovers(d) {
+				recovers = true
+				break
+			}
 		}
-		return p.run(d.Body, end)
+		if !recovers {
+			end := p.run(lit.Body, st)
+			if end == nil {
+				return nil
+			}
+			for i := len(ds) - 1; i >= 0; i-- {
+				end = p.run(ds[i].Body, end)
+				if end == nil {
+					return nil
+				}
+			}
+			return end
+		}
 	}
 	return p.later(lit, lit.Body, st)
 }
 
 // deferredRecovers reports whether a deferred literal body may call the
-// recover builtin: a panic in the invoking literal is then caught, so the
-// caller continues instead of unwinding. Sequential analysis must not
-// treat the invocation as dead.
+// recover builtin in a way that lets the invoker continue: a recover
+// in a nested deferred catches the invoker's panic, and a direct
+// recover catches it only when the deferred body itself completes
+// normally. A deferred body that unconditionally panics itself never
+// lets the invoker continue, even when it calls recover first: the
+// recover has no panic to catch, then the panic unwinds.
 func (p *logosEFPass) deferredRecovers(lit *syntax.FuncLit) bool {
+	if lit == nil || lit.Body == nil {
+		return false
+	}
+	if p.hasNestedRecoveringDefer(lit.Body) {
+		return true
+	}
 	found := false
 	syntax.Inspect(lit.Body, func(n syntax.Node) bool {
 		call, ok := n.(*syntax.CallExpr)
@@ -4233,7 +4398,81 @@ func (p *logosEFPass) deferredRecovers(lit *syntax.FuncLit) bool {
 		}
 		return true
 	})
+	if !found {
+		return false
+	}
+	return !p.hasUnconditionalPanic(lit.Body)
+}
+func (p *logosEFPass) hasNestedRecoveringDefer(body *syntax.BlockStmt) bool {
+	found := false
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		var call syntax.Expr
+		switch n := n.(type) {
+		case *syntax.CallStmt:
+			if n.Tok != syntax.Defer {
+				return true
+			}
+			call = n.Call
+		case *syntax.ScopeDeferStmt:
+			call = n.Call
+		case *syntax.ErrdeferStmt:
+			call = n.Call
+		default:
+			return true
+		}
+		c, ok := syntax.Unparen(call).(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		inner, ok := syntax.Unparen(c.Fun).(*syntax.FuncLit)
+		if !ok || inner.Body == nil {
+			return true
+		}
+		hit := false
+		syntax.Inspect(inner.Body, func(m syntax.Node) bool {
+			if c, ok := m.(*syntax.CallExpr); ok {
+				if f, ok := syntax.Unparen(c.Fun).(*syntax.Name); ok {
+					if b, ok := p.check.Uses[f].(*Builtin); ok && b.Name() == "recover" {
+						hit = true
+						return false
+					}
+				}
+			}
+			return true
+		})
+		if hit {
+			found = true
+			return false
+		}
+		return true
+	})
 	return found
+}
+func (p *logosEFPass) hasUnconditionalPanic(body *syntax.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	for _, s := range body.List {
+		es, ok := s.(*syntax.ExprStmt)
+		if !ok {
+			continue
+		}
+		call, ok := syntax.Unparen(es.X).(*syntax.CallExpr)
+		if !ok {
+			continue
+		}
+		name, ok := syntax.Unparen(call.Fun).(*syntax.Name)
+		if !ok {
+			continue
+		}
+		if b, ok := p.check.Uses[name].(*Builtin); ok && b.Name() == "panic" {
+			return true
+		}
+	}
+	return false
 }
 
 // singleDirectDefer returns the body of the only deferred call in a
@@ -4286,6 +4525,69 @@ func singleDirectDefer(lit *syntax.FuncLit) (*syntax.FuncLit, bool) {
 		return nil, false
 	}
 	return d, true
+}
+// directDefers returns the deferred literals of a directly invoked
+// literal in registration order when every deferred call in it is a
+// top-level direct literal with no arguments: the outer completes, so
+// its deferred calls run exactly once at exit in reverse order and can
+// be analyzed sequentially in execution order. Anything else reports
+// false and keeps the may-run-later treatment.
+func directDefers(lit *syntax.FuncLit) ([]*syntax.FuncLit, bool) {
+	if lit == nil || lit.Body == nil {
+		return nil, false
+	}
+	var found []*syntax.CallStmt
+	bad := false
+	syntax.Inspect(lit.Body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.CallStmt:
+			if n.Tok == syntax.Go {
+				bad = true
+				return false
+			}
+			if n.Tok != syntax.Defer {
+				return true
+			}
+			found = append(found, n)
+		case *syntax.ErrdeferStmt:
+			bad = true
+			return false
+		case *syntax.ScopeDeferStmt:
+			bad = true
+			return false
+		}
+		return !bad
+	})
+	if bad || len(found) == 0 {
+		return nil, false
+	}
+	top := make(map[*syntax.CallStmt]bool, len(found))
+	for _, s := range lit.Body.List {
+		if cs, ok := s.(*syntax.CallStmt); ok && cs.Tok == syntax.Defer {
+			top[cs] = true
+		}
+	}
+	for _, cs := range found {
+		if !top[cs] {
+			return nil, false
+		}
+	}
+	out := make([]*syntax.FuncLit, 0, len(found))
+	for _, cs := range found {
+		c, ok := syntax.Unparen(cs.Call).(*syntax.CallExpr)
+		if !ok {
+			return nil, false
+		}
+		if len(c.ArgList) != 0 {
+			return nil, false
+		}
+		d, ok := syntax.Unparen(c.Fun).(*syntax.FuncLit)
+		if !ok || d.Body == nil {
+			return nil, false
+		}
+		out = append(out, d)
+	}
+	return out, true
 }
 
 // inlineArg analyzes one call argument with immediate semantics: a
