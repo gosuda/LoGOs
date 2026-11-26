@@ -161,26 +161,7 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 			continue
 		}
 		if isPackageBuildAsset(name) {
-			src, dst := path.Join(p.src, name), path.Join(p.dst, name)
-			logical := filepath.Join(c.absSrcDir(p), name)
-			if !p.vendored && fsys.Replaced(logical) {
-				// Explicit toolchain overlays select the effective asset.
-				// Other assets keep rooted physical reads and symlink checks.
-				info, err := fsys.Stat(logical)
-				if err != nil {
-					return err
-				}
-				if !info.Mode().IsRegular() {
-					return fmt.Errorf("support asset %s is not a regular file", src)
-				}
-				data, err := fsys.ReadFile(logical)
-				if err != nil {
-					return err
-				}
-				if err := c.writeFile(src, dst, data); err != nil {
-					return err
-				}
-			} else if err := c.copyRaw(src, dst); err != nil {
+			if err := c.copyPackageAsset(p, name); err != nil {
 				return err
 			}
 		}
@@ -351,7 +332,7 @@ func (c *supportCopy) copyPackageEmbeds(p supportSourcePackage, patterns []strin
 	}
 	for _, name := range files {
 		dst := path.Join(p.dst, name)
-		if err := c.copyRaw(path.Join(p.src, name), dst); err != nil {
+		if err := c.copyPackageAsset(p, name); err != nil {
 			return err
 		}
 		c.embedded[dst] = true
@@ -430,6 +411,29 @@ func (c *supportCopy) copyVendorNotices(p supportSourcePackage) error {
 		c.notices[src] = true
 	}
 	return nil
+}
+
+// copyPackageAsset shares the effective bytes between build-asset and embed
+// passes. Only explicit toolchain overlays may bypass rooted physical reads;
+// untouched files and all vendored assets retain the symlink checks below.
+func (c *supportCopy) copyPackageAsset(p supportSourcePackage, name string) error {
+	src, dst := path.Join(p.src, name), path.Join(p.dst, name)
+	logical := filepath.Join(c.absSrcDir(p), filepath.FromSlash(name))
+	if p.vendored || !fsys.Replaced(logical) {
+		return c.copyRaw(src, dst)
+	}
+	info, err := fsys.Stat(logical)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("support asset %s is not a regular file", src)
+	}
+	data, err := fsys.ReadFile(logical)
+	if err != nil {
+		return err
+	}
+	return c.writeFile(src, dst, data)
 }
 
 func (c *supportCopy) copyRaw(src, dst string) error {

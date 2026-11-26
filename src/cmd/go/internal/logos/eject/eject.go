@@ -1310,11 +1310,14 @@ func isEjectVariant() bool {
 	return os.Getenv("LOGOSEJECT_IN_VARIANT") != ""
 }
 
-// inactiveFile is one owned .lgo file excluded from the host build by
-// platform or tag constraints that still needs compiler lowering.
+// inactiveFile requests lowering for an owned .lgo file or dependency loading
+// for a copied Go importer. A dependency-only request keeps cgo disabled while
+// loading the logos/* imports of an otherwise cgo-only Go source.
 type inactiveFile struct {
-	pkg  *load.Package
-	name string
+	pkg            *load.Package
+	name           string
+	goImports      []string
+	dependencyOnly bool
 }
 
 // collectConstraintTags appends every tag named by expr.
@@ -1339,6 +1342,13 @@ func collectConstraintTags(expr constraint.Expr, tags *[]string) {
 // It varies GOOS, GOARCH, and tags from the file; CGO stays host
 // to keep the helper count to real platform/tag variants.
 func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []string) (variantCtx, bool) {
+	return selectVariantContextWithCGO(pkgDir, name, hostGOOS, hostGOARCH, hostTags, cfg.BuildContext.CgoEnabled)
+}
+
+// selectVariantContextWithCGO can also identify a cgo-only importer's platform
+// and tags. That context is used to load its dependencies independently with
+// cgo still disabled, without requiring a C compiler to export pure-Go code.
+func selectVariantContextWithCGO(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []string, cgoEnabled bool) (variantCtx, bool) {
 	data, err := fsys.ReadFile(filepath.Join(pkgDir, name))
 	if err != nil {
 		base.Fatalf("logos eject: read inactive file %s: %v", filepath.Join(pkgDir, name), err)
@@ -1449,7 +1459,7 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 			combos = append([]string{combos[0]}, rest...)
 		}
 		for _, experiment := range combos {
-			if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, experiment, customUniq, uniqMention); ok {
+			if vc, ok := searchVariantContext(pkgDir, name, expr, goosCands, goarchCands, hostTags, experiment, customUniq, uniqMention, cgoEnabled); ok {
 				return vc, true
 			}
 		}
@@ -1541,7 +1551,7 @@ func experimentCombinations(mentioned []string) []string {
 	return out
 }
 
-func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags []string, experiment string, customUniq, mentioned []string) (variantCtx, bool) {
+func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, goarchCands, hostTags []string, experiment string, customUniq, mentioned []string, cgoEnabled bool) (variantCtx, bool) {
 	for _, goos := range goosCands {
 		for _, goarch := range goarchCands {
 			if work.CheckGOOSARCHPair(goos, goarch) != nil {
@@ -1554,6 +1564,7 @@ func searchVariantContext(pkgDir, name string, expr constraint.Expr, goosCands, 
 				if !ok {
 					continue
 				}
+				ctxt.CgoEnabled = cgoEnabled
 				if tags, ok := matchVariantTags(pkgDir, name, expr, ctxt, hostTags, customUniq); ok {
 					vc.tags = tags
 					return vc, true
@@ -1603,6 +1614,10 @@ func variantContextsForFiles(files []inactiveFile) []variantCtx {
 	var keys []string
 	for _, f := range files {
 		vc, ok := selectVariantContext(f.pkg.Dir, f.name, hostGOOS, hostGOARCH, hostTags)
+		if len(f.goImports) > 0 && !cfg.BuildContext.CgoEnabled && (!ok || slices.Contains(f.goImports, "C")) {
+			vc, ok = selectVariantContextWithCGO(f.pkg.Dir, f.name, hostGOOS, hostGOARCH, hostTags, true)
+			f.dependencyOnly = true
+		}
 		if !ok {
 			base.Fatalf("logos eject: no build context selects inactive file %s: %s", filepath.Join(f.pkg.Dir, f.name), inactiveConstraintHint(f.pkg.Dir, f.name))
 		}
@@ -1612,8 +1627,19 @@ func variantContextsForFiles(files []inactiveFile) []variantCtx {
 		} else {
 			keys = append(keys, key)
 		}
-		if f.pkg.ImportPath != "" && !slices.Contains(vc.packages, f.pkg.ImportPath) {
-			vc.packages = append(vc.packages, f.pkg.ImportPath)
+		packages := []string{f.pkg.ImportPath}
+		if f.dependencyOnly {
+			packages = nil
+			for _, imp := range f.goImports {
+				if rest, ok := strings.CutPrefix(imp, "logos/"); ok && rest != "" {
+					packages = append(packages, imp)
+				}
+			}
+		}
+		for _, importPath := range packages {
+			if importPath != "" && !slices.Contains(vc.packages, importPath) {
+				vc.packages = append(vc.packages, importPath)
+			}
 		}
 		vc.files = append(vc.files, f)
 		byKey[key] = vc
@@ -1735,25 +1761,35 @@ func stageInactiveVariantsIntoStaging(ctx context.Context, plan *ejectPlan, stag
 			absorbVariantState(plan, out, staging, len(outs))
 			outs = append(outs, out)
 		}
-		for _, f := range files {
-			if strings.HasSuffix(f.name, ".go") {
-				// Copied Go files have no lowered output. Require an actual
-				// helper load to have selected the requested importer.
-				selected := false
-				for _, p := range plan.provenance[f.pkg.ImportPath] {
-					if p.Dir == f.pkg.Dir && (slices.Contains(p.GoFiles, f.name) || slices.Contains(p.CgoFiles, f.name)) {
-						selected = true
-						break
+		for _, vc := range contexts {
+			for _, f := range vc.files {
+				if f.dependencyOnly {
+					for _, imp := range f.goImports {
+						if rest, ok := strings.CutPrefix(imp, "logos/"); ok && rest != "" && len(plan.provenance[imp]) == 0 {
+							base.Fatalf("logos eject: variant did not load dependency %s of cgo-only Go source %s", imp, filepath.Join(f.pkg.Dir, f.name))
+						}
 					}
+					continue
 				}
-				if !selected {
-					base.Fatalf("logos eject: variant did not load Go source %s", filepath.Join(f.pkg.Dir, f.name))
+				if strings.HasSuffix(f.name, ".go") {
+					// Copied Go files have no lowered output. Require an actual
+					// helper load to have selected the requested importer.
+					selected := false
+					for _, p := range plan.provenance[f.pkg.ImportPath] {
+						if p.Dir == f.pkg.Dir && (slices.Contains(p.GoFiles, f.name) || slices.Contains(p.CgoFiles, f.name)) {
+							selected = true
+							break
+						}
+					}
+					if !selected {
+						base.Fatalf("logos eject: variant did not load Go source %s", filepath.Join(f.pkg.Dir, f.name))
+					}
+					continue
 				}
-				continue
-			}
-			dst := filepath.Join(staging, filepath.FromSlash(f.pkg.ImportPath), logosStem(f.name)+".go")
-			if _, err := os.Stat(dst); err != nil {
-				base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(f.pkg.Dir, f.name), err)
+				dst := filepath.Join(staging, filepath.FromSlash(f.pkg.ImportPath), logosStem(f.name)+".go")
+				if _, err := os.Stat(dst); err != nil {
+					base.Fatalf("logos eject: missing ejected output for %s: %v", filepath.Join(f.pkg.Dir, f.name), err)
+				}
 			}
 		}
 	}

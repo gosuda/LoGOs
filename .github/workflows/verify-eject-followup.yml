@@ -1,0 +1,82 @@
+name: Verify support export follow-up repairs
+
+on:
+  push:
+    branches: [ci/verify-eject-270-followup-green-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regressions:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the exact repaired toolchain
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Eject package race tests
+        run: go test -race -count=1 -short cmd/go/internal/logos/eject 2>&1 | tee review-evidence/unit-green.log
+      - name: Export, overlay, and inactive-variant scripts
+        run: |
+          go test -v -race -count=1 cmd/go -run 'Script/^logos_eject_(arena_variant|go_test_support|goroot_lgo_dep|inactive_file|inactive_go_import|inactive_owned|inactive_packages|inactive_support|json_variant|lgo_runtime_pair|overlay_sources|overlay_toolchain|support_closure|variant_package_names|variant_tags|variant_test_imports|vendor_support)$' 2>&1 | tee review-evidence/scripts-green.log
+      - name: Prove the ignored-name guard is exercised
+        run: |
+          file=src/cmd/go/internal/logos/eject/inactive.go
+          cp "$file" review-evidence/inactive-fixed.go
+          trap 'cp review-evidence/inactive-fixed.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/go/internal/logos/eject/inactive.go')
+          text = p.read_text()
+          before = 'entry.IsDir() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !isSupportCopyFile(name)'
+          assert text.count(before) == 1
+          p.write_text(text.replace(before, 'entry.IsDir() || !isSupportCopyFile(name)'))
+          PYCODE
+          if go test -race -count=1 -short cmd/go/internal/logos/eject -run '^TestInactiveGoImportsSkipIgnoredNames$' > review-evidence/mutation.log 2>&1; then
+            cat review-evidence/mutation.log
+            echo 'ignored-name guard mutation escaped the attack'
+            exit 1
+          fi
+          cat review-evidence/mutation.log
+          grep -F 'inactive Go imports = [".ignored.go" "_ignored.go" "extra.go"]' review-evidence/mutation.log
+      - name: Vet, formatting, and clean-tree checks
+        run: |
+          go vet cmd/go/internal/logos/eject
+          files=$(gofmt -l src/cmd/go/internal/logos/eject/eject.go src/cmd/go/internal/logos/eject/eject_vendor.go src/cmd/go/internal/logos/eject/inactive.go src/cmd/go/internal/logos/eject/inactive_go_review_test.go src/cmd/go/internal/logos/eject/support_overlay_review_test.go)
+          test -z "$files" || { printf '%s\n' "$files"; exit 1; }
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: eject-followup-green-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
