@@ -6,10 +6,11 @@ ok array-true
 ok scalar-false
 ok cond-hidden-true
 ok cond-exported-false
-ok option-true
-ok view-true
-ok cond-option-true
-ok cond-view-true
-ok ptr-false
-ok option-ptr-false
+ok const-hidden-true
+ok option-hidden-true
+ok array-option-hidden-true
+ok const-option-hidden-true
+ok option-pointer-false
+ok zero-array-false
+ok const-exported-false
 ok option-exported-false

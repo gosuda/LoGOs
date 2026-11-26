@@ -1,0 +1,37 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+import "comptime"
+
+type Interface322 interface { String() string }
+
+func interfaceKindConstants322() {
+	const if !comptime.IsInterface[any]() { undefinedAnyKind322() }
+	const if !comptime.IsInterface[Interface322]() { undefinedNamedKind322() }
+	const if !comptime.IsInterface[const Interface322]() { undefinedViewKind322() }
+	const if comptime.IsInterface[int]() { undefinedIntKind322() }
+	const if comptime.IsInterface[*Interface322]() { undefinedPointerKind322() }
+	const if comptime.IsInterface[struct{ Value any }]() { undefinedStructKind322() }
+}
+
+func genericInterfaceKind322[T any]() bool {
+	const if comptime.IsInterface[T]() {
+		return true
+	}
+	return false
+}
+
+func countInterfaceFields322[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		const if comptime.IsInterface[f.Type]() { n++ }
+	}
+	return n
+}
+
+func interfaceKindRuntime322() bool {
+	return comptime /* ERROR "comptime::runtime_use" */ .IsInterface[any]()
+}

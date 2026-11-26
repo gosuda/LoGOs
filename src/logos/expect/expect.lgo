@@ -45,66 +45,83 @@ func Equal[T any](r Reporter, want T, got T) {
 	const if comptime.IsStruct[T]() {
 		wantText := ""
 		gotText := ""
-		wantTypes := ""
-		gotTypes := ""
-		typeClash := ""
 		const for _, f := range comptime.Fields[T]() {
 			wantText += FieldText(f.Name, any(want.[f])) + "\n"
 			gotText += FieldText(f.Name, any(got.[f])) + "\n"
-			wantTypes += f.Name + ": " + fmt.Sprintf("%T", any(want.[f])) + "\n"
-			gotTypes += f.Name + ": " + fmt.Sprintf("%T", any(got.[f])) + "\n"
-			if !sameDynType(any(want.[f]), any(got.[f])) {
-				typeClash += f.Name + ": " + dynTypeName(any(want.[f])) + " != " + dynTypeName(any(got.[f])) + "\n"
-			}
 		}
 		if wantText != gotText {
 			r.Errorf("expect: values differ\n%s", Diff(wantText, gotText))
-		} else if wantTypes != gotTypes {
-			// Equal rendered text can hide a changed dynamic type, so a
-			// text match across types fails with both types named.
+			return
+		}
+		wantTypes, gotTypes := "", ""
+		different := false
+		const for _, f := range comptime.Fields[T]() {
+			const if comptime.IsInterface[f.Type]() {
+				wt, gt, changed := DynamicTypeDifference(any(want.[f]), any(got.[f]))
+				if changed {
+					different = true
+					wantTypes += f.Name + ": " + wt + "\n"
+					gotTypes += f.Name + ": " + gt + "\n"
+				}
+			}
+		}
+		if different {
 			r.Errorf("expect: struct fields differ in type\n%s", Diff(wantTypes, gotTypes))
-		} else if typeClash != "" {
-			// Same display names can hide distinct types from different
-			// packages, so a text match across identities fails with
-			// both types named by full package path.
-			r.Errorf("expect: struct fields differ in type\n%s", typeClash)
 		}
 	} else {
 		wantText := LeafText(any(want))
 		gotText := LeafText(any(got))
 		if wantText != gotText {
 			r.Errorf("expect: values differ\n%s", Diff(wantText, gotText))
-		} else if !sameDynType(any(want), any(got)) {
-			// A string "nil" renders like nil and equal texts can hide
-			// different types, so a text match across types fails with
-			// both types named.
-		r.Errorf("expect: ambiguous values differ in type\n- (%T) %s\n+ (%T) %s\n",
-				any(want), wantText, any(got), gotText)
+			return
+		}
+		const if comptime.IsInterface[T]() {
+			wt, gt, changed := DynamicTypeDifference(any(want), any(got))
+			if changed {
+				r.Errorf("expect: ambiguous values differ in type\n- (%s) %s\n+ (%s) %s\n",
+					wt, wantText, gt, gotText)
+			}
 		}
 	}
 }
 
-// sameDynType reports whether want and got share one dynamic type.
-// Display strings such as %T shorten the package to its name, so two
-// distinct types from different packages can print alike; the
-// reflect.Type identity never collides. A nil interface has no dynamic
-// type, and two nils share it.
-func sameDynType(want any, got any) bool {
-	return reflect.TypeOf(want) == reflect.TypeOf(got)
+// DynamicTypeDifference compares interface values by actual type identity.
+// Equal calls it only for interface types selected at compile time. The
+// helper is exported because an exported comptime instance names it.
+func DynamicTypeDifference(want any, got any) (string, string, bool) {
+	wt, gt := reflect.TypeOf(want), reflect.TypeOf(got)
+	if wt == gt {
+		return "", "", false
+	}
+	wantName, gotName := dynamicTypeName(wt), dynamicTypeName(gt)
+	if wantName == gotName {
+		// Reflection display names are not identities, even after package
+		// qualification (for example generic arguments with equal names).
+		wantName += " [want type]"
+		gotName += " [different type]"
+	}
+	return wantName, gotName, true
 }
 
-// dynTypeName names a value's dynamic type for diagnostics. Named types
-// carry their full package path so same-named types from different
-// packages read distinctly; every other value keeps its %T display.
-func dynTypeName(v any) string {
-	t := reflect.TypeOf(v)
+func dynamicTypeName(t reflect.Type) string {
 	if t == nil {
 		return "<nil>"
 	}
-	if p, n := t.PkgPath(), t.Name(); p != "" && n != "" {
-		return p + "." + n
+	if t.PkgPath() != "" {
+		return t.PkgPath() + "." + t.Name()
 	}
-	return fmt.Sprintf("%T", v)
+	switch t.Kind() {
+	case reflect.Pointer:
+		return "*" + dynamicTypeName(t.Elem())
+	case reflect.Slice:
+		return "[]" + dynamicTypeName(t.Elem())
+	case reflect.Array:
+		return fmt.Sprintf("[%d]%s", t.Len(), dynamicTypeName(t.Elem()))
+	case reflect.Map:
+		return "map[" + dynamicTypeName(t.Key()) + "]" + dynamicTypeName(t.Elem())
+	default:
+		return t.String()
+	}
 }
 
 // FieldText renders one named field value on a single line. String

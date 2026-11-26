@@ -142,6 +142,8 @@ func LogosHasUnexported(t Type) bool {
 		return LogosHasUnexported(u.Elem)
 	case *Option:
 		return LogosHasUnexported(u.Elem)
+	case *LogosTuple:
+		return LogosHasUnexported(u.under)
 	case *Array:
 		return u.Len() > 0 && LogosHasUnexported(u.Elem())
 	case *Struct:

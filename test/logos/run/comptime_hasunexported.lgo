@@ -27,10 +27,6 @@ type blanked struct {
 	_ [2]byte
 }
 
-type hiddenOpt = hasHidden?
-type exportedOpt = exportedOnly?
-type hiddenPtrOpt = *hasHidden?
-
 type hiddenArray [3]hasHidden
 
 var failed bool
@@ -55,20 +51,6 @@ func direct[T any]() bool {
 	return comptime.HasUnexported[T]()
 }
 
-func condHiddenOption() bool {
-	const if comptime.HasUnexported[hiddenOpt]() {
-		return true
-	}
-	return false
-}
-
-func condHiddenView() bool {
-	const if comptime.HasUnexported[const hasHidden]() {
-		return true
-	}
-	return false
-}
-
 func main() {
 	check("exported-false", direct[exportedOnly](), false)
 	check("hidden-true", direct[hasHidden](), true)
@@ -78,13 +60,14 @@ func main() {
 	check("scalar-false", direct[int32](), false)
 	check("cond-hidden-true", condHidden[hasHidden](), true)
 	check("cond-exported-false", condHidden[exportedOnly](), false)
-	check("option-true", direct[hiddenOpt](), true)
-	check("view-true", direct[const hasHidden](), true)
-	check("cond-option-true", condHiddenOption(), true)
-	check("cond-view-true", condHiddenView(), true)
-	check("ptr-false", direct[*hasHidden](), false)
-	check("option-ptr-false", direct[hiddenPtrOpt](), false)
-	check("option-exported-false", direct[exportedOpt](), false)
+	check("const-hidden-true", direct[const hasHidden](), true)
+	check("option-hidden-true", direct[hasHidden?](), true)
+	check("array-option-hidden-true", direct[[2]hasHidden?](), true)
+	check("const-option-hidden-true", condHidden[const hasHidden?](), true)
+	check("option-pointer-false", direct[*hasHidden?](), false)
+	check("zero-array-false", direct[[0]hasHidden?](), false)
+	check("const-exported-false", direct[const exportedOnly](), false)
+	check("option-exported-false", condHidden[exportedOnly?](), false)
 	if failed {
 		os.Exit(1)
 	}

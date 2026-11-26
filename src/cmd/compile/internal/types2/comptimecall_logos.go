@@ -13,7 +13,7 @@ import (
 // LoGo/s M7-S2/M7-S3 comptime call positions (SPEC Sec 2.5, T-205).
 // callExpr calls in through one hook line. Values of the virtual
 // package exist only at compile time: Fields serves const-for ranges
-// (checked by the const-for checker, never here), IsStruct serves
+// (checked by the const-for checker, never here), type-kind predicates serve
 // `const if` conditions (folded here), and every other call position
 // reports [comptime::runtime_use], except a live comptime.Error, which
 // fails compilation with its message.
@@ -27,7 +27,7 @@ type logosPredState struct {
 }
 
 // logosComptimeCall vets one call for compile-time-only placement. It
-// reports whether it answered the call itself: an IsStruct predicate in
+// reports whether it answered the call itself: a type-kind predicate in
 // a `const if` condition becomes a constant (or a deferred value inside
 // a comptime generic). Every other call keeps the normal check, so the
 // arguments and results are still typed; Error messages go out through a
@@ -54,13 +54,13 @@ func (check *Checker) logosComptimeCall(x *operand, call *syntax.CallExpr) bool 
 		}
 	}
 	switch {
-	case fname == "IsStruct" && check.logosPred.depth > 0 && check.logosIsStruct(x, call):
+	case (fname == "IsStruct" || fname == "IsInterface") && check.logosPred.depth > 0 && check.logosTypeKind(x, call, fname):
 		return true
 	case isLogosLayoutName(fname) && check.logosLayoutCall(x, call, fname):
 		return true
 	case fname == "TypeOf" && check.logosTypeOfCall(x, call):
 		return true
-	case fname == "Fields", fname == "IsStruct", fname == "TypeOf",
+	case fname == "Fields", fname == "IsStruct", fname == "IsInterface", fname == "TypeOf",
 		fname == "SizeOf", fname == "AlignOf", fname == "HasPointers",
 		fname == "HasUnexported":
 		check.errorf(syntax.StartPos(call), InvalidPkgUse, "[comptime::runtime_use] comptime.%s is compile-time only", fname)
@@ -80,14 +80,13 @@ func (check *Checker) logosComptimeValueUse(e *syntax.SelectorExpr, obj Object) 
 	check.errorf(syntax.StartPos(e), InvalidPkgUse, "[comptime::runtime_use] comptime.%s is compile-time only", fname)
 }
 
-// logosIsStruct answers comptime.IsStruct[X]() in a `const if`
-// condition. A concrete X gives an untyped boolean constant, true when
-// its underlying type is a struct. A type parameter X, and the field
-// type of a const for over one, give a boolean value that is not a
+// logosTypeKind answers IsStruct and IsInterface in a const-if condition.
+// A concrete X gives an untyped boolean constant. A type parameter X,
+// and the field type of a const for over one, give a boolean value that is not a
 // constant: the answer is per instantiation, so the condition is
 // deferred to the copies. It reports false for any other call shape,
 // which the normal check then rejects.
-func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
+func (check *Checker) logosTypeKind(x *operand, call *syntax.CallExpr, name string) bool {
 	idx, ok := call.Fun.(*syntax.IndexExpr)
 	if !ok || len(call.ArgList) != 0 {
 		return false
@@ -101,11 +100,6 @@ func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
 	switch {
 	case !isValid(targ):
 		x.invalidate()
-	case check.logosCtSubst != nil && !isTypeParam(targ) && !check.logosGenericFieldType(targs[0]):
-		_, isStruct := targ.Underlying().(*Struct)
-		x.mode_ = constant_
-		x.typ_ = Typ[UntypedBool]
-		x.val = constant.MakeBool(isStruct)
 	case isTypeParam(targ) || check.logosGenericFieldType(targs[0]):
 		x.mode_ = value
 		x.typ_ = Typ[Bool]
@@ -114,13 +108,38 @@ func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
 		}
 		check.logosPred.calls[call] = true
 	default:
-		_, isStruct := targ.Underlying().(*Struct)
+		matches := false
+		switch name {
+		case "IsStruct":
+			_, matches = targ.Underlying().(*Struct)
+		case "IsInterface":
+			matches = logosInterfaceType(targ)
+		default:
+			panic("unexpected comptime type-kind predicate")
+		}
 		x.mode_ = constant_
 		x.typ_ = Typ[UntypedBool]
-		x.val = constant.MakeBool(isStruct)
+		x.val = constant.MakeBool(matches)
 	}
 	return true
 }
+
+// Read-only wrappers change access, not the interface value's dynamic type.
+func logosInterfaceType(t Type) bool {
+	for {
+		switch u := Unalias(t).Underlying().(type) {
+		case *ConstView:
+			t = u.Elem
+		case *ReadonlyDescendants:
+			t = u.Elem
+		case *Interface:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
 func (check *Checker) logosTypeOfCall(x *operand, call *syntax.CallExpr) bool {
 	if !check.logosComptimeInGeneric() && check.logosCtSubst == nil {
 		return false
