@@ -1,30 +1,178 @@
+[!symlink] skip 'fake GOROOT needs symlinks'
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env CGO_ENABLED=0
 
-# Materialize a shipped .lgo package outside the fixed support set.
-# Use the real port so the test does not write into GOROOT.
+# A .lgo package shipped in the toolchain tree under src/logos/ (outside
+# the fixed rt/arena/sync set) must be materialized into the ejected
+# support module under rt/logos/, transitively, so the ejected tree
+# builds with plain Go. The test installs fixture packages in a private
+# toolchain root inside $WORK and selects it with GOROOT.
+# Nothing is written into the real GOROOT.
+go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
+env GOROOT=$WORK/fakegoroot
 
 cd m
 
 logos run .
-stdout '^count: 42$'
-stdout 'expect: values differ'
+stdout '^ejecttestdep ok$'
 cp stdout $WORK/native.txt
+logos run -tags pr270variant .
+stdout '^ejecttestleaf ok$'
+cp stdout $WORK/native-variant.txt
 
 logos eject -o out
 exists out/main.go
 exists out/_logos_deps/rt/go.mod
-exists out/_logos_deps/rt/expect/expect.go
-! exists out/_logos_deps/rt/expect/expect_test.go
-! grep '^//go:build' out/_logos_deps/rt/expect/expect.go
-grep 'gosuda/loGos/rt/expect' out/main.go
+exists out/_logos_deps/rt/logos/ejecttestdep/ejecttestdep.go
+! exists out/_logos_deps/rt/ejecttestdep
+! grep '^//go:build' out/_logos_deps/rt/logos/ejecttestdep/ejecttestdep.go
+exists out/_logos_deps/rt/logos/ejecttestdep/variant.go
+exists out/_logos_deps/rt/logos/ejecttestleaf/ejecttestleaf.go
 
+env GOROOT=$TESTGO_GOROOT
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+go run -tags pr270variant .
+cmp stdout $WORK/native-variant.txt
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go run -tags pr270variant .
+cmp stdout $WORK/native-variant.txt
+
+# logos/json mirrors the path of the runtime package logos/rt/json. Its
+# lowered copy lands in its own directory, so it neither replaces nor
+# joins the runtime package.
+cd ../../j
+logos run .
+stdout '^2 7 9$'
+cp stdout $WORK/native-json.txt
+logos eject -o out
+exists out/_logos_deps/rt/logos/json/diagnostics.go
+exists out/_logos_deps/rt/logos/json/doc.go
+! exists out/_logos_deps/rt/json/diagnostics.go
+grep 'runtime support package' out/_logos_deps/rt/json/doc.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native-json.txt
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native-json.txt
+
+# A shipped .lgo package outside the fixed set is also materialized from
+# the real toolchain, with no fixture GOROOT. logos/expect lands under
+# rt/logos/ like every other non-runtime toolchain package.
+cd ../../r
+logos run .
+stdout '^count: 42$'
+cp stdout $WORK/native-real.txt
+logos eject -o out
+exists out/main.go
+exists out/_logos_deps/rt/go.mod
+exists out/_logos_deps/rt/logos/expect/expect.go
+! exists out/_logos_deps/rt/expect
+! exists out/_logos_deps/rt/logos/expect/expect_test.go
+! grep '^//go:build' out/_logos_deps/rt/logos/expect/expect.go
+grep 'gosuda/loGos/rt/logos/expect' out/main.go
 cd out
 exists $UPROOT1272/bin/go
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
 exec env -u GOROOT $UPROOT1272/bin/go run .
-cmp stdout $WORK/native.txt
+cmp stdout $WORK/native-real.txt
+
+-- mkgoroot.go --
+package main
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func must(err error, what string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkgoroot: %s: %v\n", what, err)
+		os.Exit(1)
+	}
+}
+
+func link(oldname, newname string) {
+	must(os.MkdirAll(filepath.Dir(newname), 0777), "mkdir "+filepath.Dir(newname))
+	must(os.Symlink(oldname, newname), "symlink "+newname)
+}
+
+func main() {
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: mkgoroot <realGOROOT> <fakeRoot> <fixtures>")
+		os.Exit(2)
+	}
+	real, fake, fixtures := os.Args[1], os.Args[2], os.Args[3]
+
+	must(os.MkdirAll(filepath.Join(fake, "src", "logos"), 0777), "mkdir fake src/logos")
+
+	ents, err := os.ReadDir(filepath.Join(real, "src"))
+	must(err, "read real src")
+	for _, e := range ents {
+		if e.Name() == "logos" {
+			continue
+		}
+		link(filepath.Join(real, "src", e.Name()), filepath.Join(fake, "src", e.Name()))
+	}
+
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(filepath.Join(real, "src", "logos"))), "copy support sources")
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(fixtures)), "install fixture packages")
+
+	// The package index distinguishes .lgo-only standard packages, but
+	// bypasses files with recent mtimes. Age only the private copies.
+	old := time.Now().Add(-time.Hour)
+	must(filepath.WalkDir(filepath.Join(fake, "src", "logos"), func(name string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		return os.Chtimes(name, old, old)
+	}), "age copied support and fixture files")
+
+	link(filepath.Join(real, "pkg"), filepath.Join(fake, "pkg"))
+	link(filepath.Join(real, "VERSION"), filepath.Join(fake, "VERSION"))
+	if _, err := os.Stat(filepath.Join(real, "go.env")); err == nil {
+		link(filepath.Join(real, "go.env"), filepath.Join(fake, "go.env"))
+	}
+	if _, err := os.Stat(filepath.Join(real, "lib")); err == nil {
+		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
+	}
+}
+
+-- dep/ejecttestdep/ejecttestdep.lgo --
+package ejecttestdep
+
+// Hello reports that the toolchain package lowered and ran.
+func Hello() string {
+	return value()
+}
+
+-- dep/ejecttestdep/value.lgo --
+//go:build !pr270variant
+
+package ejecttestdep
+
+func value() string { return "ejecttestdep ok" }
+
+-- dep/ejecttestdep/variant.lgo --
+//go:build pr270variant
+
+package ejecttestdep
+
+import "logos/ejecttestleaf"
+
+func value() string { return ejecttestleaf.Value() }
+
+-- dep/ejecttestleaf/ejecttestleaf.lgo --
+package ejecttestleaf
+
+func Value() string { return "ejecttestleaf ok" }
 
 -- m/go.mod --
 module example.com/gorootdep
@@ -37,28 +185,47 @@ package main
 import (
 	"fmt"
 
+	"logos/ejecttestdep"
+)
+
+func main() {
+	fmt.Println(ejecttestdep.Hello())
+}
+
+-- j/go.mod --
+module example.com/gorootjson
+
+go 1.27
+
+-- j/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	ljson "logos/json"
+	_ "logos/rt/json"
+)
+
+func main() {
+	d := ljson.DiagnosticsFor([]byte("{\n  \"a\": x}"), 9)
+	fmt.Println(d.Line, d.Column, d.Offset)
+}
+
+-- r/go.mod --
+module example.com/gorootdep
+
+go 1.27
+
+-- r/main.lgo --
+package main
+
+import (
+	"fmt"
+
 	"logos/expect"
 )
+
 func main() {
 	fmt.Println(expect.FieldText("count", 42))
-	rep := &depReporter{}
-	expect.Equal(rep, depProbe{Count: 1}, depProbe{Count: 2})
-	if !rep.failed {
-		fmt.Println("equal-specialization: not exercised")
-	}
-}
-
-type depProbe struct {
-	Count int
-}
-
-type depReporter struct {
-	failed bool
-}
-
-func (r *depReporter) Helper() {}
-
-func (r *depReporter) Errorf(format string, args ...any) {
-	r.failed = true
-	fmt.Printf(format, args...)
 }
