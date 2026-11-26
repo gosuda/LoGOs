@@ -3426,6 +3426,13 @@ func (w ctWalker) ctOptionNilComparison(e *syntax.Operation) (syntax.Expr, []syn
 	if opt == nil {
 		return nil, nil, false
 	}
+	if types2.LogosOptionIsBare(opt.Elem) {
+		// A bare option compares directly with nil in both the native
+		// and the ejected form, so the comparison stays as written:
+		// rewriting == as !(.. != ..) prints without the parens Go
+		// needs to keep the negation outside the comparison.
+		return nil, nil, false
+	}
 	next, pre := w.expr(operand)
 	pos := e.Pos()
 	cond := w.ctOptionPresent(pos, next, opt)

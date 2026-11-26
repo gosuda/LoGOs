@@ -305,7 +305,7 @@ def source_identity(root: Path, expected_head: str) -> dict[str, object]:
         "production_sha256": digest(root / SOURCE_DIR / "optfacts.go"),
         "frozen_sha256": verify_frozen(root),
         "helper_sha256": digest(Path(__file__)),
-        "workflow_sha256": digest(root / ".github/workflows/tagged-facts.yml"),
+        "workflow_sha256": digest(root / ".github/workflows/ci.yml"),
     }
 
 

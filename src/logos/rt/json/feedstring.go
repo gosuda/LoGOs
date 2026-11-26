@@ -331,8 +331,10 @@ func (s *FeedScanner) strU3() (Token, bool, bool) {
 		return Token{}, false, true
 	}
 	if isLow(s.cu0) {
-		s.err = ErrSyntax
-		return Token{}, false, false
+		n := utf8.EncodeRune(s.esc[:], utf8.RuneError)
+		s.start = s.pos
+		s.state = stStr
+		return Token{Kind: TokenPartialString, Bytes: s.esc[:n]}, true, false
 	}
 	n := utf8.EncodeRune(s.esc[:], rune(s.cu0))
 	s.start = s.pos
@@ -342,24 +344,33 @@ func (s *FeedScanner) strU3() (Token, bool, bool) {
 
 func (s *FeedScanner) strSur() (Token, bool, bool) {
 	if s.pos >= len(s.buf) {
+		if s.end {
+			n := utf8.EncodeRune(s.esc[:], utf8.RuneError)
+			s.start = s.pos
+			s.state = stStr
+			return Token{Kind: TokenPartialString, Bytes: s.esc[:n]}, true, false
+		}
 		return s.stringNeedMore(6)
 	}
 	if s.buf[s.pos] != '\\' {
-		s.err = ErrSyntax
-		return Token{}, false, false
+		n := utf8.EncodeRune(s.esc[:], utf8.RuneError)
+		s.start = s.pos
+		s.state = stStr
+		return Token{Kind: TokenPartialString, Bytes: s.esc[:n]}, true, false
 	}
 	s.pos++
 	s.state = stStrSurBS
 	return Token{}, false, true
 }
-
 func (s *FeedScanner) strSurBS() (Token, bool, bool) {
 	if s.pos >= len(s.buf) {
 		return s.stringNeedMore(7)
 	}
 	if s.buf[s.pos] != 'u' {
-		s.err = ErrSyntax
-		return Token{}, false, false
+		n := utf8.EncodeRune(s.esc[:], utf8.RuneError)
+		s.start = s.pos
+		s.state = stStrEsc
+		return Token{Kind: TokenPartialString, Bytes: s.esc[:n]}, true, false
 	}
 	s.pos++
 	s.cu1 = 0
@@ -371,12 +382,12 @@ func (s *FeedScanner) strSurU() (Token, bool, bool) {
 	if s.pos >= len(s.buf) {
 		return s.stringNeedMore(8)
 	}
-	c := s.buf[s.pos]
-	if c != 'D' && c != 'd' {
+	v := hexVal(s.buf[s.pos])
+	if v < 0 {
 		s.err = ErrSyntax
 		return Token{}, false, false
 	}
-	s.cu1 = 0xD << 12
+	s.cu1 = uint16(v) << 12
 	s.pos++
 	s.state = stStrSurU1
 	return Token{}, false, true
@@ -386,13 +397,11 @@ func (s *FeedScanner) strSurU1() (Token, bool, bool) {
 	if s.pos >= len(s.buf) {
 		return s.stringNeedMore(9)
 	}
-	c := s.buf[s.pos]
-	good := (c >= 'C' && c <= 'F') || (c >= 'c' && c <= 'f')
-	if !good {
+	v := hexVal(s.buf[s.pos])
+	if v < 0 {
 		s.err = ErrSyntax
 		return Token{}, false, false
 	}
-	v := hexVal(c)
 	s.cu1 |= uint16(v) << 8
 	s.pos++
 	s.state = stStrSurU2
@@ -425,12 +434,21 @@ func (s *FeedScanner) strSurU3() (Token, bool, bool) {
 	}
 	s.cu1 |= uint16(v)
 	s.pos++
-	if !isLow(s.cu1) {
-		s.err = ErrSyntax
-		return Token{}, false, false
+	if isLow(s.cu1) {
+		r := rune(0x10000) + rune(s.cu0-0xD800)<<10 + rune(s.cu1-0xDC00)
+		n := utf8.EncodeRune(s.esc[:], r)
+		s.start = s.pos
+		s.state = stStr
+		return Token{Kind: TokenPartialString, Bytes: s.esc[:n]}, true, false
 	}
-	r := rune(0x10000) + rune(s.cu0-0xD800)<<10 + rune(s.cu1-0xDC00)
-	n := utf8.EncodeRune(s.esc[:], r)
+	n := utf8.EncodeRune(s.esc[:], utf8.RuneError)
+	if isHigh(s.cu1) {
+		s.cu0 = s.cu1
+		s.start = s.pos
+		s.state = stStrSur
+		return Token{Kind: TokenPartialString, Bytes: s.esc[:n]}, true, false
+	}
+	n += utf8.EncodeRune(s.esc[n:], rune(s.cu1))
 	s.start = s.pos
 	s.state = stStr
 	return Token{Kind: TokenPartialString, Bytes: s.esc[:n]}, true, false
