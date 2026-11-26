@@ -139,7 +139,7 @@ func h2RecvParam(used map[string]bool, osName, stringsName, receiver string) str
 	trimmed := strings.TrimSpace(receiver)
 	if trimmed != "" && trimmed[0] != '*' {
 		ok := true
-		for i := 0; i < len(trimmed); i++ {
+		for i := range len(trimmed) {
 			c := trimmed[i]
 			if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9') {
 				ok = false
