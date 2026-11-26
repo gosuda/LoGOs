@@ -1,0 +1,45 @@
+// errorcheck
+
+package p
+
+func fetch4424() (int, error) { return 1, nil }
+func use4424(v int) {}
+
+type h4424 struct {
+	stats int
+	err   error
+}
+
+// Conditional deferred reset: when reset is false the original result
+// reaches the read without a check, so the read must fail.
+func ef4424(reset bool) {
+	h := h4424{}
+	h.stats, h.err = fetch4424()
+	func() {
+		defer func() {
+			if reset {
+				h.stats = 0
+			}
+		}()
+	}()
+	use4424(h.stats) // ERROR "result_before_error_check"
+	_ = h.err
+}
+
+// A conditional error reset followed by a check stays unproven: the check
+// reads the cleared error on one path, not the call's, so the read must fail.
+func ef4424b(reset bool) {
+	h := h4424{}
+	h.stats, h.err = fetch4424()
+	func() {
+		defer func() {
+			if reset {
+				h.err = nil
+			}
+		}()
+	}()
+	if h.err != nil {
+		return
+	}
+	use4424(h.stats) // ERROR "result_before_error_check"
+}

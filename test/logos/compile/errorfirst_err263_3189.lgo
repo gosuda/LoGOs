@@ -1,0 +1,45 @@
+// errorcheck
+
+package p
+
+func fetch3189() (int, error) { return 1, nil }
+func use3189(v int) {}
+
+type e3189 struct {
+	e1 error
+	e2 error
+}
+
+// Two defers store the same result with different errors. Registration
+// order is the reverse of execution order: the second registration runs
+// first and the first registration supplies the final value, so checking
+// the second error must not prove the read.
+func ef3189() {
+	var n int
+	var e e3189
+	func() {
+		defer func() { n, e.e1 = fetch3189() }()
+		defer func() { n, e.e2 = fetch3189() }()
+	}()
+	if e.e2 != nil {
+		return
+	}
+	use3189(n) // ERROR "result_before_error_check"
+	_ = e.e1
+}
+
+// Checking the final error in execution-reverse order proves the read:
+// the last-executed defer supplies the value, so its guard is the agreed one.
+func ef3189b() {
+	var n int
+	var e e3189
+	func() {
+		defer func() { n, e.e1 = fetch3189() }()
+		defer func() { n, e.e2 = fetch3189() }()
+	}()
+	if e.e1 != nil {
+		return
+	}
+	use3189(n)
+	_ = e.e2
+}

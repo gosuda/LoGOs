@@ -1,0 +1,43 @@
+// errorcheck
+
+package p
+
+func fetch4326() (int, error) { return 1, nil }
+func use4326(v int) {}
+
+type h4326 struct {
+	stats int
+	err   error
+}
+
+// Nested cleanup replaces the result's error after the body exit. The
+// final error is always nil, so checking it must not prove the read.
+func ef4326() {
+	h := h4326{}
+	func() {
+		defer func() {
+			defer func() { h.err = nil }()
+			h.stats, h.err = fetch4326()
+		}()
+	}()
+	if h.err != nil {
+		return
+	}
+	use4326(h.stats) // ERROR "result_before_error_check"
+}
+
+// A guard-only overwrite without a result rewrite still reports: clearing
+// the error alone cannot validate an unchecked use.
+func ef4326b() {
+	h := h4326{}
+	h.stats, h.err = fetch4326()
+	func() {
+		defer func() {
+			h.err = nil
+		}()
+	}()
+	if h.err != nil {
+		return
+	}
+	use4326(h.stats) // ERROR "result_before_error_check"
+}
