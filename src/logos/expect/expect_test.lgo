@@ -140,3 +140,21 @@ func TestEqualLeafValues(t *testing.T) {
 		}
 	}
 }
+
+func TestEqualAmbiguousLeafType(t *testing.T) {
+	// Planted fault: the string "nil" renders like nil, so the two
+	// compare equal and the mismatch stays silent.
+	var wantAny any = "nil"
+	var gotAny any = nil
+	r := &recorder{}
+	expect.Equal(r, wantAny, gotAny)
+	want := "expect: ambiguous values differ in type\n- (string) nil\n+ (<nil>) nil\n"
+	if r.msg != want {
+		t.Errorf("ambiguous leaf:\n got %q\nwant %q", r.msg, want)
+	}
+	same := &recorder{}
+	expect.Equal(same, wantAny, wantAny)
+	if same.msg != "" {
+		t.Errorf("identical ambiguous values failed:\n got %q", same.msg)
+	}
+}

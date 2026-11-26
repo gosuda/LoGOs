@@ -218,6 +218,66 @@ func TestFixedAppendSpare(t *testing.T) {
 	}
 }
 
+func TestFixedAppendSpareUnaccounted(t *testing.T) {
+	buf := make([]byte, 8)
+	r := arena.OpenFixed(buf)
+	got := arena.Append(r, buf[:0], 7)
+	if len(got) != 1 || got[0] != 7 {
+		t.Fatalf("Append(r, buf[:0], 7) = %v, want [7]", got)
+	}
+	if &got[0] != &buf[0] {
+		t.Errorf("Append into free region space copied instead of reusing the buffer")
+	}
+	if used := arena.FixedUsed(r); used != 1 {
+		t.Fatalf("FixedUsed = %d, want 1: a spare-capacity write into free region space must advance the cursor", used)
+	}
+	p := arena.New[byte](r)
+	*p = 0
+	if got[0] != 7 {
+		t.Fatalf("append result = %v after a later allocation, want [7]: the allocation overwrote unreserved bytes", got)
+	}
+	if used := arena.FixedUsed(r); used != 2 {
+		t.Fatalf("FixedUsed = %d, want 2", used)
+	}
+}
+
+func TestFixedAppendSpareHeap(t *testing.T) {
+	r := arena.OpenFixed(make([]byte, 8))
+	s := make([]byte, 0, 4)
+	got := arena.Append(r, s, 1, 2)
+	if want := []byte{1, 2}; !slices.Equal(got, want) {
+		t.Fatalf("Append(r, s, 1, 2) = %v, want %v", got, want)
+	}
+	if &got[0] != &s[:1][0] {
+		t.Errorf("Append with heap spare capacity moved the backing array")
+	}
+	if used := arena.FixedUsed(r); used != 0 {
+		t.Errorf("FixedUsed = %d, want 0: heap spare capacity is not region space", used)
+	}
+}
+
+func TestFixedAppendAdjacentInput(t *testing.T) {
+	buf := []byte{7, 8, 0, 0, 0}
+	r := arena.OpenFixed(buf[2:])
+	got := arena.Append(r, buf[:2:2], 9)
+	if len(got) != 3 || &got[0] != &buf[2] || got[0] != 7 || got[1] != 8 || got[2] != 9 {
+		t.Fatalf("Append = %v; want [7 8 9] inside caller's region", got)
+	}
+	if used := arena.FixedUsed(r); used != 3 {
+		t.Fatalf("FixedUsed = %d; want 3", used)
+	}
+}
+
+func TestFixedAppendAliasedFreshPrefix(t *testing.T) {
+	buf := []byte{7, 8, 0, 0, 0}
+	r := arena.OpenFixed(buf)
+	s := []byte{1}
+	got := arena.Append(r, s, buf[:2]...)
+	if want := []byte{1, 7, 8}; !slices.Equal(got, want) {
+		t.Fatalf("Append with v aliasing the fresh prefix = %v, want %v", got, want)
+	}
+}
+
 func TestFixedHeapParity(t *testing.T) {
 	r := arena.Open()
 	p := arena.New[int](r)
@@ -302,6 +362,30 @@ func TestFixedZeroSize(t *testing.T) {
 	}
 	if got := arena.FixedUsed(r); got != 0 {
 		t.Errorf("FixedUsed = %d after zero-size ops, want 0", got)
+	}
+}
+
+func TestFixedRejectsPointers(t *testing.T) {
+	type entry struct {
+		names [1]string
+	}
+	r := arena.OpenFixed(make([]byte, 64))
+	for _, tc := range []struct {
+		name string
+		run  func()
+	}{
+		{"new", func() { arena.New[entry](r) }},
+		{"make", func() { arena.Make[entry](r, 1) }},
+		{"append", func() { arena.Append(r, []entry(nil), entry{}) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if msg := fixedPanicText(t, tc.run); msg != "arena: fixed region cannot hold pointers" {
+				t.Fatalf("panic = %q, want pointer rejection", msg)
+			}
+			if got := arena.FixedUsed(r); got != 0 {
+				t.Fatalf("rejected operation consumed %d bytes", got)
+			}
+		})
 	}
 }
 

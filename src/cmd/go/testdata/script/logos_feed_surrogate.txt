@@ -1,0 +1,126 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+go run ./feed
+stdout 'feed-ok'
+
+-- w/go.mod --
+module example.com/feed
+
+go 1.27
+
+-- w/feed/main.go --
+package main
+
+import (
+	stdjson "encoding/json"
+	"fmt"
+	"os"
+
+	rtjson "logos/rt/json"
+)
+
+// Lone-surrogate documents must decode exactly like encoding/json;
+// truncated or malformed escapes must fail on both sides.
+var valid = []string{
+	`"a\uDC00b"`,
+	`"a\uD800b"`,
+	`"a\uD800\u0041b"`,
+	`"a\uD800\uD800\uDC00b"`,
+	`"\uDC00"`,
+	`"\uD800"`,
+	`"\uD83D\uDE00"`,
+	`"\\\uD800\\"`,
+}
+
+var invalid = []string{
+	`"a\uD800\u004"`,
+	`"a\uD800\u"`,
+	`"a\uD800\xb"`,
+	`"a\uD8"`,
+}
+
+func pump(s *rtjson.FeedScanner, out *[]byte, sawEnd *bool) error {
+	for {
+		t, ok := s.Next()
+		if !ok {
+			return s.Err()
+		}
+		switch t.Kind {
+		case rtjson.TokenPartialString, rtjson.TokenString:
+			*out = append(*out, t.Bytes...)
+		case rtjson.TokenEndOfDocument:
+			*sawEnd = true
+			return nil
+		}
+	}
+}
+
+func scanDoc(doc string, cut int) (string, error) {
+	data := []byte(doc)
+	chunks := [][]byte{data}
+	if cut >= 0 {
+		chunks = [][]byte{data[:cut], data[cut:]}
+	}
+	var s rtjson.FeedScanner
+	var out []byte
+	sawEnd := false
+	for _, c := range chunks {
+		if len(c) == 0 {
+			continue
+		}
+		s.Feed(c)
+		if err := pump(&s, &out, &sawEnd); err != nil {
+			return "", err
+		}
+		if sawEnd {
+			break
+		}
+	}
+	s.End()
+	if err := pump(&s, &out, &sawEnd); err != nil {
+		return "", err
+	}
+	if !sawEnd {
+		return "", fmt.Errorf("missing end of document")
+	}
+	return string(out), nil
+}
+
+func main() {
+	failed := false
+	for _, doc := range valid {
+		var std string
+		if err := stdjson.Unmarshal([]byte(doc), &std); err != nil {
+			fmt.Printf("oracle rejects valid %q: %v\n", doc, err)
+			failed = true
+			continue
+		}
+		for cut := -1; cut <= len(doc); cut++ {
+			got, err := scanDoc(doc, cut)
+			if err != nil {
+				fmt.Printf("feed rejects %q at cut %d: %v\n", doc, cut, err)
+				failed = true
+				continue
+			}
+			if got != std {
+				fmt.Printf("feed decoded %q at cut %d as %q, want %q\n", doc, cut, got, std)
+				failed = true
+			}
+		}
+	}
+	for _, doc := range invalid {
+		var std string
+		stdErr := stdjson.Unmarshal([]byte(doc), &std)
+		_, feedErr := scanDoc(doc, -1)
+		if stdErr == nil || feedErr == nil {
+			fmt.Printf("invalid accepted %q: std=%v feed=%v\n", doc, stdErr, feedErr)
+			failed = true
+		}
+	}
+	if failed {
+		os.Exit(1)
+	}
+	fmt.Println("feed-ok")
+}

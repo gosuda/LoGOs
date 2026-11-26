@@ -6,11 +6,13 @@ package proc_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"testing"
@@ -69,6 +71,18 @@ func runChild(behavior string) {
 	case "stdin":
 		_, _ = io.Copy(os.Stdout, os.Stdin)
 		os.Exit(0)
+	case "fanout":
+		cmd := exec.Command("sleep", "60")
+		cmd.Env = os.Environ()
+		if err := cmd.Start(); err != nil {
+			os.Exit(2)
+		}
+		if p := os.Getenv("LOGOS_PROC_READY"); p != "" {
+			_ = os.WriteFile(p, []byte("ready"), 0666)
+		}
+		for {
+			time.Sleep(time.Hour)
+		}
 	default:
 		os.Exit(2)
 	}
@@ -191,6 +205,9 @@ func TestWaitIdempotent(t *testing.T) {
 }
 
 func TestKillIdempotent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix signals report exited on Windows")
+	}
 	c := spawnSelf(t, "block", defaultOpts())
 	if err := c.Kill(); err != nil {
 		t.Fatalf("first kill: %v", err)
@@ -221,6 +238,9 @@ func TestKillAfterWait(t *testing.T) {
 }
 
 func TestKillGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix signals report exited on Windows")
+	}
 	opts := defaultOpts()
 	opts.NewProcessGroup = true
 	c := spawnSelf(t, "block", opts)
@@ -555,5 +575,121 @@ func TestFileStdIONil(t *testing.T) {
 	opts.Stdout = logosproc.FileStdIO(nil)
 	if _, err := logosproc.Spawn(os.Args[0], nil, opts); err == nil {
 		t.Fatal("spawn nil file succeeded, want error")
+	}
+}
+
+// A leader-only Kill must not suppress the group signal. Planted fault:
+// Kill and KillGroup share one flag, so KillGroup after Kill returns
+// success without signaling the group, leaving the worker alive.
+func TestKillThenKillGroupSignalsGroup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("process groups are Unix-only")
+	}
+	ready := filepath.Join(t.TempDir(), "ready")
+	opts := defaultOpts()
+	opts.NewProcessGroup = true
+	opts.Env = append(os.Environ(), "LOGOS_PROC_READY="+ready)
+	c := spawnSelf(t, "fanout", opts)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fanout child never became ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := c.Kill(); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	if err := syscall.Kill(-c.Pid(), 0); err != nil {
+		t.Fatalf("group empty after leader-only kill: %v", err)
+	}
+	if err := c.KillGroup(); err != nil {
+		t.Fatalf("killgroup: %v", err)
+	}
+	term, err := waitDeadline(t, c)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if term.Kind != logosproc.TermSignaled {
+		t.Fatalf("kind = %v, want signaled", term.Kind)
+	}
+	// The group signal is queued, not synchronous: poll until every
+	// member has acted on it. Without the group signal the worker
+	// outlives this window and the check times out.
+	swept := time.Now().Add(5 * time.Second)
+	for {
+		if err := syscall.Kill(-c.Pid(), 0); err == syscall.ESRCH {
+			return
+		}
+		if time.Now().After(swept) {
+			t.Fatal("group alive after KillGroup")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// An explicit relative path with a child directory set resolves against
+// that directory. Planted fault: resolvePath checks the parent directory,
+// so ./tool fails when it exists only in the child directory.
+func TestSpawnResolvesRelativeAgainstCwd(t *testing.T) {
+	dir := t.TempDir()
+	self, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatalf("read self: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tool"), self, 0755); err != nil {
+		t.Fatalf("write tool: %v", err)
+	}
+	opts := defaultOpts()
+	opts.Cwd = logosproc.PathCwd(dir)
+	opts.Env = childEnv("exit0", nil, true)
+	c, err := logosproc.Spawn("./tool", nil, opts)
+	if err != nil {
+		t.Fatalf("spawn ./tool in child dir: %v", err)
+	}
+	term, err := waitDeadline(t, c)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !term.IsSuccess() {
+		t.Fatalf("term = %+v, want success", term)
+	}
+}
+
+// Wait never closes pipes: the parent ends stay readable after Wait and
+// Close releases them exactly once. Planted fault: Wait leaves the parent
+// ends open with no defined owner, so descriptors leak by default.
+func TestWaitLeavesPipesForClose(t *testing.T) {
+	opts := defaultOpts()
+	opts.Stdout = logosproc.PipeStdIO()
+	c := spawnSelf(t, "exit0", opts)
+	term, err := waitDeadline(t, c)
+	if err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if !term.IsSuccess() {
+		t.Fatalf("term = %+v, want success", term)
+	}
+	out := c.StdoutPipe()
+	if out == nil {
+		t.Fatal("stdout pipe nil after Wait")
+	}
+	if _, err := out.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("read after Wait = %v, want EOF", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if c.StdoutPipe() != nil {
+		t.Fatal("stdout pipe non-nil after Close")
+	}
+	if _, err := out.Read(make([]byte, 1)); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("read after Close = %v, want closed file", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("second close: %v", err)
 	}
 }

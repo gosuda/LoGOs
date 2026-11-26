@@ -1,4 +1,4 @@
-// errorcheck
+// build
 
 package p
 
@@ -34,7 +34,7 @@ type HolderRef struct {
 }
 
 func exprVal(xs const []HolderVal) string {
-	return switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	return switch xs[0].S.(type) {
 	case Circle => "circle"
 	case Square => "square"
 	case nil => "nil"
@@ -43,7 +43,7 @@ func exprVal(xs const []HolderVal) string {
 }
 
 func exprRef(xs const []HolderRef) string {
-	return switch xs[0].S.(type) { // ERROR "cannot use type switch on value with readonly descendants"
+	return switch xs[0].S.(type) {
 	case Circle => "circle"
 	case Blob => "blob"
 	case nil => "nil"

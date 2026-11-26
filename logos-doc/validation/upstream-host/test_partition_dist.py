@@ -18,7 +18,9 @@ from hypothesis import strategies as st
 
 FROZEN = Path(__file__).parent / "testdir-timeout"
 FROZEN_SHA256 = "24f21c2b7f184d10249fbebb4a260a1340c6428c159bbf8a2b29ce1032e82596"
-WORKFLOW = Path(__file__).resolve().parents[3] / ".github/workflows/logos.yml"
+REPO = Path(__file__).resolve().parents[3]
+WORKFLOW = REPO / ".github/workflows/ci.yml"
+PARTITION_DRIVER = REPO / ".github/scripts/upstream-complement.sh"
 
 
 def test_exact_names_have_a_complete_disjoint_three_way_partition() -> None:
@@ -238,24 +240,21 @@ def assert_workflow_profiles(workflow: str) -> None:
 
 def test_actual_workflow_executes_the_recorded_partition() -> None:
     workflow = WORKFLOW.read_text()
-    assert_workflow_profiles(workflow)
-    assert (
-        "    timeout-minutes: \"${{ matrix.suite == 'scripts' && 180 || 90 }}\"\n"
-        in workflow
-    )
-    complement = re.search(
-        r'(?ms)^      - name: "Run the complete upstream complement"\n'
-        r"(.*?)(?=^      - name:|\Z)",
-        workflow,
-    )
-    assert complement is not None
-    assert "timeout-minutes" not in complement.group(1)
+    upstream = re.search(r"(?ms)^  upstream:\n(.*?)(?=^  [a-z_-]+:|\Z)", workflow)
+    assert upstream is not None
+    job = upstream.group(1)
+    assert "    needs: [route, build]" in job
+    assert "    if: needs.route.outputs.core == 'true'" in job
+    assert "    timeout-minutes: 150" in job
+    assert job.count("timeout-minutes") == 1
+    assert "        run: bash .github/scripts/upstream-complement.sh" in job
+    assert_workflow_profiles(PARTITION_DRIVER.read_text())
 
 
 @pytest.mark.parametrize("label", ("complement",))
 def test_workflow_contract_rejects_selection_drift(label: str) -> None:
-    workflow = WORKFLOW.read_text()
-    lines = workflow.splitlines(keepends=True)
+    driver = PARTITION_DRIVER.read_text()
+    lines = driver.splitlines(keepends=True)
     matches = 0
     for index, line in enumerate(lines):
         if "./run.bash" in line and f'tee "$evidence/{label}.log"' in line:
@@ -269,7 +268,7 @@ def test_workflow_contract_rejects_selection_drift(label: str) -> None:
 def test_workflow_records_identity_around_all_partitions_after_ordinary_failure() -> (
     None
 ):
-    workflow = WORKFLOW.read_text()
+    workflow = PARTITION_DRIVER.read_text()
     before = 'bash ../.github/scripts/logos-upstream-identity.sh before "$GITHUB_WORKSPACE" "$evidence"'
     after = 'bash ../.github/scripts/logos-upstream-identity.sh after "$GITHUB_WORKSPACE" "$evidence"'
     assert workflow.count(before) == 1

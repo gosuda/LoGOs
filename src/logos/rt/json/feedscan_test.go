@@ -299,6 +299,58 @@ func TestChunkedSplits(t *testing.T) {
 	}
 }
 
+func TestLoneSurrogateCoerced(t *testing.T) {
+	docs := []string{
+		`"a\uDC00b"`,
+		`"a\uD800b"`,
+		`"a\uD800\u0041b"`,
+		`"a\uD800\uD123b"`,
+		`"a\uD800\uD800\uDC00b"`,
+		`"\uDC00"`,
+		`"\uD800"`,
+		`"\uD800\uD800"`,
+		`"\ud800\udc00"`,
+		`"\uD83D\uDE00"`,
+		`"\\\uD800\\"`,
+	}
+	for _, d := range docs {
+		var want string
+		if err := stdjson.Unmarshal([]byte(d), &want); err != nil {
+			t.Fatalf("oracle rejects %q: %v", d, err)
+		}
+		data := []byte(d)
+		for k := 0; k <= len(data); k++ {
+			raw, err := collect([][]byte{data[:k], data[k:]})
+			if err != nil {
+				t.Fatalf("split %q at %d: %v", d, k, err)
+			}
+			got, err := logical(raw)
+			if err != nil {
+				t.Fatalf("split %q at %d: %v", d, k, err)
+			}
+			wantLog := []string{"String:" + want, "End"}
+			if !equalStr(got, wantLog) {
+				t.Fatalf("split %q at %d: got %q want %q", d, k, got, wantLog)
+			}
+		}
+	}
+	stillInvalid := []string{
+		`"a\uD800\u004"`,
+		`"a\uD800\u"`,
+		`"a\uD800\xb"`,
+		`"a\uD800\"`,
+		`"a\uD8"`,
+	}
+	for _, d := range stillInvalid {
+		if scanValid(d) {
+			t.Errorf("invalid accepted: %q", d)
+		}
+		if stdjson.Valid([]byte(d)) {
+			t.Errorf("oracle accepts invalid: %q", d)
+		}
+	}
+}
+
 func TestMaxValueLen(t *testing.T) {
 	parts := []rtjson.Token{
 		{Kind: rtjson.TokenPartialString, Bytes: []byte("123")},

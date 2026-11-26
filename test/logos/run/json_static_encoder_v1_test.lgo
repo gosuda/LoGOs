@@ -1327,7 +1327,66 @@ type OptWire struct {
 	ST  [](OptStamp?)           `json:"st"`
 }
 
-type optWireMirror OptWire
+// optWireMirror keeps the same keys as OptWire but expresses direct option
+// fields as pointers, so the reflective oracle encodes the null-or-payload
+// form the static method must be byte-identical to (SPEC 10.1). Composite
+// shapes that only contain options (slices, maps and arrays of options)
+// keep their element type: both paths encode those elements as envelopes.
+// NoGen keeps the mirror on the reflective path.
+type optWireMirror struct {
+	OS   *[]int64?           `json:"os"`
+	OM   *map[string]int64?  `json:"om"`
+	OA   *[2]string?         `json:"oa"`
+	SO   [](int64?)          `json:"so"`
+	MO   map[string](int64?) `json:"mo"`
+	AO   [2](string?)        `json:"ao"`
+	OSP  *[](*int64?)?       `json:"osp"`
+	SOS  [](([]int64)?)      `json:"sos"`
+	OSS  *[][]int64?         `json:"oss"`
+	SSO  [][](int64?)        `json:"sso"`
+	MOS  map[string](([]int64)?) `json:"mos"`
+	OMS  *map[string][]int64?    `json:"oms"`
+	MSO  map[string][](int64?)   `json:"mso"`
+	O    *int?               `json:"o"`
+	ST   [](OptStamp?)       `json:"st"`
+	NoGen any                `json:"-"`
+}
+
+func mirrorOptWire(w OptWire) optWireMirror {
+	m := optWireMirror{
+		SO: w.SO, MO: w.MO, AO: w.AO, SOS: w.SOS, SSO: w.SSO,
+		MOS: w.MOS, MSO: w.MSO, ST: w.ST,
+	}
+	if w.OS != nil {
+		x := w.OS ?? []int64{}
+		m.OS = &x
+	}
+	if w.OM != nil {
+		x := w.OM ?? map[string]int64{}
+		m.OM = &x
+	}
+	if w.OA != nil {
+		x := w.OA ?? [2]string{}
+		m.OA = &x
+	}
+	if w.OSP != nil {
+		x := w.OSP ?? [](*int64?){}
+		m.OSP = &x
+	}
+	if w.OSS != nil {
+		x := w.OSS ?? [][]int64{}
+		m.OSS = &x
+	}
+	if w.OMS != nil {
+		x := w.OMS ?? map[string][]int64{}
+		m.OMS = &x
+	}
+	if w.O != nil {
+		x := w.O ?? 0
+		m.O = &x
+	}
+	return m
+}
 
 func TestStaticEncoderOptionComposites(t *testing.T) {
 	seven := int64(7)
@@ -1361,7 +1420,7 @@ func TestStaticEncoderOptionComposites(t *testing.T) {
 		}},
 	}
 	for _, c := range cases {
-		sameOutcome(t, c.name, outcomeOf(c.w.MarshalJSON()), outcomeOf(json.Marshal(optWireMirror(c.w))))
+		sameOutcome(t, c.name, outcomeOf(c.w.MarshalJSON()), outcomeOf(json.Marshal(mirrorOptWire(c.w))))
 	}
 }
 

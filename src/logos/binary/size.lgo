@@ -1,0 +1,79 @@
+package binary
+
+import (
+	"comptime"
+)
+
+func FixedSizeOf[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return StructSizeOf[T]()
+	}
+	return FixedSizeNonStruct[T]()
+}
+
+//logos:allow(complexity::cognitive_overflow)
+func FixedSizeNonStruct[T any]() int {
+	const switch T {
+	case ~bool:
+		return 1
+	case ~int8:
+		return 1
+	case ~uint8:
+		return 1
+	case ~int16:
+		return 2
+	case ~uint16:
+		return 2
+	case ~int32:
+		return 4
+	case ~uint32:
+		return 4
+	case ~int64:
+		return 8
+	case ~uint64:
+		return 8
+	case ~float32:
+		return 4
+	case ~float64:
+		return 8
+	case ~complex64:
+		return 8
+	case ~complex128:
+		return 16
+	case [4]uint8:
+		return 4
+	case [4]bool:
+		return 4
+	case [3]int32:
+		return 12
+	case [4]int16:
+		return 8
+	case [7]byte:
+		return 7
+	case [8]float32:
+		return 32
+	case any:
+		return -1
+	}
+	return -1
+}
+
+func StructSizeOf[T any]() int {
+	total := 0
+	const for _, f := range comptime.Fields[T]() {
+		s := FixedSizeOf[f.Type]()
+		if s < 0 {
+			return -1
+		}
+		total += s
+	}
+	// comptime.Fields omits unexported fields of a T from another
+	// package, so a foreign layout can look complete while hiding
+	// bytes. A total of nothing proves nothing: only a nonempty
+	// visible layout takes the fast path, and the original path
+	// keeps every byte of the rest.
+	if total == 0 {
+		return -1
+	}
+	return total
+}

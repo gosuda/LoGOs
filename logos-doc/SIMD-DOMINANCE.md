@@ -133,7 +133,7 @@ The source/ejection scripts use the repository's pinned upstream 1.27.2,
 also pass `gofmt`. In the combined stabilization candidate,
 the `simd-host` leg of `feature-gates.yml` runs both independent source-dominance fixtures,
 the complete SSA short suite, and the native/ejected controls.
-The normal `logos.yml` workflow owns the full upstream regression job with
+The normal `ci.yml` workflow owns the full upstream regression job with
 the same timeout scale. Queued or incomplete CI is not a pass and does not
 permit merging.
 

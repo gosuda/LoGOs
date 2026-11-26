@@ -1,0 +1,195 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch263() (int, error) { return 1, nil }
+func use263(v int) {}
+
+// A possible cleanup write is not a definite replacement.
+func conditionalCleanup263(reset bool) {
+	n, err := fetch263()
+	_ = err
+	func() { defer func() { if reset { n = 0 } }() }()
+	use263(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func conditionalRegistration263(reset bool) {
+	n, err := fetch263()
+	_ = err
+	func() { if reset { defer func() { n = 0 }() } }()
+	use263(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func skippedErrdefer263() {
+	n, err := fetch263()
+	_ = err
+	_ = func() error { errdefer func() { n = 0 }(); return nil }()
+	use263(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func definiteCleanup263() {
+	n, err := fetch263()
+	_ = err
+	func() { defer func() { n = 0 }() }()
+	use263(n)
+}
+
+// Failed case operands still execute their stores before default.
+func switchDefault263() {
+	n := 0
+	var err error
+	_ = switch 1 {
+	case func() int { n, err = fetch263(); return 0 }() => 0
+	default => n /* ERROR "[correctness::result_before_error_check]" */
+	}
+	_ = err
+}
+
+func switchDefaultFirst263() {
+	n := 0
+	var err error
+	_ = switch 1 {
+	default => n /* ERROR "[correctness::result_before_error_check]" */
+	case func() int { n, err = fetch263(); return 0 }() => 0
+	}
+	_ = err
+}
+
+func switchLaterOperand263() {
+	n := 0
+	var err error
+	_ = switch 1 {
+	case func() int { n, err = fetch263(); return 0 }(), n /* ERROR "[correctness::result_before_error_check]" */ => 0
+	default => 0
+	}
+	_ = err
+}
+
+// Deferred arguments are evaluated at registration, from left to right.
+func scopeArgument263() {
+	n, err := fetch263()
+	_ = err
+	scope defer func(v int) {}(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func errorArgument263() error {
+	n, err := fetch263()
+	errdefer func(v int) {}(n /* ERROR "[correctness::result_before_error_check]" */)
+	return err
+}
+
+func scopeArgumentStops263() {
+	n, err := fetch263()
+	_ = err
+	scope defer func(a, b int) {}(func() int { panic("stop") }(), n)
+	use263(n)
+}
+
+// Defers execute in reverse registration order: first owns the final n.
+func wrongDeferredGuard263() {
+	n := 0
+	var first, second error
+	func() {
+		defer func() { n, first = fetch263() }()
+		defer func() { n, second = fetch263() }()
+	}()
+	if second != nil { return }
+	_ = first
+	use263(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func correctDeferredGuard263() {
+	n := 0
+	var first, second error
+	func() {
+		defer func() { n, first = fetch263() }()
+		defer func() { n, second = fetch263() }()
+	}()
+	if first != nil { return }
+	_ = second
+	use263(n)
+}
+
+func deferredGuardReset263() {
+	n := 0
+	var err error
+	func() {
+		defer func() { err = nil }()
+		defer func() { n, err = fetch263() }()
+	}()
+	if err != nil { return }
+	use263(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func deferredResultReset263() {
+	n := 0
+	var err error
+	func() {
+		defer func() { n = 0 }()
+		defer func() { n, err = fetch263() }()
+	}()
+	_ = err
+	use263(n)
+}
+
+func nestedGuardReset263() {
+	n := 0
+	var err error
+	func() {
+		defer func() {
+			defer func() { err = nil }()
+			n, err = fetch263()
+		}()
+	}()
+	if err != nil { return }
+	use263(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// Scope cleanup runs when its block exits, before the caller resumes.
+func scopeExitReset263() {
+	n, err := fetch263()
+	_ = err
+	{ scope defer func() { n = 0 }() }
+	use263(n)
+}
+
+func scopeExitConditionalReset263(reset bool) {
+	n, err := fetch263()
+	_ = err
+	{ scope defer func() { if reset { n = 0 } }() }
+	use263(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func scopeBreakReset263() {
+	n, err := fetch263()
+	_ = err
+	for { scope defer func() { n = 0 }(); break }
+	use263(n)
+}
+
+// A recover in an ordinary call does not recover that call's later panic.
+func directRecoverCannotResume263() {
+	n, err := fetch263()
+	_ = err
+	func() { _ = recover(); panic("stop") }()
+	use263(n)
+}
+
+func deferredRecoverCanResume263() {
+	n, err := fetch263()
+	_ = err
+	func() { defer func() { _ = recover() }(); panic("stop") }()
+	use263(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func ordinaryNestedRecoverCannotResume263() {
+	n, err := fetch263()
+	_ = err
+	func() {
+		func() { defer func() { _ = recover() }() }()
+		panic("stop")
+	}()
+	use263(n)
+}
