@@ -39,7 +39,10 @@
 // encoding/binary exactly. A struct with no visible fixed-size fields
 // takes the dynamic original path, so a struct whose fields are all
 // hidden still encodes every byte. Decoding into a struct with a
-// nonzero-width unexported field panics, as with the original.
+// nonzero-width unexported field panics, as with the original, except
+// for unexported fields that need no assignment: a zero-width field
+// such as struct{} decodes without a store, matching the original's
+// recursive walk.
 // Structs with unexported fields from another package only encode
 // their exported fields: comptime cannot see the rest. Structs with
 // blank (_) fields do not compile: Go cannot select a blank field,

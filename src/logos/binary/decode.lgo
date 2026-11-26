@@ -14,6 +14,27 @@ func DecValue[T any](buf []byte, order Order, off *int, v *T) error {
 	return DecNonStruct[T](buf, order, off, v)
 }
 
+// boundSliceInput caps the buffer handed to the original decoder when
+// the held destination is one of the two slice types whose fast path
+// loops over the input instead of the destination ([]bool, []int8).
+// A longer buffer would index past the destination after filling it.
+// A short buffer passes through unchanged so the original still
+// reports the short-buffer error.
+func boundSliceInput(buf []byte, held any) []byte {
+	if b, ok := held.([]bool); ok {
+		if len(buf) > len(b) {
+			return buf[:len(b)]
+		}
+		return buf
+	}
+	if s, ok := held.([]int8); ok {
+		if len(buf) > len(s) {
+			return buf[:len(s)]
+		}
+	}
+	return buf
+}
+
 //logos:allow(complexity::cognitive_overflow)
 func DecNonStruct[T any](buf []byte, order Order, off *int, v *T) error {
 	const switch T {
@@ -146,8 +167,8 @@ func DecNonStruct[T any](buf []byte, order Order, off *int, v *T) error {
 			*off += 4
 		}
 	case any:
-		if p, ok := any(v).(*any); ok {
-			n, err := stdbinary.Decode(buf[*off:], order, *p)
+		if p, ok := any(v).(*any); ok && *p != nil {
+			n, err := stdbinary.Decode(boundSliceInput(buf[*off:], *p), order, *p)
 			if err != nil {
 				return err
 			}

@@ -96,7 +96,8 @@ bootstrap() {
   preflight
   mkdir "$job_root/tmp" "$job_root/tmp/go-tmp" "$job_root/build-cache" "$job_root/postbuild-cache"
   export TMPDIR="$job_root/tmp" GOTMPDIR="$job_root/tmp/go-tmp"
-  export GOCACHE="$job_root/build-cache" GOENV=off GOTOOLCHAIN=local GOWORK=off
+  # A fresh local cache must not read an inherited remote cache program.
+  export GOCACHE="$job_root/build-cache" GOCACHEPROG= GOENV=off GOTOOLCHAIN=local GOWORK=off
   export GOMAXPROCS=2 GOGC=50 GOMEMLIMIT=2GiB GOFLAGS=-p=2
   unset GOOS GOARCH GOEXPERIMENT GO_GCFLAGS BOOT_GO_GCFLAGS CGO_ENABLED
   run bootstrap-go bash .github/scripts/install-ci-tool.sh go
