@@ -1,0 +1,44 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type CC struct{ name string }
+
+func (c *CC) Shut() {
+	fmt.Println("shut " + c.name)
+}
+
+type Probe struct{ X int }
+
+func shutCC[T any](c *CC?) {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	c?.Shut()
+}
+
+func main() {
+	shutCC[Probe](&CC{name: "ok"})
+	shutCC[Probe](nil)
+	check("resultless-ran", true, true, true)
+	if failed {
+		os.Exit(1)
+	}
+}

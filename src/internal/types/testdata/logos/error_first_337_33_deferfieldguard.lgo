@@ -1,0 +1,47 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_33() (int, error) { return 1, nil }
+func use337_33(v int) {}
+
+type e337_33 struct {
+	e1 error
+	e2 error
+}
+
+// Two defers store the same result with different errors. Registration
+// order is the reverse of execution order: the second registration runs
+// first and the first registration supplies the final value, so checking
+// the second error must not prove the read.
+func wrongFieldGuard337_33() {
+	var n int
+	var e e337_33
+	func() {
+		defer func() { n, e.e1 = fetch337_33() }()
+		defer func() { n, e.e2 = fetch337_33() }()
+	}()
+	if e.e2 != nil {
+		return
+	}
+	use337_33(n /* ERROR "[correctness::result_before_error_check]" */)
+	_ = e.e1
+}
+
+// Checking the final error in execution-reverse order proves the read:
+// the last-executed defer supplies the value, so its guard is the agreed one.
+func correctFieldGuard337_33() {
+	var n int
+	var e e337_33
+	func() {
+		defer func() { n, e.e1 = fetch337_33() }()
+		defer func() { n, e.e2 = fetch337_33() }()
+	}()
+	if e.e1 != nil {
+		return
+	}
+	use337_33(n)
+	_ = e.e2
+}

@@ -85,6 +85,26 @@ func TestTwinNilAnyHolder(t *testing.T) {
 	if _, err := Decode([]byte{1}, LittleEndian, &rec); err == nil {
 		t.Fatalf("nil any struct field Decode: got nil error")
 	}
+	// Decode rejects the unknown struct layout before its field walk.
+	// Call the dynamic field decoder directly to exercise its nil guard.
+	off := 0
+	if err := DecNonStruct[any]([]byte{1}, LittleEndian, &off, &rec.V); err == nil {
+		t.Fatal("nil any field decoder: got nil error")
+	}
+	if off != 0 {
+		t.Fatalf("nil any field advanced the offset to %d", off)
+	}
+}
+
+func TestTwinReadIntoTypedNilAnyHolderKeepsStream(t *testing.T) {
+	var dst any = (*uint16)(nil)
+	r := bytes.NewReader([]byte{1, 2, 3, 4})
+	if err := ReadInto(r, LittleEndian, &dst); err == nil || err.Error() != "binary.Read: invalid type *uint16" {
+		t.Fatalf("typed nil any holder: got %v", err)
+	}
+	if r.Len() != 4 {
+		t.Fatalf("typed nil any holder consumed %d bytes", 4-r.Len())
+	}
 }
 
 func TestTwinReadIntoInvalidAnyHolderKeepsStream(t *testing.T) {

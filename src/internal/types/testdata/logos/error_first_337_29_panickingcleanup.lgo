@@ -1,0 +1,28 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_29() (int, error) { return 1, nil }
+func use337_29(n int) {}
+
+// The earlier defer still runs during unwinding, so its read must fail.
+func panickingCleanupRunsEarlier337_29() {
+	n, err := fetch337_29()
+	_ = err
+	func() {
+		defer func() { use337_29(n /* ERROR "[correctness::result_before_error_check]" */) }()
+		defer func() { panic("stop") }()
+	}()
+}
+
+// Sequential cleanups check every body in order.
+func quietCleanupsCheckAll337_29() {
+	n, err := fetch337_29()
+	_ = err
+	func() {
+		defer func() { use337_29(n /* ERROR "[correctness::result_before_error_check]" */) }()
+		defer func() { println("done") }()
+	}()
+}

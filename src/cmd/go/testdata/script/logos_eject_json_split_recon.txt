@@ -1,0 +1,98 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+env GOEXPERIMENT=
+
+cd recon
+
+logos run .
+stdout '^v1: \{"title":"hi"\}$'
+stdout '^check: sentinel$'
+stdout '^std: \{"k":"v"\}$'
+stdout '^template-ok$'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+exists out/main.go
+exists out/data.go
+exists out/data_jsonv2.go
+# the companion carries the jsontext import, the main file does not
+exec grep -E 'import _logos_jsontext' out/data_jsonv2.go
+! exec grep -E '_logos_jsontext' out/data.go
+# the main file keeps the imports its retained declarations use ...
+exec grep -E '"errors"' out/data.go
+exec grep -E '"encoding/json"$' out/main.go
+# ... and the companion does not steal encoding/json for _logos_json uses
+! exec grep -E '"encoding/json"$' out/data_jsonv2.go
+# the raw template line survives the split byte-identical
+exec grep -F 'import "encoding/json/jsontext"' out/data.go
+
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+go vet ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ..
+
+-- recon/go.mod --
+module example.com/recon
+
+go 1.27
+
+-- recon/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+func main() {
+	v := Data{Title: "hi"}
+	buf, err := v.MarshalJSON()
+	if err != nil {
+		fmt.Println("marshal err:", err)
+		return
+	}
+	fmt.Println("v1:", string(buf))
+	if err := check(""); err != nil {
+		fmt.Println("check:", err)
+	}
+	fmt.Println(template)
+	m := map[string]string{"k": "v"}
+	jb, merr := json.Marshal(m)
+	if merr != nil {
+		fmt.Println("std marshal err:", merr)
+		return
+	}
+	fmt.Println("std:", string(jb))
+	fmt.Println("template-ok")
+}
+
+-- recon/data.lgo --
+//go:build goexperiment.jsonv2
+
+package main
+
+import "errors"
+
+type Data struct {
+	Title string `json:"title"`
+}
+
+var errSentinel = errors.New("sentinel")
+
+func check(s string) error {
+	if s == "" {
+		return errSentinel
+	}
+	return nil
+}
+
+func (v Data) Validate() error { return check(v.Title) }; func helper() string { return "h" }
+
+const template = `line one
+import "encoding/json/jsontext"
+line three`

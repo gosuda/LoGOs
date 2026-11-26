@@ -444,6 +444,7 @@ func deadcode(ctxt *Link) {
 	ldr := ctxt.loader
 	d := deadcodePass{ctxt: ctxt, ldr: ldr}
 	d.init()
+	traceOffTrim(&d) // loGos hook: drop the tracer backend when nothing starts it.
 	d.flood()
 
 	if ctxt.DynlinkingGo() {
