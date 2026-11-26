@@ -1,0 +1,111 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+mkdir $WORK/bin
+
+# One declaration-owned package const-map materialization: lib declares M,
+# main reads it ordinarily and through a comptime generic, and the ejected
+# tree reads it again. The declaration is emitted once in lib; every
+# consumer references it.
+cd m
+logos build -o $WORK/bin/ownedonce$GOEXE ./app
+exec $WORK/bin/ownedonce$GOEXE
+stdout '^ok lookup$'
+stdout '^ok native-lookup$'
+stdout '^ok comptime-lookup$'
+stdout '^ok materialized-once$'
+cp stdout $WORK/want.txt
+logos eject -o out
+exists out/app/main.go
+exists out/lib/lib.go
+# Exactly one table materialization in the whole tree, owned by lib.
+# The importer holds only thin wrappers that reference lib's exported helpers.
+grep -count=1 'ConstTable\[int, int\]' out/lib/lib.go
+! grep 'ConstTable\[int, int\]' out/app/main.go
+grep -count=1 'LogosCM_M_lookup' out/lib/lib.go
+grep 'LogosCM_M_lookup' out/app/main.go
+cd out
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+go run ./app
+cmp stdout $WORK/want.txt
+# SPEC 0.3: ejected output builds with upstream go1.27.2 from $UPROOT1272.
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ..
+cd ..
+
+-- m/go.mod --
+module example.com/cmownedonce
+
+go 1.27
+
+-- m/lib/lib.lgo --
+package lib
+
+import "comptime"
+
+const M = map[int]int{0: 0, 1: 10, 2: 20, 3: 30, 4: 40, 5: 50, 6: 60, 7: 70, 8: 80}
+
+func Native(k int) int {
+	return M[k] ?? -1
+}
+
+type Marker struct{ N int }
+
+func Get[T any](k int) int {
+	const if comptime.IsStruct[T]() {
+		return M[k] ?? -1
+	}
+	return -2
+}
+
+func Materialized() map[int]int {
+	var m map[int]int = M
+	return m
+}
+
+func CMaterialized[T any]() map[int]int {
+	const if comptime.IsStruct[T]() {
+		var m map[int]int = M
+		return m
+	}
+	return map[int]int{}
+}
+
+-- m/app/main.lgo --
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"example.com/cmownedonce/lib"
+)
+
+func fail(msg string) {
+	fmt.Println("FAIL " + msg)
+	os.Exit(1)
+}
+
+func main() {
+	if (lib.M[4] ?? -1) != 40 {
+		fail("lookup")
+	}
+	fmt.Println("ok lookup")
+	if lib.Native(4) != 40 {
+		fail("native-lookup")
+	}
+	fmt.Println("ok native-lookup")
+	if lib.Get[lib.Marker](4) != 40 {
+		fail("comptime-lookup")
+	}
+	fmt.Println("ok comptime-lookup")
+	a := lib.Materialized()
+	b := lib.CMaterialized[lib.Marker]()
+	if fmt.Sprintf("%p", a) != fmt.Sprintf("%p", b) {
+		fail("materialized-once")
+	}
+	fmt.Println("ok materialized-once")
+}
