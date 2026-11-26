@@ -12,14 +12,16 @@ const catalogInfo = true
 const itemsDebug = false
 const itemsWarn = true
 
-func pickParentDisabled() int {
-	const if catalogDebug {
+// asmcheck matches source lines, so every line in a disabled function
+// carries the negative check, including the guard and function boundary.
+func pickParentDisabled() int { // amd64:-"CALL" arm64:-"CALL"
+	const if catalogDebug { // amd64:-"CALL" arm64:-"CALL"
 		parentLog.Debug("noisy") // amd64:-"CALL" arm64:-"CALL"
-		return 0
-	} else {
+		return 0 // amd64:-"CALL" arm64:-"CALL"
+	} else { // amd64:-"CALL" arm64:-"CALL"
 		return 1 // amd64:-"CALL" arm64:-"CALL"
-	}
-}
+	} // amd64:-"CALL" arm64:-"CALL"
+} // amd64:-"CALL" arm64:-"CALL"
 
 func pickParentEnabled() int {
 	const if catalogInfo {
@@ -30,14 +32,14 @@ func pickParentEnabled() int {
 	}
 }
 
-func pickChildDisabled() int {
-	const if itemsDebug {
+func pickChildDisabled() int { // amd64:-"CALL" arm64:-"CALL"
+	const if itemsDebug { // amd64:-"CALL" arm64:-"CALL"
 		childLog.Debug("noisy") // amd64:-"CALL" arm64:-"CALL"
-		return 0
-	} else {
+		return 0 // amd64:-"CALL" arm64:-"CALL"
+	} else { // amd64:-"CALL" arm64:-"CALL"
 		return 1 // amd64:-"CALL" arm64:-"CALL"
-	}
-}
+	} // amd64:-"CALL" arm64:-"CALL"
+} // amd64:-"CALL" arm64:-"CALL"
 
 func pickChildEnabled() int {
 	const if itemsWarn {
