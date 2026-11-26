@@ -283,6 +283,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 	if !ok {
 		return nil, false, fmt.Errorf("overlapping import edits")
 	}
+	mainBytes, extraBytes := splitJSONv2File(fixed)
 	var patterns []string
 	if embeds {
 		patterns, err = packageEmbedPatterns(fset, f.Comments)
@@ -290,11 +291,20 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 			return nil, false, err
 		}
 	}
-	if err := c.writeFile(src, dst, fixed); err != nil {
+	if err := c.writeFile(src, dst, mainBytes); err != nil {
 		return nil, false, err
 	}
 	if !p.vendored {
 		c.format = append(c.format, dst)
+	}
+	if extraBytes != nil {
+		extraDst := path.Join(p.dst, jsonv2ExtraStem(logosStem(name))+".go")
+		if err := c.writeFile(src, extraDst, extraBytes); err != nil {
+			return nil, false, err
+		}
+		if !p.vendored {
+			c.format = append(c.format, extraDst)
+		}
 	}
 	return patterns, true, nil
 }
