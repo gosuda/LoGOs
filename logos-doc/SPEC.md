@@ -1271,6 +1271,8 @@ The declaration check of a comptime generic MUST leave the statements after a st
 
 `comptime.Error(msg)` MUST take a constant string. [T-205]
 
+After checking a silenced `comptime.Error` message, lowering MUST retain only the uses of enclosing local variables needed by the prepared check. It MUST NOT retain package dependencies or variables declared inside the discarded message expression. [T-205]
+
 A non-constant `msg` MUST fail with `[comptime::error_not_constant]`. [T-205]
 
 `Resolve[f.Type](c)` MUST resolve per field. [T-205]

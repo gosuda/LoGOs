@@ -987,19 +987,47 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 }
 
 // silentErrorStmt replaces a comptime.Error call the instance check silenced
-// with a blank assignment of its message, so locals the message mentions
-// stay used in the prepared check. The statement is unreachable, so the
-// assignment never runs. A malformed call keeps an empty statement; the
-// check already reported it.
+// with blank uses of the outer local variables its message mentions. The
+// prepared check still needs those uses, but the dead message must not retain
+// private package dependencies in an instance ejected into another package.
+// Variables declared inside the message belong to the discarded expression.
 func (r *ctReducer) silentErrorStmt(pos syntax.Pos, call *syntax.CallExpr, f *ctFrame) syntax.Node {
 	if len(call.ArgList) != 1 {
 		return at(&syntax.EmptyStmt{}, pos)
 	}
-	msg, ok := r.clone(call.ArgList[0], f).(syntax.Expr)
-	if !ok || msg == nil {
+	msg := call.ArgList[0]
+	declared := make(map[types2.Object]bool)
+	syntax.Inspect(msg, func(n syntax.Node) bool {
+		if name, ok := n.(*syntax.Name); ok {
+			if obj := f.info.Defs[name]; obj != nil {
+				declared[obj] = true
+			}
+		}
+		return true
+	})
+	var lhs, rhs []syntax.Expr
+	seen := make(map[*types2.Var]bool)
+	syntax.Inspect(msg, func(n syntax.Node) bool {
+		name, ok := n.(*syntax.Name)
+		if !ok {
+			return true
+		}
+		obj, ok := f.info.Uses[name].(*types2.Var)
+		if !ok || obj.IsField() || declared[obj] || seen[obj] {
+			return true
+		}
+		if pkg := obj.Pkg(); pkg != nil && obj.Parent() == pkg.Scope() {
+			return true
+		}
+		seen[obj] = true
+		lhs = append(lhs, nameOf(name.Pos(), "_"))
+		rhs = append(rhs, r.clone(name, f).(syntax.Expr))
+		return true
+	})
+	if len(rhs) == 0 {
 		return at(&syntax.EmptyStmt{}, pos)
 	}
-	return assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{msg})
+	return assignOf(pos, lhs, rhs)
 }
 
 func (f *ctFrame) caseType(c *syntax.ConstSwitchCase) types2.Type {
