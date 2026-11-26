@@ -1,0 +1,51 @@
+// asmcheck
+
+package logcheck
+
+import logoslog "logos/log"
+
+var parentLog = logoslog.Scoped("catalog", logoslog.Info)
+var childLog = logoslog.Scoped("catalog/items", logoslog.Warn)
+
+const catalogDebug = false
+const catalogInfo = true
+const itemsDebug = false
+const itemsWarn = true
+
+// asmcheck matches source lines, so every line in a disabled function
+// carries the negative check, including the guard and function boundary.
+func pickParentDisabled() int { // amd64:-"CALL" arm64:-"CALL"
+	const if catalogDebug { // amd64:-"CALL" arm64:-"CALL"
+		parentLog.Debug("noisy") // amd64:-"CALL" arm64:-"CALL"
+		return 0 // amd64:-"CALL" arm64:-"CALL"
+	} else { // amd64:-"CALL" arm64:-"CALL"
+		return 1 // amd64:-"CALL" arm64:-"CALL"
+	} // amd64:-"CALL" arm64:-"CALL"
+} // amd64:-"CALL" arm64:-"CALL"
+
+func pickParentEnabled() int {
+	const if catalogInfo {
+		parentLog.Info("state") // amd64:"CALL" arm64:"CALL"
+		return 0
+	} else {
+		return 1 // amd64:-"CALL" arm64:-"CALL"
+	}
+}
+
+func pickChildDisabled() int { // amd64:-"CALL" arm64:-"CALL"
+	const if itemsDebug { // amd64:-"CALL" arm64:-"CALL"
+		childLog.Debug("noisy") // amd64:-"CALL" arm64:-"CALL"
+		return 0 // amd64:-"CALL" arm64:-"CALL"
+	} else { // amd64:-"CALL" arm64:-"CALL"
+		return 1 // amd64:-"CALL" arm64:-"CALL"
+	} // amd64:-"CALL" arm64:-"CALL"
+} // amd64:-"CALL" arm64:-"CALL"
+
+func pickChildEnabled() int {
+	const if itemsWarn {
+		childLog.Warn("low") // amd64:"CALL" arm64:"CALL"
+		return 0
+	} else {
+		return 1 // amd64:-"CALL" arm64:-"CALL"
+	}
+}

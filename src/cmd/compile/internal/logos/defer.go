@@ -322,8 +322,8 @@ func planTypeDecls(plan *callPlan, tw *twin) []syntax.Stmt {
 func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, []syntax.Stmt, *twin) {
 	fc.fl.needRT = true
 	tw := &twin{}
-	funN, argN, capNamesN, capValsN := fc.planUses(plan, nil)
-	funT, argT, capNamesT, capValsT := fc.planUses(plan, tw)
+	funN, argN, _, _ := fc.planUses(plan, nil)
+	funT, argT, _, _ := fc.planUses(plan, tw)
 	inner := "_logos_e"
 	joinN := joinAssign(cpos, fc.errName, inner)
 	callN := callOf(cpos, funN, argN)
@@ -334,11 +334,33 @@ func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, 
 	callT.HasDots = plan.dots
 	checkT := ifOf(cpos, defineOf(cpos, []syntax.Expr{nameOf(cpos, inner)}, []syntax.Expr{callT}), notNil(cpos, nameOf(cpos, inner)), joinT)
 	native, text := planTypeDecls(plan, nil), planTypeDecls(plan, tw)
-	if len(capNamesN) > 0 {
-		native = append(native, defineOf(cpos, capNamesN, capValsN))
-		text = append(text, defineOf(cpos, capNamesT, capValsT))
-	}
+	native = append(native, fc.definePieces(plan, nil, cpos)...)
+	text = append(text, fc.definePieces(plan, tw, cpos)...)
 	return append(native, checkN), append(text, checkT), tw
+}
+
+// definePieces emits one short declaration per captured piece, in use
+// order, so a multi-result argument never shares its right-hand side
+// with another capture. A call can supply all parameters of another
+// call with its multiple results only when it is the sole expression,
+// so combining the receiver with a two-result argument in one
+// declaration rejects programs the language accepts.
+func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []syntax.Stmt {
+	var pieces []capturePiece
+	if plan.isMethod {
+		pieces = append(pieces, plan.recv)
+	} else if plan.fun.capture {
+		pieces = append(pieces, plan.fun)
+	}
+	pieces = append(pieces, plan.args...)
+	var out []syntax.Stmt
+	for _, piece := range pieces {
+		if !piece.capture {
+			continue
+		}
+		out = append(out, defineOf(cpos, nameList(piece), valList(piece, tw)))
+	}
+	return out
 }
 
 func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.Expr, []syntax.Expr, []syntax.Expr) {
@@ -451,6 +473,10 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	cpos := syntax.StartPos(s)
 	stmtOff := fl.off(cpos)
 	spanEnd := skipCloseParens(fl.src, fl.off(t.Pos())+1)
+	if w, ok := fl.optDeferGoPend[call]; ok && w.isTry {
+		delete(fl.optDeferGoPend, call)
+		return fc.lowerOptDeferTryGuarded(call, w, cpos, stmtOff, spanEnd)
+	}
 	plan, ok := fc.planCall(call)
 	if !ok {
 		return []syntax.Stmt{s}
@@ -464,6 +490,98 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	}
 	fc.spliceCall(stmtOff, spanEnd, plan, scoped(cpos, headT), tw)
 	return scoped(cpos, headN)
+}
+
+// lowerOptDeferTryGuarded lowers `defer recv?.Method(args)?` in one edit.
+// The option pass claims the try-wrapped call (markOptDeferGo) without
+// lowering it to an IIFE, so the defer-try rewrite reads the recorded
+// wrapper span instead of deriving positions from a synthetic Fun.
+func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGoWork, cpos syntax.Pos, stmtOff, spanEnd int) []syntax.Stmt {
+	fl := fc.fl
+	fc.fl.needRT = true
+	pos := w.osel.Pos()
+	method := w.osel.Sel.Value
+	xStart := fl.off(w.rpos)
+	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
+	recvText := fl.lazyText(span{start: xStart, end: xEnd})
+	recvName := nameOf(pos, w.lv)
+	var cond, calleeN syntax.Expr
+	var condT, accSuffix string
+	if types2.LogosOptionIsBare(w.ox.Elem) {
+		cond, condT = notNil(pos, nameOf(pos, w.lv)), w.lv+" != nil"
+		calleeN, accSuffix = fl.selectAccessBare(recvName, w.osel)
+	} else {
+		// A non-bare option lowers to rt.Option[T]; the method lives
+		// on the boxed value, not on the option struct.
+		cond, condT = selOf(pos, nameOf(pos, w.lv), "Present"), w.lv+".Present"
+		calleeN, accSuffix = fl.selectAccessPresent(recvName, w.osel)
+	}
+	selEnd := fl.off(w.osel.Sel.Pos()) + len(method)
+	plan := &callPlan{dots: call.HasDots, end: spanEnd, isMethod: true, method: method}
+	plan.fun = capturePiece{expr: call.Fun, start: xStart, end: selEnd}
+	plan.recv = capturePiece{expr: w.nx, capture: true, single: w.lv, start: xStart, end: xEnd, text: recvText}
+	split, ok := splitCall(fl.src, fl.off(call.Pos()))
+	useSplit := ok && len(split.args) == len(call.ArgList)
+	for i, raw := range call.ArgList {
+		var rsp span
+		if useSplit {
+			// Exact token-split spans, as for ordinary deferred
+			// calls. EndPos-derived spans start a binary
+			// expression at its operator, which would eject
+			// `2 + 3` as `+3`.
+			rsp = trimSpan(fl.src, split.args[i])
+		} else {
+			rsp = trimSpan(fl.src, span{start: fl.off(raw.Pos()), end: fl.off(syntax.EndPos(raw))})
+		}
+		arg := capturePiece{expr: raw, start: rsp.start, end: rsp.end, text: fl.lazyText(rsp)}
+		switch argKind(fc, raw) {
+		case argInline:
+		case argMulti:
+			arg.capture = true
+			arg.multi = fc.multiNames(raw)
+		default:
+			arg.capture = true
+			arg.single = fc.nextArg()
+		}
+		plan.args = append(plan.args, arg)
+	}
+	tw := &twin{}
+	_, argN, _, _ := fc.planUses(plan, nil)
+	_, argT, _, _ := fc.planUses(plan, tw)
+	// Capture the selected method value before the arguments: a value
+	// method through a pointer binds its receiver copy now, and a
+	// function-valued callee cannot be replaced by a later assignment.
+	fTmp := fc.nextFun()
+	calleeDefN := defineOf(cpos, []syntax.Expr{nameOf(cpos, fTmp)}, []syntax.Expr{calleeN})
+	calleeDefT := defineOf(cpos, []syntax.Expr{nameOf(cpos, fTmp)}, []syntax.Expr{tw.mark(pos, cat(gen(w.lv), gen(accSuffix)))})
+	inner := "_logos_e"
+	callN := callOf(cpos, nameOf(cpos, fTmp), argN)
+	callN.HasDots = call.HasDots
+	deferN := deferOf(cpos, callOf(cpos, rtSel(cpos, "DeferTry"), []syntax.Expr{addrOf(cpos, nameOf(cpos, fc.errName)), callN}))
+	callT := callOf(cpos, nameOf(cpos, fTmp), argT)
+	callT.HasDots = call.HasDots
+	checkT := ifOf(cpos, defineOf(cpos, []syntax.Expr{nameOf(cpos, inner)}, []syntax.Expr{callT}), notNil(cpos, nameOf(cpos, inner)), joinAssign(cpos, fc.errName, inner))
+	closureT := deferClosure(cpos, []syntax.Stmt{checkT})
+	// Only the receiver binds before the presence test. The callee
+	// selection and every argument bind inside the guard, at defer
+	// registration, so an absent receiver evaluates nothing else in
+	// either output.
+	inGuardN := []syntax.Stmt{calleeDefN}
+	inGuardT := []syntax.Stmt{calleeDefT}
+	recvDefN := defineOf(cpos, nameList(plan.recv), valList(plan.recv, nil))
+	recvDefT := defineOf(cpos, nameList(plan.recv), valList(plan.recv, tw))
+	for _, piece := range plan.args {
+		if !piece.capture {
+			continue
+		}
+		inGuardN = append(inGuardN, defineOf(cpos, nameList(piece), valList(piece, nil)))
+		inGuardT = append(inGuardT, defineOf(cpos, nameList(piece), valList(piece, tw)))
+	}
+	inGuardN = append(inGuardN, deferN)
+	inGuardT = append(inGuardT, deferOf(cpos, callOf(cpos, closureT, nil)))
+	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
+	fl.addT(stmtOff, spanEnd, cat(prefix, renderText([]syntax.Stmt{recvDefT}, tw.subs), gen("if "+condT+" { "), renderText(inGuardT, tw.subs), gen(" }")))
+	return scoped(cpos, []syntax.Stmt{recvDefN, ifOf(cpos, nil, cond, inGuardN)})
 }
 
 func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {

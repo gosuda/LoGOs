@@ -1,0 +1,154 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch() (int, error) {
+	return 1, nil
+}
+
+func use(v int) {}
+
+func two(a, b int) {}
+
+func indexOf(v int) int { return v }
+
+// A literal call that never returns leaves no state for the rest of the
+// statement: the compiler must stop, not crash, and the remainder needs
+// no diagnostic.
+func cInlinePanicAssign() {
+	n, err := fetch()
+	_ = err
+	n = func() int { panic("stop") }()
+	use(n)
+}
+
+// The same, with the nonreturning call in an argument list: evaluation
+// stops at the call, so the sibling read needs no diagnostic.
+func cInlinePanicArg() {
+	n, err := fetch()
+	_ = err
+	two(func() int { panic("stop") }(), n)
+	use(n)
+}
+
+var gN int
+var gErr error
+
+// A deferred write that replaces the guarding error breaks the pairing:
+// the caller can no longer prove the value, so the read must fail.
+func cInlineDeferredErrReset() {
+	n, err := fetch()
+	_ = err
+	func() {
+		defer func() { err = nil }()
+		n, err = fetch()
+	}()
+	if err != nil {
+		return
+	}
+	use(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// A tuple store in a deferred call leaves an unchecked result the caller
+// can read: without a check, the read must fail.
+func cInlineDeferredTupleStoreUnchecked() {
+	func() {
+		defer func() { gN, gErr = fetch() }()
+	}()
+	use(gN /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// The same store with its error checked first is a proven result, so the
+// read stays silent.
+func cInlineDeferredTupleStoreChecked() {
+	func() {
+		defer func() { gN, gErr = fetch() }()
+	}()
+	if gErr != nil {
+		return
+	}
+	use(gN)
+}
+
+// A scope defer runs at scope exit, not at the statement: a reset it
+// performs cannot hide an unchecked read that runs before cleanup.
+func cInlineScopeDeferHidesReset() {
+	n, err := fetch()
+	_ = err
+	scope defer func() { n = 0 }()
+	use(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// An errdefer runs on the error path, not at the statement.
+func cInlineErrdeferHidesReset() error {
+	n, err := fetch()
+	errdefer func() { n = 0 }()
+	use(n /* ERROR "[correctness::result_before_error_check]" */)
+	return err
+}
+
+// A ?-deferred literal call still defers its body.
+func cInlineDeferQueryHidesReset() error {
+	n, err := fetch()
+	defer func() error { n = 0; return nil }()?
+	use(n /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+	return nil
+}
+
+// A ?? fallback runs only when the option is absent: a reset in the
+// fallback cannot hide an unchecked read on the path that skips it.
+func cInlineCoalesceSkippedReset(opt int?) {
+	n, err := fetch()
+	_ = err
+	_ = opt ?? func() int { n = 0; return 0 }()
+	use(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// Switch expression arms run exclusively: a reset in one arm cannot hide
+// an unchecked read on another arm's path.
+func cInlineSwitchExprArmStores(tag int) {
+	n, err := fetch()
+	_ = err
+	_ = switch tag {
+	case 1 => func() int { n = 0; return 0 }()
+	default => 0
+	}
+	use(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// Calls run left to right, so a destination call reads before a
+// right-hand call resets: the index read must fail.
+func cInlineAssignDestCallReadsFirst() {
+	n, err := fetch()
+	_ = err
+	vals := []int{0}
+	vals[indexOf(n /* ERROR "[correctness::result_before_error_check]" */)] = func() int { n = 0; return 1 }()
+	_ = vals
+	_ = err
+}
+
+// A panic the literal recovers lets the call return: the caller resumes
+// with the result still unchecked, so the read must fail.
+func cInlineRecoveredPanicResumes() {
+	n, err := fetch()
+	_ = err
+	func() {
+		defer func() { _ = recover() }()
+		panic("stop")
+	}()
+	use(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// Without a recovering defer the call never returns, so the code after
+// it is dead and needs no diagnostic.
+func cInlineUnrecoveredPanicStaysDead() {
+	n, err := fetch()
+	_ = err
+	func() {
+		panic("stop")
+	}()
+	use(n)
+}

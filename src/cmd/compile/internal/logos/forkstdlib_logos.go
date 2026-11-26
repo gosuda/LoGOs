@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -35,7 +34,6 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 	if t == nil {
 		return
 	}
-	rewritten := rewrittenH2Calls(files)
 	check := func(name *syntax.Name, obj types2.Object) {
 		if obj == nil {
 			return
@@ -53,89 +51,112 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 		if t.hasName(p.Path(), obj.Name()) {
 			return
 		}
-		if p.Path() == "net/http" && obj.Name() == h2extendedConnectMethod && rewritten[name.Pos()] {
-			return
-		}
 		base.Errorf("%s: [portability::fork_stdlib_api] logos eject: %s.%s has no upstream spelling (absent from the Go 1.27 API files); ejected output must build with upstream Go (SPEC T-0.3)", name.Pos(), p.Path(), obj.Name())
 	}
-	for name, obj := range info.Uses {
-		check(name, obj)
+	verify := func(info *types2.Info, roots []syntax.Node) {
+		mapped := mappedEjectStdlibCalls(info, roots)
+		for name, obj := range info.Uses {
+			if !mapped[name] {
+				check(name, obj)
+			}
+		}
 	}
+	roots := make([]syntax.Node, len(files))
+	for i, file := range files {
+		roots[i] = file
+	}
+	verify(info, roots)
 	for _, rec := range info.LogosCtPrepared {
 		if rec == nil || rec.Info == nil {
 			continue
 		}
-		for name, obj := range rec.Info.Uses {
-			check(name, obj)
+		roots := make([]syntax.Node, 0, len(rec.Helpers)+1)
+		if rec.Decl != nil {
+			roots = append(roots, rec.Decl)
 		}
+		for _, helper := range rec.Helpers {
+			roots = append(roots, helper)
+		}
+		verify(rec.Info, roots)
 	}
 }
 
-// h2extendedConnectMethod is the fork-only per-server opt-in for HTTP/2
-// extended CONNECT. logos eject rewrites direct calls to the GODEBUG-guarded
-// stock form (see cmd/go/internal/logos/eject/eject_h2extendedconnect.go),
-// so the verifier must not refuse those calls: the rewritten output builds
-// with upstream Go. Every other use (method values, calls with arguments,
-// or calls eject leaves alone) still has no upstream spelling and fails.
-const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
-
-// rewrittenH2Calls records the selector positions of direct zero-argument
-// EnableHTTP2ExtendedConnect calls in files importing net/http. Those are
-// exactly the calls eject rewrites, so the verifier exempts them.
-func rewrittenH2Calls(files []*syntax.File) map[syntax.Pos]bool {
-	out := make(map[syntax.Pos]bool)
-	for _, f := range files {
-		if f == nil {
-			continue
-		}
-		hasNetHTTP := false
-		for _, d := range f.DeclList {
-			imp, ok := d.(*syntax.ImportDecl)
-			if !ok || imp.Path == nil {
-				continue
-			}
-			path, err := strconv.Unquote(imp.Path.Value)
-			if err != nil {
-				continue
-			}
-			if path == "net/http" {
-				hasNetHTTP = true
-				break
-			}
-		}
-		if !hasNetHTTP {
-			continue
-		}
-		syntax.Inspect(f, func(n syntax.Node) bool {
-			call, ok := n.(*syntax.CallExpr)
-			if !ok || len(call.ArgList) != 0 {
-				return true
-			}
-			sel, ok := call.Fun.(*syntax.SelectorExpr)
-			if !ok || sel.Sel == nil || sel.Sel.Value != h2extendedConnectMethod {
-				return true
-			}
-			// Eject leaves receivers holding a compiler-temporary _logos_site
-			// name alone: another rewrite renames those temporaries, so its
-			// edits would overlap the call. Exempting the call here would let
-			// the fork-only method reach output upstream Go rejects, so keep
-			// the same boundary eject uses and refuse the call instead.
-			site := false
-			syntax.Inspect(sel.X, func(n syntax.Node) bool {
-				if name, ok := n.(*syntax.Name); ok {
-					rest, isSite := strings.CutPrefix(name.Value, "_logos_site")
-					site = site || isSite && rest != "" && strings.Trim(rest, "0123456789") == ""
-				}
-				return !site
-			})
-			if site {
-				return true
-			}
-			out[sel.Sel.Pos()] = true
+// mappedEjectStdlibCalls identifies exact call sites with an existing
+// upstream rewrite. The exemption belongs to the selector occurrence,
+// never the method name: escaping method values and method expressions
+// still have no upstream spelling.
+func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.Name]bool {
+	var mapped map[*syntax.Name]bool
+	inspect := func(node syntax.Node) bool {
+		call, ok := node.(*syntax.CallExpr)
+		if !ok || len(call.ArgList) != 0 {
 			return true
+		}
+		selector, ok := call.Fun.(*syntax.SelectorExpr)
+		if !ok || selector.Sel.Value != "EnableHTTP2ExtendedConnect" {
+			return true
+		}
+		selection := info.Selections[selector]
+		if selection == nil || selection.Kind() != types2.MethodVal {
+			return true
+		}
+		obj := selection.Obj()
+		if obj.Pkg() == nil || obj.Pkg().Path() != "net/http" {
+			return true
+		}
+		recv := types2.Unalias(selection.Recv())
+		if pointer, ok := recv.(*types2.Pointer); ok {
+			recv = types2.Unalias(pointer.Elem())
+		}
+		named, ok := recv.(*types2.Named)
+		if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "net/http" || named.Obj().Name() != "Server" {
+			return true
+		}
+		// The text rewrite declines receivers containing generated site
+		// names because their independent edits would overlap the call.
+		// Keep exactly that boundary here instead of approving output
+		// which the later rewrite cannot materialize.
+		hasSite := false
+		syntax.Inspect(selector.X, func(node syntax.Node) bool {
+			if name, ok := node.(*syntax.Name); ok {
+				rest, site := strings.CutPrefix(name.Value, "_logos_site")
+				hasSite = hasSite || site && rest != "" && strings.Trim(rest, "0123456789") == ""
+			}
+			return !hasSite
 		})
+		if hasSite {
+			return true
+		}
+		if mapped == nil {
+			mapped = make(map[*syntax.Name]bool)
+		}
+		mapped[selector.Sel] = true
+		return true
 	}
-	return out
+	for _, root := range roots {
+		if f, ok := root.(*syntax.File); ok && !fileImportsNetHTTP(f) {
+			continue
+		}
+		syntax.Inspect(root, inspect)
+	}
+	return mapped
+}
+
+// fileImportsNetHTTP reports whether f directly imports net/http.
+// The eject rewrite only fires in files with a local net/http import,
+// so verification must not exempt alias calls from other files that
+// the emitter will leave behind for upstream Go to reject.
+func fileImportsNetHTTP(f *syntax.File) bool {
+	for _, decl := range f.DeclList {
+		imp, ok := decl.(*syntax.ImportDecl)
+		if !ok || imp.Path == nil {
+			continue
+		}
+		if imp.Path.Value == "\"net/http\"" {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyEjectStdlibDone keeps VerifyEjectStdlib to one report per package:
@@ -247,6 +268,13 @@ func parseUpstreamAPIFile(data []byte, t *upstreamAPI) {
 			name := apiIdent(rest)
 			add(path, name)
 			tail := rest[len(name):]
+			// A struct field is separated at the declaration's top
+			// level. Its type, and generic constraints before it, may
+			// contain braces that do not describe interface members.
+			if idx := apiMemberSeparator(tail); idx >= 0 {
+				add(path, apiIdent(tail[idx+1:]))
+				continue
+			}
 			if open := strings.IndexByte(tail, '{'); open >= 0 {
 				end := strings.IndexByte(tail[open:], '}')
 				body := tail[open+1:]
@@ -258,15 +286,31 @@ func parseUpstreamAPIFile(data []byte, t *upstreamAPI) {
 				}
 				continue
 			}
-			if idx := strings.IndexByte(tail, ','); idx >= 0 {
-				add(path, apiIdent(tail[idx+1:]))
-			}
 		case strings.HasPrefix(feature, "const "), strings.HasPrefix(feature, "var "):
 			if idx := strings.IndexByte(feature, ' '); idx >= 0 {
 				add(path, apiIdent(feature[idx+1:]))
 			}
 		}
 	}
+}
+
+// apiMemberSeparator finds the comma introducing a struct field, outside
+// type parameters, constraints, and interface member lists.
+func apiMemberSeparator(s string) int {
+	depth := 0
+	for i, c := range s {
+		switch c {
+		case '[', '(', '{':
+			depth++
+		case ']', ')', '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // apiIdent returns the leading identifier of s, or "" if s starts with

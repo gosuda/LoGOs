@@ -6,12 +6,19 @@ cd m
 # (SPEC T-0.3): logos build accepts it, but logos eject must refuse it
 # at its source location instead of reporting a successful eject.
 # The direct EnableHTTP2ExtendedConnect call is exempt: eject rewrites it
-# to the GODEBUG-guarded stock form (see logos_eject_h2extendedconnect).
-# This case keeps a method value, which no rewrite covers, so eject must
-# still refuse it here.
+# to the ejectedhttp.RequireExtendedConnect helper form
+# (see logos_eject_h2extendedconnect). This case keeps a method value,
+# which no rewrite covers, so eject must still refuse it here.
 logos build ./...
 ! logos eject -o out
 stderr 'server\.lgo:6.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
+! exists out
+
+cd ../expression
+# A method expression likewise has no upstream spelling and no rewrite.
+logos build ./...
+! logos eject -o out
+stderr 'server\.lgo:5.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
 ! exists out
 
 cd ../ok
@@ -48,3 +55,15 @@ import "net/http"
 func KeepAlive(s *http.Server) {
 	s.SetKeepAlivesEnabled(true)
 }
+
+-- expression/go.mod --
+module example.com/h2expression
+
+go 1.27
+
+-- expression/server.lgo --
+package h2expression
+
+import "net/http"
+
+var Enable = (*http.Server).EnableHTTP2ExtendedConnect

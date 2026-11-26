@@ -173,6 +173,10 @@ func LogosOptionExportType(rt *Package, o *Option, ctxt *Context) Type {
 
 func logosWrapOption(t Type) *Option { return &Option{Elem: t} }
 
+func IsErrorType(t Type) bool {
+	return Identical(t, universeError)
+}
+
 func logosWrapOne(t Type) Type {
 	if logosAsOption(t) != nil {
 		return t
@@ -517,11 +521,19 @@ func (check *Checker) logosOptionalCall(x *operand, call *syntax.CallExpr) bool 
 			return true
 		}
 		x.mode_ = value
-		x.typ_ = logosWrapOne(typ)
+		if IsErrorType(typ) {
+			x.typ_ = typ
+		} else {
+			x.typ_ = logosWrapOne(typ)
+		}
 	default:
 		vars := make([]*Var, rsig.results.Len())
 		for i, v := range rsig.results.vars {
-			vars[i] = newVar(ResultVar, v.Pos(), v.Pkg(), v.Name(), logosWrapOne(v.typ))
+			typ := logosWrapOne(v.typ)
+			if i == len(rsig.results.vars)-1 && IsErrorType(v.typ) {
+				typ = v.typ
+			}
+			vars[i] = newVar(ResultVar, v.Pos(), v.Pkg(), v.Name(), typ)
 		}
 		x.mode_ = value
 		x.typ_ = NewTuple(vars...)

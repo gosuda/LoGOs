@@ -1,0 +1,116 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOFLAGS=-buildvcs=false
+env CGO_ENABLED=0
+env GOEXPERIMENT=jsonv2
+
+cd m
+
+# Reserve active and inactive logical overlay sources before selecting
+# companion names. Both the inserted declarations and methods must survive.
+logos build -overlay=overlay.json -emit-go=out .
+exists out/data_jsonv2.go
+exists out/data_jsonv2_jsonv2.go
+exists out/data_jsonv2_wasip1_wasm.go
+exists out/data_jsonv2_jsonv2_wasip1_wasm.go
+grep 'OverlayVersion' out/data_jsonv2.go
+grep 'WASIVersion' out/data_jsonv2_wasip1_wasm.go
+cp stream_check.txt out/stream_check_test.go
+cp wasi_check.txt out/wasi_check_test.go
+
+cd out
+go run .
+stdout '^version 7$'
+go test .
+go vet .
+env GOOS=wasip1 GOARCH=wasm
+go test -c -o wasi.test .
+env GOOS=$TESTGO_GOHOSTOS GOARCH=$TESTGO_GOHOSTARCH
+
+-- m/go.mod --
+module example.com/overlayjson
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("version", OverlayVersion()) }
+
+-- m/data.lgo --
+package main
+
+type Data struct {
+	Title string `json:"title"`
+}
+
+-- m/data_wasip1_wasm.lgo --
+package main
+
+type WASIData struct {
+	Title string `json:"title"`
+}
+
+-- m/overlay.json --
+{
+	"Replace": {
+		"data_jsonv2.lgo": ".overlay/data_jsonv2.lgo",
+		"data_jsonv2_wasip1_wasm.lgo": ".overlay/data_jsonv2_wasip1_wasm.lgo"
+	}
+}
+
+-- m/.overlay/data_jsonv2.lgo --
+package main
+
+func OverlayVersion() int { return 7 }
+
+-- m/.overlay/data_jsonv2_wasip1_wasm.lgo --
+package main
+
+func WASIVersion() int { return 9 }
+
+-- m/stream_check.txt --
+package main
+
+import (
+	"bytes"
+	"encoding/json/jsontext"
+	"strings"
+	"testing"
+)
+
+func TestStreamingMethod(t *testing.T) {
+	var buf bytes.Buffer
+	if err := (Data{Title: "hello"}).MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != `{"title":"hello"}` {
+		t.Fatalf("stream = %q", got)
+	}
+	if got := OverlayVersion(); got != 7 {
+		t.Fatalf("overlay version = %d", got)
+	}
+}
+
+-- m/wasi_check.txt --
+//go:build wasip1 && wasm
+
+package main
+
+import (
+	"bytes"
+	"encoding/json/jsontext"
+	"testing"
+)
+
+func TestWASIStreamingMethod(t *testing.T) {
+	var buf bytes.Buffer
+	if err := (WASIData{Title: "wasi"}).MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+		t.Fatal(err)
+	}
+	if got := WASIVersion(); got != 9 {
+		t.Fatalf("WASI overlay version = %d", got)
+	}
+}

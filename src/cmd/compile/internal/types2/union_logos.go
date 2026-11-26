@@ -546,6 +546,29 @@ func logosAppendTypeMember(term Type, out *[]LogosUnionMember, seen map[string]b
 	*out = append(*out, m)
 }
 
+// logosAccessibleAlias reports the outermost alias in t's written form
+// (via Rhs, never the expansion cache) whose name the holder package can
+// spell: either declared in the holder's own package or exported. It lets
+// a union member that wraps an unexported type in an accessible alias
+// stay reachable. A nil type or a chain with no accessible spelling
+// reports false.
+func logosAccessibleAlias(t Type, pkg *Package) (*TypeName, bool) {
+	for {
+		a, ok := t.(*Alias)
+		if !ok {
+			return nil, false
+		}
+		if obj := a.Obj(); obj != nil && (obj.Pkg() == nil || obj.Pkg() == pkg || obj.Exported()) {
+			return obj, true
+		}
+		rhs := a.Rhs()
+		if rhs == nil {
+			return nil, false
+		}
+		t = rhs
+	}
+}
+
 func logosAppendImportedMembers(name logosForeignName, out *[]LogosUnionMember, seen, visited map[string]bool) {
 	key := name.pkgPath + "." + name.typeName
 	if visited[key] {

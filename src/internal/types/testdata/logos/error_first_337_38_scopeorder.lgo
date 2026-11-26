@@ -1,0 +1,42 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_38() (int, error) { return 1, nil }
+func use337_38(n int) {}
+func step337_38() error { return nil }
+
+// Scopes exit before the return runs function cleanups: the scope read
+// sees the pre-overwrite value, so no diagnostic is warranted.
+func scopeBeforeFunctionOverwrite337_38() error {
+	n := 0
+	var err error
+	_ = func() error {
+		{
+			scope defer func() { use337_38(n) }()
+			defer func() { n, err = fetch337_38() }()
+			step337_38()?
+			return nil
+		}
+	}()
+	_ = err
+	return nil
+}
+
+// A scope read cannot rely on a later function-defer reset: the scope
+// exits first and still observes the unchecked value.
+func scopeCannotUseLaterReset337_38() error {
+	n, err := fetch337_38()
+	_ = err
+	_ = func() error {
+		{
+			scope defer func() { use337_38(n /* ERROR "[correctness::result_before_error_check]" */) }()
+			defer func() { n = 0 }()
+			step337_38()?
+			return nil
+		}
+	}()
+	return nil
+}
