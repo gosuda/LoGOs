@@ -383,6 +383,7 @@ type Info struct {
 	LogosCtInst                map[string]*LogosCtInst
 	LogosCtPrepared            map[*Func]*LogosCtInst
 	LogosCtImports             []string
+	LogosCtSilentError         map[*syntax.CallExpr]bool // logos M7-S3 hook: comptime.Error calls an instance check silenced after a terminating const switch, for lowering to erase.
 	LogosCtFinish              func(*Package, *Info, *Config)
 	LogosCtGenerics            map[*Func]LogosCtGeneric
 	LogosCtImport              func(*Func) (LogosCtGeneric, bool)

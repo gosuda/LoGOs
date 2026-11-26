@@ -274,14 +274,23 @@ func (check *Checker) logosComptimeError(call *syntax.CallExpr) {
 	generic := check.logosComptimeInGeneric()
 	// Invariant (dead silence): M7-S1 dead-branch membership is the
 	// first-check Info proof, shared with lowered rechecks.
+	dead := check.logosDead(check.logosCurStmt) || check.logosCtDeclCheck
 	// Invariant (switch-tail silence): in an instance outside a const-for
 	// iteration, an Error after a const switch whose selected case
 	// terminates cannot be reached, so it stays silent while the tail
-	// itself is still type-checked for other errors.
-	dead := check.logosDead(check.logosCurStmt) || check.logosCtDeclCheck || check.logosErrorAfterTerminatingSwitch()
+	// itself is still type-checked for other errors. The verdict is
+	// recorded for lowering, which erases exactly the calls the
+	// instance check silenced instead of redoing termination analysis.
+	switchTail := check.logosErrorAfterTerminatingSwitch()
 	var arg syntax.Expr
 	if len(call.ArgList) == 1 {
 		arg = call.ArgList[0]
+	}
+	if switchTail && arg != nil && !generic && !dead {
+		if check.Info.LogosCtSilentError == nil {
+			check.Info.LogosCtSilentError = make(map[*syntax.CallExpr]bool)
+		}
+		check.Info.LogosCtSilentError[call] = true
 	}
 	check.later(func() {
 		// Invariant (no double report): malformed, generic-deferred,
@@ -296,9 +305,15 @@ func (check *Checker) logosComptimeError(call *syntax.CallExpr) {
 			return
 		}
 		// Invariant (constant obligation): a live non-constant message
-		// fails as not constant without weakening the text.
+		// fails as not constant without weakening the text. The tail
+		// rule silences only the requested message, never this check.
 		if val == nil || val.Kind() != constant.String {
 			check.error(arg.Pos(), InvalidConstInit, "[comptime::error_not_constant] comptime.Error needs a constant message")
+			return
+		}
+		// Invariant (switch-tail silence): a constant message after a
+		// terminating const switch stays silent.
+		if switchTail {
 			return
 		}
 		// Invariant (live error): a live constant message fails with its text.
@@ -361,7 +376,13 @@ func (check *Checker) logosErrorAfterTerminatingSwitch() bool {
 			return false
 		}
 		if cs, ok := list[i].(*syntax.ConstSwitchStmt); ok {
-			return check.logosTerminatingConstSwitch(cs)
+			// An earlier terminating switch already keeps control from
+			// reaching the tail, so a nearer switch that does not
+			// terminate must not erase it. Keep scanning past it.
+			if check.logosTerminatingConstSwitch(cs) {
+				return true
+			}
+			continue
 		}
 		if check.isTerminating(list[i], "") {
 			return false
