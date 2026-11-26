@@ -27,30 +27,38 @@ func assign(v *Value?, ok bool) (int?, error) {
 	return result, nil
 }
 
-func verify(name string, v *Value?, ok bool, wantValue int, wantError bool, wantArguments, wantCalls, wantContinued int) {
+type expectation struct {
+	value     int
+	error     bool
+	arguments int
+	calls     int
+	continued int
+}
+
+func verify(name string, v *Value?, ok bool, want expectation) {
 	arguments, calls, continued = 0, 0, 0
 	value, err := assign(v, ok)
 	if err != nil {
-		if !wantError || err.Error() != "assignment failure" {
-			panic(fmt.Sprintf("%s error = %v, failure = %v", name, err, wantError))
+		if !want.error || err.Error() != "assignment failure" {
+			panic(fmt.Sprintf("%s error = %v, failure = %v", name, err, want.error))
 		}
 	} else {
-		if wantError {
+		if want.error {
 			panic(name + " lost assignment error")
 		}
-		if got := value ?? -1; got != wantValue {
-			panic(fmt.Sprintf("%s value = %d, want %d", name, got, wantValue))
+		if got := value ?? -1; got != want.value {
+			panic(fmt.Sprintf("%s value = %d, want %d", name, got, want.value))
 		}
 	}
-	if arguments != wantArguments || calls != wantCalls || continued != wantContinued {
-		panic(fmt.Sprintf("%s effects = %d/%d/%d, want %d/%d/%d", name, arguments, calls, continued, wantArguments, wantCalls, wantContinued))
+	if arguments != want.arguments || calls != want.calls || continued != want.continued {
+		panic(fmt.Sprintf("%s effects = %d/%d/%d, want %d/%d/%d", name, arguments, calls, continued, want.arguments, want.calls, want.continued))
 	}
 	fmt.Println(name)
 }
 
 func main() {
-	verify("present success", &Value{N: 7}, true, 7, false, 1, 1, 1)
-	verify("assignment failure", &Value{N: 7}, false, -1, true, 1, 1, 0)
-	verify("absent success", nil, true, -1, false, 0, 0, 1)
-	verify("absent failing argument", nil, false, -1, false, 0, 0, 1)
+	verify("present success", &Value{N: 7}, true, expectation{value: 7, arguments: 1, calls: 1, continued: 1})
+	verify("assignment failure", &Value{N: 7}, false, expectation{value: -1, error: true, arguments: 1, calls: 1})
+	verify("absent success", nil, true, expectation{value: -1, continued: 1})
+	verify("absent failing argument", nil, false, expectation{value: -1, continued: 1})
 }
