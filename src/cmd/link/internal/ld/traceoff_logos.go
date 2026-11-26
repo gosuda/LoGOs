@@ -56,6 +56,9 @@ var traceOffHooks = []traceOffHook{
 	{"runtime.traceLocker.GoPark", "runtime.traceOffGoPark"},
 	{"runtime.traceLocker.GoStart", "runtime.traceOffLocker"},
 	{"runtime.traceLocker.GoStop", "runtime.traceOffGoStop"},
+	{"runtime.traceLocker.GoSwitch", "runtime.traceOffGoSwitch"},
+	{"runtime.traceLocker.GoCreateSyscall", "runtime.traceOffGoCreateSyscall"},
+	{"runtime.traceLocker.GoDestroySyscall", "runtime.traceOffLocker"},
 	{"runtime.traceLocker.GoSysCall", "runtime.traceOffLocker"},
 	{"runtime.traceLocker.GoSysExit", "runtime.traceOffLockerBool"},
 	{"runtime.traceLocker.GoUnpark", "runtime.traceOffGoUnpark"},
@@ -98,6 +101,10 @@ func traceOffTrim(d *deadcodePass) {
 			return
 		}
 	}
+	if hasTraceControlRef(d) {
+		return
+	}
+
 	stubFor := make(map[string]string, len(traceOffHooks))
 	for _, h := range traceOffHooks {
 		stubFor[h.hook] = h.stub
@@ -170,4 +177,48 @@ func traceOffTrim(d *deadcodePass) {
 			d.mark(w.stub, 0)
 		}
 	}
+}
+
+// hasTraceControlRef reports whether any linked code references one of
+// the public tracing controls. Only text symbols are examined: data
+// references made by the toolchain itself (notably DWARF line tables,
+// which are loaded with the objects) must not count, while any genuine
+// use — a direct call or a function value taken in code — always emits
+// a reloc from a text symbol. A package-level variable initialized
+// with a control, never called, is not detected; calling one always is.
+// References from the controls' own bodies do not count: the plumbing
+// is reachable only when user code reaches a control first.
+func hasTraceControlRef(d *deadcodePass) bool {
+	ldr := d.ldr
+	// Match by name across every symbol version: the controls live
+	// in the always-linked runtime package, whose versioning the
+	// trim must not assume.
+	controls := make(map[loader.Sym]bool)
+	n := ldr.NSym()
+	for i := 1; i < n; i++ {
+		s := loader.Sym(i)
+		switch ldr.SymName(s) {
+		case "runtime.ReadTrace", "runtime.StartTrace", "runtime.StopTrace":
+			controls[s] = true
+		}
+	}
+	if len(controls) == 0 {
+		return false
+	}
+	for i := 1; i < n; i++ {
+		s := loader.Sym(i)
+		if controls[s] {
+			continue
+		}
+		if !ldr.SymType(s).IsText() {
+			continue
+		}
+		relocs := ldr.Relocs(s)
+		for j := 0; j < relocs.Count(); j++ {
+			if controls[relocs.At(j).Sym()] {
+				return true
+			}
+		}
+	}
+	return false
 }

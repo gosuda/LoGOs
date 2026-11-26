@@ -80,6 +80,12 @@ func traceOffGoPark(tl traceLocker, _ traceBlockReason, _ int) { _ = tl }
 func traceOffGoStop(tl traceLocker, _ traceGoStopReason) { _ = tl }
 
 //go:nosplit
+func traceOffGoSwitch(tl traceLocker, _ *g, _ bool) { _ = tl }
+
+//go:nosplit
+func traceOffGoCreateSyscall(tl traceLocker, _ *g) { _ = tl }
+
+//go:nosplit
 func traceOffGoUnpark(tl traceLocker, _ *g, _ int) { _ = tl }
 
 //go:nosplit

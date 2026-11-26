@@ -1,0 +1,165 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+
+# traceOffTrim must keep trimming programs that never touch the
+# tracer, and must stand down as soon as any linked code can start
+# a trace. The rewrite log is the observable decision.
+#
+# Inlining is disabled for the traced programs (-gcflags=all=-l):
+# otherwise the tiny StopTrace body inlines into its caller and the
+# resulting direct hook call from outside the runtime disables the
+# trim for an unrelated reason, hiding a control-scan regression.
+
+env LOGOS_EXAMPLE=traceoff
+cd $GOPATH/src
+cd $LOGOS_EXAMPLE
+env GOOS=js
+env GOARCH=wasm
+env GOCACHE=$WORK/cache-wasm
+
+# A traceless program is trimmed: direct hook calls are rewritten
+# to the traceOff stubs.
+logos build -trimpath -buildvcs=false -ldflags='-s -w -v -v' -o $WORK/plain.wasm ./plain
+stderr 'traceoff: rewrite '
+stderr 'traceoff: rewrite .* ref to runtime\.traceOffGoSwitch'
+stderr 'traceoff: rewrite .* ref to runtime\.traceOffGoCreateSyscall'
+stderr 'traceoff: rewrite runtime\.dropm ref to runtime\.traceOffLocker'
+
+# A program that starts, drains and stops a trace directly through
+# the runtime package (without importing runtime/trace) keeps every
+# edge: no rewrite may happen.
+logos build -trimpath -buildvcs=false -gcflags=all=-l -ldflags='-s -w -v -v' -o $WORK/traced.wasm ./traced
+! stderr 'traceoff: rewrite '
+
+# The same holds when the control reaches the linker as a function
+# value rather than a direct call.
+logos build -trimpath -buildvcs=false -gcflags=all=-l -ldflags='-s -w -v -v' -o $WORK/tracedvia.wasm ./tracedvia
+! stderr 'traceoff: rewrite '
+
+# A program that only pulls iterators keeps the trim, and the pull
+# coroutine's GoSwitch call is rewritten to its stub.
+logos build -trimpath -buildvcs=false -ldflags='-s -w -v -v' -o $WORK/pull.wasm ./pull
+stderr 'traceoff: rewrite .* ref to runtime\.traceOffGoSwitch'
+
+# Same for the two-value form.
+logos build -trimpath -buildvcs=false -ldflags='-s -w -v -v' -o $WORK/pull2.wasm ./pull2
+stderr 'traceoff: rewrite .* ref to runtime\.traceOffGoSwitch'
+
+-- traceoff/go.mod --
+module example.com/traceoff
+
+go 1.27
+-- traceoff/plain/main.lgo --
+package main
+
+import "fmt"
+
+func run() error {
+	fmt.Println("hi")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+-- traceoff/traced/main.lgo --
+package main
+
+import "runtime"
+
+func main() {
+	if err := runtime.StartTrace(); err != nil {
+		panic(err)
+	}
+	for i := 0; i < 3; i++ {
+		buf := runtime.ReadTrace()
+		if len(buf) == 0 {
+			println("empty")
+		}
+	}
+	runtime.StopTrace()
+	println("traced")
+}
+-- traceoff/tracedvia/main.lgo --
+package main
+
+import "runtime"
+
+func call(f func()) {
+	f()
+}
+
+func main() {
+	if err := runtime.StartTrace(); err != nil {
+		panic(err)
+	}
+	call(runtime.StopTrace)
+	println("traced-via-value")
+}
+-- traceoff/pull/main.lgo --
+package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+func run() error {
+	next, stop := iter.Pull(iter.Seq[int](func(yield func(int) bool) {
+		for i := 0; i < 3; i++ {
+			if !yield(i) {
+				return
+			}
+		}
+	}))
+	defer stop()
+	for {
+		v, ok := next()
+		if !ok {
+			break
+		}
+		fmt.Println(v)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+-- traceoff/pull2/main.lgo --
+package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+func run() error {
+	next, stop := iter.Pull2(iter.Seq2[int, string](func(yield func(int, string) bool) {
+		for i := 0; i < 3; i++ {
+			if !yield(i, "x") {
+				return
+			}
+		}
+	}))
+	defer stop()
+	for {
+		v, s, ok := next()
+		if !ok {
+			break
+		}
+		fmt.Println(v, s)
+	}
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
