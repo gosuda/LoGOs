@@ -126,7 +126,8 @@ def test_benchmark_fetches_missing_base_in_shallow_checkout(tmp_path: Path) -> N
     # local path copies the full object store, so the base would still
     # be present and the missing-base fetch would go untested.
     subprocess.run(
-        ("git", "clone", "-q", "--depth=1", "--no-local", str(upstream), str(root)), check=True
+        ("git", "clone", "-q", "--depth=1", "--no-local", str(upstream), str(root)),
+        check=True,
     )
     assert base not in git(root, "rev-list", "HEAD"), "fixture must lack base"
     driver = copy_driver(root, "bench-autovec.sh")
