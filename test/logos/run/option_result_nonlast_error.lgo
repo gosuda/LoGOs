@@ -1,0 +1,78 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type PM struct{ X int }
+
+func (m *PM) Pair(ok bool) (error, int) {
+	if !ok {
+		return fmt.Errorf("no"), 0
+	}
+	return fmt.Errorf("yes"), m.X
+}
+
+func (m *PM) PairErr(ok bool) (error, error) {
+	if !ok {
+		return fmt.Errorf("no"), fmt.Errorf("no2")
+	}
+	return nil, nil
+}
+
+func mkPM() *PM? {
+	return &PM{X: 7}
+}
+func main() {
+	e, n := mkPM()?.Pair(true)
+	check("pos-count", (n ?? -1) == 7, n ?? -1, 7)
+	d := fmt.Errorf("dflt")
+	v := e ?? d
+	check("pos-value", v.Error() == "yes", v.Error(), "yes")
+	ea, _ := mkPM()?.Pair(false)
+	va := ea ?? d
+	check("pos-fail-value", va.Error() == "no", va.Error(), "no")
+	var eRes struct {
+		v   error?
+		err error
+	}
+	eRes.v, eRes.err = mkPM()?.PairErr(true)
+	e1, e2 := eRes.v, eRes.err
+	if e2 == nil {
+		check("pos2-second-nil", true, nil, nil)
+		v2 := e1 ?? d
+		check("pos2-first-nil", v2 == nil, v2, nil)
+	} else {
+		check("pos2-second-nil", false, e2, nil)
+	}
+	var fRes struct {
+		v   error?
+		err error
+	}
+	fRes.v, fRes.err = mkPM()?.PairErr(false)
+	f1, f2 := fRes.v, fRes.err
+	if f2 == nil {
+		check("pos2-fail-second", false, "<nil>", "no2")
+	} else {
+		check("pos2-fail-second", f2.Error() == "no2", f2.Error(), "no2")
+		vf := f1 ?? d
+		check("pos2-fail-first", vf.Error() == "no", vf.Error(), "no")
+	}
+	if failed {
+		os.Exit(1)
+	}
+}

@@ -1,0 +1,60 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type CC struct{ name string }
+
+func (c *CC) Close() error {
+	if c.name == "bad" {
+		return fmt.Errorf("close %s", c.name)
+	}
+	return nil
+}
+
+func mkCC() *CC? {
+	return &CC{name: "ok"}
+}
+
+func mkCCBad() *CC? {
+	return &CC{name: "bad"}
+}
+
+type Probe struct{ X int }
+
+func closeCC[T any](c *CC?) error {
+	var v T
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	_ = v
+	return c?.Close()
+}
+
+func main() {
+	err := closeCC[Probe](mkCC())
+	check("ct-close-ok", err == nil, err, nil)
+	errb := closeCC[Probe](mkCCBad())
+	check("ct-close-err", errb != nil && errb.Error() == "close bad", errb, "close bad")
+	erra := closeCC[Probe](nil)
+	check("ct-close-absent", erra == nil, erra, nil)
+	if failed {
+		os.Exit(1)
+	}
+}
