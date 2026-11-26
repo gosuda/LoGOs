@@ -23,7 +23,7 @@ import (
 // would report success for output that upstream Go rejects. Each miss is
 // reported at its source location; the staging build failure makes logos
 // eject exit nonzero before it writes any output.
-func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info) {
+func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
 	if base.LogosEject == "" {
 		return
 	}
@@ -53,20 +53,31 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info) {
 		}
 		base.Errorf("%s: [portability::fork_stdlib_api] logos eject: %s.%s has no upstream spelling (absent from the Go 1.27 API files); ejected output must build with upstream Go (SPEC T-0.3)", name.Pos(), p.Path(), obj.Name())
 	}
-	verify := func(info *types2.Info) {
-		mapped := mappedEjectStdlibCalls(info)
+	verify := func(info *types2.Info, roots []syntax.Node) {
+		mapped := mappedEjectStdlibCalls(info, roots)
 		for name, obj := range info.Uses {
 			if !mapped[name] {
 				check(name, obj)
 			}
 		}
 	}
-	verify(info)
+	roots := make([]syntax.Node, len(files))
+	for i, file := range files {
+		roots[i] = file
+	}
+	verify(info, roots)
 	for _, rec := range info.LogosCtPrepared {
 		if rec == nil || rec.Info == nil {
 			continue
 		}
-		verify(rec.Info)
+		roots := make([]syntax.Node, 0, len(rec.Helpers)+1)
+		if rec.Decl != nil {
+			roots = append(roots, rec.Decl)
+		}
+		for _, helper := range rec.Helpers {
+			roots = append(roots, helper)
+		}
+		verify(rec.Info, roots)
 	}
 }
 
@@ -74,24 +85,24 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info) {
 // upstream rewrite. The exemption belongs to the selector occurrence,
 // never the method name: escaping method values and method expressions
 // still have no upstream spelling.
-func mappedEjectStdlibCalls(info *types2.Info) map[*syntax.Name]bool {
+func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.Name]bool {
 	var mapped map[*syntax.Name]bool
-	for expr := range info.Types {
-		call, ok := expr.(*syntax.CallExpr)
+	inspect := func(node syntax.Node) bool {
+		call, ok := node.(*syntax.CallExpr)
 		if !ok || len(call.ArgList) != 0 {
-			continue
+			return true
 		}
 		selector, ok := call.Fun.(*syntax.SelectorExpr)
 		if !ok || selector.Sel.Value != "EnableHTTP2ExtendedConnect" {
-			continue
+			return true
 		}
 		selection := info.Selections[selector]
 		if selection == nil || selection.Kind() != types2.MethodVal {
-			continue
+			return true
 		}
 		obj := selection.Obj()
 		if obj.Pkg() == nil || obj.Pkg().Path() != "net/http" {
-			continue
+			return true
 		}
 		recv := types2.Unalias(selection.Recv())
 		if pointer, ok := recv.(*types2.Pointer); ok {
@@ -99,12 +110,31 @@ func mappedEjectStdlibCalls(info *types2.Info) map[*syntax.Name]bool {
 		}
 		named, ok := recv.(*types2.Named)
 		if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "net/http" || named.Obj().Name() != "Server" {
-			continue
+			return true
+		}
+		// The text rewrite declines receivers containing generated site
+		// names because their independent edits would overlap the call.
+		// Keep exactly that boundary here instead of approving output
+		// which the later rewrite cannot materialize.
+		hasSite := false
+		syntax.Inspect(selector.X, func(node syntax.Node) bool {
+			if name, ok := node.(*syntax.Name); ok {
+				rest, site := strings.CutPrefix(name.Value, "_logos_site")
+				hasSite = hasSite || site && rest != "" && strings.Trim(rest, "0123456789") == ""
+			}
+			return !hasSite
+		})
+		if hasSite {
+			return true
 		}
 		if mapped == nil {
 			mapped = make(map[*syntax.Name]bool)
 		}
 		mapped[selector.Sel] = true
+		return true
+	}
+	for _, root := range roots {
+		syntax.Inspect(root, inspect)
 	}
 	return mapped
 }
