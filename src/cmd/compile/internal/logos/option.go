@@ -354,6 +354,9 @@ func (fl *fileLower) lowerOptExpr(e syntax.Expr) (out syntax.Expr) {
 	switch e := e.(type) {
 	case nil:
 		return nil
+	case *syntax.TryExpr:
+		e.X = fl.lowerOptExpr(e.X)
+		return e
 	case *syntax.Name:
 		if out, ok := fl.lowerConstMapName(e); ok {
 			return out

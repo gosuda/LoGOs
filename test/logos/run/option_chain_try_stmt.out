@@ -1,0 +1,5 @@
+ok stmt-ok-err-nil
+ok stmt-ok-value
+ok stmt-fail-err
+ok stmt-absent-err-nil
+ok stmt-absent-value

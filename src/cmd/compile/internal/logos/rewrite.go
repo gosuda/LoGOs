@@ -421,7 +421,7 @@ func (p *forPost) buildPostAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call 
 	tw := &twin{}
 	lhsSpan := trimSpan(fl.src, span{start: p.spanStart, end: fl.off(s.Pos())})
 	lhsMark := tw.mark(stmtPos, fl.lazyText(lhsSpan))
-	callMark := tw.mark(tpos, fl.lazyText(span{start: fl.off(leftmostOf(call.Fun)), end: qOff}))
+	callMark := tw.mark(tpos, p.fc.tryCallText(call, qOff))
 	withErr := append(slices.Clone(lhs), nameOf(stmtPos, innerErr))
 	native := []syntax.Stmt{blockOf(stmtPos, []syntax.Stmt{
 		errorVarDecl(stmtPos, nameOf(stmtPos, innerErr)),
@@ -444,9 +444,9 @@ func (p *forPost) buildPostExpr(s *syntax.ExprStmt, t *syntax.TryExpr, call *syn
 	exit := p.closureExit(t, innerErr)
 	stmtPos := leftmostOf(call.Fun)
 	qOff := fl.off(tpos)
-	p.spanStart = spanStartBack(fl.src, fl.off(stmtPos))
+	p.spanStart = spanStartBack(fl.src, p.fc.tryCallStart(call))
 	tw := &twin{}
-	callMark := tw.mark(tpos, fl.lazyText(span{start: fl.off(stmtPos), end: qOff}))
+	callMark := tw.mark(tpos, p.fc.tryCallText(call, qOff))
 	n := p.fc.callResults(call)
 	var native []syntax.Stmt
 	var text otext
@@ -977,6 +977,36 @@ func tryDiscardStmts(pos, exitPos syntax.Pos, n int, call syntax.Expr, err strin
 	return []syntax.Stmt{def, check}
 }
 
+// tryCallStart returns the source offset where a ? operand call's text
+// begins. The option pass lowers a ?. call into an IIFE whose Fun carries
+// the ? position, so leftmostOf no longer reaches the original receiver;
+// the wrapper's recorded span does.
+func (fc *funcLower) tryCallStart(call *syntax.CallExpr) int {
+	fl := fc.fl
+	if vs, ok := fl.wrapSpan[call]; ok {
+		return vs.start
+	}
+	return fl.off(leftmostOf(call.Fun))
+}
+
+// tryCallText copies a ? operand call for a try rewrite. When the option
+// pass already lowered the call, the copy starts at the wrapper's recorded
+// start and drains the wrapper's owned boundary inserts into the try text,
+// so one edit owns the whole statement instead of overlapping the option
+// pass's inner edits (lowerOptDeferGoWith fuses the same way).
+func (fc *funcLower) tryCallText(call *syntax.CallExpr, qOff int) otext {
+	fl := fc.fl
+	start := fl.off(leftmostOf(call.Fun))
+	if vs, ok := fl.wrapSpan[call]; ok {
+		start = vs.start
+		if id, ok := fl.wrapOwner[call]; ok {
+			head, tail := fl.drainOwned(span{start: start, end: qOff}, id)
+			return cat(head, fl.lazyText(span{start: start, end: qOff}), tail)
+		}
+	}
+	return fl.lazyText(span{start: start, end: qOff})
+}
+
 func (fc *funcLower) lowerTryAssign(s *syntax.AssignStmt, t *syntax.TryExpr, call *syntax.CallExpr) []syntax.Stmt {
 	fl := fc.fl
 	native, text, spanStart, spanEnd := fc.tryAssignCore(s, t, call)
@@ -994,7 +1024,7 @@ func (fc *funcLower) tryAssignCore(s *syntax.AssignStmt, t *syntax.TryExpr, call
 	qOff := fl.off(tpos)
 	spanEnd := skipCloseParens(src, qOff+1)
 	lhs := syntax.UnpackListExpr(s.Lhs)
-	callText := fl.lazyText(span{start: fl.off(leftmostOf(call.Fun)), end: qOff})
+	callText := fc.tryCallText(call, qOff)
 	errSpelling := fc.nextErr()
 	siteSpelling := fl.newSite(tpos, tpos.Line())
 	exitNative, exitText, exitSubs := fc.exitPairAt(stmtPos, tpos, errSpelling, siteSpelling)
@@ -1062,10 +1092,10 @@ func (fc *funcLower) tryExprCore(s *syntax.ExprStmt, t *syntax.TryExpr, call *sy
 	fl := fc.fl
 	tpos := t.Pos()
 	stmtPos := leftmostOf(call.Fun)
-	spanStart := spanStartBack(fl.src, fl.off(stmtPos))
+	spanStart := spanStartBack(fl.src, fc.tryCallStart(call))
 	qOff := fl.off(tpos)
 	spanEnd := skipCloseParens(fl.src, qOff+1)
-	callText := fl.lazyText(span{start: fl.off(stmtPos), end: qOff})
+	callText := fc.tryCallText(call, qOff)
 	errSpelling := fc.nextErr()
 	siteSpelling := fl.newSite(tpos, tpos.Line())
 	exitNative, exitText, exitSubs := fc.exitPairAt(stmtPos, tpos, errSpelling, siteSpelling)
