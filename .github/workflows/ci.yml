@@ -473,6 +473,7 @@ jobs:
       - name: "Autovec benchmarks: base vs candidate, measured sequentially"
         run: bash .github/scripts/bench-autovec.sh
         env:
+          AUTOVEC_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           AUTOVEC_CAND_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Retain AMD64 benchmark evidence
         if: always()

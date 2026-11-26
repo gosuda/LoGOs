@@ -14,4 +14,4 @@ env -i \
   GOMAXPROCS=2 GOFLAGS=-p=2 GO_TEST_TIMEOUT_SCALE=6 GO_TEST_SHORT=1 \
   GOEXPERIMENT="$CGO_EXPERIMENT" \
   UPROOT1272="$UPROOT1272" UPROOT1273="$UPROOT1273" UPROOT1274="$UPROOT1274" \
-  bash ./run.bash --no-rebuild -k
+  bash ./run.bash --no-rebuild -k 2>&1 | tee "$RUNNER_TEMP/cgo-evidence/full/dist.log"
