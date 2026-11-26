@@ -67,3 +67,5 @@ func IsAlias(name string) bool {
 	e := Ext(name)
 	return e != "" && e != Canonical
 }
+
+var _ int=1
