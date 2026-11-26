@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -236,6 +237,42 @@ def test_frozen_source_digest_mismatch_is_rejected(
     target.write_bytes(target.read_bytes() + b"\n")
     with pytest.raises(ValueError, match="frozen source digest mismatch"):
         gate.verify_frozen(tmp_path)
+
+
+def test_source_identity_uses_the_active_ci_workflow(tmp_path: Path) -> None:
+    repository = Path(__file__).resolve().parents[3]
+    files = [
+        *(relative for relative, _ in gate.FROZEN_PINS),
+        f"{gate.SOURCE_DIR}/optfacts.go",
+        ".github/workflows/ci.yml",
+    ]
+    for relative in files:
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(repository / relative, target)
+    subprocess.run(("git", "init", "-q", str(tmp_path)), check=True)
+    subprocess.run(("git", "-C", str(tmp_path), "add", "."), check=True)
+    subprocess.run(
+        (
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Evidence fixture",
+            "-c",
+            "user.email=evidence@example.invalid",
+            "commit",
+            "-qm",
+            "active checkout fixture",
+        ),
+        check=True,
+    )
+    head = gate.git_value(tmp_path, "rev-parse", "HEAD")
+    identity = gate.source_identity(tmp_path, head)
+    assert identity["workflow_sha256"] == gate.digest(
+        tmp_path / ".github/workflows/ci.yml"
+    )
+    assert identity["head"] == head
 
 
 @pytest.mark.parametrize("raw", ("[]", "null"))

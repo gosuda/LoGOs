@@ -15,8 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   route:
@@ -52,10 +52,13 @@ jobs:
           shellcheck --version
           "$RUNNER_TEMP/actionlint" -color
           for f in .github/scripts/*.sh; do bash -n "$f"; done
+          bash .github/scripts/test-route.sh
       - id: route
         run: GITHUB_SHA="${{ github.event.pull_request.head.sha || github.sha }}" bash .github/scripts/route.sh
         env:
           INPUT_SUITES: ${{ inputs.suites || 'all' }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
 
   build:
     needs: route
@@ -209,6 +212,13 @@ jobs:
       - run: bash .github/scripts/setup.sh restore oracles
       - name: Routed feature gates (feature-gate.sh, minus its own toolchain build)
         run: bash .github/scripts/gates-routed.sh
+  # Manual GC validation has one entry point, with native checks on both
+  # architectures and the core/upstream regression selected by route.sh.
+  gc-arm:
+    needs: route
+    if: github.event_name == 'workflow_dispatch' && needs.route.outputs.gc == 'true'
+    uses: ./.github/workflows/gc-stability.yml
+
   gc:
     needs: [route, build]
     if: needs.route.outputs.gc == 'true'
@@ -464,3 +474,11 @@ jobs:
         run: bash .github/scripts/bench-autovec.sh
         env:
           AUTOVEC_CAND_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Retain AMD64 benchmark evidence
+        if: always()
+        uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
+        with:
+          name: "autovec-amd64-${{ github.run_id }}-${{ github.run_attempt }}"
+          path: .outline/optimize/autovec
+          include-hidden-files: true
+          retention-days: 30
