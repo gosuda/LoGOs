@@ -711,7 +711,27 @@ func IsStandardPackage(goroot_, compiler, path string) bool {
 	} else if errors.Is(err, ErrNotIndexed) {
 		// Fall back because package isn't indexable. (Probably because
 		// a file was modified recently)
-		return goroot.IsStandardPackage(fsys.ReadDir, goroot_, compiler, path)
+		if goroot.IsStandardPackage(fsys.ReadDir, goroot_, compiler, path) {
+			return true
+		}
+		// The upstream fallback only recognizes .go files. Under an overlay
+		// a .lgo-only toolchain package stays a standard package even when
+		// a fresh overlay file keeps it out of the index, so check the
+		// effective listing for LoGOs sources too. Plain go keeps the
+		// upstream answer: .lgo files never count without logos mode.
+		if !cfg.Logos {
+			return false
+		}
+		entries, err := fsys.ReadDir(filepath.Join(goroot_, "src", path))
+		if err != nil {
+			return false
+		}
+		for _, e := range entries {
+			if !e.IsDir() && logosfile.Is(e.Name()) {
+				return true
+			}
+		}
+		return false
 	}
 	return false
 }
