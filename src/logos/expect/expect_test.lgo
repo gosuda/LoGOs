@@ -7,6 +7,8 @@ package expect_test
 import (
 	"fmt"
 	"logos/expect"
+	unitsa "logos/expect/internal/unitsa"
+	unitsb "logos/expect/internal/unitsb"
 	"strings"
 	"testing"
 )
@@ -173,5 +175,27 @@ func TestEqualStructFieldTypes(t *testing.T) {
 	expect.Equal(r, holder{V: int(7)}, holder{V: uint(7)})
 	if !strings.Contains(r.msg, "differ in type") {
 		t.Errorf("int-to-uint field change passed:\n got %q", r.msg)
+	}
+}
+
+func TestEqualStructSameNameTypes(t *testing.T) {
+	// Planted fault: interface fields holding distinct types with the
+	// same %T display name and rendered value compare equal, so a
+	// cross-package type swap passes silently.
+	type holder struct {
+		V any
+	}
+	same := &recorder{}
+	expect.Equal(same, holder{V: unitsa.Count(7)}, holder{V: unitsa.Count(7)})
+	if same.msg != "" {
+		t.Errorf("identical same-name values failed:\n got %q", same.msg)
+	}
+	r := &recorder{}
+	expect.Equal(r, holder{V: unitsa.Count(7)}, holder{V: unitsb.Count(7)})
+	if !strings.Contains(r.msg, "differ in type") {
+		t.Errorf("same-name type swap passed:\n got %q", r.msg)
+	}
+	if !strings.Contains(r.msg, "internal/unitsa") || !strings.Contains(r.msg, "internal/unitsb") {
+		t.Errorf("diff does not disambiguate the packages:\n got %q", r.msg)
 	}
 }

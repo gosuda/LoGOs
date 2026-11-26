@@ -553,6 +553,7 @@ func (e *jsonEnc) mapBody(lt types2.Type, x string) []string {
 		"defer "+jsonAlias+".LeaveMap(_logos_s, "+x+")",
 		"_logos_es, _logos_ke := "+jsonAlias+"."+entries+"("+args+")")
 	body = append(body, ifLines("_logos_ke != nil", []string{"return _logos_buf, _logos_ke"})...)
+	body = append(body, "_logos_buf = append(_logos_buf, '{')")
 	loop := loneSurrogateGuard("_logos_es[_logos_i].Key", "_logos_buf")
 	loop = append(loop,
 		elemSeparator(),
