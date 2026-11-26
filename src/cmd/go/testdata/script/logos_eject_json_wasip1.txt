@@ -1,6 +1,8 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env CGO_ENABLED=0
+# Streaming companions are required regardless of the caller experiment set.
+env GOEXPERIMENT=jsonv2
 
 cd wasi
 

@@ -19,8 +19,13 @@ exec grep -E 'cgo' out/native_jsonv2.go
 
 cd out
 go build ./...
+go run .
+stderr '^native$'
 env CGO_ENABLED=0
 go build ./...
+go run .
+! stderr 'native'
+stderr '^ok$'
 env CGO_ENABLED=1
 
 -- cg/go.mod --
@@ -39,6 +44,8 @@ func main() {
 package main
 
 import "C"
+
+func init() { println("native") }
 
 type Native struct {
 	Name string `json:"name"`

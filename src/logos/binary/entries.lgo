@@ -3,7 +3,9 @@ package binary
 import (
 	"comptime"
 	stdbinary "encoding/binary"
+	"errors"
 	"io"
+	"reflect"
 	"slices"
 	"sync"
 )
@@ -79,7 +81,18 @@ func ReadInto[T any](r io.Reader, order Order, data *T) error {
 	n := FixedSizeNonStruct[T]()
 	if n < 0 {
 		if p, ok := any(data).(*any); ok {
-			return stdbinary.Read(r, order, *p)
+			if held := *p; held != nil {
+				// The original reads a scalar's width before it can
+				// reject the destination, so an invalid dynamic
+				// destination would consume stream bytes. Reject it
+				// here, before touching the reader, with the same
+				// text the original reports.
+				if kind := reflect.TypeOf(held).Kind(); kind != reflect.Pointer && kind != reflect.Slice {
+					return errors.New("binary.Read: invalid type " + reflect.TypeOf(held).String())
+				}
+				return stdbinary.Read(r, order, held)
+			}
+			return stdbinary.Read(r, order, data)
 		}
 		return stdbinary.Read(r, order, data)
 	}
@@ -178,12 +191,15 @@ func Decode[T any](buf []byte, order Order, data *T) (int, error) {
 	n := FixedSizeNonStruct[T]()
 	if n < 0 {
 		if p, ok := any(data).(*any); ok {
-			return stdbinary.Decode(buf, order, *p)
+			if *p == nil {
+				return stdbinary.Decode(buf, order, data)
+			}
+			return stdbinary.Decode(boundSliceInput(buf, *p), order, *p)
 		}
 		if p, ok := any(data).(*[]byte); ok {
 			return stdbinary.Decode(buf, order, *p)
 		}
-		return stdbinary.Decode(buf, order, data)
+		return stdbinary.Decode(boundSliceInput(buf, any(*data)), order, data)
 	}
 	if len(buf) < n {
 		return 0, ErrTooSmall
