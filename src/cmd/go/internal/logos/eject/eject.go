@@ -1091,6 +1091,7 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 	type span struct{ s, e int }
 	var moved []span
 	var movedText [][]byte
+	var movedFns []*ast.FuncDecl
 	offset := func(p token.Pos) int {
 		return fset.Position(p).Offset
 	}
@@ -1108,6 +1109,7 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 		}
 		moved = append(moved, span{s, e})
 		movedText = append(movedText, bytes.TrimRight(fixed[s:e], "\n"))
+		movedFns = append(movedFns, fn)
 	}
 	if len(moved) == 0 {
 		return fixed, nil
@@ -1155,9 +1157,21 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 		}
 		main = bytes.Join(kept, nil)
 	}
-	// Imports for the extra file: every import whose alias is used by the
-	// moved declarations.
-	joinedMoved := bytes.Join(movedText, []byte("\n"))
+	// Imports for the extra file: every import whose alias the moved
+	// declarations use as a package qualifier. Selector bases are exact
+	// identifiers, so _logos_json.CallerOptionsAreV1Default counts as a
+	// use of _logos_json only, never of json.
+	used := map[string]bool{}
+	for _, fn := range movedFns {
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok {
+				if id, ok := sel.X.(*ast.Ident); ok {
+					used[id.Name] = true
+				}
+			}
+			return true
+		})
+	}
 	var extraImports []string
 	for _, decl := range f.Decls {
 		gen, ok := decl.(*ast.GenDecl)
@@ -1179,7 +1193,7 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 			if alias == "_" || alias == "." {
 				continue
 			}
-			if bytes.Contains(joinedMoved, []byte(alias+".")) {
+			if used[alias] {
 				impPath := strings.TrimSpace(imp.Path.Value)
 				extraImports = append(extraImports, "import "+alias+" "+impPath)
 			}
