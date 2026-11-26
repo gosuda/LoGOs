@@ -16,6 +16,7 @@ env GOROOT=$WORK/fakegoroot
 cd m
 logos run .
 stdout '^original$'
+stdout '^original-file$'
 
 logos build -overlay=$WORK/ovl/overlay.json --emit-go=out .
 exists out/_logos_deps/rt/logos/ejecttestembed/version.go
@@ -27,6 +28,7 @@ cd out
 go build -mod=readonly ./...
 go run .
 stdout '^patched$'
+stdout '^patched-file$'
 
 # A replacement that needs import rewriting still aborts: the embed pass
 # cannot copy bytes the source pass rewrote, so the genuine rewrite
@@ -176,6 +178,16 @@ var versionFile string
 
 func Which() string { return Version }
 
+func WhichFile() string {
+	if versionFile == "package ejecttestembed\n\nconst Version = \"patched\"\n" {
+		return "patched-file"
+	}
+	if versionFile == "package ejecttestembed\n\nconst Version = \"original\"\n" {
+		return "original-file"
+	}
+	return "other-file"
+}
+
 -- m/go.mod --
 module example.com/embeddep
 
@@ -192,4 +204,5 @@ import (
 
 func main() {
 	fmt.Println(ejecttestembed.Which())
+	fmt.Println(ejecttestembed.WhichFile())
 }
