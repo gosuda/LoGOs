@@ -917,6 +917,21 @@ var depsRules = `
 
 	context, fmt, os, os/exec, sync, syscall
 	< logos/proc;
+
+	NONE
+	< logos/enum;
+
+	strconv
+	< logos/strconv;
+
+	strconv
+	< logos/encoding/base64;
+
+	errors, fmt, strings
+	< logos/net/uri;
+
+	fmt, io, os, sync
+	< logos/log;
 `
 
 // listStdPkgs returns the same list of packages as "go list std".
