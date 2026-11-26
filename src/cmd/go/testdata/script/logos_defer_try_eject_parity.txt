@@ -79,9 +79,24 @@ func spanOpt(m *optNote?) (err error) {
 	defer m?.Note(2 + 3)?
 	return nil
 }
+var cleanup func(int) error
 
+func install() int {
+	cleanup = func(n int) error {
+		fmt.Println("installed", n)
+		return nil
+	}
+	return 1
+}
 
-var seen any = "unset"
+// The deferred callee resolves after the argument call in both twins:
+// install replaces cleanup before the deferred call runs.
+func reassign() (err error) {
+	defer cleanup(install())?
+	return nil
+}
+
+ var seen any = "unset"
 
 func probe() error {
 	seen = recover()
@@ -125,6 +140,11 @@ func main() {
 	} else {
 		fmt.Println("span", (mn ?? &optNote{}).last)
 	}
+	if err := reassign(); err != nil {
+		fmt.Println("reassign err:", err)
+	} else {
+		fmt.Println("reassign ok")
+	}
 	recoverProbe()
 }
 
@@ -134,4 +154,6 @@ method ok 1
 join err: fail 3
 fail 1
 span 5
+installed 1
+reassign ok
 recover in f: <nil> outer: boom

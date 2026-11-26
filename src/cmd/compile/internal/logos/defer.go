@@ -339,12 +339,12 @@ func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, 
 	return append(native, checkN), append(text, checkT), tw
 }
 
-// definePieces emits one short declaration per captured piece, in use
-// order, so a multi-result argument never shares its right-hand side
-// with another capture. A call can supply all parameters of another
-// call with its multiple results only when it is the sole expression,
-// so combining the receiver with a two-result argument in one
-// declaration rejects programs the language accepts.
+// definePieces binds the captured operands in use order. Consecutive
+// single-valued pieces share one short declaration, so the ejected
+// evaluation matches the native single-assignment spill: an argument
+// call runs before a plain function variable is read. A multi-result
+// argument keeps its own declaration, since combining it with another
+// value rejects programs the language accepts.
 func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []syntax.Stmt {
 	var pieces []capturePiece
 	if plan.isMethod {
@@ -354,12 +354,26 @@ func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []s
 	}
 	pieces = append(pieces, plan.args...)
 	var out []syntax.Stmt
+	var names, vals []syntax.Expr
+	flush := func() {
+		if len(names) > 0 {
+			out = append(out, defineOf(cpos, names, vals))
+			names, vals = nil, nil
+		}
+	}
 	for _, piece := range pieces {
 		if !piece.capture {
 			continue
 		}
-		out = append(out, defineOf(cpos, nameList(piece), valList(piece, tw)))
+		if len(pieceNames(piece)) != 1 {
+			flush()
+			out = append(out, defineOf(cpos, nameList(piece), valList(piece, tw)))
+			continue
+		}
+		names = append(names, nameList(piece)...)
+		vals = append(vals, valList(piece, tw)...)
 	}
+	flush()
 	return out
 }
 
