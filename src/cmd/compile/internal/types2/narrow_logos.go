@@ -3329,26 +3329,21 @@ func (p *logosEFPass) deferredFunBody(outer *logosEFEffects, lit *syntax.FuncLit
 // receiver: a `?.` optional selection, or a TryExpr marker whose operand
 // is a plain optional value rather than an error-propagating call. A call
 // result under TryExpr exits the function on failure instead of skipping
-// the call, so only plain values mark an absent path that continues.
+// the call, so only plain values mark an absent path that continues. Only
+// the outer callee form decides: lowering guards arguments only when the
+// callee itself is the optional selection, so a nested `?.` inside a
+// factory argument keeps the outer call eager.
 func optionalChainCallee(fun syntax.Expr) bool {
-	found := false
-	syntax.Inspect(fun, func(n syntax.Node) bool {
-		if found {
-			return false
-		}
-		if _, ok := n.(*syntax.OptSelectExpr); ok {
-			found = true
-			return false
-		}
-		if t, ok := n.(*syntax.TryExpr); ok {
-			if _, isCall := syntax.Unparen(t.X).(*syntax.CallExpr); !isCall {
-				found = true
-				return false
-			}
-		}
+	fun = syntax.Unparen(fun)
+	if _, ok := fun.(*syntax.OptSelectExpr); ok {
 		return true
-	})
-	return found
+	}
+	if t, ok := fun.(*syntax.TryExpr); ok {
+		if _, isCall := syntax.Unparen(t.X).(*syntax.CallExpr); !isCall {
+			return true
+		}
+	}
+	return false
 }
 
 // unwrapDeferredCall separates the immediately evaluated callee and
