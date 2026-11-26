@@ -33,7 +33,8 @@ type Reporter interface {
 
 // Equal asserts that want and got render identically, and fails the
 // test with a unified diff otherwise. Struct values compare field by
-// field through comptime iteration; every other value compares through
+// field through comptime iteration, checking both the rendered text and
+// each field's dynamic type; every other value compares through
 // LeafText. Strings compare line by line so the diff shows the exact
 // line that changed. Equal leaf texts of different dynamic types still
 // fail, with both types named, so an ambiguous value such as the
@@ -43,12 +44,20 @@ func Equal[T any](r Reporter, want T, got T) {
 	const if comptime.IsStruct[T]() {
 		wantText := ""
 		gotText := ""
+		wantTypes := ""
+		gotTypes := ""
 		const for _, f := range comptime.Fields[T]() {
 			wantText += FieldText(f.Name, any(want.[f])) + "\n"
 			gotText += FieldText(f.Name, any(got.[f])) + "\n"
+			wantTypes += f.Name + ": " + fmt.Sprintf("%T", any(want.[f])) + "\n"
+			gotTypes += f.Name + ": " + fmt.Sprintf("%T", any(got.[f])) + "\n"
 		}
 		if wantText != gotText {
 			r.Errorf("expect: values differ\n%s", Diff(wantText, gotText))
+		} else if wantTypes != gotTypes {
+			// Equal rendered text can hide a changed dynamic type, so a
+			// text match across types fails with both types named.
+			r.Errorf("expect: struct fields differ in type\n%s", Diff(wantTypes, gotTypes))
 		}
 	} else {
 		wantText := LeafText(any(want))

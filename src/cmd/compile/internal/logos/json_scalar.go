@@ -77,18 +77,19 @@ func (c scalarCodec) stringAppend() string {
 	return "AppendEscaped"
 }
 
-func (c scalarCodec) emitStmt(x string) string {
+func (c scalarCodec) emitStmt(x string) []string {
 	switch c.kind {
 	case scalarBool:
-		return fmt.Sprintf("if %s { _logos_buf = append(_logos_buf, \"true\"...) } else { _logos_buf = append(_logos_buf, \"false\"...) }", x)
+		return []string{fmt.Sprintf("if %s { _logos_buf = append(_logos_buf, \"true\"...) } else { _logos_buf = append(_logos_buf, \"false\"...) }", x)}
 	case scalarInt:
-		return fmt.Sprintf("_logos_buf = %s.AppendInt(_logos_buf, int64(%s))", jsonAlias, x)
+		return []string{fmt.Sprintf("_logos_buf = %s.AppendInt(_logos_buf, int64(%s))", jsonAlias, x)}
 	case scalarUint:
-		return fmt.Sprintf("_logos_buf = %s.AppendUint(_logos_buf, uint64(%s))", jsonAlias, x)
+		return []string{fmt.Sprintf("_logos_buf = %s.AppendUint(_logos_buf, uint64(%s))", jsonAlias, x)}
 	case scalarFloat32, scalarFloat64:
-		return fmt.Sprintf("_logos_buf = %s.AppendFloat(_logos_buf, float64(%s), %d)", jsonAlias, x, c.floatBits())
+		return []string{fmt.Sprintf("_logos_buf = %s.AppendFloat(_logos_buf, float64(%s), %d)", jsonAlias, x, c.floatBits())}
 	}
-	return fmt.Sprintf("_logos_buf = %s.%s(_logos_buf, string(%s))", jsonAlias, c.stringAppend(), x)
+	return append(loneSurrogateGuard("string("+x+")", "_logos_buf"),
+		fmt.Sprintf("_logos_buf = %s.%s(_logos_buf, string(%s))", jsonAlias, c.stringAppend(), x))
 }
 
 func (c scalarCodec) decodeFn() string {

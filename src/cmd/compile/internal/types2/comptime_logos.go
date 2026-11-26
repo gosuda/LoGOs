@@ -57,6 +57,7 @@ func logosComptimePackage() *Package {
 		addGeneric("SizeOf", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", Typ[Int])))
 		addGeneric("AlignOf", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", Typ[Int])))
 		addGeneric("HasPointers", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", Typ[Bool])))
+		addGeneric("HasUnexported", "T", NewTuple(), NewTuple(NewVar(nopos, pkg, "", Typ[Bool])))
 		addGeneric("TypeOf", "X", NewTuple(), NewTuple(NewVar(nopos, pkg, "", typeNamed)))
 		pkg.Scope().Insert(NewFunc(nopos, pkg, "Error", NewSignatureType(
 			nil, nil, nil,
@@ -73,7 +74,7 @@ func logosComptimePackage() *Package {
 }
 
 func logosComptimeEnsure(imp *Package) {
-	for _, name := range []string{"StructTag", "Type", "Field", "Fields", "IsStruct", "SizeOf", "AlignOf", "HasPointers", "TypeOf", "Error"} {
+	for _, name := range []string{"StructTag", "Type", "Field", "Fields", "IsStruct", "SizeOf", "AlignOf", "HasPointers", "HasUnexported", "TypeOf", "Error"} {
 		if imp.Scope().Lookup(name) == nil {
 			full := logosComptimePackage()
 			if obj := full.Scope().Lookup(name); obj != nil {

@@ -1925,12 +1925,12 @@ func copyDataFile(src, dst string) (bool, error) {
 }
 
 // rewriteEjectedGo rewrites one compiler-emitted file to the ejected
-// import paths. Compiler output must parse; anything else is a loud
-// failure, never a silent copy.
+// import paths. Compiler output must rewrite cleanly; anything else is a
+// loud failure naming the file, never a silent copy.
 func rewriteEjectedGo(data []byte, name string) ([]byte, bool) {
 	fixed, uses, ok := remapEjectedFile(data, siteNamespace(logosStem(name)))
 	if !ok {
-		base.Fatalf("logos eject: cannot parse ejected file for %s", name)
+		base.Fatalf("logos eject: cannot rewrite ejected file for %s", name)
 	}
 	return fixed, uses
 }
@@ -1989,7 +1989,8 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	}
 	edits, uses := ejectedImportEdits(data, fset, f)
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
-	h2edits := h2ExtendedConnectEdits(fset, data, f)
+	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f)
+	uses = uses || h2uses
 	if off, overlap := h2OverlapOffset(edits, h2edits); overlap {
 		pos := fset.Position(token.Pos(fset.File(f.Pos()).Base() + off))
 		base.Errorf("logos eject: overlapping h2extendedconnect import edit at line %d: EnableHTTP2ExtendedConnect left unrewritten", pos.Line)
@@ -2198,13 +2199,41 @@ func applyTextEdits(data []byte, edits []textEdit) ([]byte, bool) {
 func writeSupportModule(out, goVer string, plan *ejectPlan) {
 	src := filepath.Join(cfg.GOROOT, "src")
 	dst := filepath.Join(out, "_logos_deps", "rt")
-	if err := copyEjectedSupport(src, dst, ejectSupportRoots(plan)); err != nil {
+	roots := ejectSupportRoots(plan)
+	for _, ref := range ejectedSupportRefs(out) {
+		if slices.Contains(roots, ref) || !ejectedPureGoPackage(src, ref) {
+			continue
+		}
+		// Rewrites can inject a support import the loader never saw,
+		// such as the extended-CONNECT guard. Materialize it when it
+		// names a pure-Go GOROOT package; anything else stays a
+		// hand-written import for the plain build to judge.
+		roots = append(roots, ref)
+	}
+	slices.Sort(roots)
+	if err := copyEjectedSupport(src, dst, roots); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 	copyJSONScanSupport(filepath.Join(src, "internal", "jsonscan"), filepath.Join(dst, "internal", "jsonscan"))
 	if err := os.WriteFile(filepath.Join(dst, "go.mod"), []byte("module "+rtModulePath+"\n\ngo "+goVer+"\n"), 0666); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
+}
+
+// ejectedPureGoPackage reports whether ref names a GOROOT package
+// directory holding no LoGOs sources, so the support copy can carry it
+// without lowering from compiler staging.
+func ejectedPureGoPackage(src, ref string) bool {
+	entries, err := os.ReadDir(filepath.Join(src, filepath.FromSlash(ref)))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && logosfile.Is(entry.Name()) {
+			return false
+		}
+	}
+	return true
 }
 
 // ejectSupportRoots keeps support imports from owned packages, their tests,

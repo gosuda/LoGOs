@@ -62,3 +62,59 @@ func TestTwinForeignHiddenRoundTrip(t *testing.T) {
 		t.Fatalf("original Read did not panic")
 	}
 }
+// mixedVisibility is foreign to logos/binary and hides one field
+// between two visible ones: the visible layout alone would drop two
+// bytes and read After from the wrong offset. The twin must take the
+// original path instead.
+type mixedVisibility struct {
+	Before uint16
+	hidden uint16
+	After  uint16
+}
+
+func TestTwinForeignMixedRoundTrip(t *testing.T) {
+	v := mixedVisibility{Before: 1, hidden: 2, After: 3}
+	if got, want := binary.Size(v), obinary.Size(v); got != want {
+		t.Fatalf("Size = %d, want original %d", got, want)
+	}
+	tb, terr := binary.Append(nil, binary.LittleEndian, v)
+	if terr != nil {
+		t.Fatalf("twin Append: %v", terr)
+	}
+	ob, oerr := obinary.Append(nil, binary.LittleEndian, v)
+	if oerr != nil {
+		t.Fatalf("original Append: %v", oerr)
+	}
+	if !bytes.Equal(tb, ob) {
+		t.Fatalf("twin bytes %x, original %x: hidden bytes dropped", tb, ob)
+	}
+	// Decoding the original six-byte record must panic exactly like the
+	// original: the partial layout consumed four bytes and misread After.
+	tpanicked, opanicked := false, false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				tpanicked = true
+			}
+		}()
+		var b1 mixedVisibility
+		_, _ = binary.Decode(ob, binary.LittleEndian, &b1)
+	}()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				opanicked = true
+			}
+		}()
+		var b2 mixedVisibility
+		_, _ = obinary.Decode(ob, binary.LittleEndian, &b2)
+	}()
+	if tpanicked != opanicked {
+		t.Fatalf("twin panicked = %v, original panicked = %v", tpanicked, opanicked)
+		return
+	}
+	if !tpanicked {
+		t.Fatalf("twin decoded original bytes without panicking")
+		return
+	}
+}
