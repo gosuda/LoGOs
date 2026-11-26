@@ -3644,6 +3644,10 @@ func (w ctWalker) ctOptionCall(e *syntax.CallExpr, sel *syntax.OptSelectExpr) (s
 		targets = tupleTypes(tuple)
 	} else if w.fl.asOption(t) != nil {
 		targets = []types2.Type{t}
+	} else if types2.IsErrorType(t) {
+		// The checker leaves a sole error result unwrapped; bind it like
+		// any other single target, nil when the receiver is absent.
+		targets = []types2.Type{t}
 	}
 	if len(targets) == 0 {
 		w.reject(e, "optional call without a result requires a call statement")
