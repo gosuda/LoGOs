@@ -1239,11 +1239,14 @@ func (p *ctPreparedPackage) finalize(pkg *types2.Package, info *types2.Info, con
 }
 
 // rewriteMethodSites redirects every direct call of a comptime generic
-// method in the compiled files to its checked instance. The instance is
-// a plain function whose first parameter is the receiver, so the call
-// recv.M(args) becomes Origin_logosct_<id>(recv, args). Method values,
-// method expressions and interface calls are out of scope: only a direct
-// MethodVal call carries a site key the drain produced.
+// method in the compiled files and in every checked instance body to
+// its checked instance. The instance is a plain function whose first
+// parameter is the receiver, so the call recv.M(args) becomes
+// Origin_logosct_<id>(recv, args). Calls inside instance bodies resolve
+// through the body's own facts, and the fresh name is keyed there too,
+// so logos eject prints the instance's ejected name. Method values and
+// interface calls are out of scope: only a direct call carries a site
+// key the drain produced.
 func (p *ctPreparedPackage) rewriteMethodSites(info *types2.Info, records map[*types2.Func]*types2.LogosCtInst) {
 	byID := make(map[string]ctMethodTarget, len(records))
 	for fn, rec := range records {
@@ -1265,40 +1268,83 @@ func (p *ctPreparedPackage) rewriteMethodSites(info *types2.Info, records map[*t
 			return true
 		})
 	}
+	for _, rec := range records {
+		if rec.Info == nil || rec.Decl == nil {
+			continue
+		}
+		syntax.Inspect(rec.Decl, func(n syntax.Node) bool {
+			call, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			if fresh, id := rewriteMethodCall(rec.Info, call, byID); fresh != nil {
+				if rec.Info.LogosCtSiteKeys == nil {
+					rec.Info.LogosCtSiteKeys = make(map[*syntax.Name]string)
+				}
+				rec.Info.LogosCtSiteKeys[fresh] = id
+			}
+			return true
+		})
+	}
 }
 
 // rewriteMethodCall rewrites one direct comptime-method call to its
 // instance. A pointer receiver wraps an addressable-by-construction
 // value argument in &, mirroring Go's automatic addressing; a value
 // receiver dereferences a pointer argument symmetrically.
-func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string]ctMethodTarget) {
+func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string]ctMethodTarget) (*syntax.Name, string) {
 	fun := syntax.Unparen(call.Fun)
 	if idx, ok := fun.(*syntax.IndexExpr); ok {
 		fun = syntax.Unparen(idx.X)
 	}
 	sel, ok := fun.(*syntax.SelectorExpr)
 	if !ok {
-		return
+		return nil, ""
 	}
 	id := info.LogosCtSiteKeys[sel.Sel]
 	if id == "" {
-		return
+		if fn, ok := info.Uses[sel.Sel].(*types2.Func); ok && fn.Signature().Recv() != nil {
+			if recvTyp := info.TypeOf(syntax.Unparen(sel.X)); recvTyp != nil {
+				var targs []types2.Type
+				targs = append(targs, recvTyp)
+				if nparams := fn.Signature().TypeParams().Len(); nparams != 0 {
+					if inst, found := info.Instances[sel.Sel]; found && nparams == inst.TypeArgs.Len() {
+						targs = append(targs, typeArgsOf(inst.TypeArgs)...)
+					} else {
+						targs = nil
+					}
+				}
+				if targs != nil {
+					if key := types2.LogosCtKey(fn.Origin(), targs); key != "" {
+						for candID, tgt := range byID {
+							if types2.LogosCtKey(tgt.fn.Origin(), tgt.rec.Targs) == key {
+								id = candID
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		if id == "" {
+			return nil, ""
+		}
 	}
 	target, ok := byID[id]
 	if !ok {
-		return
+		return nil, ""
 	}
 	selection, ok := info.Selections[sel]
 	if !ok {
-		return
+		return nil, ""
 	}
 	methodExpr := selection.Kind() == types2.MethodExpr
 	if !methodExpr && selection.Kind() != types2.MethodVal {
-		return
+		return nil, ""
 	}
 	sig := target.fn.Signature()
 	if sig.Params().Len() == 0 {
-		return
+		return nil, ""
 	}
 	// A method expression already passes the receiver explicitly;
 	// a method value call prepends the selector's receiver.
@@ -1306,7 +1352,7 @@ func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string
 	newArgs := call.ArgList
 	if methodExpr {
 		if len(newArgs) == 0 {
-			return
+			return nil, ""
 		}
 		recvExpr = newArgs[0]
 	} else {
@@ -1348,6 +1394,7 @@ func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string
 		info.LogosCtGlobalRefs = make(map[types2.Object]bool)
 	}
 	info.LogosCtGlobalRefs[target.fn] = true
+	return name, id
 }
 
 // ctMethodRecvAdjust reports how a method-call receiver argument must be

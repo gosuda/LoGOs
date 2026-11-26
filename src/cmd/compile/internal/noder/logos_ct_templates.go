@@ -149,6 +149,7 @@ type logosCtImportObject struct {
 
 type logosCtImportState struct {
 	objects          map[logosCtOrigin]logosCtImportObject
+	methods          map[logosCtMethodOrigin]logosCtImportObject
 	loaded           map[*types2.Func]types2.LogosCtGeneric
 	constMaps        map[string]logosCtImportObject
 	constMapPackages map[string]*logosCtConstMapPackage
@@ -168,6 +169,9 @@ func (st *logosCtImportState) record(pr *pkgReader, idx index, path, name string
 }
 
 func logosImportCtGeneric(m *gcimports, fn *types2.Func) (types2.LogosCtGeneric, bool) {
+	if origin := fn.Origin(); origin.Signature().Recv() != nil {
+		return logosImportCtMethod(m, origin)
+	}
 	owner := fn.Pkg()
 	if owner == nil || fn.Signature().Recv() != nil || fn.Signature().TypeParams().Len() == 0 || m.packages[owner.Path()] != owner || owner.Scope().Lookup(fn.Name()) != fn {
 		return types2.LogosCtGeneric{}, false
@@ -203,6 +207,73 @@ func logosImportCtGeneric(m *gcimports, fn *types2.Func) (types2.LogosCtGeneric,
 		st.loaded = make(map[*types2.Func]types2.LogosCtGeneric)
 	}
 	st.loaded[fn] = generic
+	return generic, generic.Decl != nil || len(generic.Edges) != 0
+}
+
+// logosCtMethodReceiver returns the defined receiver base type of a
+// comptime generic method origin.
+func logosCtMethodReceiver(fn *types2.Func) (*types2.Named, bool) {
+	recv := fn.Signature().Recv()
+	if recv == nil {
+		return nil, false
+	}
+	t := types2.Unalias(recv.Type())
+	if ptr, isPtr := t.(*types2.Pointer); isPtr {
+		t = types2.Unalias(ptr.Elem())
+	}
+	named, _ := t.(*types2.Named)
+	if named == nil || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return nil, false
+	}
+	return named, true
+}
+
+// logosImportCtMethod lazily parses the exported template of a
+// comptime generic method. Methods travel in the aux method table keyed
+// by receiver named type, not in the package-function table: two named
+// types may declare the same method name. origin must be the method's
+// generic origin.
+func logosImportCtMethod(m *gcimports, origin *types2.Func) (types2.LogosCtGeneric, bool) {
+	key, ok := logosCtMethodKeyOf(origin)
+	if !ok {
+		return types2.LogosCtGeneric{}, false
+	}
+	st := &m.logos.ct
+	if generic, ok := st.loaded[origin]; ok {
+		return generic, generic.Decl != nil || len(generic.Edges) != 0
+	}
+	obj, ok := st.methods[key]
+	if !ok || obj.pr == nil {
+		return types2.LogosCtGeneric{}, false
+	}
+	input := obj.pr.PkgDecoder
+	edges, payload := importer.ReadLogosCtEdges(m.ctxt, m.packages, input, obj.idx, origin)
+	generic := types2.LogosCtGeneric{Edges: edges}
+	if payload != nil {
+		r := logosCtSyntaxReader{Decoder: payload, input: &input}
+		generic.Decl, generic.Scope, generic.GoVersion = r.template(origin, m.packages)
+		recvNamed, ok := logosCtMethodReceiver(origin)
+		if !ok {
+			return types2.LogosCtGeneric{}, false
+		}
+		owner := recvNamed.Obj().Pkg()
+		if maps := logosCtConstMapPackageFor(m, owner.Path()); maps != nil {
+			for name := range maps.indices {
+				if owner.Scope().Lookup(name) != nil {
+					continue
+				}
+				generic.Scope.InsertLazy(name, func() types2.Object {
+					row, ok := maps.lookup(owner, name)
+					assert(ok)
+					return row.Binding
+				})
+			}
+		}
+	}
+	if st.loaded == nil {
+		st.loaded = make(map[*types2.Func]types2.LogosCtGeneric)
+	}
+	st.loaded[origin] = generic
 	return generic, generic.Decl != nil || len(generic.Edges) != 0
 }
 
