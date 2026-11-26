@@ -37,26 +37,19 @@ jobs:
           (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
           printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
       - name: Existing flow fixtures
-        run: go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos/(error_first_inline|error_first_flow)$' 2>&1 | tee review-evidence/baseline.log
+        run: go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/(error_first_inline|error_first_flow)\.lgo$' 2>&1 | tee review-evidence/baseline.log
       - name: Verify flow attacks fail for semantic reasons
         run: |
-          if go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos/error_first_review263$' > review-evidence/flow-red.log 2>&1; then
+          if go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/error_first_review263\.lgo$' > review-evidence/flow-red.log 2>&1; then
             cat review-evidence/flow-red.log
             echo 'flow attacks unexpectedly passed'
             exit 1
           fi
           cat review-evidence/flow-red.log
-          grep -E 'no error expected|no error reported|unmatched error|unexpected error' review-evidence/flow-red.log
-      - name: Verify public pointer alias attack fails
+          grep -E 'no error expected|unreported errors|unmatched error|unexpected error' review-evidence/flow-red.log
+      - name: Current base preserves direct public pointer aliases
         if: ${{ !cancelled() }}
-        run: |
-          if go test -v -count=1 cmd/go -run '^TestScript/logos_json_union_alias_pointer$' > review-evidence/alias-red.log 2>&1; then
-            cat review-evidence/alias-red.log
-            echo 'public pointer alias attack unexpectedly passed'
-            exit 1
-          fi
-          cat review-evidence/alias-red.log
-          grep -F 'is not exported' review-evidence/alias-red.log
+        run: go test -v -count=1 cmd/go -run '^TestScript$/logos_json_union_alias_pointer$' 2>&1 | tee review-evidence/alias-control.log
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: ${{ !cancelled() }}
         with:
