@@ -16,7 +16,12 @@ name: "autovec stability"
 
 permissions:
   contents: "read"
+concurrency:
+  group: "autovec-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
 
+
+# amd64 checks share the toolchain in ci.yml; this lane proves native ARM behavior.
 jobs:
   native:
     name: "autovec native ${{ matrix.arch }}"
@@ -29,8 +34,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: "amd64"
-            runner: "depot-ubuntu-24.04"
           - arch: "arm64"
             runner: "depot-ubuntu-24.04-arm"
     defaults:
@@ -231,65 +234,3 @@ jobs:
         with:
           name: "autovec-native-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}"
           path: "${{ runner.temp }}/autovec-evidence"
-
-  regression:
-    name: "upstream and SIMD regression"
-    concurrency:
-      group: "autovec-upstream-${{ github.ref }}"
-      cancel-in-progress: true
-    runs-on: "depot-ubuntu-24.04-4"
-    timeout-minutes: 120
-    defaults:
-      run:
-        shell: "bash"
-        working-directory: "src"
-    steps:
-      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          persist-credentials: false
-          ref: "${{ github.event.pull_request.head.sha }}"
-      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
-        with:
-          go-version: "1.27.4"
-          cache: false
-      - uses: "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1" # v7.1.0
-        with:
-          node-version: "26.13.1"
-      - name: "Install the upstream oracle toolchains"
-        run: |
-          printf 'UPROOT1274=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
-          while read -r version sha256 root; do
-            archive="$RUNNER_TEMP/go$version.linux-amd64.tar.gz"
-            curl --fail --silent --show-error --location --output "$archive" "https://go.dev/dl/go$version.linux-amd64.tar.gz"
-            printf '%s  %s\n' "$sha256" "$archive" | sha256sum --check --strict -
-            mkdir "$RUNNER_TEMP/go$version"
-            tar -xzf "$archive" -C "$RUNNER_TEMP/go$version" --strip-components=1
-            printf '%s=%s\n' "$root" "$RUNNER_TEMP/go$version" >> "$GITHUB_ENV"
-          done <<'PINS'
-          1.27.2 ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 UPROOT1272
-          1.27.3 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40 UPROOT1273
-          PINS
-      - name: "Select and verify the C23 consumer compiler"
-        run: |
-          compiler="$(command -v gcc-14)"
-          compiler_bin="$RUNNER_TEMP/autovec-c23-bin"
-          mkdir "$compiler_bin"
-          ln -s "$compiler" "$compiler_bin/cc"
-          "$compiler_bin/cc" --version
-          printf 'int main(void) { return 0; }\n' |
-            "$compiler_bin/cc" -std=c23 -x c - -o "$RUNNER_TEMP/autovec-c23-check"
-          "$RUNNER_TEMP/autovec-c23-check"
-          printf '%s\n' "$compiler_bin" >> "$GITHUB_PATH"
-      - name: "Build the toolchain"
-        id: "build"
-        run: |
-          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
-          printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
-      - name: "Run the complete upstream regression gate"
-        if: "!cancelled() && steps.build.outcome == 'success'"
-        run: |
-          GO_TEST_TIMEOUT_SCALE=8 ./run.bash --no-rebuild
-      - name: "Run the SIMD-enabled standard library"
-        if: "!cancelled() && steps.build.outcome == 'success'"
-        run: |
-          GOEXPERIMENT=simd GOAMD64=v3 go test -count=1 -timeout 30m std
