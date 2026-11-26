@@ -4417,9 +4417,9 @@ func (s *logosEFState) withoutLocals(inside map[*Var]bool) *logosEFState {
 
 // litCanRecover reports whether running lit can return after a panic: a
 // call lit defers invokes recover directly. An ordinary nested call and
-// a recover in lit itself cannot recover lit's later panic. A named call may also
-// recover, but deferred named calls keep the conservative path, so only
-// literal bodies matter here.
+// a recover in lit itself cannot recover lit's later panic. A named or
+// lambda callee may call recover where the scan cannot see it, so those
+// keep the conservative continuation instead of marking the caller dead.
 func (p *logosEFPass) litCanRecover(lit *syntax.FuncLit) bool {
 	if lit.Body == nil {
 		return false
@@ -4446,7 +4446,9 @@ func (p *logosEFPass) litCanRecover(lit *syntax.FuncLit) bool {
 			return true
 		}
 		_, inner := unwrapDeferredCall(call)
-		if inner != nil && inner.Body != nil && bodyHasDirectRecover(p, inner.Body) && !p.bodyAlwaysPanics(inner.Body) {
+		if inner == nil {
+			hit = true
+		} else if inner.Body != nil && bodyHasDirectRecover(p, inner.Body) && !p.bodyAlwaysPanics(inner.Body) {
 			hit = true
 		}
 		return true
