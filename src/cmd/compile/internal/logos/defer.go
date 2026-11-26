@@ -503,11 +503,16 @@ func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGo
 		base.Fatalf("logos: cannot plan optional cleanup call at %s", call.Pos().String())
 	}
 	plan.isMethod = false
-	plan.fun = capturePiece{expr: callee, text: gen(w.lv + suffix), start: recv.start, end: recv.end, capture: true, single: fc.nextFun()}
+	bound := fc.nextFun()
+	plan.fun = capturePiece{expr: nameOf(cpos, bound), text: gen(bound), start: recv.start, end: recv.end}
 	funN, argN, _, _ := fc.planUses(plan, nil)
 	nativeCall := callOf(cpos, funN, argN)
 	nativeCall.HasDots = call.HasDots
 	nativeStmts, textStmts, tw := fc.checkPair(plan, cpos)
+	// The callee is captured first. A multi-result argument then remains
+	// the sole right-hand expression of its own capture assignment.
+	nativeStmts = append([]syntax.Stmt{defineOf(cpos, []syntax.Expr{nameOf(cpos, bound)}, []syntax.Expr{callee})}, nativeStmts...)
+	textStmts = append([]syntax.Stmt{defineOf(cpos, []syntax.Expr{nameOf(cpos, bound)}, []syntax.Expr{tw.mark(cpos, gen(w.lv + suffix))})}, textStmts...)
 	var cleanupN, cleanupT syntax.Stmt
 	if onError {
 		cleanupN = fc.guardedDefer(cpos, nativeStmts[len(nativeStmts)-1:], nil, nil)[0]
