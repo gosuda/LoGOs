@@ -1,0 +1,195 @@
+[!symlink] skip 'fake GOROOT needs symlinks'
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOWORK=off
+env CGO_ENABLED=0
+
+# A toolchain Go source that is also an embed asset must copy once with
+# the overlay replacement bytes: the source pass and the embed pass
+# agree instead of aborting on a rewrite conflict. The test installs
+# fixture packages in a private toolchain root inside $WORK and selects
+# it with GOROOT. Nothing is written into the real GOROOT.
+go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
+go run mkovl.go $WORK/fakegoroot $WORK/ovl
+env GOROOT=$WORK/fakegoroot
+
+cd m
+logos run .
+stdout '^original$'
+
+logos build -overlay=$WORK/ovl/overlay.json --emit-go=out .
+exists out/_logos_deps/rt/logos/ejecttestembed/version.go
+grep '"patched"' out/_logos_deps/rt/logos/ejecttestembed/version.go
+! grep '"original"' out/_logos_deps/rt/logos/ejecttestembed/version.go
+
+env GOROOT=$TESTGO_GOROOT
+cd out
+go build -mod=readonly ./...
+go run .
+stdout '^patched$'
+
+# A replacement that needs import rewriting still aborts: the embed pass
+# cannot copy bytes the source pass rewrote, so the genuine rewrite
+# conflict is kept.
+cd ..
+env GOROOT=$WORK/fakegoroot
+! logos build -overlay=$WORK/ovl/overlay2.json --emit-go=out2 .
+stderr 'cannot be emitted both as rewritten Go and as a verbatim asset'
+
+-- mkgoroot.go --
+package main
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func must(err error, what string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkgoroot: %s: %v\n", what, err)
+		os.Exit(1)
+	}
+}
+
+func link(oldname, newname string) {
+	must(os.MkdirAll(filepath.Dir(newname), 0777), "mkdir "+filepath.Dir(newname))
+	must(os.Symlink(oldname, newname), "symlink "+newname)
+}
+
+func main() {
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: mkgoroot <realGOROOT> <fakeRoot> <fixtures>")
+		os.Exit(2)
+	}
+	real, fake, fixtures := os.Args[1], os.Args[2], os.Args[3]
+
+	must(os.MkdirAll(filepath.Join(fake, "src", "logos"), 0777), "mkdir fake src/logos")
+
+	ents, err := os.ReadDir(filepath.Join(real, "src"))
+	must(err, "read real src")
+	for _, e := range ents {
+		if e.Name() == "logos" {
+			continue
+		}
+		link(filepath.Join(real, "src", e.Name()), filepath.Join(fake, "src", e.Name()))
+	}
+
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(filepath.Join(real, "src", "logos"))), "copy support sources")
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(fixtures)), "install fixture packages")
+
+	// The package index distinguishes .lgo-only standard packages, but
+	// bypasses files with recent mtimes. Age only the private copies.
+	old := time.Now().Add(-time.Hour)
+	must(filepath.WalkDir(filepath.Join(fake, "src", "logos"), func(name string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		return os.Chtimes(name, old, old)
+	}), "age copied support and fixture files")
+
+	link(filepath.Join(real, "pkg"), filepath.Join(fake, "pkg"))
+	link(filepath.Join(real, "VERSION"), filepath.Join(fake, "VERSION"))
+	if _, err := os.Stat(filepath.Join(real, "go.env")); err == nil {
+		link(filepath.Join(real, "go.env"), filepath.Join(fake, "go.env"))
+	}
+	if _, err := os.Stat(filepath.Join(real, "lib")); err == nil {
+		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
+	}
+}
+
+-- mkovl.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+func must(err error, what string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkovl: %s: %v\n", what, err)
+		os.Exit(1)
+	}
+}
+
+func quote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\', '"':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+func main() {
+	if len(os.Args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: mkovl <fakeGOROOT> <outdir>")
+		os.Exit(2)
+	}
+	fake, out := os.Args[1], os.Args[2]
+	must(os.MkdirAll(out, 0777), "mkdir "+out)
+	patched := "package ejecttestembed\n\nconst Version = \"patched\"\n"
+	patchedPath := filepath.Join(out, "version.go")
+	must(os.WriteFile(patchedPath, []byte(patched), 0666), "write "+patchedPath)
+	// Age the replacement like mkgoroot ages the private tree, so the
+	// package index sees the effective file instead of bypassing it.
+	old := time.Now().Add(-2 * time.Hour)
+	must(os.Chtimes(patchedPath, old, old), "chtimes "+patchedPath)
+	rewrite := "package ejecttestembed\n\nimport \"logos/rt\"\n\nconst Version = \"patched2\"\n\nvar _ = rt.HashString\n"
+	rewritePath := filepath.Join(out, "version_rewrite.go")
+	must(os.WriteFile(rewritePath, []byte(rewrite), 0666), "write "+rewritePath)
+	must(os.Chtimes(rewritePath, old, old), "chtimes "+rewritePath)
+	replaced := filepath.Join(fake, "src", "logos", "ejecttestembed", "version.go")
+	doc := "{\n\"Replace\": {\n" +
+		quote(replaced) + ": " + quote(patchedPath) + "\n}\n}\n"
+	must(os.WriteFile(filepath.Join(out, "overlay.json"), []byte(doc), 0666), "write overlay.json")
+	doc2 := "{\n\"Replace\": {\n" +
+		quote(replaced) + ": " + quote(rewritePath) + "\n}\n}\n"
+	must(os.WriteFile(filepath.Join(out, "overlay2.json"), []byte(doc2), 0666), "write overlay2.json")
+}
+
+-- dep/ejecttestembed/version.go --
+package ejecttestembed
+
+const Version = "original"
+
+-- dep/ejecttestembed/embed.go --
+package ejecttestembed
+
+import _ "embed"
+
+//go:embed version.go
+var versionFile string
+
+func Which() string { return Version }
+
+-- m/go.mod --
+module example.com/embeddep
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/ejecttestembed"
+)
+
+func main() {
+	fmt.Println(ejecttestembed.Which())
+}

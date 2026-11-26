@@ -224,13 +224,17 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 		if err != nil {
 			return nil, false, fmt.Errorf("read lowered output: %w", err)
 		}
-	} else {
+	} else if p.vendored {
 		data, err = c.src.ReadFile(src)
-		if err != nil && !p.vendored && os.IsNotExist(err) {
-			// An overlay-inserted Go source has no physical file; the
-			// rooted read above stays the rule for ordinary assets.
-			data, err = c.readOriginal(p, name)
+		if err != nil {
+			return nil, false, err
 		}
+	} else {
+		// Non-vendored sources read through the effective filesystem,
+		// so an overlay replacement governs the copy exactly as it
+		// governs the embed pass below. Untouched files read their
+		// physical bytes; deleted files are never listed.
+		data, err = c.readOriginal(p, name)
 		if err != nil {
 			return nil, false, err
 		}
@@ -347,11 +351,13 @@ func (c *supportCopy) copyPackageEmbeds(p supportSourcePackage, patterns []strin
 		return err
 	}
 	for _, name := range files {
-		dst := path.Join(p.dst, name)
-		if err := c.copyRaw(path.Join(p.src, name), dst); err != nil {
+		// Assets ride the same effective read as the source copy so an
+		// overlay replacement lands identically in both writes instead
+		// of tripping the rewrite-versus-verbatim collision check.
+		if err := c.copyAsset(p, name); err != nil {
 			return err
 		}
-		c.embedded[dst] = true
+		c.embedded[path.Join(p.dst, name)] = true
 	}
 	return nil
 }
