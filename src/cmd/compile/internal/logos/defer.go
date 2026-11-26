@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"cmd/compile/internal/base"
 	"cmd/compile/internal/syntax"
 	"cmd/compile/internal/types2"
 )
@@ -453,7 +454,7 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	spanEnd := skipCloseParens(fl.src, fl.off(t.Pos())+1)
 	if w, ok := fl.optDeferGoPend[call]; ok && w.isTry {
 		delete(fl.optDeferGoPend, call)
-		return fc.lowerOptDeferTryGuarded(call, w, cpos, stmtOff, spanEnd)
+		return fc.lowerOptDeferTryGuarded(call, w, cpos, stmtOff, spanEnd, false)
 	}
 	plan, ok := fc.planCall(call)
 	if !ok {
@@ -470,53 +471,60 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	return scoped(cpos, headN)
 }
 
-// lowerOptDeferTryGuarded lowers `defer recv?.Method(args)?` in one edit.
-// The option pass claims the try-wrapped call (markOptDeferGo) without
-// lowering it to an IIFE, so the defer-try rewrite reads the recorded
-// wrapper span instead of deriving positions from a synthetic Fun.
-func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGoWork, cpos syntax.Pos, stmtOff, spanEnd int) []syntax.Stmt {
+// lowerOptDeferTryGuarded captures the optional receiver once, then captures
+// its bound method and arguments only when present. The captured call runs
+// at exit; onError additionally applies the ordinary errdefer exit guard.
+// Native and ejected forms share the same call plan and statement boundary.
+func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGoWork, cpos syntax.Pos, stmtOff, spanEnd int, onError bool) []syntax.Stmt {
 	fl := fc.fl
 	pos := w.osel.Pos()
-	method := w.osel.Sel.Value
 	xStart := fl.off(w.rpos)
 	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
-	recvText := fl.lazyText(span{start: xStart, end: xEnd})
-	var cond syntax.Expr
-	var condT string
+	recv := span{start: xStart, end: xEnd}
+	if vs, ok := fl.wrapSpan[w.nx]; ok {
+		recv = vs
+	}
+	var head, tail otext
+	if id, ok := fl.wrapOwner[w.nx]; ok {
+		head, tail = fl.drainOwned(recv, id)
+	}
+	recvText := cat(head, fl.lazyText(recv), tail)
+	var cond, callee syntax.Expr
+	var suffix string
 	if types2.LogosOptionIsBare(w.ox.Elem) {
-		cond, condT = notNil(pos, nameOf(pos, w.lv)), w.lv+" != nil"
+		cond = notNil(pos, nameOf(pos, w.lv))
+		callee, suffix = fl.selectAccessBare(nameOf(w.rpos, w.lv), w.osel)
 	} else {
-		cond, condT = selOf(pos, nameOf(pos, w.lv), "Present"), w.lv+".Present"
+		cond = selOf(pos, nameOf(pos, w.lv), "Present")
+		callee, suffix = fl.selectAccessPresent(nameOf(w.rpos, w.lv), w.osel)
 	}
-	selEnd := fl.off(w.osel.Sel.Pos()) + len(method)
-	plan := &callPlan{dots: call.HasDots, end: spanEnd, isMethod: true, method: method}
-	plan.fun = capturePiece{expr: call.Fun, start: xStart, end: selEnd}
-	plan.recv = capturePiece{expr: w.nx, capture: true, single: w.lv, start: xStart, end: xEnd, text: recvText}
-	for _, raw := range call.ArgList {
-		trimmed := trimSpan(fl.src, span{start: fl.off(raw.Pos()), end: fl.off(syntax.EndPos(raw))})
-		arg := capturePiece{expr: raw, start: trimmed.start, end: trimmed.end, text: fl.lazyText(trimmed)}
-		switch argKind(fc, raw) {
-		case argInline:
-		case argMulti:
-			arg.capture = true
-			arg.multi = fc.multiNames(raw)
-		default:
-			arg.capture = true
-			arg.single = fc.nextArg()
-		}
-		plan.args = append(plan.args, arg)
+	plan, ok := fc.planCall(call)
+	if !ok {
+		base.Fatalf("logos: cannot plan optional cleanup call at %s", call.Pos().String())
 	}
+	plan.isMethod = false
+	plan.fun = capturePiece{expr: callee, text: gen(w.lv + suffix), start: recv.start, end: recv.end, capture: true, single: fc.nextFun()}
 	funN, argN, _, _ := fc.planUses(plan, nil)
 	nativeCall := callOf(cpos, funN, argN)
 	nativeCall.HasDots = call.HasDots
 	nativeStmts, textStmts, tw := fc.checkPair(plan, cpos)
-	nativeInit := nativeStmts[:len(nativeStmts)-1]
-	headN := []syntax.Stmt{deferOf(cpos, callOf(cpos, rtSel(cpos, "DeferTry"), []syntax.Expr{addrOf(cpos, nameOf(cpos, fc.errName)), nativeCall}))}
-	closureT := deferClosure(cpos, []syntax.Stmt{textStmts[len(textStmts)-1]})
-	headT := append(slices.Clone(textStmts[:len(textStmts)-1]), deferOf(cpos, callOf(cpos, closureT, nil)))
+	var cleanupN, cleanupT syntax.Stmt
+	if onError {
+		cleanupN = fc.guardedDefer(cpos, nativeStmts[len(nativeStmts)-1:], nil, nil)[0]
+		cleanupT = fc.guardedDefer(cpos, textStmts[len(textStmts)-1:], nil, nil)[0]
+	} else {
+		cleanupN = deferOf(cpos, callOf(cpos, rtSel(cpos, "DeferTry"), []syntax.Expr{addrOf(cpos, nameOf(cpos, fc.errName)), nativeCall}))
+		cleanupT = deferOf(cpos, callOf(cpos, deferClosure(cpos, textStmts[len(textStmts)-1:]), nil))
+	}
+	headN := append(slices.Clone(nativeStmts[:len(nativeStmts)-1]), cleanupN)
+	headT := append(slices.Clone(textStmts[:len(textStmts)-1]), cleanupT)
+	initN := defineOf(cpos, []syntax.Expr{nameOf(cpos, w.lv)}, []syntax.Expr{w.nx})
+	initT := defineOf(cpos, []syntax.Expr{nameOf(cpos, w.lv)}, []syntax.Expr{tw.mark(w.rpos, recvText)})
+	native := scoped(cpos, []syntax.Stmt{initN, ifOf(cpos, nil, cond, headN)})
+	text := scoped(cpos, []syntax.Stmt{initT, ifOf(cpos, nil, cond, headT)})
 	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
-	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(headT[:len(headT)-1], tw.subs), gen("if "+condT+" { "), renderText(headT[len(headT)-1:], tw.subs), gen(" }")))
-	return scoped(cpos, append(nativeInit, ifOf(cpos, nil, cond, headN)))
+	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(text, tw.subs)))
+	return native
 }
 
 func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {
@@ -562,6 +570,11 @@ func (fc *funcLower) lowerErrdeferTry(s *syntax.ErrdeferStmt, t *syntax.TryExpr,
 	call, ok := syntax.Unparen(t.X).(*syntax.CallExpr)
 	if !ok {
 		return []syntax.Stmt{s}
+	}
+	if w, ok := fl.optDeferGoPend[call]; ok && w.isTry {
+		delete(fl.optDeferGoPend, call)
+		spanEnd := skipCloseParens(fl.src, fl.off(t.Pos())+1)
+		return fc.lowerOptDeferTryGuarded(call, w, cpos, stmtOff, spanEnd, true)
 	}
 	plan, planned := fc.planCall(call)
 	if !planned {

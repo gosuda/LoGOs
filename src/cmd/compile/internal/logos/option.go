@@ -251,7 +251,11 @@ func (fl *fileLower) lowerOptions() {
 func (fl *fileLower) lowerOptNode(n syntax.Node) {
 	switch n := n.(type) {
 	case *syntax.CallStmt:
-		if fl.markOptDeferGo(n) {
+		if fl.markOptDeferGo(n.Call, n.Tok == syntax.Defer) {
+			return
+		}
+	case *syntax.ErrdeferStmt:
+		if _, ok := syntax.Unparen(n.Call).(*syntax.TryExpr); ok && fl.markOptDeferGo(n.Call, true) {
 			return
 		}
 	case *syntax.CallExpr:
@@ -2207,11 +2211,11 @@ type optDeferGoWork struct {
 	isTry bool
 }
 
-func (fl *fileLower) markOptDeferGo(s *syntax.CallStmt) bool {
-	e, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
+func (fl *fileLower) markOptDeferGo(call syntax.Expr, allowTry bool) bool {
+	e, ok := syntax.Unparen(call).(*syntax.CallExpr)
 	try := false
-	if t, isTry := syntax.Unparen(s.Call).(*syntax.TryExpr); isTry {
-		if s.Tok != syntax.Defer {
+	if t, isTry := syntax.Unparen(call).(*syntax.TryExpr); isTry {
+		if !allowTry {
 			return false
 		}
 		inner, ok := syntax.Unparen(t.X).(*syntax.CallExpr)

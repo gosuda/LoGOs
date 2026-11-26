@@ -1,8 +1,8 @@
-name: Reproduce optional cleanup review boundaries
+name: Verify optional cleanup capture and export
 
 on:
   push:
-    branches: [ci/verify-optional-335-red-20261126]
+    branches: [ci/verify-optional-335-green-20261126]
 
 permissions:
   contents: read
@@ -14,7 +14,7 @@ defaults:
 jobs:
   review_cases:
     runs-on: depot-ubuntu-24.04-8
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       GOENV: 'off'
       GOCACHEPROG: ''
@@ -23,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: 2
           persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
         with:
@@ -33,9 +34,11 @@ jobs:
         with:
           go-version: '1.27.4'
           cache: false
-      - name: Build unchanged production from the refreshed head
+      - name: Build the candidate after format and oracle checks
         run: |
           export GOENV=off GOCACHEPROG=''
+          test -z "$(gofmt -l src/cmd/compile/internal/logos/defer.go src/cmd/compile/internal/logos/option.go)"
+          git diff --exit-code 19654495986828bc1ef116f33c62b0fbedb3d2ab HEAD -- src/cmd/go/testdata/script/logos_option_chain_review335.txt 'test/logos/run/*review335*' 'test/logos/run/option_chain_try_assignment.*'
           mkdir -p review-evidence
           git rev-parse HEAD > review-evidence/source.txt
           go env GOENV GOCACHEPROG | tee review-evidence/cache-env.txt
@@ -43,41 +46,50 @@ jobs:
           export GOROOT_BOOTSTRAP=$(go env GOROOT)
           (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
           printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
-      - name: Verify the isolated assignment control
+      - name: Check compiler packages and optional cleanup runtime controls
         run: |
           export GOENV=off GOCACHEPROG=''
-          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_chain_try_assignment\.lgo$' 2>&1 | tee review-evidence/assignment-control.log
-      - name: Reproduce argument evaluation for an absent cleanup receiver
+          go test -count=1 -short cmd/compile/internal/types2 cmd/compile/internal/logos cmd/compile/internal/noder 2>&1 | tee review-evidence/compiler.log
+          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/(run|compile)/(option_chain.*|defer_opt.*|defer_try.*|option_result_nonlast_error|comptime_option_(error_only|resultless)|option_(errdefer|defer)_capture_review335)\.lgo$' 2>&1 | tee review-evidence/runtime.log
+      - name: Execute all eight cases natively and with upstream Go
         run: |
           export GOENV=off GOCACHEPROG=''
-          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_defer_capture_review335\.lgo$' > review-evidence/defer-red.log 2>&1; then
-            cat review-evidence/defer-red.log
+          go test -v -race -count=1 cmd/go -run '^TestScript$/logos_(option_chain_review335|defer_try_pool_diff)$' 2>&1 | tee review-evidence/export-green.log
+          go test -race -count=1 -short cmd/go/internal/logos/eject 2>&1 | tee review-evidence/exporter-race.log
+      - name: Prove the receiver guard controls argument evaluation
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          file=src/cmd/compile/internal/logos/defer.go
+          cp -p "$file" review-evidence/fixed-defer.go
+          trap 'cp -p review-evidence/fixed-defer.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/compile/internal/logos/defer.go')
+          s = p.read_text()
+          old = '\t\tcond = notNil(pos, nameOf(pos, w.lv))'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, '\t\tcond = nameOf(pos, "true")'))
+          PYCODE
+          touch -r review-evidence/fixed-defer.go "$file"
+          go install cmd/compile
+          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_defer_capture_review335\.lgo$' > review-evidence/mutation-red.log 2>&1; then
+            cat review-evidence/mutation-red.log
             exit 1
           fi
-          cat review-evidence/defer-red.log
-          grep -F 'absent RAB' review-evidence/defer-red.log
-      - name: Reproduce optional errdefer lowering
+          cat review-evidence/mutation-red.log
+          grep -F 'panic: cleanup' review-evidence/mutation-red.log
+      - name: Restore the compiler and verify the checked-in source
         run: |
           export GOENV=off GOCACHEPROG=''
-          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/option_errdefer_capture_review335\.lgo$' > review-evidence/errdefer-red.log 2>&1; then
-            cat review-evidence/errdefer-red.log
-            exit 1
-          fi
-          cat review-evidence/errdefer-red.log
-      - name: Record export behavior independently
-        if: ${{ !cancelled() }}
-        run: |
-          export GOENV=off GOCACHEPROG=''
-          set +e
-          go test -v -race -count=1 cmd/go -run '^TestScript$/logos_option_chain_review335$' > review-evidence/export-baseline.log 2>&1
-          status=$?
-          set -e
-          printf '%s\n' "$status" > review-evidence/export-status.txt
-          cat review-evidence/export-baseline.log
+          go install cmd/compile
+          go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/(option_chain_try_assignment|option_(errdefer|defer)_capture_review335)\.lgo$' 2>&1 | tee review-evidence/restored-green.log
+          go vet cmd/compile/internal/logos
+          test -z "$(gofmt -l src/cmd/compile/internal/logos/defer.go src/cmd/compile/internal/logos/option.go)"
+          git diff --exit-code
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: ${{ !cancelled() }}
         with:
-          name: optional-review-red-${{ github.sha }}
+          name: optional-review-green-${{ github.sha }}
           path: review-evidence/
           if-no-files-found: error
           retention-days: 7
