@@ -145,7 +145,7 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 					}
 					continue
 				}
-				if entry.Type().IsRegular() && isSupportCopyFile(name) && !activeGo[path] {
+				if entry.Type().IsRegular() && !strings.HasPrefix(name, ".") && !strings.HasPrefix(name, "_") && isSupportCopyFile(name) && !activeGo[path] {
 					if cgoGap, ok := cgoOnlyLogosGap(path, plan); ok {
 						cgoGaps = append(cgoGaps, cgoGap)
 					}
