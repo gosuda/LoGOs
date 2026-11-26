@@ -7,9 +7,12 @@ env CGO_ENABLED=0
 # A lowered .lgo pair split across the logosejected tag must not collide in
 # the ejected support module: the support copy is the ejected form, so the
 # !logosejected side stays out like its *_runtime.go twin, and the
-# logosejected side arrives with its tag stripped. The test installs fixture
-# packages in a private toolchain root inside $WORK and selects it with
-# GOROOT. Nothing is written into the real GOROOT.
+# logosejected side arrives with its tag stripped. A compound guard
+# mentioning logosejected specializes instead of surviving verbatim: the
+# emitted file keeps the residual so plain-Go builds exclude the same
+# files. The test installs fixture packages in a private toolchain root
+# inside $WORK and selects it with GOROOT. Nothing is written into the
+# real GOROOT.
 go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
 env GOROOT=$WORK/fakegoroot
 
@@ -23,12 +26,22 @@ logos eject -o out
 ! exists out/_logos_deps/rt/logos/ejecttestrt/mode_runtime.go
 exists out/_logos_deps/rt/logos/ejecttestrt/mode_ejected.go
 ! grep '^//go:build' out/_logos_deps/rt/logos/ejecttestrt/mode_ejected.go
+exists out/_logos_deps/rt/logos/ejecttestrt/winfallback.go
+grep '^//go:build !windows$' out/_logos_deps/rt/logos/ejecttestrt/winfallback.go
+! grep 'logosejected' out/_logos_deps/rt/logos/ejecttestrt/winfallback.go
 
 env GOROOT=$TESTGO_GOROOT
 cd out
 go build -mod=readonly ./...
 go run .
 stdout '^ejected$'
+# The specialized guard keeps the fallback out of plain-Go Windows builds
+# too, while the default build still lists it.
+go list -f '{{.GoFiles}}' github.com/gosuda/loGos/rt/logos/ejecttestrt
+stdout 'winfallback.go'
+env GOOS=windows
+go list -f '{{.GoFiles}}' github.com/gosuda/loGos/rt/logos/ejecttestrt
+! stdout 'winfallback.go'
 
 -- mkgoroot.go --
 package main
@@ -107,6 +120,15 @@ func Mode() string { return "runtime" }
 package ejecttestrt
 
 func Mode() string { return "ejected" }
+
+-- dep/ejecttestrt/winfallback.lgo --
+//go:build !logosejected || !windows
+
+package ejecttestrt
+
+// WinFallback is disabled on Windows ejected builds; the support copy
+// carries the specialized !windows residual so plain-Go builds agree.
+func WinFallback() string { return "fallback" }
 
 -- m/go.mod --
 module example.com/rtpairdep

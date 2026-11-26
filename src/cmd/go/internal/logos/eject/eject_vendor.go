@@ -207,23 +207,143 @@ func ejectedSelected(expr constraint.Expr) bool {
 	return satisfyVariantTags(expr, true, values, func() bool { return true })
 }
 
-// isEjectedSourceSelected reads the original LoGOs source and reports
-// whether it belongs in the ejected support copy.
-func (c *supportCopy) isEjectedSourceSelected(p supportSourcePackage, name string) bool {
+// foldEjectedGuard substitutes the ejected-mode tags into expr and folds
+// boolean identities: logosejected is set, logosconc is unset because the
+// support copy has no monitored file. It returns nil for a
+// constantly-true residual and reports a constantly-false one via
+// excluded.
+func foldEjectedGuard(expr constraint.Expr) (guard constraint.Expr, excluded bool) {
+	switch e := expr.(type) {
+	case *constraint.TagExpr:
+		switch e.Tag {
+		case "logosejected":
+			return nil, false
+		case "logosconc":
+			return nil, true
+		default:
+			return e, false
+		}
+	case *constraint.NotExpr:
+		g, ex := foldEjectedGuard(e.X)
+		if ex {
+			return nil, false
+		}
+		if g == nil {
+			return nil, true
+		}
+		if inner, ok := g.(*constraint.NotExpr); ok {
+			return inner.X, false
+		}
+		return &constraint.NotExpr{X: g}, false
+	case *constraint.AndExpr:
+		gx, exx := foldEjectedGuard(e.X)
+		if exx {
+			return nil, true
+		}
+		gy, exy := foldEjectedGuard(e.Y)
+		if exy {
+			return nil, true
+		}
+		if gx == nil {
+			return gy, false
+		}
+		if gy == nil {
+			return gx, false
+		}
+		if gx.String() == gy.String() {
+			return gx, false
+		}
+		return &constraint.AndExpr{X: gx, Y: gy}, false
+	case *constraint.OrExpr:
+		gx, exx := foldEjectedGuard(e.X)
+		if !exx && gx == nil {
+			return nil, false
+		}
+		gy, exy := foldEjectedGuard(e.Y)
+		if !exy && gy == nil {
+			return nil, false
+		}
+		if exx {
+			return gy, exy
+		}
+		if exy {
+			return gx, exx
+		}
+		if gx.String() == gy.String() {
+			return gx, false
+		}
+		return &constraint.OrExpr{X: gx, Y: gy}, false
+	default:
+		return expr, false
+	}
+}
+
+// ejectedSupportGuard reads the original LoGOs source and reports whether
+// the ejected support copy skips it and, when kept, the residual guard for
+// the emitted file: nil selects unconditionally, so the emitted file drops
+// its build lines. rewrite reports whether the emitted file needs its
+// header rewritten: files without an original guard pass through
+// untouched.
+func (c *supportCopy) ejectedSupportGuard(p supportSourcePackage, name string) (skip bool, guard constraint.Expr, rewrite bool) {
 	data, err := c.readOriginal(p, name)
 	if err != nil {
-		return true
+		return false, nil, false
 	}
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, name, data, parser.PackageClauseOnly|parser.ParseComments)
 	if err != nil {
-		return true
+		return false, nil, false
 	}
 	expr, err := ownedHeaderExpr(f)
 	if err != nil || expr == nil {
-		return true
+		return false, nil, false
 	}
-	return ejectedSelected(expr)
+	if !ejectedSelected(expr) {
+		return true, nil, false
+	}
+	guard, excluded := foldEjectedGuard(expr)
+	if excluded {
+		return true, nil, false
+	}
+	return false, guard, true
+}
+
+// rewriteEjectedGuard drops every build-constraint line from the header of
+// the lowered data and, unless guard selects unconditionally, prepends the
+// specialized residual as a single modern build line. Legacy lines never
+// survive: a modern line governs the file, so dropping them preserves the
+// constraint.
+func rewriteEjectedGuard(data []byte, guard constraint.Expr) []byte {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", data, parser.PackageClauseOnly)
+	if err != nil {
+		return data
+	}
+	pkgOff := fset.Position(f.Package).Offset
+	var kept []string
+	hasBuild := false
+	for _, ln := range strings.Split(string(data[:pkgOff]), "\n") {
+		t := strings.TrimSpace(ln)
+		if constraint.IsGoBuild(t) || constraint.IsPlusBuild(t) {
+			hasBuild = true
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	if !hasBuild && guard == nil {
+		return data
+	}
+	for len(kept) > 0 && strings.TrimSpace(kept[len(kept)-1]) == "" {
+		kept = kept[:len(kept)-1]
+	}
+	if guard != nil {
+		if len(kept) > 0 {
+			kept = append(kept, "")
+		}
+		kept = append(kept, "//go:build "+guard.String())
+	}
+	kept = append(kept, "")
+	return []byte(strings.Join(kept, "\n") + string(data[pkgOff:]))
 }
 
 func isVendoredGoFile(name string) bool {
@@ -277,6 +397,20 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 	if !p.vendored {
 		data = stripEjectedBuildTag(data)
 	}
+	// The support copy is the ejected form: a lowered LoGOs source belongs
+	// only with logosejected set, and its emitted guard is specialized to
+	// the residual so plain-Go builds select the same files. The rewrite
+	// runs before parsing so every later offset refers to the emitted bytes.
+	if lowered {
+		skip, guard, rewrite := c.ejectedSupportGuard(p, name)
+		if skip {
+			return nil, false, nil
+		}
+		if rewrite {
+			data = rewriteEjectedGuard(data, guard)
+		}
+	}
+
 	dst := path.Join(p.dst, outputName)
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, src, data, parser.ParseComments|parser.SkipObjectResolution)
@@ -293,12 +427,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 	if hasIgnoreTag(constraint) {
 		return nil, false, nil
 	}
-	// The support copy is the ejected form: a lowered LoGOs source
-	// belongs iff its original constraint holds with logosejected=true
-	// (logosconc never set, all other tags assumed set). This keeps
-	if lowered && !c.isEjectedSourceSelected(p, name) {
-		return nil, false, nil
-	}
+
 	edits, _ := ejectedImportEdits(data, fset, f)
 	if lowered {
 		edits = append(edits, siteIdentEdits(fset, f, siteNamespace(logosStem(name)))...)

@@ -45,3 +45,37 @@ func TestEjectedSelectedRejectsNativeOnly(t *testing.T) {
 		t.Errorf("ejectedSelected(nil) = false, want true")
 	}
 }
+
+// Specializing the emitted guard must preserve plain-Go selection: the
+// residual drops only ejected-mode tags, and a constantly-false residual
+// excludes the file instead of emitting dead code.
+func TestFoldEjectedGuardSpecializes(t *testing.T) {
+	cases := []struct {
+		line     string
+		residual string // "" means nil (unconditional)
+		excluded bool
+	}{
+		{"//go:build !logosejected || !windows", "!windows", false},
+		{"//go:build logosejected", "", false},
+		{"//go:build !logosejected", "", true},
+		{"//go:build windows", "windows", false},
+		{"//go:build logosejected && windows", "windows", false},
+		{"//go:build !logosconc", "", false},
+		{"//go:build logosconc", "", true},
+		{"//go:build !ejecttestjsonoff", "!ejecttestjsonoff", false},
+	}
+	for _, tc := range cases {
+		guard, excluded := foldEjectedGuard(parseEjectedGuard(t, tc.line))
+		if excluded != tc.excluded {
+			t.Errorf("foldEjectedGuard(%q) excluded = %v, want %v", tc.line, excluded, tc.excluded)
+			continue
+		}
+		got := ""
+		if guard != nil {
+			got = guard.String()
+		}
+		if got != tc.residual {
+			t.Errorf("foldEjectedGuard(%q) = %q, want %q", tc.line, got, tc.residual)
+		}
+	}
+}
