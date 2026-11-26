@@ -3177,7 +3177,28 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 		return p.expr(s, st)
 	}
 	outer := p.eff
-	call, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
+	stmt := s
+	if s.Tok == syntax.Defer || s.Tok == syntax.Go {
+		if _, isTry := syntax.Unparen(s.Call).(*syntax.TryExpr); isTry {
+			// A deferred ?-call runs at exit: the statement evaluates
+			// the callee and arguments now, but the failure edge must
+			// not run cleanups at registration.
+			inner := s.Call
+			for {
+				t, ok := syntax.Unparen(inner).(*syntax.TryExpr)
+				if !ok {
+					break
+				}
+				inner = t.X
+			}
+			if _, ok := syntax.Unparen(inner).(*syntax.CallExpr); ok {
+				cp := *s
+				cp.Call = inner
+				stmt = &cp
+			}
+		}
+	}
+	call, ok := syntax.Unparen(stmt.Call).(*syntax.CallExpr)
 	if !ok {
 		// A ?-deferred literal call still defers its body: the callee
 		// and arguments run now, the body runs at exit.
@@ -3203,11 +3224,11 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 			}
 		}
 		if outer == nil || s.Tok != syntax.Defer {
-			return p.expr(s, st)
+			return p.expr(stmt, st)
 		}
 		d := &logosEFEffects{inside: outer.inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
 		p.eff = d
-		st = p.expr(s, st)
+		st = p.expr(stmt, st)
 		p.eff = outer
 		for k := range d.assigned {
 			p.noteAssigned(k)
@@ -3231,11 +3252,11 @@ func (p *logosEFPass) callStmt(s *syntax.CallStmt, st *logosEFState) *logosEFSta
 	if _, isLam := funU.(*syntax.LambdaExpr); isLam {
 		// Lambda callees keep the conservative path.
 		if outer == nil || s.Tok != syntax.Defer {
-			return p.expr(s, st)
+			return p.expr(stmt, st)
 		}
 		d := &logosEFEffects{inside: outer.inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
 		p.eff = d
-		st = p.expr(s, st)
+		st = p.expr(stmt, st)
 		p.eff = outer
 		for k := range d.assigned {
 			p.noteAssigned(k)
@@ -3377,6 +3398,19 @@ func unwrapDeferredCall(call syntax.Expr) (*syntax.CallExpr, *syntax.FuncLit) {
 func (p *logosEFPass) deferredStmtCall(call syntax.Expr, scope syntax.Node, onError bool, st *logosEFState) *logosEFState {
 	inner, lit := unwrapDeferredCall(call)
 	if lit == nil || lit.Body == nil {
+		if _, isTry := syntax.Unparen(call).(*syntax.TryExpr); isTry {
+			innerTry := call
+			for {
+				t, ok := syntax.Unparen(innerTry).(*syntax.TryExpr)
+				if !ok {
+					break
+				}
+				innerTry = t.X
+			}
+			if _, ok := syntax.Unparen(innerTry).(*syntax.CallExpr); ok {
+				return p.expr(innerTry, st)
+			}
+		}
 		return p.expr(call, st)
 	}
 	if _, isLam := syntax.Unparen(inner.Fun).(*syntax.LambdaExpr); isLam {
