@@ -744,12 +744,17 @@ func (r *ctReducer) clone(n syntax.Node, f *ctFrame) syntax.Node {
 				f.keepCalls = make(map[*syntax.CallExpr]bool)
 			}
 			f.keepCalls[call] = true
+		} else if call, ok := syntax.Unparen(n.Call).(*syntax.CallExpr); ok && cfComptimeCall(call, f.info) == "Error" && f.info.LogosCtSilentError[call] {
+			// A deferred silenced Error never runs: the selected case
+			// terminates, so the defer never registers. Replace it like
+			// a plain silenced Error, keeping message uses alive.
+			out = r.silentErrorStmt(n.Pos(), call, f)
 		}
 	case *syntax.ExprStmt:
 		if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && f.info.LogosTagGet[call].Value != nil {
 			out = assignOf(n.Pos(), []syntax.Expr{nameOf(n.Pos(), "_")}, []syntax.Expr{r.clone(call, f).(syntax.Expr)})
-		} else if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && cfComptimeCall(call, f.info) == "Error" && r.isErrorAfterTerminatingSwitch(call, f) {
-			out = at(&syntax.EmptyStmt{}, n.Pos())
+		} else if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && cfComptimeCall(call, f.info) == "Error" && f.info.LogosCtSilentError[call] {
+			out = r.silentErrorStmt(n.Pos(), call, f)
 		}
 	}
 	if out == nil {
@@ -960,7 +965,7 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 		switch cfComptimeCall(e, f.info) {
 		case "Error":
 			if len(e.ArgList) == 1 {
-				if r.isErrorAfterTerminatingSwitch(e, f) {
+				if f.info.LogosCtSilentError[e] {
 					return nil
 				}
 				if msg, ok := cfComptimeErrorMsg(f.info, e.ArgList[0]); ok {
@@ -981,58 +986,20 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 	return nil
 }
 
-// isErrorAfterTerminatingSwitch reports whether an Error call sits in the
-// tail after a const switch whose selected case terminates, as a direct
-// child of the instance function body. The tail is still type-checked for
-// other errors; only the Error is omitted. Labels between the switch and
-// the Error keep it live.
-func (r *ctReducer) isErrorAfterTerminatingSwitch(e *syntax.CallExpr, f *ctFrame) bool {
-	if r.decl == nil || r.decl.Body == nil {
-		return false
+// silentErrorStmt replaces a comptime.Error call the instance check silenced
+// with a blank assignment of its message, so locals the message mentions
+// stay used in the prepared check. The statement is unreachable, so the
+// assignment never runs. A malformed call keeps an empty statement; the
+// check already reported it.
+func (r *ctReducer) silentErrorStmt(pos syntax.Pos, call *syntax.CallExpr, f *ctFrame) syntax.Node {
+	if len(call.ArgList) != 1 {
+		return at(&syntax.EmptyStmt{}, pos)
 	}
-	list := r.decl.Body.List
-	idx := -1
-	for i, s := range list {
-		found := false
-		syntax.Inspect(s, func(n syntax.Node) bool {
-			if n == e {
-				found = true
-				return false
-			}
-			return true
-		})
-		if found {
-			idx = i
-			break
-		}
+	msg, ok := r.clone(call.ArgList[0], f).(syntax.Expr)
+	if !ok || msg == nil {
+		return at(&syntax.EmptyStmt{}, pos)
 	}
-	if idx <= 0 {
-		return false
-	}
-	for i := idx - 1; i >= 0; i-- {
-		if _, ok := list[i].(*syntax.LabeledStmt); ok {
-			return false
-		}
-		if cs, ok := list[i].(*syntax.ConstSwitchStmt); ok {
-			sel, static := types2.LogosConstSelectedCase(f.info, cs)
-			if !static || sel == nil || len(sel.Body) == 0 {
-				return false
-			}
-			last := sel.Body[len(sel.Body)-1]
-			if _, ok := last.(*syntax.ReturnStmt); ok {
-				return true
-			}
-			if es, ok := last.(*syntax.ExprStmt); ok {
-				if call, ok := syntax.Unparen(es.X).(*syntax.CallExpr); ok {
-					if name, ok := syntax.Unparen(call.Fun).(*syntax.Name); ok && name.Value == "panic" {
-						return true
-					}
-				}
-			}
-			return false
-		}
-	}
-	return false
+	return assignOf(pos, []syntax.Expr{nameOf(pos, "_")}, []syntax.Expr{msg})
 }
 
 func (f *ctFrame) caseType(c *syntax.ConstSwitchCase) types2.Type {
