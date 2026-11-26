@@ -316,11 +316,23 @@ func (s *handleState) appendGroupAttr(a slog.Attr) bool {
 		return true
 	}
 	pos := s.buf.length()
+	groups := len(s.groups)
+	sep := s.sep
+	prefix := s.prefix.length()
 	if a.Key != "" {
 		s.openGroup(a.Key)
 	}
 	if !s.appendAttrs(attrs) {
+		// An emptied group must leave no trace: rewind the output and
+		// restore the callback group stack, the separator, and the
+		// text prefix, so later sibling fields keep the path they
+		// would have without the dropped group.
 		s.buf.setLength(pos)
+		if s.groups != nil {
+			s.groups = s.groups[:groups]
+		}
+		s.sep = sep
+		s.prefix.setLength(prefix)
 		return false
 	}
 	if a.Key != "" {

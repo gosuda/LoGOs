@@ -142,7 +142,7 @@ func TestStaticOptionsOptionExemptStrictRefuses(t *testing.T) {
 		t.Fatalf("strict error %q is not the UnsupportedOptions diagnostic", err)
 	}
 	var dflt OptVal
-	if err := jsonv2.Unmarshal([]byte(`{"n":{"Value":1,"Present":true}}`), &dflt); err != nil {
+	if err := jsonv2.Unmarshal([]byte(`{"n":1}`), &dflt); err != nil {
 		t.Fatal(err)
 	}
 	if (dflt.N ?? -1) != 1 {
@@ -158,10 +158,10 @@ func TestStaticOptionsStringTagFieldRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v1 marshal of a ,string struct field: %v", err)
 	}
-	if want := `{"value":{"n":{"Value":1,"Present":true}}}`; string(got) != want {
+	if want := `{"value":{"n":1}}`; string(got) != want {
 		t.Fatalf("marshal: got %s, want %s", got, want)
 	}
-	if err := json.Unmarshal([]byte(`{"value":{"n":{"Value":2,"Present":true}}}`), &v); err != nil {
+	if err := json.Unmarshal([]byte(`{"value":{"n":2}}`), &v); err != nil {
 		t.Fatalf("v1 unmarshal of a ,string struct field: %v", err)
 	}
 	if (v.V.N ?? -1) != 2 {

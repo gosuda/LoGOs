@@ -158,7 +158,7 @@ func monitor(ctx context.Context, verb string, inv invocation) {
 			printStalledBrief(fixes, briefOut)
 		} else {
 			for _, done := range applyStalledFixes(fixes, started) {
-				fmt.Fprintf(os.Stderr, "logos conc: fixed %s\n", done)
+				_, _ = fmt.Fprintf(os.Stderr, "logos conc: fixed %s\n", done)
 			}
 		}
 	}
@@ -268,7 +268,7 @@ func applyStalledFixes(fixes []stalledFix, started time.Time) []string {
 	for _, f := range fixes {
 		resolved, err := filepath.EvalSymlinks(f.file)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "logos conc: cannot fix %s: %v\n", f.file, err)
+			_, _ = fmt.Fprintf(os.Stderr, "logos conc: cannot fix %s: %v\n", f.file, err)
 			continue
 		}
 		byFile[resolved] = append(byFile[resolved], f)
@@ -282,7 +282,7 @@ func applyStalledFixes(fixes []stalledFix, started time.Time) []string {
 			err = scope.fixFile(resolved, edits, started)
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "logos conc: cannot fix %s: %v\n", edits[0].file, err)
+			_, _ = fmt.Fprintf(os.Stderr, "logos conc: cannot fix %s: %v\n", edits[0].file, err)
 			continue
 		}
 		for _, f := range edits {
@@ -405,7 +405,7 @@ func generated(text string) bool {
 // writeFixedFile stages data next to file and renames it over file only
 // while file still holds before, the bytes the edits were proved on, so
 // a failure at any step leaves file whole.
-func writeFixedFile(file string, before, data []byte, info os.FileInfo) error {
+func writeFixedFile(file string, before, data []byte, info os.FileInfo) (err error) {
 	tmp, err := os.CreateTemp(filepath.Dir(file), ".logosconc-fix-*")
 	if err != nil {
 		return err
@@ -413,8 +413,11 @@ func writeFixedFile(file string, before, data []byte, info os.FileInfo) error {
 	name := tmp.Name()
 	keep := false
 	defer func() {
-		if !keep {
-			os.Remove(name)
+		if keep {
+			return
+		}
+		if rmErr := os.Remove(name); rmErr != nil && !os.IsNotExist(rmErr) {
+			err = errors.Join(err, rmErr)
 		}
 	}()
 	err = stageFixedFile(tmp, data, info)

@@ -4,14 +4,15 @@
 
 package json
 
-// AppendTokens appends the payloads of one value's parts and enforces max.
 // Parts are PartialNumber followed by Number, or PartialString pieces
 // followed by String. Any other kind is a syntax error. A negative max
 // selects DefaultMaxValueLen. A value closes exactly once: only the last
 // token may be a final kind, every earlier token must be the matching
-// partial kind, and a final Number carries at least one digit. Partial
-// input with no closing token, two closing tokens, or a digit-free
-// closing number are all syntax errors.
+// partial kind, and a joined Number carries at least one digit: an empty
+// final Number only closes a value whose digits arrived in earlier chunks,
+// which is how the scanner encodes a number split across chunk or
+// end-of-input boundaries. Partial input with no closing token, two
+// closing tokens, and a digit-free joined number are all syntax errors.
 func AppendTokens(dst []byte, toks []Token, max int) ([]byte, error) {
 	if max < 0 {
 		max = DefaultMaxValueLen
@@ -24,9 +25,6 @@ func AppendTokens(dst []byte, toks []Token, max int) ([]byte, error) {
 	switch last.Kind {
 	case TokenNumber:
 		partial = TokenPartialNumber
-		if len(last.Bytes) == 0 {
-			return dst, ErrSyntax
-		}
 	case TokenString:
 		partial = TokenPartialString
 	default:
@@ -34,6 +32,15 @@ func AppendTokens(dst []byte, toks []Token, max int) ([]byte, error) {
 	}
 	for _, t := range toks[:len(toks)-1] {
 		if t.Kind != partial {
+			return dst, ErrSyntax
+		}
+	}
+	if last.Kind == TokenNumber {
+		total := len(last.Bytes)
+		for _, t := range toks[:len(toks)-1] {
+			total += len(t.Bytes)
+		}
+		if total == 0 {
 			return dst, ErrSyntax
 		}
 	}

@@ -1,0 +1,138 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+env GOEXPERIMENT=
+
+cd repro
+
+# Ordinary commands never compile dependency tests, so the module is
+# healthy for them: testonly is required only so the module graph loads
+# offline, and nothing reachable imports it.
+logos build ./...
+logos test ./...
+
+# d is a regular dependency, not an inactive-file owner, but
+# collectTestBuilds still builds its test variant. Its test-only import
+# (example.com/deptestonly/t) is reached by neither the variant roots
+# nor their loaded imports, so it stays out of the loader's package
+# set; before the fix eject failed resolving it.
+logos eject -o out
+exists out/p/p.go
+exists out/p/p_test.go
+exists out/p/engines_test.go
+grep '^//go:build engines' out/p/engines_test.go
+
+cd out
+go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+-- repro/go.mod --
+module example.com/ejectdeptest
+
+go 1.27
+
+require (
+	example.com/deptestdep v0.0.0
+	example.com/deptestonly v0.0.0
+)
+
+replace (
+	example.com/deptestdep => ./dep
+	example.com/deptestonly => ./testonly
+)
+
+-- repro/p/p.lgo --
+package p
+
+import "example.com/deptestdep/d"
+
+const Value = 1
+
+func Name() string {
+	return d.Name()
+}
+
+-- repro/p/p_test.lgo --
+package p_test
+
+import (
+	"testing"
+
+	"example.com/deptestdep/d"
+	"example.com/ejectdeptest/p"
+)
+
+func TestValue(t *testing.T) {
+	if got := p.Value; got != 1 {
+		t.Fatalf("Value = %d, want 1", got)
+	}
+	if p.Name() != d.Name() {
+		t.Fatalf("Name() = %q, want %q", p.Name(), d.Name())
+	}
+}
+
+-- repro/p/engines_test.lgo --
+//go:build engines
+
+package p_test
+
+-- repro/dep/go.mod --
+module example.com/deptestdep
+
+go 1.27
+
+require example.com/deptestonly v0.0.0
+
+replace example.com/deptestonly => ../testonly
+-- repro/dep/d/d.go --
+// Package d is a regular dependency of the variant root p: its
+// non-test code imports logos/sync so the eject plan keeps this module,
+// while only its external test file imports the test-only module.
+package d
+
+import "logos/sync"
+
+const Input = "ABC"
+
+// Name returns Input through a locked value.
+func Name() string {
+	var locked sync.Locked[string]
+	locked.WithLock(func(value *string) {
+		*value = Input
+	})
+	var got string
+	locked.WithLock(func(value *string) {
+		got = *value
+	})
+	return got
+}
+
+-- repro/dep/d/d_test.go --
+package d_test
+
+import (
+	"testing"
+
+	"example.com/deptestdep/d"
+	"example.com/deptestonly/t"
+)
+
+func TestName(t *testing.T) {
+	if got := d.Name(); got != t.Greet() {
+		t.Fatalf("Name() = %q, want %q", got, t.Greet())
+	}
+}
+
+-- repro/testonly/go.mod --
+module example.com/deptestonly
+
+go 1.27
+
+-- repro/testonly/t/t.go --
+// Package t is imported only by d's external test file; no non-test
+// code in the module graph reaches it.
+package t
+
+// Greet reports the string d.Name returns.
+func Greet() string {
+	return "ABC"
+}

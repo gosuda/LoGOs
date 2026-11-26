@@ -485,6 +485,74 @@ func TestTwinReplaceAttrGroups(t *testing.T) {
 	}
 }
 
+func TestTwinEmptiedGroupRestoresPath(t *testing.T) {
+	// Dropping every field inside a group must not leak the group's
+	// path into later siblings: the callback group stack, the
+	// separator, and the text prefix rewind with the output.
+	// Standard log/slog leaks the emptied group the same way (the
+	// sibling reaches ReplaceAttr with the dead group's path and is
+	// dropped), so twin-vs-standard equality cannot hold here; the
+	// twin intentionally restores the path and keeps the sibling.
+	for _, tc := range []struct {
+		name    string
+		newTwin func(*[][]string) func(io.Writer) slog.Handler
+		want    string
+	}{
+		{"json",
+			func(seen *[][]string) func(io.Writer) slog.Handler {
+				return func(w io.Writer) slog.Handler {
+					return twinslog.NewJSONHandler(w, &slog.HandlerOptions{ReplaceAttr: dropDebug(seen)})
+				}
+			},
+			`"status":200`},
+		{"text",
+			func(seen *[][]string) func(io.Writer) slog.Handler {
+				return func(w io.Writer) slog.Handler {
+					return twinslog.NewTextHandler(w, &slog.HandlerOptions{ReplaceAttr: dropDebug(seen)})
+				}
+			},
+			`status=200`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var seen [][]string
+			r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+			r.AddAttrs(slog.Group("debug", slog.Int("trace", 1)), slog.Int("status", 200))
+			var twinBuf bytes.Buffer
+			if err := tc.newTwin(&seen)(&twinBuf).Handle(context.Background(), r); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(twinBuf.String(), tc.want) {
+				t.Errorf("sibling after emptied group lost: %q lacks %q", twinBuf.String(), tc.want)
+			}
+			debugPaths := 0
+			for _, groups := range seen {
+				if len(groups) == 1 && groups[0] == "debug" {
+					debugPaths++
+				}
+			}
+			if debugPaths != 1 {
+				t.Errorf("want exactly the dropped trace field under [debug], saw %d: %q", debugPaths, seen)
+			}
+			if len(seen) == 0 || len(seen[len(seen)-1]) != 0 {
+				t.Errorf("sibling status did not reach the callback with a restored path: %q", seen)
+			}
+		})
+	}
+}
+
+// dropDebug records the group path of every field it sees and discards
+// fields inside the debug group. The surviving status field must reach
+// the callback with an empty group path.
+func dropDebug(seen *[][]string) func([]string, slog.Attr) slog.Attr {
+	return func(groups []string, a slog.Attr) slog.Attr {
+		*seen = append(*seen, append([]string(nil), groups...))
+		if len(groups) == 1 && groups[0] == "debug" {
+			return slog.Attr{}
+		}
+		return a
+	}
+}
+
 func TestTwinNilSource(t *testing.T) {
 	r := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
 	r.AddAttrs(slog.Any("s", (*slog.Source)(nil)))
@@ -551,6 +619,32 @@ func TestTwinWithSliceAlias(t *testing.T) {
 	got := strings.TrimSpace(buf.String())
 	if !strings.Contains(got, "a=1") {
 		t.Errorf("With should own its slice: got %q, want a=1", got)
+	}
+}
+
+// retainAttrsHandler keeps the exact slice WithAttrs receives, so a
+// caller-side mutation is visible unless Logger.With clones first.
+type retainAttrsHandler struct{ kept []slog.Attr }
+
+func (h *retainAttrsHandler) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *retainAttrsHandler) Handle(context.Context, slog.Record) error { return nil }
+
+func (h *retainAttrsHandler) WithAttrs(as []slog.Attr) slog.Handler { return &retainAttrsHandler{kept: as} }
+
+func (h *retainAttrsHandler) WithGroup(string) slog.Handler { return h }
+
+func TestTwinWithRetainingHandlerSliceAlias(t *testing.T) {
+	l := twinslog.New(new(retainAttrsHandler))
+	attrs := []slog.Attr{slog.Int("a", 1)}
+	c := l.With(attrs...)
+	attrs[0] = slog.Int("a", 2)
+	rh, ok := c.Handler().(*retainAttrsHandler)
+	if !ok {
+		t.Fatalf("With did not keep the retaining handler: %T", c.Handler())
+	}
+	if len(rh.kept) != 1 || rh.kept[0].Value.Int64() != 1 {
+		t.Errorf("With should own its slice: kept %v, want [a=1]", rh.kept)
 	}
 }
 

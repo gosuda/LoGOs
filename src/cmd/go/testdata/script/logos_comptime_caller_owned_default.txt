@@ -1,0 +1,84 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+# Caller-owned defaulted struct through a defining-package generic
+# (SPEC T-205): the instance is compiled for the defining package, but
+# the default factory lives in the instantiating package. The program
+# builds and runs, and the literal carries the default.
+logos build ./...
+logos run ./main
+stdout '^localhost$'
+stdout '^b-private$'
+stdout '^inferred-b-private$'
+stdout '^third$'
+
+-- w/go.mod --
+module example.com/cown
+
+go 1.27
+
+-- w/b/b.lgo --
+package b
+
+import "comptime"
+
+func F[T any]() T {
+	const if comptime.IsStruct[T]() {
+		return T{}
+	} else {
+		var out T
+		return out
+	}
+}
+
+type private struct {
+	Tag string = "b-private"
+}
+
+func UsePrivate() string {
+	return F[private]().Tag
+}
+
+func G[T any](v T) T {
+	const if comptime.IsStruct[T]() {
+		return T{}
+	} else {
+		return v
+	}
+}
+
+func Make() private {
+	return private{}
+}
+
+func UseInferred() string {
+	return "inferred-" + G(Make()).Tag
+}
+
+-- w/a/a.lgo --
+package a
+
+type Third struct {
+	Name string = "third"
+}
+
+-- w/main/main.lgo --
+package main
+
+import (
+	"example.com/cown/a"
+	"example.com/cown/b"
+	"fmt"
+)
+
+type S struct {
+	Host string = "localhost"
+}
+
+func main() {
+	fmt.Println(b.F[S]().Host)
+	fmt.Println(b.UsePrivate())
+	fmt.Println(b.UseInferred())
+	fmt.Println(b.F[a.Third]().Name)
+}

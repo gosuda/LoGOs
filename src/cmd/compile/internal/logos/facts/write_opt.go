@@ -58,6 +58,17 @@ func walkNamedQuals(name string, named *types2.Named, emitOpt, emitConst func(st
 	if tuple, ok := u.(*types2.LogosTuple); ok {
 		u = tuple.Underlying()
 	}
+	if opt, ok := unaliasAs[*types2.Option](u); ok {
+		// A defined option type owns its option: record it on the
+		// declaration with the root marker so the overlay restores the
+		// underlying option there. Variable facts then keep pointing at
+		// the declaration instead of wrapping it a second time.
+		if emitOpt != nil {
+			emitOpt(name, "O")
+		}
+		walkQualType(opt.Elem, []string{"O", "E"}, name, emitOpt, emitConst, make(map[types2.Type]bool))
+		return
+	}
 	switch u := u.(type) {
 	case *types2.Struct:
 		for i := range u.NumFields() {

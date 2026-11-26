@@ -122,6 +122,7 @@ The output MUST NOT emit `_logos_errors` imports [T-0.3].
 Among support imports, lowered files before eject MUST import only `_logos_rt "logos/rt"`, `_logos_json "logos/rt/json"`, plus `_logos_unsafe "unsafe"` where needed, in addition to standard library imports under reserved `_logos_` aliases. Ejected files MUST spell those support imports as `_logos_rt "github.com/gosuda/loGos/rt"` and `_logos_json "github.com/gosuda/loGos/rt/json"` (the eject rewrite in `src/cmd/go/internal/logos/eject/eject.go:supportPathEdit`).
 The tool MUST write ejected files only inside DIR, and it MUST NOT change the source tree outside DIR; DIR MAY be inside the source tree [T-0.3].
 Ejected code MUST build with an upstream Go 1.27.2 toolchain [T-0.3].
+The tool MUST refuse a standard-library selector with no upstream spelling at its source location with `portability::fork_stdlib_api`, instead of writing output that upstream Go rejects [T-0.3].
 A Go package that imports a LoGOs package MUST see each exported declaration with the Go-facing signature that `logos eject` emits for it [T-0.3][R-U2].
 The output MUST NOT emit colliding helper imports. [T-0.3]
 
@@ -2072,6 +2073,7 @@ Supported tag options are name, omitempty, omitzero, string, and -. [T-Sec10]
 HTML characters, U+2028, U+2029, invalid UTF-8, and float exponents encode per encoding/json. [T-Sec10]
 NaN and infinities report UnsupportedValueError. [T-Sec10]
 A closed-union value marshals to its dynamic member static bytes. [T-Sec10][T-203.1]
+An option field whose lowered form is `rt.Option[T]` marshals as JSON null when none, or is omitted when none and the field carries `omitempty` or `omitzero`; when present, it marshals as the payload value alone. [T-Sec10]
 A comptime generic that marshals over comptime fields expands once per instantiation. [T-205]
 Each instantiation carries its own static helpers. [T-205]
 
@@ -2093,6 +2095,7 @@ Decoding MUST fill defaults first, then parse. [T-Sec10]
 A _logos_seen mask sized [(K+63)/64]uint64 tracks matched keys against a required-mask constant, where K is the number of required non-nil fields of the struct. [T-Sec10]
 At the closing brace, a missing required non-nil field returns MissingFieldError naming type and field. [T-Sec10]
 JSON null for a non-nil field returns the same error. [T-Sec10]
+JSON null or a missing key for an option field gives none; any other value decodes the payload and gives some. [T-Sec10]
 The option-aware fallback MUST preserve the same required-field checks, scanning member presence over a buffered copy of the object with the fast path fold and duplicate semantics while decoding into the destination's existing allocations, so an omitted member still fails when the destination already holds a non-nil pointer and a present member keeps nested data and pointer aliases. [T-Sec10.2]
 Keys MUST dispatch by switch up to 8 keys and by the Sec 7 const-map table above that. [T-Sec10][T-Sec7]
 Keys whose 64-bit hashes are equal MUST each dispatch to their own field. [T-Sec10][T-Sec7]
@@ -2188,6 +2191,7 @@ A violation at severity `deny` aborts linking with ERROR capabilities::unauthori
 The report MUST list the shortest call chain with file and line per frame. [T-Sec11]
 For the allowlist keys that authorize each sink, see Sec 8.4. [T-Sec8][T-Sec11]
 Unsafe violations use capabilities::unauthorized_unsafe with the shortest import chain. [T-Sec11]
+A transitive_unsafe violation stays silent at the default `allow`, which skips the audit entirely. At `warn` cmd/go prints the violation and continues; at `deny` the violation aborts linking. Both severities audit the same set: dependencies that import `unsafe` and packages that hold linked assembly files or precompiled `.syso` objects, reported as `capabilities::unauthorized_unsafe` and `capabilities::unclassified_assembly`; an entry in `transitive_unsafe_allowlist` authorizes either. [T-Sec11]
 cgo reachability reports capabilities::unauthorized_cgo unless the cgo policy allows the package. [T-Sec11][T-101.2]
 Only a dependency that owns the cgo wrapper is blamed: the standard library's own cgo never blames the dependencies that call it. [T-Sec11]
 The cgo sink is the per-call-site `pkg._Cfunc_*` or `pkg._C2func_*` wrapper of the package that owns it, reported as `runtime.cgocall`, because `runtime.cgocall` itself lies in the runtime and has no owning dependency to blame. [T-Sec11]
