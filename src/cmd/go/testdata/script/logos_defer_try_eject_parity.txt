@@ -96,6 +96,27 @@ func reassign() (err error) {
 	return nil
 }
 
+type Stamp struct{ A, B uint64 }
+
+var epoch uint64 = 1
+
+func advance() int {
+	epoch = 2
+	return 0
+}
+
+func save(v any, n int) error {
+	fmt.Println("saved", v, n)
+	return nil
+}
+
+// A struct passed to an interface parameter snapshots before a later
+// argument call mutates the fields it reads, in both twins.
+func reassignStruct() (err error) {
+	defer save(Stamp{epoch, epoch}, advance())?
+	return nil
+}
+
  var seen any = "unset"
 
 func probe() error {
@@ -145,6 +166,11 @@ func main() {
 	} else {
 		fmt.Println("reassign ok")
 	}
+	if err := reassignStruct(); err != nil {
+		fmt.Println("reassign-struct err:", err)
+	} else {
+		fmt.Println("reassign-struct ok")
+	}
 	recoverProbe()
 }
 
@@ -156,4 +182,6 @@ fail 1
 span 5
 installed 1
 reassign ok
+saved {1 1} 0
+reassign-struct ok
 recover in f: <nil> outer: boom
