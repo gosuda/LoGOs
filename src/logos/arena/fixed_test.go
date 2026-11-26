@@ -218,6 +218,44 @@ func TestFixedAppendSpare(t *testing.T) {
 	}
 }
 
+func TestFixedAppendSpareUnaccounted(t *testing.T) {
+	buf := make([]byte, 8)
+	r := arena.OpenFixed(buf)
+	got := arena.Append(r, buf[:0], 7)
+	if len(got) != 1 || got[0] != 7 {
+		t.Fatalf("Append(r, buf[:0], 7) = %v, want [7]", got)
+	}
+	if &got[0] != &buf[0] {
+		t.Errorf("Append into free region space copied instead of reusing the buffer")
+	}
+	if used := arena.FixedUsed(r); used != 1 {
+		t.Fatalf("FixedUsed = %d, want 1: a spare-capacity write into free region space must advance the cursor", used)
+	}
+	p := arena.New[byte](r)
+	*p = 0
+	if got[0] != 7 {
+		t.Fatalf("append result = %v after a later allocation, want [7]: the allocation overwrote unreserved bytes", got)
+	}
+	if used := arena.FixedUsed(r); used != 2 {
+		t.Fatalf("FixedUsed = %d, want 2", used)
+	}
+}
+
+func TestFixedAppendSpareHeap(t *testing.T) {
+	r := arena.OpenFixed(make([]byte, 8))
+	s := make([]byte, 0, 4)
+	got := arena.Append(r, s, 1, 2)
+	if want := []byte{1, 2}; !slices.Equal(got, want) {
+		t.Fatalf("Append(r, s, 1, 2) = %v, want %v", got, want)
+	}
+	if &got[0] != &s[:1][0] {
+		t.Errorf("Append with heap spare capacity moved the backing array")
+	}
+	if used := arena.FixedUsed(r); used != 0 {
+		t.Errorf("FixedUsed = %d, want 0: heap spare capacity is not region space", used)
+	}
+}
+
 func TestFixedAppendAdjacentInput(t *testing.T) {
 	buf := []byte{7, 8, 0, 0, 0}
 	r := arena.OpenFixed(buf[2:])

@@ -124,6 +124,28 @@ func fixedMake[T any](r Region, n int) []T {
 	return out
 }
 
+// fixedSpareAccounted reports whether appending n elements into s's spare
+// capacity stays clear of the region's unallocated space. The write range
+// may sit inside bytes the cursor already accounts for (a reslice of a
+// previous allocation) or entirely outside the region buffer (an unrelated
+// heap slice). Anything else overlaps space a later allocation will claim,
+// so the caller must take the checked path and let the cursor account for
+// the returned bytes.
+func fixedSpareAccounted[T any](st *fixedState, s []T, n, size int) bool {
+	if st == nil {
+		return true
+	}
+	t := s[:len(s)+n]
+	ws := uintptr(unsafe.Pointer(&t[len(s)]))
+	we := ws + uintptr(n)*uintptr(size)
+	base := uintptr(unsafe.Pointer(unsafe.SliceData(st.buf)))
+	front := base + uintptr(st.used)
+	if ws >= base && we <= front {
+		return true
+	}
+	return we <= base || ws >= base+uintptr(len(st.buf))
+}
+
 func fixedAppend[T any](r Region, s []T, v []T) []T {
 	if len(v) == 0 {
 		return s
@@ -135,7 +157,7 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 	fixedCheckElement[T]()
 	size := int(unsafe.Sizeof(zero))
 	align := int(unsafe.Alignof(zero))
-	if cap(s)-len(s) >= len(v) {
+	if cap(s)-len(s) >= len(v) && fixedSpareAccounted(r.fixed, s, len(v), size) {
 		return append(s, v...)
 	}
 	st := r.fixed
