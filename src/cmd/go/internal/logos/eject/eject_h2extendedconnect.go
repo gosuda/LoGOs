@@ -51,6 +51,13 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 	if !hasNetHTTP {
 		return nil
 	}
+	// The text rewrite cannot resolve selector identity; a local
+	// interface or method with the same name would be rewritten
+	// incorrectly. Skip files that define the name so only the
+	// type-checked stdlib exemption (which matches by type) is trusted.
+	if h2DefinesExtendedConnect(f) {
+		return nil
+	}
 	used := h2UsedNames(f)
 	osName := h2FreshName(used, "logosH2Os")
 	used[osName] = true
@@ -129,6 +136,34 @@ func h2FreshName(used map[string]bool, base string) string {
 			return cand
 		}
 	}
+}
+
+// h2DefinesExtendedConnect reports whether f declares the method name
+// itself (interface member or func/method). Such files are skipped so
+// a same-named user interface call is never rewritten by spelling.
+func h2DefinesExtendedConnect(f *ast.File) bool {
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		switch x := n.(type) {
+		case *ast.Field:
+			for _, name := range x.Names {
+				if name.Name == h2extendedConnectMethod {
+					found = true
+					return false
+				}
+			}
+		case *ast.FuncDecl:
+			if x.Name.Name == h2extendedConnectMethod {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // h2OverlapOffset returns the start offset of the first h2 edit that
