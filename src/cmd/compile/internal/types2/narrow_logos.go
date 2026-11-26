@@ -3307,7 +3307,7 @@ func (p *logosEFPass) logosStmt(s syntax.Stmt, st *logosEFState) *logosEFState {
 	case *syntax.ConstSwitchStmt:
 		out := st
 		for _, c := range s.Cases {
-			out = logosEFJoin(out, p.scopeStmts(c, c.Body, st, false))
+			out = logosEFJoin(out, p.scopeStmts(s, c.Body, st, false))
 		}
 		return out
 	case *syntax.ConstForStmt:
