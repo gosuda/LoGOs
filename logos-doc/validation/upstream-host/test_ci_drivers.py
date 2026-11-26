@@ -110,6 +110,76 @@ def test_benchmark_uses_event_base_after_the_branch_moves(tmp_path: Path) -> Non
     assert (tmp_path / "runner/measured-shas").read_text().splitlines() == [
         f"{base} {candidate}"
     ] * 6
+@pytest.mark.parametrize("extra", (0, 1))
+def test_benchmark_fetches_missing_base_in_shallow_checkout(
+    tmp_path: Path, extra: int
+) -> None:
+    upstream, root = tmp_path / "upstream", tmp_path / "candidate"
+    upstream.mkdir()
+    git(upstream, "init", "-q", "-b", "main")
+    write(upstream / "src/make.bash", "#!/bin/bash\nexit 0\n", executable=True)
+    base = commit(upstream, "event base")
+    write(upstream / "later.txt", "base branch moved\n")
+    commit(upstream, "new base tip")
+    for i in range(extra):
+        write(upstream / f"again{i}.txt", "moved again\n")
+        commit(upstream, f"move again {i}")
+    # Mirror the shallow benchmark checkout in CI: only the tip is present,
+    # so the driver must fetch the base commit it does not have. A plain
+    # local path ignores --depth, so clone over file:// to keep the
+    # fixture genuinely shallow.
+    subprocess.run(
+        ("git", "clone", "-q", "--depth", "1", f"file://{upstream}", str(root)),
+        check=True,
+    )
+    missing = subprocess.run(
+        ("git", "cat-file", "-t", base),
+        check=False,
+        cwd=root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    assert missing.returncode != 0, "shallow fixture already holds the base commit"
+    driver = copy_driver(root, "bench-autovec.sh")
+    write(
+        root / "test/logos/bench/autovec_measure.sh",
+        '#!/bin/bash\nset -eu\nprintf "%s %s\\n" "$6" "$7" >> "$RUNNER_TEMP/measured-shas"\n',
+    )
+    candidate = commit(root, "candidate")
+    env = environment(root, tmp_path)
+    env.update(
+        AUTOVEC_BASE_SHA=base,
+        AUTOVEC_CAND_SHA=candidate,
+        GITHUB_BASE_REF="main",
+        GITHUB_SHA=candidate,
+    )
+    for command, body in {
+        "curl": "exit 0",
+        "sha256sum": "cat >/dev/null",
+        "tar": "exit 0",
+        "go": "printf 'amd64\\n'",
+        "jq": "printf '1\\n'",
+    }.items():
+        write(
+            tmp_path / "commands" / command, f"#!/bin/bash\n{body}\n", executable=True
+        )
+    result = subprocess.run(
+        ("bash", str(driver)),
+        check=False,
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    checked_out = git(tmp_path / "runner/autovec-base", "rev-parse", "HEAD")
+    assert checked_out == base, (checked_out, base)
+    assert (tmp_path / "runner/autovec-base/src/make.bash").exists()
+    assert not (tmp_path / "runner/autovec-base/later.txt").exists()
+    assert (root / "later.txt").read_text() == "base branch moved\n"
+    assert (tmp_path / "runner/measured-shas").read_text().splitlines() == [
+        f"{base} {candidate}"
+    ] * 6
 
 
 @pytest.mark.parametrize("status", (0, 37))
