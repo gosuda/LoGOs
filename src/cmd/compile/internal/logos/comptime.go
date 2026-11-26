@@ -998,6 +998,9 @@ func (r *ctReducer) silentErrorStmt(pos syntax.Pos, call *syntax.CallExpr, f *ct
 	msg := call.ArgList[0]
 	declared := make(map[types2.Object]bool)
 	syntax.Inspect(msg, func(n syntax.Node) bool {
+		if obj := f.info.Implicits[n]; obj != nil {
+			declared[obj] = true
+		}
 		if name, ok := n.(*syntax.Name); ok {
 			if obj := f.info.Defs[name]; obj != nil {
 				declared[obj] = true

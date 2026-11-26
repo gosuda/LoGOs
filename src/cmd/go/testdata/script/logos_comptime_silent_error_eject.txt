@@ -5,7 +5,7 @@ env GOTOOLCHAIN=local
 
 cd m
 logos run .
-stdout '^1 2 3 4$'
+stdout '^1 2 3 4 5 6$'
 logos eject -o out
 ! grep 'unsupported' out/main.go
 cd out
@@ -14,7 +14,7 @@ exec $UPROOT1272/bin/go$GOEXE version
 stdout '^go version go1\.27\.2 '
 env GOROOT=$UPROOT1272
 exec $UPROOT1272/bin/go$GOEXE run .
-stdout '^1 2 3 4$'
+stdout '^1 2 3 4 5 6$'
 
 -- m/go.mod --
 module example.com/silenterror
@@ -32,7 +32,7 @@ import (
 type localInt int
 
 func main() {
-	fmt.Println(owner.Pick[localInt](), owner.Deferred[localInt](), owner.Local[localInt](), owner.Capture[localInt]())
+	fmt.Println(owner.Pick[localInt](), owner.Deferred[localInt](), owner.Local[localInt](), owner.Capture[localInt](), owner.TypeSwitch[localInt](), owner.TypeSwitchCase[localInt]())
 }
 
 -- m/owner/pick.lgo --
@@ -82,6 +82,38 @@ func Capture[T any]() int {
 	comptime.Error(unsupported + string('0' + unsafe.Sizeof(func() {
 		var inner byte
 		_ = inner
+		_ = outer
+	})))
+	return 0
+}
+
+func TypeSwitch[T any]() int {
+	var outer byte
+	const switch T {
+	case ~int:
+		return 5
+	}
+	comptime.Error(unsupported + string('0' + unsafe.Sizeof(func() {
+		switch inner := any(1).(type) {
+		default:
+			_ = inner
+		}
+		_ = outer
+	})))
+	return 0
+}
+
+func TypeSwitchCase[T any]() int {
+	var outer byte
+	const switch T {
+	case ~int:
+		return 6
+	}
+	comptime.Error(unsupported + string('0' + unsafe.Sizeof(func() {
+		switch inner := any(1).(type) {
+		case int:
+			_ = inner
+		}
 		_ = outer
 	})))
 	return 0
