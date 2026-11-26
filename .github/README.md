@@ -26,7 +26,12 @@ pull requests still run the focused SSA/SIMD checks and the ordinary Go
 regression. This cadence reduction is part of the CI cost reduction.
 
 Autovec measurements remain PR-only. The canonical job uploads AMD64 evidence;
-the specialist benchmark workflow uploads ARM evidence.
+the specialist benchmark workflow uploads ARM evidence. Both compare against
+the immutable base SHA recorded in the pull-request event, so a later base
+branch update cannot change a rerun's reference compiler.
+
+Full CGO runs retain their complete combined stdout/stderr transcript beside
+the environment snapshot, including when the dist command exits unsuccessfully.
 
 ## Release evidence
 

@@ -1,0 +1,21 @@
+// compile
+
+package p
+
+func fetch4239() (int, error) { return 1, nil }
+func use4239(v int) {}
+
+// A deferred body that calls recover directly and then panics never
+// returns: the recover has no panic to catch, so the panic unwinds the
+// invoker and the later read never executes and needs no diagnostic.
+func ef4239() {
+	n, err := fetch4239()
+	_ = err
+	func() {
+		defer func() {
+			_ = recover()
+			panic("stop")
+		}()
+	}()
+	use4239(n)
+}

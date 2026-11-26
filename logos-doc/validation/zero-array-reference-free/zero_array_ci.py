@@ -196,6 +196,7 @@ def suite(repo: Path) -> native_gate.FrozenSuite:
             PRODUCTION,
             f"{DIRECTORY}/zero_array_ci.py",
             ".github/workflows/ci.yml",
+            ".github/scripts/unit-evidence.sh",
         ),
         phases=tuple(native_gate.Phase(check) for check in CHECKS),
     )

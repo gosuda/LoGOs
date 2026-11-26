@@ -57,6 +57,13 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 	if !hasNetHTTP {
 		return nil, false
 	}
+	// The text rewrite cannot resolve selector identity; a local
+	// interface or method with the same name would be rewritten
+	// incorrectly. Skip files that define the name so only the
+	// type-checked stdlib exemption (which matches by type) is trusted.
+	if h2DefinesExtendedConnect(f) {
+		return nil, false
+	}
 	var edits []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -87,6 +94,116 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 		edits = append(edits, h2ImportEdit(fset, f, []string{`ejectedhttp "` + supportPath + `"`}))
 	}
 	return edits, true
+}
+
+// h2ImportLocal returns the file-local name bound to path, or false when
+// the file does not import it.
+func h2ImportLocal(f *ast.File, path string) (string, bool) {
+	for _, imp := range f.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || p != path {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name, true
+		}
+		if i := strings.LastIndex(p, "/"); i >= 0 {
+			return p[i+1:], true
+		}
+		return p, true
+	}
+	return "", false
+}
+
+// h2RecvParam picks the closure parameter name: a simple identifier
+// receiver reuses itself (keeping _ = s), otherwise a fresh name that
+// cannot collide with the helper imports.
+func h2RecvParam(used map[string]bool, osName, stringsName, receiver string) string {
+	trimmed := strings.TrimSpace(receiver)
+	if trimmed != "" && trimmed[0] != '*' {
+		ok := true
+		for i := range len(trimmed) {
+			c := trimmed[i]
+			if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9') {
+				ok = false
+				break
+			}
+		}
+		if ok && trimmed != "_" && trimmed != osName && trimmed != stringsName && !used[trimmed+"_"] {
+			return trimmed
+		}
+	}
+	return h2FreshName(used, "logosH2Recv")
+}
+
+// h2UsedNames collects local import names and all identifiers in f so
+// generated bindings cannot collide with an alias, a local variable, or
+// an existing import, generally for any file shape.
+func h2UsedNames(f *ast.File) map[string]bool {
+	used := make(map[string]bool)
+	for _, imp := range f.Imports {
+		if imp.Name != nil {
+			used[imp.Name.Name] = true
+			continue
+		}
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		if i := strings.LastIndex(path, "/"); i >= 0 {
+			used[path[i+1:]] = true
+		} else {
+			used[path] = true
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			used[id.Name] = true
+		}
+		return true
+	})
+	return used
+}
+
+// h2FreshName returns base or the first base+N unused in used.
+func h2FreshName(used map[string]bool, base string) string {
+	if !used[base] {
+		return base
+	}
+	for i := 2; ; i++ {
+		cand := base + strconv.Itoa(i)
+		if !used[cand] {
+			return cand
+		}
+	}
+}
+
+// h2DefinesExtendedConnect reports whether f declares the method name
+// itself (interface member or func/method). Such files are skipped so
+// a same-named user interface call is never rewritten by spelling.
+func h2DefinesExtendedConnect(f *ast.File) bool {
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		switch x := n.(type) {
+		case *ast.Field:
+			for _, name := range x.Names {
+				if name.Name == h2extendedConnectMethod {
+					found = true
+					return false
+				}
+			}
+		case *ast.FuncDecl:
+			if x.Name.Name == h2extendedConnectMethod {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // h2OverlapOffset returns the start offset of the first h2 edit that

@@ -146,8 +146,10 @@ func efClosureReadKeepsPairing() {
 }
 
 // A literal that stores the result again with the same error field
-// leaves one pairing on every path, so the check proves the read.
-func efClosureSamePairingAccepted() {
+// leaves one pairing on every path, so the check proves the flow read.
+// A top-level deferred body re-checks under capture, which withholds
+// the proof from repeated stores, so the deferred read still reports.
+func efClosureSamePairingDeferredReports() {
 	h := efClosureHeld{}
 	h.stats, h.err = efClosureFetch()
 	func() {
@@ -155,7 +157,7 @@ func efClosureSamePairingAccepted() {
 	}()
 	if h.err == nil {
 		defer func() {
-			println(h.stats)
+			println(h.stats) // ERROR "result_before_error_check"
 		}()
 	}
 }
@@ -196,9 +198,10 @@ func efClosureDeferredInnerResetAccepted() {
 
 // A nested defer that replaces the result and its error together leaves
 // one pairing on every path: the single deferred call rewrites both in
-// the same assignment, so the guarded read proves the fresh call and
-// stays accepted.
-func efClosureNestedDeferPairingAccepted() {
+// the same assignment, so the guarded flow read proves the fresh call.
+// A top-level deferred body re-checks under capture, which withholds
+// the proof from repeated stores, so the deferred read still reports.
+func efClosureNestedDeferPairingDeferredReports() {
 	h := efClosureHeld{}
 	h.stats, h.err = efClosureFetch()
 	func() {
@@ -208,7 +211,7 @@ func efClosureNestedDeferPairingAccepted() {
 	}()
 	if h.err == nil {
 		defer func() {
-			println(h.stats)
+			println(h.stats) // ERROR "result_before_error_check"
 		}()
 	}
 }

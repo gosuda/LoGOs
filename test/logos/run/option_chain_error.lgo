@@ -50,60 +50,113 @@ func mkBox(present bool) ChainBox? {
 	return ChainBox{X: 7}
 }
 
-func errMsg(err error?) string {
+func errMsg(err error) string {
 	if err != nil {
-		if err == nil {
-			return "<nil>"
-		}
 		return err.Error()
 	}
-	return "<absent>"
+	return "<nil>"
+}
+
+func tryGet(m *ChainM?, ok bool) (int?, error) {
+	v := m?.Get(ok)?
+	return v, nil
+}
+
+func checkBare(m *ChainM?, absentM *ChainM?) {
+	v, err := m?.Get(true)
+	if err != nil {
+		check("bare-ok-err-nil", false, errMsg(err), "<nil>")
+	} else {
+		check("bare-ok-err-nil", true, "<nil>", "<nil>")
+		check("bare-ok-value", (v ?? -1) == 7, v ?? -1, 7)
+	}
+	_, errf := m?.Get(false)
+	if errf == nil {
+		check("bare-fail-err", false, "<nil>", "no")
+	} else {
+		check("bare-fail-err", errMsg(errf) == "no", errMsg(errf), "no")
+	}
+	va, erra := absentM?.Get(true)
+	if erra != nil {
+		check("bare-absent-err-nil", false, errMsg(erra), "<nil>")
+	} else {
+		check("bare-absent-err-nil", true, "<nil>", "<nil>")
+		check("bare-absent-value", (va ?? -1) == -1, va ?? -1, -1)
+	}
+}
+
+func checkBareAbsent2(absentM *ChainM?) {
+	vb, errb := absentM?.Get(false)
+	if errb != nil {
+		check("bare-absent2-err-nil", false, errMsg(errb), "<nil>")
+	} else {
+		check("bare-absent2-err-nil", true, "<nil>", "<nil>")
+		check("bare-absent2-value", (vb ?? -1) == -1, vb ?? -1, -1)
+	}
+}
+
+func checkBox(b ChainBox?, absentB ChainBox?) {
+	s, serr := b?.Label(true)
+	if serr != nil {
+		check("box-ok-err-nil", false, errMsg(serr), "<nil>")
+	} else {
+		check("box-ok-err-nil", true, "<nil>", "<nil>")
+		check("box-ok-value", (s ?? "fallback") == "box-7", s ?? "fallback", "box-7")
+	}
+	_, serrf := b?.Label(false)
+	if serrf == nil {
+		check("box-fail-err", false, "<nil>", "no")
+	} else {
+		check("box-fail-err", errMsg(serrf) == "no", errMsg(serrf), "no")
+	}
+	sa, serra := absentB?.Label(true)
+	if serra != nil {
+		check("box-absent-err-nil", false, errMsg(serra), "<nil>")
+	} else {
+		check("box-absent-err-nil", true, "<nil>", "<nil>")
+		check("box-absent-value", (sa ?? "fallback") == "fallback", sa ?? "fallback", "fallback")
+	}
+}
+
+func checkBoxAbsent2(absentB ChainBox?) {
+	sf2, serrf2 := absentB?.Label(false)
+	if serrf2 != nil {
+		check("box-absent2-err-nil", false, errMsg(serrf2), "<nil>")
+	} else {
+		check("box-absent2-err-nil", true, "<nil>", "<nil>")
+		check("box-absent2-value", (sf2 ?? "fallback") == "fallback", sf2 ?? "fallback", "fallback")
+	}
+}
+
+func checkTry() {
+	pv, perr := tryGet(mkChain(true), true)
+	if perr != nil {
+		check("try-present-err-nil", false, errMsg(perr), "<nil>")
+	} else {
+		check("try-present-err-nil", true, "<nil>", "<nil>")
+		check("try-present-value", (pv ?? -1) == 7, pv ?? -1, 7)
+	}
+	_, perrf := tryGet(mkChain(true), false)
+	if perrf == nil {
+		check("try-present-fail", false, "<nil>", "no")
+	} else {
+		check("try-present-fail", errMsg(perrf) == "no", errMsg(perrf), "no")
+	}
+	pav, paerr := tryGet(nil, true)
+	if paerr != nil {
+		check("try-absent-err-nil", false, errMsg(paerr), "<nil>")
+	} else {
+		check("try-absent-err-nil", true, "<nil>", "<nil>")
+		check("try-absent-value", (pav ?? -1) == -1, pav ?? -1, -1)
+	}
 }
 
 func main() {
-	m := mkChain(true)
-	v, err := m?.Get(true)
-	check("bare-ok-value", (v ?? -1) == 7, v ?? -1, 7)
-	check("bare-ok-ran", (err != nil) == true, err != nil, true)
-	check("bare-ok-err", errMsg(err) == "<nil>", errMsg(err), "<nil>")
-
-	vf, errf := m?.Get(false)
-	check("bare-fail-value", (vf ?? -1) == 0, vf ?? -1, 0)
-	check("bare-fail-ran", (errf != nil) == true, errf != nil, true)
-	check("bare-fail-err", errMsg(errf) == "no", errMsg(errf), "no")
-
-	var absentM *ChainM?
-	va, erra := absentM?.Get(true)
-	check("bare-absent-value", (va ?? -1) == -1, va ?? -1, -1)
-	check("bare-absent-ran", (erra != nil) == false, erra != nil, false)
-	check("bare-absent-err", errMsg(erra) == "<absent>", errMsg(erra), "<absent>")
-
-	vb, errb := absentM?.Get(false)
-	check("bare-absent2-value", (vb ?? -1) == -1, vb ?? -1, -1)
-	check("bare-absent2-ran", (errb != nil) == false, errb != nil, false)
-
-	b := mkBox(true)
-	s, serr := b?.Label(true)
-	check("box-ok-value", (s ?? "fallback") == "box-7", s ?? "fallback", "box-7")
-	check("box-ok-ran", (serr != nil) == true, serr != nil, true)
-	check("box-ok-err", errMsg(serr) == "<nil>", errMsg(serr), "<nil>")
-
-	sf, serrf := b?.Label(false)
-	check("box-fail-value", (sf ?? "fallback") == "", sf ?? "fallback", "")
-	check("box-fail-ran", (serrf != nil) == true, serrf != nil, true)
-	check("box-fail-err", errMsg(serrf) == "no", errMsg(serrf), "no")
-
-	var absentB ChainBox?
-	sa, serra := absentB?.Label(true)
-	check("box-absent-value", (sa ?? "fallback") == "fallback", sa ?? "fallback", "fallback")
-	check("box-absent-ran", (serra != nil) == false, serra != nil, false)
-	check("box-absent-err", errMsg(serra) == "<absent>", errMsg(serra), "<absent>")
-
-	sf2, serrf2 := absentB?.Label(false)
-	check("box-absent2-value", (sf2 ?? "fallback") == "fallback", sf2 ?? "fallback", "fallback")
-	check("box-absent2-ran", (serrf2 != nil) == false, serrf2 != nil, false)
-	check("box-absent2-err", errMsg(serrf2) == "<absent>", errMsg(serrf2), "<absent>")
-
+	checkBare(mkChain(true), nil)
+	checkBareAbsent2(nil)
+	checkBox(mkBox(true), nil)
+	checkBoxAbsent2(nil)
+	checkTry()
 	if failed {
 		os.Exit(1)
 	}

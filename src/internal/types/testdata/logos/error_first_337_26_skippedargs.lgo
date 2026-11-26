@@ -1,0 +1,28 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_26() (int, error) { return 1, nil }
+func use337_26(n int) {}
+
+type OptBox337_26 struct{ val int }
+
+func (b *OptBox337_26) Set337_26(v int) { b.val = v }
+
+// The absent path skips the argument, so n keeps the fetch value.
+func optAbsentSkipsArg337_26(up *OptBox337_26?) {
+	n, err := fetch337_26()
+	_ = err
+	up?.Set337_26(func() int { n = 0; return 0 }())
+	use337_26(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// An eager call always evaluates the argument, so the reset applies.
+func eagerArgResets337_26(b *OptBox337_26) {
+	n, err := fetch337_26()
+	_ = err
+	b.Set337_26(func() int { n = 0; return 0 }())
+	use337_26(n)
+}

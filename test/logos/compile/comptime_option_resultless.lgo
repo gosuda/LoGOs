@@ -1,0 +1,22 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type CC struct{ name string }
+
+func (c *CC) Shut() {}
+
+type Probe struct{ X int }
+
+func shutCC[T any](c *CC?) {
+	var v T
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	_ = v
+	c?.Shut()
+}
+
+var _ = shutCC[Probe](nil) // ERROR "\(no value\) used as value"

@@ -1,0 +1,112 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+// Non-bare receiver: an interface option boxes the value.
+type BoxCloser interface {
+	Close() error
+}
+
+type Box struct{ shut bool }
+
+func (b Box) Close() error {
+	closedLog = append(closedLog, "box")
+	return nil
+}
+
+func mkBoxP(present bool) Box? {
+	if !present {
+		return nil
+	}
+	return Box{}
+}
+
+var closedLog []string
+
+func useBox(c Box?) error {
+	defer c?.Close()?
+	return nil
+}
+
+// Non-bare receiver: a struct value option boxes the value.
+type Item struct{ n int }
+
+var touched []int
+
+func (v Item) Touch() error {
+	touched = append(touched, v.n)
+	return nil
+}
+
+func mkItemP(present bool) Item? {
+	if !present {
+		return Item{}
+	}
+	return Item{n: 3}
+}
+
+func useItem(c Item?) error {
+	defer c?.Touch()?
+	return nil
+}
+
+// Value receiver through a pointer option: the deferred call must see
+// the state at registration, not the mutated state at exit.
+type VS struct{ status string }
+
+var seenStatus string
+
+func (v VS) Close() error {
+	seenStatus = v.status
+	return nil
+}
+
+func mkVS() *VS? {
+	return &VS{status: "ready"}
+}
+
+func useValueRecv(v *VS?) error {
+	defer v?.Close()?
+	if v != nil {
+		p := (v ?? &VS{})
+		p.status = "failed"
+	}
+	return nil
+}
+
+func main() {
+	closedLog = nil
+	errb := useBox(mkBoxP(true))
+	check("box-err", errb == nil, errb, nil)
+	check("box-ran", len(closedLog) == 1, len(closedLog), 1)
+	check("box-absent-err", useBox(mkBoxP(false)) == nil, true, true)
+	touched = nil
+	erri := useItem(mkItemP(true))
+	check("item-err", erri == nil, erri, nil)
+	check("item-ran", len(touched) == 1 && touched[0] == 3, touched, []int{3})
+	check("item-absent-err", useItem(mkItemP(false)) == nil, true, true)
+	seenStatus = ""
+	errv := useValueRecv(mkVS())
+	check("value-err", errv == nil, errv, nil)
+	check("value-saw-registration", seenStatus == "ready", seenStatus, "ready")
+	check("value-absent-err", useValueRecv(nil) == nil, true, true)
+	if failed {
+		os.Exit(1)
+	}
+}

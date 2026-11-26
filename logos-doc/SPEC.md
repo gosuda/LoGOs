@@ -298,6 +298,7 @@ An `errdefer` MUST evaluate the index and function value even when cleanup is sk
 A deferred generic method MUST capture its receiver at the statement, including when some or all method type arguments are explicit. A value receiver MUST copy the selected value, including a promoted receiver reached through a pointer; a pointer receiver MUST retain the selected pointer or implicit address. [T-104.2]
 Explicit method type arguments MUST keep their bindings from that statement. Remaining type arguments MUST retain call-argument inference, including an inferred type that the caller cannot name. [T-104.2]
 A `?.` call with an absent receiver MUST skip the call and MUST NOT evaluate its arguments, as an ordinary call and in a `defer` or `go` statement [T-104.3][T-104.2].
+A `?.` call whose method's last result is `error` MUST bind that `error` unwrapped, nil when the receiver is absent; other results wrap as options. [T-104.3]
 A panic while evaluating return values MUST count as failure for `errdefer` [T-104.2].
 Deferred calls MUST run in LIFO order across `defer`, `defer?`, and `errdefer` [T-104.2].
 ```go
@@ -798,6 +799,7 @@ A nil test on a struct field MUST NOT narrow the field. [T-202]
 Code MUST copy the field to a local first. [T-202]
 
 For a callee declared in `.lgo`, reading a result before the `err == nil` proof MUST fail with `[correctness::result_before_error_check]`. [T-202]
+On continuation after a directly invoked function literal, the proof MUST describe the value after its registered cleanup has run in reverse registration order. A possible cleanup write MUST NOT discharge an unchecked value on a path that skips the write or its registration; `errdefer` MUST retain the path on which no error cleanup runs. Scope cleanup MUST affect the state at the exit of its block or switch/select clause, including outward control transfers. Deferred arguments MUST be checked when evaluated, before registration. Call operands MUST be checked once in evaluation order; each literal invocation MUST begin with fresh parameter and local state, and its continuation MUST retain only caller-visible keys and proofs. A direct `recover()` outside a deferred function MUST NOT create a continuation after a later panic. A deferred recovery followed by an unconditional panic also has no normal continuation; a conditional return before that panic retains the continuation. [T-202][T-104.7]
 
 A call that cannot return MUST discharge the `err == nil` proof. The calls that count are the builtin `panic` and a closed list of standard library calls: `os.Exit`; `log.Fatal`, `log.Fatalf`, `log.Fatalln`, `log.Panic`, `log.Panicf`, `log.Panicln`; the methods `Fatal`, `Fatalf`, `FailNow`, `Skip`, `Skipf`, `SkipNow` called through `*testing.T`, `*testing.B`, `*testing.F`, or `testing.TB`; and `runtime.Goexit`. A method with one of those names declared outside its listed package MUST NOT discharge the proof, and a user declared function MUST NOT be inferred as never returning. [T-202]
 
@@ -866,6 +868,7 @@ An ordinary method call on an unnarrowed `T?` MUST fail with `[correctness::nil_
 
 `?.` over a field whose type is a defined option type MUST keep that declared type when the selection runs through no constant view; through a constant view the flattened result is the option of the qualified element. [T-104.3]
 
+A `?.` method call MUST type its last `error` result unwrapped, so `v := x?.M()?` typechecks and `v, err := x?.M()` binds `err` as `error`. [T-104.3]
 See Sec 1.4 for `??` grouping, precedence, and single-value map reads.
 
 `m[k] ?? d` MUST type as `V`. [T-104.3]
@@ -1232,6 +1235,8 @@ An instance printed outside its defining package MUST spell each type declared i
 A comptime generic MAY name the unexported package-level identifiers of its own package. Each instance MUST check them in the scope of the defining package. An unexported identifier of another package MUST stay refused. [T-205]
 
 An instantiation of such a generic in another package MUST build and run. The instance is compiled for the defining package, so it reaches those identifiers; the instantiating package never resolves them. [T-205]
+
+An instantiated body MUST apply the section 1.4 `?.` error rule: a sole `error` result of a `?.` call stays unwrapped, nil when the receiver is absent. [T-205]
 
 A `const for` range MUST be `comptime.Fields[T]()` over a struct type. [T-205]
 

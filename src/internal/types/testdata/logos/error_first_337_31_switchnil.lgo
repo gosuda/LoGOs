@@ -1,0 +1,36 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_31() (int, error) { return 1, nil }
+func use337_31(n int) {}
+
+// The nil arm proves the error, so the read is valid.
+func switchNilProvesErr337_31() {
+	n, err := fetch337_31()
+	v := switch err { case nil => n; default => 0 }
+	_ = v
+}
+
+// The default arm leaves the error unproven, so the read must fail.
+func switchDefaultKeepsErr337_31() {
+	n, err := fetch337_31()
+	v := switch err {
+	case nil => 0
+	default => n /* ERROR "[correctness::result_before_error_check]" */
+	}
+	_ = v
+}
+
+// A case operand that rewrites the tag defeats a later nil match.
+func switchNilAfterTagRewrite337_31() {
+	n, err := fetch337_31()
+	v := switch err {
+	case func() error { err = nil; return err }() => 0
+	case nil => n /* ERROR "[correctness::result_before_error_check]" */
+	default => 0
+	}
+	_ = v
+}

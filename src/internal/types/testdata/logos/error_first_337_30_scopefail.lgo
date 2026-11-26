@@ -1,0 +1,29 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_30() (int, error) { return 1, nil }
+func use337_30(n int) {}
+func step337_30() error { return nil }
+
+// The failure edge runs the cleanup before the reset, so it must fail.
+func scopeCleanupOnFailureEdge337_30() error {
+	n, err := fetch337_30()
+	_ = err
+	scope defer func() { use337_30(n /* ERROR "[correctness::result_before_error_check]" */) }()
+	step337_30()?
+	n = 0
+	return nil
+}
+
+// A reset before the call proves the cleanup on every edge.
+func scopeCleanupAfterReset337_30() error {
+	n, err := fetch337_30()
+	_ = err
+	scope defer func() { use337_30(n) }()
+	n = 0
+	step337_30()?
+	return nil
+}

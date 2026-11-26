@@ -1,0 +1,38 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_40() (int, error) { return 1, nil }
+func use337_40(n int) {}
+
+// The recovery defer registers after the panic: the panic path cannot
+// resume, so the guaranteed reset proves the read.
+func unregisteredRecoverSkipped337_40(stop bool) {
+	n, err := fetch337_40()
+	_ = err
+	func() {
+		if stop {
+			panic("stop")
+		}
+		defer func() { _ = recover() }()
+		n = 0
+	}()
+	use337_40(n)
+}
+
+// A recovery defer registered before the panic resumes it: the reset is
+// conditional and the read must fail.
+func registeredRecoverJoins337_40(stop bool) {
+	n, err := fetch337_40()
+	_ = err
+	func() {
+		defer func() { _ = recover() }()
+		if stop {
+			panic("stop")
+		}
+		n = 0
+	}()
+	use337_40(n /* ERROR "[correctness::result_before_error_check]" */)
+}

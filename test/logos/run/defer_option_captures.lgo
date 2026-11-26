@@ -1,0 +1,127 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type AC struct {
+	closed  bool
+	lastArg int
+	calls   int
+}
+
+func (c *AC) Close() error {
+	c.closed = true
+	return nil
+}
+
+func (c *AC) Note(v int) error {
+	c.calls++
+	c.lastArg = v
+	c.closed = true
+	return nil
+}
+
+func (c *AC) Note2(a, b int) error {
+	c.calls++
+	c.lastArg = a*100 + b
+	c.closed = true
+	return nil
+}
+
+var ids int
+
+func nextID() int {
+	ids++
+	return ids
+}
+
+func mustPanic() int {
+	panic("must not evaluate")
+}
+
+func pair() (int, int) {
+	return 4, 2
+}
+
+// [8] Side-effecting arguments must not run when the receiver is absent.
+func useAbsentArg(m *AC?) error {
+	defer m?.Note(nextID())?
+	return nil
+}
+
+func useAbsentPanic(m *AC?) error {
+	defer m?.Note(mustPanic())?
+	return nil
+}
+func twice(v int) int {
+	return v * 2
+}
+
+// [10] Argument expressions keep their full span.
+func useSpanArg(m *AC?) error {
+	defer m?.Note(2 + 3)?
+	return nil
+}
+
+func useCallArg(m *AC?) error {
+	defer m?.Note(twice(21))?
+	return nil
+}
+
+
+func mkAC() *AC? {
+	return &AC{}
+}
+
+// [12] Multi-result arguments bind beside the receiver capture.
+func useMultiArg(m *AC?) error {
+	defer m?.Note2(pair())?
+	return nil
+}
+
+func main() {
+	ids = 0
+	erra := useAbsentArg(nil)
+	check("arg-absent-err", erra == nil, erra, nil)
+	check("arg-absent-skipped", ids == 0, ids, 0)
+	ids = 0
+	errap := useAbsentArg(mkAC())
+	check("arg-present-err", errap == nil, errap, nil)
+	check("arg-present-ran", ids == 1, ids, 1)
+	check("arg-absent-panic", useAbsentPanic(nil) == nil, true, true)
+	mb := mkAC()
+	errb := useSpanArg(mb)
+	check("span-err", errb == nil, errb, nil)
+	vb := mb ?? &AC{}
+	check("span-value", vb.lastArg == 5, vb.lastArg, 5)
+	mc := mkAC()
+	errc := useCallArg(mc)
+	check("callarg-err", errc == nil, errc, nil)
+	vc := mc ?? &AC{}
+	check("callarg-value", vc.lastArg == 42, vc.lastArg, 42)
+	md := mkAC()
+	errd := useMultiArg(md)
+	check("multi-err", errd == nil, errd, nil)
+	vd := md ?? &AC{}
+	check("multi-value", vd.lastArg == 402, vd.lastArg, 402)
+	errda := useMultiArg(nil)
+	check("multi-absent-err", errda == nil, errda, nil)
+	if failed {
+		os.Exit(1)
+	}
+}
