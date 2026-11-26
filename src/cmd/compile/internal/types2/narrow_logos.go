@@ -1070,9 +1070,13 @@ func (s *logosEFState) prove(errV *Var) *logosEFState {
 // dropMayFor stops marking the results guarded by errKey as may-reach:
 // the nil test proved the guarding call succeeded on this path. It also
 // discharges seeded entries that every live store pairs with errKey, so a
-// nil check inside the deferred literal can prove its own read. Results
-// that rewritten wrote since the guard was read keep their marks.
-func (s *logosEFState) dropMayFor(errKey logosEFKey, rewritten *logosEFEffects) *logosEFState {
+// nil check inside the deferred literal can prove its own read. A store
+// that only runs after the literal registers leaves no flow pairing, so a
+// unanimous inventory pairing with no other writer proves the same way,
+// while any plain write or differently-paired store keeps the rejection.
+// Results that rewritten wrote since the guard was read keep their marks.
+func (p *logosEFPass) dropMayFor(st *logosEFState, errKey logosEFKey, rewritten *logosEFEffects) *logosEFState {
+	s := st
 	if (s.may == nil || len(s.mayErr) == 0) && len(s.m) == 0 {
 		return s
 	}
@@ -1088,7 +1092,14 @@ func (s *logosEFState) dropMayFor(errKey logosEFKey, rewritten *logosEFEffects) 
 	}
 	var mout map[logosEFKey]logosEFEntry
 	for k, e := range s.m {
-		if e.proven || e.err != nil || e.errKey != errKey || s.mayErr[k] != errKey || (rewritten != nil && rewritten.writes(k)) {
+		if e.proven || e.err != nil || e.errKey != errKey || errKey == (logosEFKey{}) {
+			continue
+		}
+		if s.mayErr[k] == errKey {
+			if rewritten != nil && rewritten.writes(k) {
+				continue
+			}
+		} else if s.mayErr[k] != (logosEFKey{}) || (rewritten != nil && rewritten.writes(k)) || !p.futurePairClean(k, errKey) {
 			continue
 		}
 		if mout == nil {
@@ -1112,6 +1123,41 @@ func (s *logosEFState) dropMayFor(errKey logosEFKey, rewritten *logosEFEffects) 
 		}
 	}
 	return &logosEFState{m: m, may: may, mayErr: s.mayErr}
+}
+
+// futurePairClean reports whether every recorded write of the value k and
+// of its paired error errKey belongs to a call store pairing k with
+// errKey. The inventory pairing a seed carries is then the only one any
+// later statement can establish: a plain write of either side, or a store
+// with a different error, fails the counts and keeps the read unproven,
+// so an intervening overwrite still invalidates the proof.
+func (p *logosEFPass) futurePairClean(k, errKey logosEFKey) bool {
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	if len(p.assigns[k]) != len(p.storePos[k]) {
+		return false
+	}
+	paired := 0
+	for _, ek := range p.storeErrKey[k] {
+		if ek == errKey {
+			paired++
+		}
+	}
+	if len(p.assigns[errKey]) != paired {
+		return false
+	}
+	for k2, eks := range p.storeErrKey {
+		if k2 == k {
+			continue
+		}
+		for _, ek := range eks {
+			if ek == errKey {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (s *logosEFState) detach(errV *Var) *logosEFState {
@@ -2589,9 +2635,9 @@ func (p *logosEFPass) cond(e syntax.Expr, st *logosEFState) (t, f *logosEFState)
 		// may-reach mark, so a later deferred read stays accepted.
 		if fk, ok := p.nilTestFieldKey(op); ok {
 			if isNeq {
-				return st, st.dropMayFor(fk, nil)
+				return st, p.dropMayFor(st, fk, nil)
 			}
-			return st.dropMayFor(fk, nil), st
+			return p.dropMayFor(st, fk, nil), st
 		}
 		return st, st
 	}
@@ -3435,7 +3481,7 @@ func (p *logosEFPass) caseCond(tag syntax.Expr, tagErr *Var, tagKey logosEFKey, 
 	case tagErr != nil:
 		return miss.prove(tagErr), miss
 	case tagKey != (logosEFKey{}):
-		return miss.dropMayFor(tagKey, written), miss
+		return p.dropMayFor(miss, tagKey, written), miss
 	}
 	miss = p.expr(e, miss)
 	return miss, miss
