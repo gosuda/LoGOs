@@ -1,0 +1,37 @@
+// run
+
+package jsonlonesurrogate
+
+import (
+	"strings"
+	"testing"
+)
+
+type surrogateHolder struct {
+	S string `json:"s"`
+}
+type surrogateMapHolder struct {
+	M map[string]string `json:"m"`
+}
+
+func isLoneSurrogateError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "lone surrogate")
+}
+
+func TestTypedStringFieldRejectsLoneSurrogate(t *testing.T) {
+	if _, err := (surrogateHolder{S: "\xed\xa0\x80"}).MarshalJSON(); !isLoneSurrogateError(err) {
+		t.Fatalf("typed string field: error = %v, want lone-surrogate rejection", err)
+	}
+	if _, err := (surrogateHolder{S: "plain"}).MarshalJSON(); err != nil {
+		t.Fatalf("clean string field: error = %v", err)
+	}
+}
+
+func TestMapKeyRejectsLoneSurrogate(t *testing.T) {
+	if _, err := (surrogateMapHolder{M: map[string]string{"\xed\xa0\x80": "v"}}).MarshalJSON(); !isLoneSurrogateError(err) {
+		t.Fatalf("surrogate map key: error = %v, want lone-surrogate rejection", err)
+	}
+	if _, err := (surrogateMapHolder{M: map[string]string{"k": "\xed\xa0\x80"}}).MarshalJSON(); !isLoneSurrogateError(err) {
+		t.Fatalf("surrogate map value: error = %v, want lone-surrogate rejection", err)
+	}
+}
