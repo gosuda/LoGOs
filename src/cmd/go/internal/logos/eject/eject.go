@@ -163,6 +163,13 @@ type ejectPlan struct {
 	// they stay out of logos and deps; they still need compiler lowering
 	// into staging, which phaseOneRoots and makeEjectStagingDirs arrange.
 	gorootLogos []*load.Package
+	// unloadable holds import paths of GOROOT logos/* packages the host
+	// load cannot resolve (no buildable source for this target, for
+	// example a platform-only package reached through an inactive Go
+	// import). They stay out of provenance, but their host-inactive
+	// sources still need helper lowering under a selecting context, so
+	// the variant inventory walks them.
+	unloadable []string
 }
 
 // testBuild holds the test variant of one package for emission of its

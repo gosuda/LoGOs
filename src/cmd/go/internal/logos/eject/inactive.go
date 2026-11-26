@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"cmd/go/internal/base"
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
@@ -254,6 +255,15 @@ func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, op
 			}
 		}
 		if len(newPaths) == 0 {
+			// A discovered package with no buildable source for the host
+			// target stays out of provenance, but the variant inventory
+			// still needs its host-inactive sources: a selecting-context
+			// helper lowers them into staging for the support copy.
+			// Without this, the copy reaches the package through the
+			// inactive import edge and aborts on the missing staged output.
+			if len(unloadable) > 0 {
+				plan.unloadable = slices.Sorted(maps.Keys(unloadable))
+			}
 			return
 		}
 		slices.Sort(newPaths)
@@ -345,6 +355,22 @@ func collectInactiveGorootLogosFiles(plan *ejectPlan, staging string, active map
 			if _, ok := dirs[p.Dir]; !ok {
 				dirs[p.Dir] = p
 			}
+		}
+	}
+	// Packages the host load cannot resolve still need helper lowering
+	// for the support copy, so seed the walk with census records for
+	// them. Their sources are host-inactive by definition (an active
+	// source would have loaded), and the walk below inventories exactly
+	// those for a selecting-context helper.
+	for _, path := range plan.unloadable {
+		dir := filepath.Join(cfg.GOROOT, "src", filepath.FromSlash(path))
+		if _, ok := dirs[dir]; ok {
+			continue
+		}
+		p := &load.Package{PackagePublic: load.PackagePublic{Dir: dir, ImportPath: path}}
+		dirs[dir] = p
+		if _, ok := loaded[dir]; !ok {
+			loaded[dir] = p
 		}
 	}
 	var walk func(string) error
