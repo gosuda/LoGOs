@@ -1,0 +1,81 @@
+// run
+
+package main
+
+import "fmt"
+
+type Resource struct {
+	state int
+	Fn func(int) error
+}
+
+func (r Resource) Finish(value int) error {
+	fmt.Println("method", r.state, value)
+	return nil
+}
+
+func (r *Resource) Pointer(value int) error {
+	fmt.Println("pointer", r.state, value)
+	return nil
+}
+
+type Finisher interface {
+	Finish(int) error
+}
+
+func valueMethod() error {
+	r := &Resource{state: 1}
+	var optional *Resource? = r
+	defer optional?.Finish(2 + 3)?
+	r.state = 2
+	return nil
+}
+
+func pointerMethod() error {
+	r := &Resource{state: 1}
+	var optional *Resource? = r
+	defer optional?.Pointer(2 + 3)?
+	r.state = 2
+	return nil
+}
+
+func boxed(present bool) error {
+	var optional Finisher?
+	if present {
+		optional = Finisher(Resource{state: 3})
+	}
+	defer optional?.Finish(2 + 3)?
+	return nil
+}
+
+func functionField() error {
+	r := &Resource{Fn: func(value int) error {
+		fmt.Println("original", value)
+		return nil
+	}}
+	var optional *Resource? = r
+	defer optional?.Fn(2 + 3)?
+	r.Fn = func(value int) error {
+		fmt.Println("replacement", value)
+		return nil
+	}
+	return nil
+}
+
+func main() {
+	if err := valueMethod(); err != nil {
+		panic(err)
+	}
+	if err := pointerMethod(); err != nil {
+		panic(err)
+	}
+	if err := boxed(true); err != nil {
+		panic(err)
+	}
+	if err := boxed(false); err != nil {
+		panic(err)
+	}
+	if err := functionField(); err != nil {
+		panic(err)
+	}
+}

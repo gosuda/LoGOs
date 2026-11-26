@@ -1,0 +1,6 @@
+defer present RABC
+defer absent RB
+errdefer success RAB
+errdefer failure RABC
+errdefer absent success RB
+errdefer absent failure RB

@@ -1,0 +1,64 @@
+// run
+
+package main
+
+import "fmt"
+
+var events string
+var bodyFailure = fmt.Errorf("body")
+
+type Resource struct{}
+
+func (r *Resource) Finish(number int, label string) error {
+	if number != 7 || label != "captured" {
+		panic("lost multi-result arguments")
+	}
+	events += "C"
+	return nil
+}
+
+func receiver(present bool) *Resource? {
+	events += "R"
+	if !present {
+		return nil
+	}
+	return &Resource{}
+}
+
+func pair() (int, string) {
+	events += "A"
+	return 7, "captured"
+}
+
+func deferred(present bool) error {
+	defer receiver(present)?.Finish(pair())?
+	events += "B"
+	return nil
+}
+
+func errDeferred(present, fail bool) error {
+	errdefer receiver(present)?.Finish(pair())?
+	events += "B"
+	if fail {
+		return bodyFailure
+	}
+	return nil
+}
+
+func check(name string, call func() error, want string, wantError bool) {
+	events = ""
+	err := call()
+	if (err == bodyFailure) != wantError || (err != nil && err != bodyFailure) || events != want {
+		panic(fmt.Sprintf("%s: events=%s error=%v", name, events, err))
+	}
+	fmt.Println(name, events)
+}
+
+func main() {
+	check("defer present", func() error { return deferred(true) }, "RABC", false)
+	check("defer absent", func() error { return deferred(false) }, "RB", false)
+	check("errdefer success", func() error { return errDeferred(true, false) }, "RAB", false)
+	check("errdefer failure", func() error { return errDeferred(true, true) }, "RABC", true)
+	check("errdefer absent success", func() error { return errDeferred(false, false) }, "RB", false)
+	check("errdefer absent failure", func() error { return errDeferred(false, true) }, "RB", true)
+}

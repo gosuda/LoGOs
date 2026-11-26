@@ -1,0 +1,61 @@
+# Exercise bound callees, boxed receivers, resultless instances, and tuple captures.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+exists $UPROOT1272/bin/go$GOEXE
+exec $UPROOT1272/bin/go$GOEXE version
+stdout '^go version go1\.27\.2 '
+
+cp $GOROOT/test/logos/run/option_defer_binding_review335.lgo option_defer_binding_review335/main.lgo
+cp $GOROOT/test/logos/run/option_defer_binding_review335.out option_defer_binding_review335/expected.txt
+cd option_defer_binding_review335
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+cp $GOROOT/test/logos/run/comptime_option_resultless_review335.lgo comptime_option_resultless_review335/main.lgo
+cp $GOROOT/test/logos/run/comptime_option_resultless_review335.out comptime_option_resultless_review335/expected.txt
+cd comptime_option_resultless_review335
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+cp $GOROOT/test/logos/run/option_defer_multi_review335.lgo option_defer_multi_review335/main.lgo
+cp $GOROOT/test/logos/run/option_defer_multi_review335.out option_defer_multi_review335/expected.txt
+cd option_defer_multi_review335
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+-- option_defer_binding_review335/go.mod --
+module example.com/option_defer_binding_review335
+
+go 1.27
+
+-- comptime_option_resultless_review335/go.mod --
+module example.com/comptime_option_resultless_review335
+
+go 1.27
+
+-- option_defer_multi_review335/go.mod --
+module example.com/option_defer_multi_review335
+
+go 1.27
+
