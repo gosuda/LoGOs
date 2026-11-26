@@ -1,0 +1,41 @@
+# A source-owned jsontext import must survive splitting generated streaming
+# methods into their own companion. Native and upstream results must match.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOEXPERIMENT=jsonv2
+env CGO_ENABLED=0
+
+cd m
+logos run .
+stdout '^\{"Schema":\{"ok":true\}\}$'
+cp stdout $WORK/native.txt
+logos eject -o out
+cd out
+exists $UPROOT1272/bin/go$GOEXE
+exec $UPROOT1272/bin/go$GOEXE version
+stdout '^go version go1\.27\.2 '
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout $WORK/native.txt
+
+-- m/go.mod --
+module example.com/jsontextstruct
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+    jt "encoding/json/jsontext"
+    "encoding/json/v2"
+    "fmt"
+)
+
+type Payload struct { Schema jt.Value }
+
+func main() {
+    data, err := json.Marshal(Payload{Schema: jt.Value(`{"ok":true}`)})
+    if err != nil { panic(err) }
+    fmt.Println(string(data))
+}

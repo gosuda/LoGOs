@@ -1,0 +1,66 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+env GOEXPERIMENT=jsonv2
+
+cd m
+
+# A basename alone is not a platform suffix. The unaliased versioned
+# import declares rand, not v2, and must survive in the receiver file.
+logos eject -o out
+exists out/linux.go
+grep '"math/rand/v2"' out/linux.go
+exists out/linux_jsonv2.go
+! exists out/_jsonv2_linux.go
+cp stream_check.txt out/stream_check_test.go
+
+cd out
+go run .
+stdout '^roll 0$'
+go test .
+go vet .
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+
+-- m/go.mod --
+module example.com/importname
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("roll", Roll()) }
+
+-- m/linux.lgo --
+package main
+
+import "math/rand/v2"
+
+type Data struct {
+	Title string `json:"title"`
+}
+
+func Roll() int { return rand.IntN(1) }
+
+-- m/stream_check.txt --
+package main
+
+import (
+	"bytes"
+	"encoding/json/jsontext"
+	"strings"
+	"testing"
+)
+
+func TestStreamingMethod(t *testing.T) {
+	var buf bytes.Buffer
+	if err := (Data{Title: "hello"}).MarshalJSONTo(jsontext.NewEncoder(&buf)); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != `{"title":"hello"}` {
+		t.Fatalf("stream = %q", got)
+	}
+}
