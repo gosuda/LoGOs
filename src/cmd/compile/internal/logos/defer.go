@@ -504,12 +504,17 @@ func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGo
 	xStart := fl.off(w.rpos)
 	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
 	recvText := fl.lazyText(span{start: xStart, end: xEnd})
-	var cond syntax.Expr
-	var condT string
+	recvName := nameOf(pos, w.lv)
+	var cond, calleeN syntax.Expr
+	var condT, accSuffix string
 	if types2.LogosOptionIsBare(w.ox.Elem) {
 		cond, condT = notNil(pos, nameOf(pos, w.lv)), w.lv+" != nil"
+		calleeN, accSuffix = fl.selectAccessBare(recvName, w.osel)
 	} else {
+		// A non-bare option lowers to rt.Option[T]; the method lives
+		// on the boxed value, not on the option struct.
 		cond, condT = selOf(pos, nameOf(pos, w.lv), "Present"), w.lv+".Present"
+		calleeN, accSuffix = fl.selectAccessPresent(recvName, w.osel)
 	}
 	selEnd := fl.off(w.osel.Sel.Pos()) + len(method)
 	plan := &callPlan{dots: call.HasDots, end: spanEnd, isMethod: true, method: method}
@@ -530,8 +535,10 @@ func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGo
 		plan.args = append(plan.args, arg)
 	}
 	tw := &twin{}
-	funN, argN, _, _ := fc.planUses(plan, nil)
-	funT, argT, _, _ := fc.planUses(plan, tw)
+	_, argN, _, _ := fc.planUses(plan, nil)
+	_, argT, _, _ := fc.planUses(plan, tw)
+	funN := calleeN
+	funT := tw.mark(pos, cat(gen(w.lv), gen(accSuffix)))
 	inner := "_logos_e"
 	callN := callOf(cpos, funN, argN)
 	callN.HasDots = call.HasDots
