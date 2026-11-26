@@ -409,12 +409,21 @@ func logosScopeWithin(s, outer *Scope) bool {
 }
 
 func (check *Checker) logosConstForCharge(s *syntax.ConstForStmt, n int) bool {
-	if check.logosConstForBudget > 8*check.logosNodeLimit() {
-		return false
+	if len(check.logosCtChain) == 0 {
+		if check.logosConstForBudget > 8*check.logosNodeLimit() {
+			return false
+		}
+		check.logosConstForBudget += n
+		if check.logosConstForBudget > 8*check.logosNodeLimit() {
+			check.errorf(s.Pos(), InvalidRangeExpr, "[comptime::node_limit] const for has %d iterations above the selected limit %d", check.logosConstForBudget, check.logosNodeLimit())
+			return false
+		}
+		return true
 	}
-	check.logosConstForBudget += n
-	if check.logosConstForBudget > 8*check.logosNodeLimit() {
-		check.errorf(s.Pos(), InvalidRangeExpr, "[comptime::node_limit] const for has %d iterations above the selected limit %d", check.logosConstForBudget, check.logosNodeLimit())
+	top := len(check.logosCtChain) - 1
+	check.logosCtChain[top] += n
+	if sum := logosCtChainSum(check.logosCtChain); sum > check.logosNodeLimit() {
+		check.errorf(s.Pos(), InvalidRangeExpr, "[comptime::node_limit] comptime instantiation chain has %d nodes above the limit %d", sum, check.logosNodeLimit())
 		return false
 	}
 	return true

@@ -189,7 +189,7 @@ In a LoGOs package, `forbid` MUST ignore `//logos:allow(<rule>)` [T-102].
 In a LoGOs package, a `//logos:allow` directive on a `forbid` rule MUST itself be an error with `correctness::allow_forbidden_rule` [T-102].
 The default group severities MUST be `correctness` forbid, `concurrency` forbid, `slop` deny, `complexity` deny, `perf` warn, `style` warn, `suspicious` warn, `portability` warn, `pedantic` allow [T-102].
 The `logos.toml [lints]` table MUST control group severities [T-102].
-Configuration MAY raise `max_comptime_ast_nodes` and `max_ctfe_steps` above their defaults, which Sec 8.5 lists [T-102][T-Sec8].
+Configuration MAY raise `max_ctfe_steps` above its default, which Sec 8.5 lists [T-102][T-Sec8].
 `logos build` and `logos lint` MUST accept `--pedantic` with default false [T-102].
 `--pedantic` and `--pedantic=true` MUST NOT lower a stricter `logos.toml` severity [T-102]. `--pedantic` MUST raise the pedantic group from `allow` to `warn` and MUST keep a stricter configured severity, and `--pedantic=false` MUST set the pedantic group to `allow` [T-102].
 A `logos.toml` value that lowers a `forbid` group MUST fail with `configuration::forbid_lowered` [T-102].
@@ -1296,9 +1296,9 @@ A call of a comptime generic without explicit type arguments inside an expansion
 
 An exported forwarding function MUST fail with `[comptime::exported_forwarder]` at its first instantiation that forwards a type parameter, because a caller in another package cannot instantiate it. The message MUST name the function and the type parameter. The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. `logos eject` MUST refuse such a package with the same diagnostic. [T-205]
 
-A method with type parameters MAY be a comptime generic. Each instance is keyed by the receiver type arguments followed by the method type arguments, and it is checked in the defining package. Only a direct call with concrete type arguments instantiates it. [T-205]
+A method with type parameters MAY be a comptime generic. Each instance is keyed by the receiver type arguments followed by the method type arguments, and it is checked in the defining package. Only a direct call with concrete type arguments instantiates it; a method value or method expression of a comptime generic method MUST fail with `[comptime::method_value]`, and so MUST a conversion or type assertion that would place a value whose type provides such a method behind an interface requiring it. An instance of a method defined in another package is checked from that package's exported template. [T-205]
 
-An expansion above the selected `max_comptime_ast_nodes` limit with default 4,096 nodes MUST fail with `[comptime::node_limit]`. [T-205][T-102]
+Each comptime instantiation carries the node budget of its whole instance chain: the body nodes of every active instance plus the const for iterations checked under them count together against the selected node limit with default 4,096 nodes. An instance chain above the limit MUST fail with `[comptime::node_limit]`. Every comptime error MUST carry one `instantiated here` note per active instance, outermost first. [T-205][T-102]
 
 A stack trace MUST print the base name without the instance suffix `.logosct.<id>`. [T-205]
 
@@ -2026,8 +2026,8 @@ deny fails the build unless a logos allow directive for the rule precedes the st
 warn prints a diagnostic. [T-102]
 allow stays silent. [T-102]
 `--pedantic` and `--pedantic=true` override the pedantic key for logos build and logos lint, but they MUST NOT lower a stricter configured severity. [T-Sec8]
-The lints.thresholds table of `logos.toml` holds six integer keys. [T-Sec8]
-Defaults MUST be 3 for max_nesting_depth, 15 for max_cognitive_complexity, 60 for max_function_lines, 4 for max_function_params, 4096 for max_comptime_ast_nodes, and 100000 for max_ctfe_steps. [T-Sec8][T-102]
+The lints.thresholds table of `logos.toml` holds five integer keys. [T-Sec8]
+Defaults MUST be 3 for max_nesting_depth, 15 for max_cognitive_complexity, 60 for max_function_lines, 4 for max_function_params, and 100000 for max_ctfe_steps. [T-Sec8][T-102]
 Third-party modules of either kind get no code lints. [T-102][R-U1]
 
 ## 9. End-to-end example

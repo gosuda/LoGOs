@@ -183,9 +183,10 @@ type Config struct {
 	// MAY raise it through max_ctfe_steps.
 	LogosCTFEMaxSteps int
 
-	// LogosComptimeNodeLimit bounds const-for checking and expansion.
-	// Zero selects 4096 nodes; configuration MAY raise it through
-	// max_comptime_ast_nodes.
+	// LogosComptimeNodeLimit bounds one comptime instance chain: the
+	// body nodes of every active instance plus the const-for iterations
+	// checked under them. Zero selects 4096 nodes; the selected limit
+	// comes from -logos.comptime_nodes.
 	LogosComptimeNodeLimit int
 
 	// LogosCtEject analyzes forwarding functions per instantiation like
@@ -388,6 +389,7 @@ type Info struct {
 	LogosCtImport              func(*Func) (LogosCtGeneric, bool)
 	LogosCtGraph               map[string][]string     // semantic instance ID to forwarding targets in checked edge order
 	LogosCtSiteKeys            map[*syntax.Name]string // exact semantic instance requested at a checked use
+	LogosCtDirectCalls         map[*syntax.Name]bool   // selectors that directly call a comptime generic method; exempt from method-value rejection
 	LogosCtExportNamedDefaults LogosCtNamedDefaults
 	LogosCtImportNamedDefaults func(*Named) LogosCtNamedTypeDefaults
 	LogosCtExportConstMaps     map[string]LogosCtConstMapExport

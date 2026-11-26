@@ -8,7 +8,7 @@ cd wnest
 stderr 'comptime::node_limit'
 cd ..
 
-# SPEC 2.5 [T-205]: an expansion above max_comptime_ast_nodes fails with
+# SPEC 2.5 [T-205]: an expansion above the selected node limit fails with
 # [comptime::node_limit]. The trip is incremental: six fields nested
 # twelve deep would expand to 6^12 copies, so a build that charges the
 # budget only after the whole expansion cannot finish. The helper runs
