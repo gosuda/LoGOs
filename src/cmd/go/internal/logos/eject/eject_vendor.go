@@ -193,24 +193,56 @@ func isLoweredSupportFile(name string) bool {
 	return isSupportLogosFile(name)
 }
 
-// isEjectedSelected reports whether the original LoGOs source constraint
-// holds for the ejected form (logosejected=true, logosconc unset, every
-// other tag assumed set). Untagged sources select it; !logosejected twins
-// do not; platform tags keep selecting it for the multi-platform copy.
+// isEjectedSelected reports whether some assignment with logosejected=true
+// and logosconc=false satisfies the original constraint. Untagged sources
+// select it; !logosejected twins do not; platform and negated custom tags
+// (windows, !pr270variant, !ejecttestjsonoff) stay satisfiable for the
+// multi-platform copy. Brute-forces the remaining tags; too many tags
+// conservatively select the file.
 func ejectedSelected(expr constraint.Expr) bool {
 	if expr == nil {
 		return true
 	}
-	return expr.Eval(func(tag string) bool {
-		switch tag {
-		case "logosejected":
-			return true
-		case "logosconc":
-			return false
-		default:
+	var tags []string
+	seen := map[string]bool{}
+	var walk func(x constraint.Expr)
+	walk = func(x constraint.Expr) {
+		switch e := x.(type) {
+		case *constraint.TagExpr:
+			if !seen[e.Tag] {
+				seen[e.Tag] = true
+				tags = append(tags, e.Tag)
+			}
+		case *constraint.NotExpr:
+			walk(e.X)
+		case *constraint.AndExpr:
+			walk(e.X)
+			walk(e.Y)
+		case *constraint.OrExpr:
+			walk(e.X)
+			walk(e.Y)
+		}
+	}
+	walk(expr)
+	var free []string
+	for _, t := range tags {
+		if t != "logosejected" && t != "logosconc" {
+			free = append(free, t)
+		}
+	}
+	if len(free) > 10 {
+		return true
+	}
+	for mask := 0; mask < 1<<len(free); mask++ {
+		assign := map[string]bool{"logosejected": true, "logosconc": false}
+		for i, t := range free {
+			assign[t] = mask&(1<<i) != 0
+		}
+		if expr.Eval(func(tag string) bool { return assign[tag] }) {
 			return true
 		}
-	})
+	}
+	return false
 }
 
 // isEjectedSourceSelected reads the original LoGOs source and reports
