@@ -1,0 +1,58 @@
+name: Reproduce dead diagnostic export dependency
+
+on:
+  push:
+    branches: [ci/verify-silent-error-334-red-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  frozen_red:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 25
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build unchanged production
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Reproduce the dead private message in a copied instance
+        run: |
+          if go test -v -race -count=1 cmd/go -run '^TestScript$/logos_comptime_silent_error_eject$' > review-evidence/private-message-red.log 2>&1; then
+            cat review-evidence/private-message-red.log
+            exit 1
+          fi
+          cat review-evidence/private-message-red.log
+          grep -F 'comptime::unexported_in_exported' review-evidence/private-message-red.log
+          grep -F 'unexported unsupported' review-evidence/private-message-red.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: silent-error-red-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7

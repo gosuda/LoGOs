@@ -1,0 +1,88 @@
+# A silenced message must not introduce a private owner dependency into
+# an instance printed in the caller. Its local-only uses must survive.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^1 2 3 4$'
+logos eject -o out
+! grep 'unsupported' out/main.go
+cd out
+exists $UPROOT1272/bin/go$GOEXE
+exec $UPROOT1272/bin/go$GOEXE version
+stdout '^go version go1\.27\.2 '
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+stdout '^1 2 3 4$'
+
+-- m/go.mod --
+module example.com/silenterror
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"example.com/silenterror/owner"
+	"fmt"
+)
+
+type localInt int
+
+func main() {
+	fmt.Println(owner.Pick[localInt](), owner.Deferred[localInt](), owner.Local[localInt](), owner.Capture[localInt]())
+}
+
+-- m/owner/pick.lgo --
+package owner
+
+import (
+	"comptime"
+	"unsafe"
+)
+
+const unsupported = "unsupported"
+
+func Pick[T any]() int {
+	const switch T {
+	case ~int:
+		return 1
+	}
+	comptime.Error(unsupported)
+	return 0
+}
+
+func Deferred[T any]() int {
+	const switch T {
+	case ~int:
+		return 2
+	}
+	defer comptime.Error(unsupported)
+	return 0
+}
+
+func Local[T any]() int {
+	var marker byte
+	const switch T {
+	case ~int:
+		return 3
+	}
+	comptime.Error(unsupported + string('0' + unsafe.Sizeof(marker)))
+	return 0
+}
+
+func Capture[T any]() int {
+	var outer byte
+	const switch T {
+	case ~int:
+		return 4
+	}
+	comptime.Error(unsupported + string('0' + unsafe.Sizeof(func() {
+		var inner byte
+		_ = inner
+		_ = outer
+	})))
+	return 0
+}
