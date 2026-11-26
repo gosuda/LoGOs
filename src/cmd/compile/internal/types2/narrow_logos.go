@@ -2632,6 +2632,25 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 				st = p.inlineFuncLit(lit, st)
 				return false
 			}
+			// An optional callee evaluates the receiver once, then runs the
+			// arguments and the call only when present. Join the path that
+			// skips them with the path that runs them, so a store in an
+			// argument cannot hide an unchecked result on the absent path.
+			if optionalChainCallee(x.Fun) {
+				st = p.expr(x.Fun, st)
+				if st == nil {
+					return false
+				}
+				absent := st
+				for _, arg := range x.ArgList {
+					st = p.expr(arg, st)
+					if st == nil {
+						return false
+					}
+				}
+				st = logosEFJoin(absent, st)
+				return false
+			}
 		case *syntax.CoalesceExpr:
 			// The fallback runs only when the option is absent: join the
 			// path that skips it with the path that runs it, so a store
@@ -3278,6 +3297,32 @@ func (p *logosEFPass) deferredFunBody(outer *logosEFEffects, lit *syntax.FuncLit
 	// state describes them, so drop the precise one.
 	outer.deferred.exit = nil
 	return st
+}
+
+// optionalChainCallee reports whether fun calls through an absent-checked
+// receiver: a `?.` optional selection, or a TryExpr marker whose operand
+// is a plain optional value rather than an error-propagating call. A call
+// result under TryExpr exits the function on failure instead of skipping
+// the call, so only plain values mark an absent path that continues.
+func optionalChainCallee(fun syntax.Expr) bool {
+	found := false
+	syntax.Inspect(fun, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		if _, ok := n.(*syntax.OptSelectExpr); ok {
+			found = true
+			return false
+		}
+		if t, ok := n.(*syntax.TryExpr); ok {
+			if _, isCall := syntax.Unparen(t.X).(*syntax.CallExpr); !isCall {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // unwrapDeferredCall separates the immediately evaluated callee and
