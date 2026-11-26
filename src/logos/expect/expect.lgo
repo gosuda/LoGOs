@@ -120,26 +120,27 @@ func Diff(want string, got string) string {
 	for tail < len(w)-head && tail < len(g)-head && w[len(w)-1-tail] == g[len(g)-1-tail] {
 		tail++
 	}
-	out := "--- want\n+++ got\n"
+	var out strings.Builder
+	out.WriteString("--- want\n+++ got\n")
 	start := head - 2
 	if start < 0 {
 		start = 0
 	}
 	for i := start; i < head; i++ {
-		out += "  " + w[i] + "\n"
+		out.WriteString("  " + w[i] + "\n")
 	}
 	for i := head; i < len(w)-tail; i++ {
-		out += "- " + w[i] + "\n"
+		out.WriteString("- " + w[i] + "\n")
 	}
 	for i := head; i < len(g)-tail; i++ {
-		out += "+ " + g[i] + "\n"
+		out.WriteString("+ " + g[i] + "\n")
 	}
 	end := len(w) - tail + 2
 	if end > len(w) {
 		end = len(w)
 	}
 	for i := len(w) - tail; i < end; i++ {
-		out += "  " + w[i] + "\n"
+		out.WriteString("  " + w[i] + "\n")
 	}
-	return out
+	return out.String()
 }
