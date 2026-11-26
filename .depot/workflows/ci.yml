@@ -11,6 +11,12 @@ on:
       suites:
         description: "core ssa gc gates compiler cgo dogfood, or all"
         default: all
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   route:
