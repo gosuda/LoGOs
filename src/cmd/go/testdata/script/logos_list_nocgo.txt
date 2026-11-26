@@ -5,10 +5,13 @@ env GOTOOLCHAIN=local
 env CGO_ENABLED=0
 env CC=review-missing-c-compiler
 env PATH=$WORK/no-compiler
-
 cd plain
 go list -export -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}} export={{if .Export}}yes{{else}}no{{end}}{{end}}' .
 stdout '^example.com/plain export=yes$'
+# Drop the build cache before the -compiled check: checkCacheForBuild can
+# otherwise serve the compiled file list cached by the -export line above,
+# leaving the compiler-free cache-miss path untested.
+go clean -cache
 go list -e -compiled -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}}{{end}}' .
 stdout '^example.com/plain$'
 go list -f '{{if .Error}}{{.Error.Err}}{{else}}stale={{.Stale}}{{end}}' .
@@ -19,6 +22,9 @@ stdout '^fmt$'
 cd ../logos
 logos list -export -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}} export={{if .Export}}yes{{else}}no{{end}}{{end}}' .
 stdout '^example.com/logos export=yes$'
+# Same cache hazard as the plain section: evict before the -compiled
+# check so the compiler-free cache-miss path is exercised.
+logos clean -cache
 logos list -e -compiled -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}}{{end}}' .
 stdout '^example.com/logos$'
 logos list -f '{{if .Error}}{{.Error.Err}}{{else}}stale={{.Stale}}{{end}}' .
