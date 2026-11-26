@@ -1,0 +1,29 @@
+// run
+
+package main
+
+import "fmt"
+
+func classify[T, U any](outer T, inner U) string {
+	_, _ = outer, inner
+	result := ""
+	const switch T {
+	case bool:
+		const switch U {
+		case int, string:
+			result += "list"
+		default:
+			result += "default"
+		}
+	default:
+		result += "outer"
+	}
+	return result
+}
+
+func main() {
+	fmt.Println(classify(true, 1))
+	fmt.Println(classify(false, "value"))
+	fmt.Println(classify(true, 1.5))
+	fmt.Println(classify("value", 1))
+}

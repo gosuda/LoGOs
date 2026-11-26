@@ -343,6 +343,9 @@ func (c *cswLower) lowerRuntimeHost() []syntax.Stmt {
 			continue
 		}
 		for i := range syn.Elems {
+			if !c.info.LogosConstCases[types2.LogosConstCaseKey{Case: syn, Elem: i}].Live {
+				continue
+			}
 			arms = append(arms, c.lowerHostArm(syn, i))
 		}
 	}
@@ -557,20 +560,21 @@ func reparseCswBody(text string, pos syntax.Pos) (*syntax.BlockStmt, *syntax.Pos
 func (fl *fileLower) composeRegionNow(r *cfRegion) otext {
 	inner := make([]splice, 0, len(r.splices)+4)
 	inner = append(inner, r.splices...)
-	var kept []splice
+	var nested, kept []splice
 	for _, sp := range fl.splices {
 		if sp.host != nil && sp.start >= r.start && sp.end <= r.end {
-			inner = append(inner, splice{start: sp.start, end: sp.end, text: sp.text, chunks: sp.chunks})
-			for _, h := range fl.hosts {
-				if h == sp.host {
-					h.retired = true
-				}
-			}
+			nested = append(nested, sp)
 		} else {
 			kept = append(kept, sp)
 		}
 	}
+	// Remove these hosts before composing them: recursive composition may
+	// consume their descendants from the remaining global splice list.
 	fl.splices = kept
+	for _, sp := range nested {
+		text := fl.retireHost(sp.host)
+		inner = append(inner, splice{start: sp.start, end: sp.end, text: text.s, chunks: text.chunks})
+	}
 	adj := make([]splice, len(inner))
 	for i, sp := range inner {
 		adj[i] = sp
@@ -583,6 +587,7 @@ func (fl *fileLower) composeRegionNow(r *cfRegion) otext {
 	}
 	return out
 }
+
 func (c *cswLower) lowerRuntimeSync() []syntax.Stmt {
 	c.cases = make([]cswCase, 0, len(c.stmt.Cases))
 	for _, syn := range c.stmt.Cases {
@@ -689,12 +694,12 @@ func (c *cswLower) typeSwitch(exacts, rest []*cswCase, done string) (syntax.Stmt
 	}
 	if len(rest) > 0 {
 		chain, chainText := c.chainIf(rest, done)
-		if c.hasDef {
+		if c.hasDef && done == "" {
 			chain, chainText = c.attachDefault(chain, chainText)
 		}
 		sw.Body = append(sw.Body, at(&syntax.CaseClause{Body: []syntax.Stmt{chain}}, rest[0].syn.Case))
 		text = cat(text, gen("\ndefault:\n"), chainText)
-	} else if c.hasDef {
+	} else if c.hasDef && done == "" {
 		sw.Body = append(sw.Body, at(&syntax.CaseClause{Body: c.defStmts}, c.defPos))
 		text = cat(text, gen("\ndefault:\n"), c.defText)
 	}
