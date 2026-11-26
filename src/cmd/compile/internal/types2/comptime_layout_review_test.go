@@ -11,6 +11,16 @@ func TestHasUnexportedInlineWrappers(t *testing.T) {
 	hidden := NewStruct([]*Var{NewField(nopos, pkg, "hidden", Typ[Int32], false)}, nil)
 	public := NewStruct([]*Var{NewField(nopos, pkg, "Public", Typ[Int32], false)}, nil)
 	wrapped := NewStruct([]*Var{NewField(nopos, pkg, "Public", &Option{Elem: hidden}, false)}, nil)
+	defined := NewNamed(
+		NewTypeName(nopos, pkg, "Pair", nil),
+		NewLogosTuple(nopos, pkg, nil, []Type{hidden, Typ[Int32]}),
+		nil,
+	)
+	definedPublic := NewNamed(
+		NewTypeName(nopos, pkg, "PublicPair", nil),
+		NewLogosTuple(nopos, pkg, nil, []Type{public, Typ[Int32]}),
+		nil,
+	)
 	tests := []struct {
 		name string
 		typ  Type
@@ -24,6 +34,8 @@ func TestHasUnexportedInlineWrappers(t *testing.T) {
 		{"nested", wrapped, true},
 		{"array-option", NewArray(&Option{Elem: hidden}, 2), true},
 		{"tuple", NewLogosTuple(nopos, pkg, nil, []Type{hidden, Typ[Int32]}), true},
+		{"defined-tuple", defined, true},
+		{"defined-tuple-public", definedPublic, false},
 		{"option-pointer", &Option{Elem: NewPointer(hidden)}, false},
 		{"zero-array", NewArray(&Option{Elem: hidden}, 0), false},
 		{"slice", NewSlice(hidden), false},
