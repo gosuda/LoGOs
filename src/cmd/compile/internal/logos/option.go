@@ -258,6 +258,15 @@ func (fl *fileLower) lowerOptNode(n syntax.Node) {
 		if _, ok := fl.optDeferGoPend[n]; ok {
 			return
 		}
+	case *syntax.TryExpr:
+		// A defer-try claim owns the whole statement: keep the option pass
+		// from lowering the operand into an IIFE the defer rewrite cannot
+		// compose with.
+		if inner, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok {
+			if _, ok := fl.optDeferGoPend[inner]; ok {
+				return
+			}
+		}
 	case *syntax.AssignStmt:
 		fl.lowerOptAssign(n)
 		fl.lowerOptFields(n, "Lhs")
@@ -2190,16 +2199,27 @@ func (fl *fileLower) lowerOptCall(e *syntax.CallExpr, osel *syntax.OptSelectExpr
 }
 
 type optDeferGoWork struct {
-	osel *syntax.OptSelectExpr
-	ox   *types2.Option
-	nx   syntax.Expr
-	lv   string
-	rpos syntax.Pos
+	osel  *syntax.OptSelectExpr
+	ox    *types2.Option
+	nx    syntax.Expr
+	lv    string
+	rpos  syntax.Pos
+	isTry bool
 }
 
 func (fl *fileLower) markOptDeferGo(s *syntax.CallStmt) bool {
 	e, ok := syntax.Unparen(s.Call).(*syntax.CallExpr)
-	if !ok {
+	try := false
+	if t, isTry := syntax.Unparen(s.Call).(*syntax.TryExpr); isTry {
+		if s.Tok != syntax.Defer {
+			return false
+		}
+		inner, ok := syntax.Unparen(t.X).(*syntax.CallExpr)
+		if !ok {
+			return false
+		}
+		e, try = inner, true
+	} else if !ok {
 		return false
 	}
 	osel, ok := syntax.Unparen(e.Fun).(*syntax.OptSelectExpr)
@@ -2224,7 +2244,7 @@ func (fl *fileLower) markOptDeferGo(s *syntax.CallStmt) bool {
 	if fl.optDeferGoPend == nil {
 		fl.optDeferGoPend = make(map[*syntax.CallExpr]optDeferGoWork)
 	}
-	fl.optDeferGoPend[e] = optDeferGoWork{osel: osel, ox: ox, nx: osel.X, lv: lv, rpos: rpos}
+	fl.optDeferGoPend[e] = optDeferGoWork{osel: osel, ox: ox, nx: osel.X, lv: lv, rpos: rpos, isTry: try}
 	return true
 }
 

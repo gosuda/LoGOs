@@ -451,6 +451,10 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	cpos := syntax.StartPos(s)
 	stmtOff := fl.off(cpos)
 	spanEnd := skipCloseParens(fl.src, fl.off(t.Pos())+1)
+	if w, ok := fl.optDeferGoPend[call]; ok && w.isTry {
+		delete(fl.optDeferGoPend, call)
+		return fc.lowerOptDeferTryGuarded(call, w, cpos, stmtOff, spanEnd)
+	}
 	plan, ok := fc.planCall(call)
 	if !ok {
 		return []syntax.Stmt{s}
@@ -464,6 +468,55 @@ func (fc *funcLower) lowerDeferTry(s *syntax.CallStmt, t *syntax.TryExpr, call *
 	}
 	fc.spliceCall(stmtOff, spanEnd, plan, scoped(cpos, headT), tw)
 	return scoped(cpos, headN)
+}
+
+// lowerOptDeferTryGuarded lowers `defer recv?.Method(args)?` in one edit.
+// The option pass claims the try-wrapped call (markOptDeferGo) without
+// lowering it to an IIFE, so the defer-try rewrite reads the recorded
+// wrapper span instead of deriving positions from a synthetic Fun.
+func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGoWork, cpos syntax.Pos, stmtOff, spanEnd int) []syntax.Stmt {
+	fl := fc.fl
+	pos := w.osel.Pos()
+	method := w.osel.Sel.Value
+	xStart := fl.off(w.rpos)
+	xEnd := lastTokenEnd(fl.src, xStart, fl.off(pos))
+	recvText := fl.lazyText(span{start: xStart, end: xEnd})
+	var cond syntax.Expr
+	var condT string
+	if types2.LogosOptionIsBare(w.ox.Elem) {
+		cond, condT = notNil(pos, nameOf(pos, w.lv)), w.lv+" != nil"
+	} else {
+		cond, condT = selOf(pos, nameOf(pos, w.lv), "Present"), w.lv+".Present"
+	}
+	selEnd := fl.off(w.osel.Sel.Pos()) + len(method)
+	plan := &callPlan{dots: call.HasDots, end: spanEnd, isMethod: true, method: method}
+	plan.fun = capturePiece{expr: call.Fun, start: xStart, end: selEnd}
+	plan.recv = capturePiece{expr: w.nx, capture: true, single: w.lv, start: xStart, end: xEnd, text: recvText}
+	for _, raw := range call.ArgList {
+		trimmed := trimSpan(fl.src, span{start: fl.off(raw.Pos()), end: fl.off(syntax.EndPos(raw))})
+		arg := capturePiece{expr: raw, start: trimmed.start, end: trimmed.end, text: fl.lazyText(trimmed)}
+		switch argKind(fc, raw) {
+		case argInline:
+		case argMulti:
+			arg.capture = true
+			arg.multi = fc.multiNames(raw)
+		default:
+			arg.capture = true
+			arg.single = fc.nextArg()
+		}
+		plan.args = append(plan.args, arg)
+	}
+	funN, argN, _, _ := fc.planUses(plan, nil)
+	nativeCall := callOf(cpos, funN, argN)
+	nativeCall.HasDots = call.HasDots
+	nativeStmts, textStmts, tw := fc.checkPair(plan, cpos)
+	nativeInit := nativeStmts[:len(nativeStmts)-1]
+	headN := []syntax.Stmt{deferOf(cpos, callOf(cpos, rtSel(cpos, "DeferTry"), []syntax.Expr{addrOf(cpos, nameOf(cpos, fc.errName)), nativeCall}))}
+	closureT := deferClosure(cpos, []syntax.Stmt{textStmts[len(textStmts)-1]})
+	headT := append(slices.Clone(textStmts[:len(textStmts)-1]), deferOf(cpos, callOf(cpos, closureT, nil)))
+	prefix := leftoverComments(fl, span{start: stmtOff, end: spanEnd}, planSpans(plan))
+	fl.addT(stmtOff, spanEnd, cat(prefix, renderText(headT[:len(headT)-1], tw.subs), gen("if "+condT+" { "), renderText(headT[len(headT)-1:], tw.subs), gen(" }")))
+	return scoped(cpos, append(nativeInit, ifOf(cpos, nil, cond, headN)))
 }
 
 func (fc *funcLower) lowerErrdefer(s *syntax.ErrdeferStmt) []syntax.Stmt {
