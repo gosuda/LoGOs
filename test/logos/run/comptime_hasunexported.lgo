@@ -60,6 +60,14 @@ func main() {
 	check("scalar-false", direct[int32](), false)
 	check("cond-hidden-true", condHidden[hasHidden](), true)
 	check("cond-exported-false", condHidden[exportedOnly](), false)
+	check("const-hidden-true", direct[const hasHidden](), true)
+	check("option-hidden-true", direct[hasHidden?](), true)
+	check("array-option-hidden-true", direct[[2]hasHidden?](), true)
+	check("const-option-hidden-true", condHidden[const hasHidden?](), true)
+	check("option-pointer-false", direct[*hasHidden?](), false)
+	check("zero-array-false", direct[[0]hasHidden?](), false)
+	check("const-exported-false", direct[const exportedOnly](), false)
+	check("option-exported-false", condHidden[exportedOnly?](), false)
 	if failed {
 		os.Exit(1)
 	}

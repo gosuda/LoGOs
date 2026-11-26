@@ -1,0 +1,137 @@
+name: Verify base-check review repairs
+
+on:
+  push:
+    branches: [ci/verify-base-checks-322-green-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regressions:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the exact repaired source
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Frozen layout and interface-kind checks
+        run: |
+          go test -v -count=1 cmd/compile/internal/types2 -run '^TestHasUnexportedInlineWrappers$' 2>&1 | tee review-evidence/layout-green.log
+          go test -v -count=1 cmd/compile/internal/types2 -run '^TestLogos$/comptime_isinterface\.lgo$' 2>&1 | tee review-evidence/interface-kind-green.log
+      - name: Direct JSON and lowered-layout runtime tests
+        run: go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/(json_map_braces322|json_static_encoder.*|json_lone_surrogate_test|comptime_hasunexported|comptime_isinterface|comptime_layout.*)\.lgo$' 2>&1 | tee review-evidence/runtime-green.log
+      - name: Build, test, and lint the assertion library
+        run: |
+          logos build logos/expect 2>&1 | tee review-evidence/expect-build.log
+          logos test -count=1 logos/expect 2>&1 | tee review-evidence/expect-tests.log
+          logos lint logos/expect 2>&1 | tee review-evidence/expect-lint.log
+      - name: Full affected compiler suites
+        run: go test -count=1 -short cmd/compile/internal/types2 cmd/compile/internal/logos cmd/compile/internal/noder 2>&1 | tee review-evidence/compiler-green.log
+      - name: Exporter package race suite
+        run: go test -v -race -count=1 -short cmd/go/internal/logos/eject 2>&1 | tee review-evidence/eject-green.log
+      - name: Dynamic identity, static elision, and actual export scripts
+        run: go test -v -race -count=1 cmd/go -run '^TestScript$/logos_(expect_(type_identity|static_identity)|eject_(h2extendedconnect|fork_stdlib|stdlib_fields|struct_default|comptime_crosscopy)|comptime_(cross|instance_identity))$' 2>&1 | tee review-evidence/scripts-green.log
+      - name: Prove optional inline storage is checked
+        run: |
+          file=src/cmd/compile/internal/types2/comptime_layout_logos.go
+          cp "$file" review-evidence/layout-fixed.go
+          trap 'cp review-evidence/layout-fixed.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/compile/internal/types2/comptime_layout_logos.go')
+          source = p.read_text()
+          prefix, target = source.split('func LogosHasUnexported(t Type) bool {', 1)
+          old = 'case *Option:\n\t\treturn LogosHasUnexported(u.Elem)'
+          assert target.count(old) == 1
+          target = target.replace(old, 'case *Option:\n\t\treturn false')
+          p.write_text(prefix + 'func LogosHasUnexported(t Type) bool {' + target)
+          PYCODE
+          if go test -v -count=1 cmd/compile/internal/types2 -run '^TestHasUnexportedInlineWrappers$' > review-evidence/layout-mutation.log 2>&1; then
+            cat review-evidence/layout-mutation.log
+            exit 1
+          fi
+          cat review-evidence/layout-mutation.log
+          grep -F 'hidden field = false, want true' review-evidence/layout-mutation.log
+      - name: Prove failed edits cannot reach the copy writer
+        run: |
+          file=src/cmd/go/internal/logos/eject/eject.go
+          cp "$file" review-evidence/eject-fixed.go
+          trap 'cp review-evidence/eject-fixed.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/go/internal/logos/eject/eject.go')
+          source = p.read_text()
+          start = source.index('if off, overlap := h2OverlapOffset(edits, h2edits); overlap {')
+          end = source.index('\n\t}', start)
+          target = source[start:end]
+          assert target.count('return nil, false, false') == 1
+          p.write_text(source[:start] + target.replace('return nil, false, false', 'h2edits = nil') + source[end:])
+          PYCODE
+          if go test -v -race -count=1 cmd/go/internal/logos/eject -run '^TestH2ExtendedConnectRejectsOverlappingImportEdit$' > review-evidence/overlap-mutation.log 2>&1; then
+            cat review-evidence/overlap-mutation.log
+            exit 1
+          fi
+          cat review-evidence/overlap-mutation.log
+          grep -F 'overlapping edit reported partial success' review-evidence/overlap-mutation.log
+      - name: Prove display names cannot replace dynamic identity
+        run: |
+          file=src/logos/expect/expect.lgo
+          cp "$file" review-evidence/expect-fixed.lgo
+          trap 'cp review-evidence/expect-fixed.lgo "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/logos/expect/expect.lgo')
+          source = p.read_text()
+          assert source.count('if wt == gt {') == 1
+          p.write_text(source.replace('if wt == gt {', 'if wt == gt || fmt.Sprintf("%T", want) == fmt.Sprintf("%T", got) {'))
+          PYCODE
+          if go test -v -race -count=1 cmd/go -run '^TestScript$/logos_expect_type_identity$' > review-evidence/identity-mutation.log 2>&1; then
+            cat review-evidence/identity-mutation.log
+            exit 1
+          fi
+          cat review-evidence/identity-mutation.log
+          grep -F 'distinct dynamic types compared equal' review-evidence/identity-mutation.log
+          cp review-evidence/expect-fixed.lgo "$file"
+          trap - EXIT
+          go test -v -race -count=1 cmd/go -run '^TestScript$/logos_expect_type_identity$' 2>&1 | tee review-evidence/identity-restored.log
+      - name: Vet, formatting, and clean source
+        run: |
+          go vet cmd/compile/internal/types2 cmd/compile/internal/logos cmd/compile/internal/noder cmd/go/internal/logos/eject
+          files=$(gofmt -l src/cmd/compile/internal/types2/comptime_layout_logos.go src/cmd/compile/internal/types2/comptime_layout_review_test.go src/cmd/compile/internal/types2/comptime_logos.go src/cmd/compile/internal/types2/comptimecall_logos.go src/cmd/compile/internal/logos/comptime.go src/cmd/compile/internal/logos/json_encoder.go src/cmd/compile/internal/logos/forkstdlib_logos.go src/cmd/compile/internal/logos/forkstdlib_logos_test.go src/cmd/compile/internal/noder/irgen.go src/cmd/go/internal/logos/eject/eject.go src/cmd/go/internal/logos/eject/eject_h2extendedconnect_test.go)
+          test -z "$files" || { printf '%s\n' "$files"; exit 1; }
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: base-checks-green-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7

@@ -136,6 +136,14 @@ func LogosHasPointers(t Type) bool {
 // their own instantiations, so they do not count toward the container.
 func LogosHasUnexported(t Type) bool {
 	switch u := Unalias(t).Underlying().(type) {
+	case *ConstView:
+		return LogosHasUnexported(u.Elem)
+	case *ReadonlyDescendants:
+		return LogosHasUnexported(u.Elem)
+	case *Option:
+		return LogosHasUnexported(u.Elem)
+	case *LogosTuple:
+		return LogosHasUnexported(u.under)
 	case *Array:
 		return u.Len() > 0 && LogosHasUnexported(u.Elem())
 	case *Struct:
