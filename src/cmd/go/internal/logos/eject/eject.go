@@ -218,7 +218,7 @@ func ejectToDir(ctx context.Context, out string) {
 		// refusal would leak the staging tree. Register the same
 		// cleanup at exit as well as on the normal return path.
 		stagingCopy := staging
-		base.AtExit(func() { os.RemoveAll(stagingCopy) })
+		base.AtExit(func() { _ = os.RemoveAll(stagingCopy) })
 		defer func() {
 			if err := os.RemoveAll(staging); err != nil {
 				base.Errorf("logos eject: %v", err)
