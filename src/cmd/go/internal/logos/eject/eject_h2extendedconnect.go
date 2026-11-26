@@ -58,10 +58,23 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 	if h2DefinesExtendedConnect(f) {
 		return nil
 	}
+	// Reuse existing os/strings bindings by their actual local names so
+	// aliased imports keep working and no duplicate import is added.
+	// Only missing paths get a fresh collision-free alias.
+	osName, osOk := h2ImportLocal(f, "os")
+	stringsName, stringsOk := h2ImportLocal(f, "strings")
 	used := h2UsedNames(f)
-	osName := h2FreshName(used, "logosH2Os")
-	used[osName] = true
-	stringsName := h2FreshName(used, "logosH2Strings")
+	var missing []string
+	if !osOk {
+		osName = h2FreshName(used, "logosH2Os")
+		used[osName] = true
+		missing = append(missing, osName+" \"os\"")
+	}
+	if !stringsOk {
+		stringsName = h2FreshName(used, "logosH2Strings")
+		used[stringsName] = true
+		missing = append(missing, stringsName+" \"strings\"")
+	}
 	var edits []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -83,17 +96,61 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 		receiver := string(data[recvStart:recvEnd])
 		msg := "net/http: extended CONNECT on server " + strconv.Quote(receiver) + " needs GODEBUG=http2xconnect=1 in the ejected process environment"
 		// Evaluate the receiver as an argument so defer/go preserve
-		// registration-time side effects; only the GODEBUG check runs later.
-		repl := "func(_ any) {\nif !" + stringsName + ".Contains(" + osName + ".Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}(" + receiver + ")"
+		// registration-time side effects; only the GODEBUG check runs
+		// later. Name a simple identifier receiver with itself so the
+		// output keeps _ = s; complex receivers get a fresh name.
+		param := h2RecvParam(used, osName, stringsName, receiver)
+		repl := "func(" + param + " any) {\n_ = " + param + "\nif !" + stringsName + ".Contains(" + osName + ".Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}(" + receiver + ")"
 		edits = append(edits, textEdit{start, end, repl})
 		return true
 	})
 	if len(edits) == 0 {
 		return nil
 	}
-	missing := []string{osName + " \"os\"", stringsName + " \"strings\""}
-	edits = append(edits, h2ImportEdit(fset, f, missing))
+	if len(missing) > 0 {
+		edits = append(edits, h2ImportEdit(fset, f, missing))
+	}
 	return edits
+}
+
+// h2ImportLocal returns the file-local name bound to path, or false when
+// the file does not import it.
+func h2ImportLocal(f *ast.File, path string) (string, bool) {
+	for _, imp := range f.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || p != path {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name, true
+		}
+		if i := strings.LastIndex(p, "/"); i >= 0 {
+			return p[i+1:], true
+		}
+		return p, true
+	}
+	return "", false
+}
+
+// h2RecvParam picks the closure parameter name: a simple identifier
+// receiver reuses itself (keeping _ = s), otherwise a fresh name that
+// cannot collide with the helper imports.
+func h2RecvParam(used map[string]bool, osName, stringsName, receiver string) string {
+	trimmed := strings.TrimSpace(receiver)
+	if trimmed != "" && trimmed[0] != '*' {
+		ok := true
+		for i := 0; i < len(trimmed); i++ {
+			c := trimmed[i]
+			if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9') {
+				ok = false
+				break
+			}
+		}
+		if ok && trimmed != "_" && trimmed != osName && trimmed != stringsName && !used[trimmed+"_"] {
+			return trimmed
+		}
+	}
+	return h2FreshName(used, "logosH2Recv")
 }
 
 // h2UsedNames collects local import names and all identifiers in f so
