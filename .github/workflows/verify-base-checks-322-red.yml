@@ -1,0 +1,95 @@
+name: Reproduce base-check review regressions
+
+on:
+  push:
+    branches: [ci/verify-base-checks-322-red-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  witnesses:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 30
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the unchanged implementation
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Reproduce hidden fields lost through wrappers
+        run: |
+          if go test -v -count=1 cmd/compile/internal/types2 -run '^TestHasUnexportedInlineWrappers$' > review-evidence/layout-unit-red.log 2>&1; then
+            cat review-evidence/layout-unit-red.log
+            exit 1
+          fi
+          cat review-evidence/layout-unit-red.log
+          grep -F 'hidden field = false, want true' review-evidence/layout-unit-red.log
+      - name: Reproduce invalid direct map JSON
+        run: |
+          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/json_map_braces322\.lgo$' > review-evidence/map-red.log 2>&1; then
+            cat review-evidence/map-red.log
+            exit 1
+          fi
+          cat review-evidence/map-red.log
+          grep -F 'map braces empty' review-evidence/map-red.log
+      - name: Reproduce incorrect folded wrapper values
+        run: |
+          if go test -v -count=1 cmd/internal/testdir -run '^Test$/logos/run/comptime_hasunexported\.lgo$' > review-evidence/layout-run-red.log 2>&1; then
+            cat review-evidence/layout-run-red.log
+            exit 1
+          fi
+          cat review-evidence/layout-run-red.log
+          grep -F 'FAIL const-hidden-true got false want true' review-evidence/layout-run-red.log
+          grep -F 'FAIL option-hidden-true got false want true' review-evidence/layout-run-red.log
+      - name: Reproduce partial exporter writes
+        run: |
+          if go test -v -race -count=1 cmd/go/internal/logos/eject -run '^TestH2ExtendedConnectRejectsOverlappingImportEdit$' > review-evidence/overlap-red.log 2>&1; then
+            cat review-evidence/overlap-red.log
+            exit 1
+          fi
+          cat review-evidence/overlap-red.log
+          grep -F 'overlapping edit reported partial success' review-evidence/overlap-red.log
+      - name: Reproduce equal display names hiding different types
+        run: |
+          if go test -v -race -count=1 cmd/go -run '^TestScript$/logos_expect_type_identity$' > review-evidence/identity-red.log 2>&1; then
+            cat review-evidence/identity-red.log
+            exit 1
+          fi
+          cat review-evidence/identity-red.log
+          grep -F 'distinct dynamic types compared equal' review-evidence/identity-red.log
+      - name: Reproduce the absent extended CONNECT fixture
+        run: |
+          if go test -v -race -count=1 cmd/go -run '^TestScript$/logos_eject_h2extendedconnect$' > review-evidence/h2-fixture-red.log 2>&1; then
+            cat review-evidence/h2-fixture-red.log
+            exit 1
+          fi
+          cat review-evidence/h2-fixture-red.log
+          grep -F 'cd m' review-evidence/h2-fixture-red.log
+          grep -F 'no such file or directory' review-evidence/h2-fixture-red.log
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: base-checks-red-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
