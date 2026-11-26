@@ -322,8 +322,8 @@ func planTypeDecls(plan *callPlan, tw *twin) []syntax.Stmt {
 func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, []syntax.Stmt, *twin) {
 	fc.fl.needRT = true
 	tw := &twin{}
-	funN, argN, capNamesN, capValsN := fc.planUses(plan, nil)
-	funT, argT, capNamesT, capValsT := fc.planUses(plan, tw)
+	funN, argN, _, _ := fc.planUses(plan, nil)
+	funT, argT, _, _ := fc.planUses(plan, tw)
 	inner := "_logos_e"
 	joinN := joinAssign(cpos, fc.errName, inner)
 	callN := callOf(cpos, funN, argN)
@@ -334,11 +334,33 @@ func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, 
 	callT.HasDots = plan.dots
 	checkT := ifOf(cpos, defineOf(cpos, []syntax.Expr{nameOf(cpos, inner)}, []syntax.Expr{callT}), notNil(cpos, nameOf(cpos, inner)), joinT)
 	native, text := planTypeDecls(plan, nil), planTypeDecls(plan, tw)
-	if len(capNamesN) > 0 {
-		native = append(native, defineOf(cpos, capNamesN, capValsN))
-		text = append(text, defineOf(cpos, capNamesT, capValsT))
-	}
+	native = append(native, fc.definePieces(plan, nil, cpos)...)
+	text = append(text, fc.definePieces(plan, tw, cpos)...)
 	return append(native, checkN), append(text, checkT), tw
+}
+
+// definePieces emits one short declaration per captured piece, in use
+// order, so a multi-result argument never shares its right-hand side
+// with another capture. A call can supply all parameters of another
+// call with its multiple results only when it is the sole expression,
+// so combining the receiver with a two-result argument in one
+// declaration rejects programs the language accepts.
+func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []syntax.Stmt {
+	var pieces []capturePiece
+	if plan.isMethod {
+		pieces = append(pieces, plan.recv)
+	} else if plan.fun.capture {
+		pieces = append(pieces, plan.fun)
+	}
+	pieces = append(pieces, plan.args...)
+	var out []syntax.Stmt
+	for _, piece := range pieces {
+		if !piece.capture {
+			continue
+		}
+		out = append(out, defineOf(cpos, nameList(piece), valList(piece, tw)))
+	}
+	return out
 }
 
 func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.Expr, []syntax.Expr, []syntax.Expr) {

@@ -1,0 +1,71 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type AC struct {
+	closed  bool
+	lastArg int
+	calls   int
+}
+
+func (c *AC) Close() error {
+	c.closed = true
+	return nil
+}
+
+func (c *AC) Note(v int) error {
+	c.calls++
+	c.lastArg = v
+	c.closed = true
+	return nil
+}
+
+func (c *AC) Note2(a, b int) error {
+	c.calls++
+	c.lastArg = a*100 + b
+	c.closed = true
+	return nil
+}
+
+func pair() (int, int) {
+	return 4, 2
+}
+
+func mkAC() *AC? {
+	return &AC{}
+}
+
+// [12] Multi-result arguments bind beside the receiver capture.
+func useMultiArg(m *AC?) error {
+	defer m?.Note2(pair())?
+	return nil
+}
+
+func main() {
+	md := mkAC()
+	errd := useMultiArg(md)
+	check("multi-err", errd == nil, errd, nil)
+	vd := md ?? &AC{}
+	check("multi-value", vd.lastArg == 402, vd.lastArg, 402)
+	errda := useMultiArg(nil)
+	check("multi-absent-err", errda == nil, errda, nil)
+	if failed {
+		os.Exit(1)
+	}
+}
