@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/build/constraint"
 	"go/parser"
 	"go/token"
 	"internal/logosfile"
@@ -192,6 +193,45 @@ func isLoweredSupportFile(name string) bool {
 	return isSupportLogosFile(name)
 }
 
+// isEjectedSelected reports whether the original LoGOs source constraint
+// holds for the ejected form (logosejected=true, logosconc unset, every
+// other tag assumed set). Untagged sources select it; !logosejected twins
+// do not; platform tags keep selecting it for the multi-platform copy.
+func ejectedSelected(expr constraint.Expr) bool {
+	if expr == nil {
+		return true
+	}
+	return expr.Eval(func(tag string) bool {
+		switch tag {
+		case "logosejected":
+			return true
+		case "logosconc":
+			return false
+		default:
+			return true
+		}
+	})
+}
+
+// isEjectedSourceSelected reads the original LoGOs source and reports
+// whether it belongs in the ejected support copy.
+func (c *supportCopy) isEjectedSourceSelected(p supportSourcePackage, name string) bool {
+	data, err := c.readOriginal(p, name)
+	if err != nil {
+		return true
+	}
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, name, data, parser.PackageClauseOnly|parser.ParseComments)
+	if err != nil {
+		return true
+	}
+	expr, err := ownedHeaderExpr(f)
+	if err != nil || expr == nil {
+		return true
+	}
+	return ejectedSelected(expr)
+}
+
 func isVendoredGoFile(name string) bool {
 	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
 }
@@ -257,6 +297,12 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string) ([]stri
 		return nil, false, err
 	}
 	if hasIgnoreTag(constraint) {
+		return nil, false, nil
+	}
+	// The support copy is the ejected form: a lowered LoGOs source
+	// belongs iff its original constraint holds with logosejected=true
+	// (logosconc never set, all other tags assumed set). This keeps
+	if lowered && !c.isEjectedSourceSelected(p, name) {
 		return nil, false, nil
 	}
 	edits, _ := ejectedImportEdits(data, fset, f)
