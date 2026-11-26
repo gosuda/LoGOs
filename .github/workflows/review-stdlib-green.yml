@@ -1,0 +1,80 @@
+name: Verify public stdlib and mapped ejection repair
+
+on:
+  push:
+    branches: [ci/verify-stdlib-eject-green-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  regressions:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 45
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - name: Record upstream ejection oracle
+        run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build the repaired verifier
+        run: |
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          git rev-parse HEAD^{tree} >> review-evidence/source.txt
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Compiler regression tests
+        run: go test -v -count=1 -short cmd/compile/internal/logos cmd/compile/internal/noder 2>&1 | tee review-evidence/compiler-green.log
+      - name: Export tests with actual upstream compilation
+        run: go test -v -race -count=1 cmd/go -run '^TestScript$/logos_eject_(stdlib_fields|h2extendedconnect|fork_stdlib|struct_default)$' 2>&1 | tee review-evidence/scripts-green.log
+      - name: Prove the field separator guard is exercised
+        run: |
+          file=src/cmd/compile/internal/logos/forkstdlib_logos.go
+          cp "$file" review-evidence/forkstdlib-fixed.go
+          trap 'cp review-evidence/forkstdlib-fixed.go "$file"' EXIT
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          p = Path('src/cmd/compile/internal/logos/forkstdlib_logos.go')
+          text = p.read_text()
+          assert text.count('if depth == 0 {') == 1
+          p.write_text(text.replace('if depth == 0 {', 'if depth < 0 {'))
+          PYCODE
+          if go test -v -count=1 -short cmd/compile/internal/logos -run '^TestUpstreamAPIFields$' > review-evidence/mutation.log 2>&1; then
+            cat review-evidence/mutation.log
+            echo 'field separator mutation escaped the attack'
+            exit 1
+          fi
+          cat review-evidence/mutation.log
+          grep -F 'upstream API omitted public member container/list.Value' review-evidence/mutation.log
+      - name: Vet, formatting, and unchanged attacks
+        run: |
+          go vet cmd/compile/internal/logos cmd/compile/internal/noder
+          files=$(gofmt -l src/cmd/compile/internal/logos/forkstdlib_logos.go src/cmd/compile/internal/logos/forkstdlib_logos_test.go)
+          test -z "$files" || { printf '%s\n' "$files"; exit 1; }
+          git diff --exit-code
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: stdlib-green-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7

@@ -53,17 +53,60 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info) {
 		}
 		base.Errorf("%s: [portability::fork_stdlib_api] logos eject: %s.%s has no upstream spelling (absent from the Go 1.27 API files); ejected output must build with upstream Go (SPEC T-0.3)", name.Pos(), p.Path(), obj.Name())
 	}
-	for name, obj := range info.Uses {
-		check(name, obj)
+	verify := func(info *types2.Info) {
+		mapped := mappedEjectStdlibCalls(info)
+		for name, obj := range info.Uses {
+			if !mapped[name] {
+				check(name, obj)
+			}
+		}
 	}
+	verify(info)
 	for _, rec := range info.LogosCtPrepared {
 		if rec == nil || rec.Info == nil {
 			continue
 		}
-		for name, obj := range rec.Info.Uses {
-			check(name, obj)
-		}
+		verify(rec.Info)
 	}
+}
+
+// mappedEjectStdlibCalls identifies exact call sites with an existing
+// upstream rewrite. The exemption belongs to the selector occurrence,
+// never the method name: escaping method values and method expressions
+// still have no upstream spelling.
+func mappedEjectStdlibCalls(info *types2.Info) map[*syntax.Name]bool {
+	var mapped map[*syntax.Name]bool
+	for expr := range info.Types {
+		call, ok := expr.(*syntax.CallExpr)
+		if !ok || len(call.ArgList) != 0 {
+			continue
+		}
+		selector, ok := call.Fun.(*syntax.SelectorExpr)
+		if !ok || selector.Sel.Value != "EnableHTTP2ExtendedConnect" {
+			continue
+		}
+		selection := info.Selections[selector]
+		if selection == nil || selection.Kind() != types2.MethodVal {
+			continue
+		}
+		obj := selection.Obj()
+		if obj.Pkg() == nil || obj.Pkg().Path() != "net/http" {
+			continue
+		}
+		recv := types2.Unalias(selection.Recv())
+		if pointer, ok := recv.(*types2.Pointer); ok {
+			recv = types2.Unalias(pointer.Elem())
+		}
+		named, ok := recv.(*types2.Named)
+		if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "net/http" || named.Obj().Name() != "Server" {
+			continue
+		}
+		if mapped == nil {
+			mapped = make(map[*syntax.Name]bool)
+		}
+		mapped[selector.Sel] = true
+	}
+	return mapped
 }
 
 // verifyEjectStdlibDone keeps VerifyEjectStdlib to one report per package:
@@ -175,6 +218,13 @@ func parseUpstreamAPIFile(data []byte, t *upstreamAPI) {
 			name := apiIdent(rest)
 			add(path, name)
 			tail := rest[len(name):]
+			// A struct field is separated at the declaration's top
+			// level. Its type, and generic constraints before it, may
+			// contain braces that do not describe interface members.
+			if idx := apiMemberSeparator(tail); idx >= 0 {
+				add(path, apiIdent(tail[idx+1:]))
+				continue
+			}
 			if open := strings.IndexByte(tail, '{'); open >= 0 {
 				end := strings.IndexByte(tail[open:], '}')
 				body := tail[open+1:]
@@ -186,15 +236,31 @@ func parseUpstreamAPIFile(data []byte, t *upstreamAPI) {
 				}
 				continue
 			}
-			if idx := strings.IndexByte(tail, ','); idx >= 0 {
-				add(path, apiIdent(tail[idx+1:]))
-			}
 		case strings.HasPrefix(feature, "const "), strings.HasPrefix(feature, "var "):
 			if idx := strings.IndexByte(feature, ' '); idx >= 0 {
 				add(path, apiIdent(feature[idx+1:]))
 			}
 		}
 	}
+}
+
+// apiMemberSeparator finds the comma introducing a struct field, outside
+// type parameters, constraints, and interface member lists.
+func apiMemberSeparator(s string) int {
+	depth := 0
+	for i, c := range s {
+		switch c {
+		case '[', '(', '{':
+			depth++
+		case ']', ')', '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // apiIdent returns the leading identifier of s, or "" if s starts with
