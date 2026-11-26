@@ -52,11 +52,11 @@ type cswLower struct {
 	cases []cswCase
 	// Default arm lowering, when the switch has one. Lowered once per
 	// switch; the clauses below splice its statements and text in place.
-	defStmts []syntax.Stmt
-	defText otext
-	hasDef bool
-	defPos syntax.Pos
-	defClose syntax.Pos
+	defStmts  []syntax.Stmt
+	defText   otext
+	hasDef    bool
+	defPos    syntax.Pos
+	defClose  syntax.Pos
 	hostTexts map[*syntax.ConstSwitchCase]otext
 }
 type cswRebind struct {
@@ -300,22 +300,23 @@ func (c *cswLower) lowerRuntime() []syntax.Stmt {
 	}
 	return c.lowerRuntimeSync()
 }
+
 // cswHostArm is one lowered arm of a region-based switch: an if-chain
 // link whose body lives in its own region until finalization. Head and
 // condition texts are fixed at lowering; the body composes at finalize,
 // after nested hosts finalize.
 type cswHostArm struct {
-	init syntax.SimpleStmt
-	initText otext
-	hasInit  bool
-	cond     syntax.Expr
-	condText otext
-	head     []syntax.Stmt
-	headText otext
-	body     []syntax.Stmt
-	region   *cfRegion
-	pos      syntax.Pos
-	close    syntax.Pos
+	init      syntax.SimpleStmt
+	initText  otext
+	hasInit   bool
+	cond      syntax.Expr
+	condText  otext
+	head      []syntax.Stmt
+	headText  otext
+	body      []syntax.Stmt
+	region    *cfRegion
+	pos       syntax.Pos
+	close     syntax.Pos
 	isDefault bool
 }
 
@@ -454,7 +455,7 @@ func (c *cswLower) lowerHostArm(syn *syntax.ConstSwitchCase, elem int) cswHostAr
 		asrt := at(&syntax.AssertExpr{X: tagExpr, Type: ptr}, syn.Case)
 		okName := c.fl.cswName("ok")
 		arm.init = defineOf(syn.Case, []syntax.Expr{nameOf(syn.Case, "_"), nameOf(syn.Case, okName)}, []syntax.Expr{asrt})
-		arm.initText = gen("_, "+okName+" := any((*"+tag.s+")(nil)).(*"+cs.spell.s+")")
+		arm.initText = gen("_, " + okName + " := any((*" + tag.s + ")(nil)).(*" + cs.spell.s + ")")
 		arm.hasInit = true
 		arm.cond = nameOf(syn.Case, okName)
 		arm.condText = gen(okName)
@@ -660,7 +661,6 @@ func (c *cswLower) lowerDefault(done string) {
 	c.defClose = dc.close
 }
 
-
 func (c *cswLower) typeSwitch(exacts, rest []*cswCase, done string) (syntax.Stmt, otext) {
 	pos := c.stmt.Pos()
 	if len(exacts) > 0 {
@@ -788,6 +788,7 @@ func (c *cswLower) caseTail(cs *cswCase) ([]syntax.Stmt, otext) {
 	lowered := c.fc.lowerList(cs.body)
 	return lowered, c.fl.lazyText(span{cs.lo, cs.hi})
 }
+
 // rewriteRebound respells the switched type's name to the case type and
 // rewrites every use of a variable bound to the switched type as a
 // dereference of a type-correct pointer into the variable's own storage,
