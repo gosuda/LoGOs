@@ -1,0 +1,75 @@
+name: Reproduce type-switch review dispatch
+
+on:
+  push:
+    branches: [ci/verify-switch-328-red-20261126]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dispatch:
+    runs-on: depot-ubuntu-24.04-8
+    timeout-minutes: 30
+    env:
+      GOENV: 'off'
+      GOCACHEPROG: ''
+      GOMAXPROCS: '4'
+      GOFLAGS: '-p=4'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.2'
+          cache: false
+      - run: printf 'UPROOT1272=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Build unchanged source with the frozen regression cases
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          mkdir -p review-evidence
+          git rev-parse HEAD > review-evidence/source.txt
+          go env GOENV GOCACHEPROG | tee review-evidence/cache-env.txt
+          test -z "$(go env GOCACHEPROG)"
+          export GOROOT_BOOTSTRAP=$(go env GOROOT)
+          (cd src && ./make.bash) 2>&1 | tee review-evidence/make.log
+          printf '%s/bin\n' "$PWD" >> "$GITHUB_PATH"
+      - name: Capture each dispatch result independently
+        run: |
+          export GOENV=off GOCACHEPROG=''
+          python3 - <<'PYCODE'
+          import json
+          import subprocess
+          from pathlib import Path
+          cases = [
+              ('nested-native', ['go', 'test', '-v', '-count=1', 'cmd/internal/testdir', '-run', r'^Test$/logos/run/const_switch_nested_list_review328\.lgo$'], True),
+              ('mixed-native', ['go', 'test', '-v', '-count=1', 'cmd/internal/testdir', '-run', r'^Test$/logos/run/const_switch_mixed_default_review328\.lgo$'], False),
+              ('live-native', ['go', 'test', '-v', '-count=1', 'cmd/internal/testdir', '-run', r'^Test$/logos/run/const_switch_live_list_review328\.lgo$'], False),
+              ('nested-export', ['go', 'test', '-v', '-race', '-count=1', 'cmd/go', '-run', '^TestScript$/logos_switch_dispatch_review328$'], False),
+          ]
+          results = []
+          for name, command, expect_success in cases:
+              result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+              Path(f'review-evidence/{name}.log').write_text(result.stdout)
+              print(name, result.returncode, flush=True)
+              print(result.stdout, flush=True)
+              results.append({'name': name, 'command': command, 'exit': result.returncode, 'expected_success': expect_success})
+          Path('review-evidence/results.json').write_text(json.dumps(results, indent=2) + '\n')
+          assert all((r['exit'] == 0) == r['expected_success'] for r in results), results
+          PYCODE
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: ${{ !cancelled() }}
+        with:
+          name: switch-review-red-${{ github.sha }}
+          path: review-evidence/
+          if-no-files-found: error
+          retention-days: 7
