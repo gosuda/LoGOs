@@ -642,7 +642,7 @@ func (check *Checker) assertableTo(V, T Type, cause *string) bool {
 		return false
 	}
 	// TODO(gri) fix this for generalized interfaces
-	return check.hasAllMethods(T, V, false, Identical, cause)
+	return check.hasAllMethods(T, check.logosAssertSource(V), false, Identical, cause)
 }
 
 // newAssertableTo reports whether a value of type V can be asserted to have type T.
@@ -663,7 +663,7 @@ func (check *Checker) newAssertableTo(V, T Type, cause *string) bool {
 	if logosConcreteAssertErasable(T, cause) {
 		return false
 	}
-	return check.implements(T, V, false, cause)
+	return check.implements(T, check.logosAssertSource(V), false, cause)
 }
 
 // deref dereferences typ if it is a *Pointer (but not a *Named type

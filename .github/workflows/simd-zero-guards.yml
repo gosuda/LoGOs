@@ -30,6 +30,7 @@ env:
   GOAMD64: "v1"
   GOEXPERIMENT: ""
 
+# amd64 checks share the toolchain in ci.yml; this lane proves native ARM behavior.
 jobs:
   native:
     name: "SIMD zero native ${{ matrix.arch }}"
@@ -39,8 +40,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - arch: "amd64"
-            runner: "depot-ubuntu-24.04"
           - arch: "arm64"
             runner: "depot-ubuntu-24.04-arm"
     defaults:
@@ -80,7 +79,7 @@ jobs:
       - name: "Build the default toolchain"
         id: "build"
         run: |
-          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash 2>&1 | tee "$RUNNER_TEMP/simd-zero-evidence/build.txt"
+          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash
           printf '%s\n' "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
       - name: "Check the full short SSA suite and vet"
         if: "!cancelled() && steps.build.outcome == 'success'"
@@ -194,47 +193,4 @@ jobs:
         if: "always()"
         with:
           name: "simd-zero-native-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          path: "${{ runner.temp }}/simd-zero-evidence"
-
-  simd_std:
-    name: "SIMD baseline-target standard library"
-    runs-on: "depot-ubuntu-24.04-4"
-    timeout-minutes: 120
-    defaults:
-      run:
-        shell: "bash"
-        working-directory: "src"
-    steps:
-      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" # v7.0.1
-        with:
-          persist-credentials: false
-          ref: "${{ github.event.pull_request.head.sha }}"
-      - uses: "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e" # v7.0.0
-        with:
-          go-version: "1.27.4"
-          cache: false
-      - name: "Record exact source head and bootstrap toolchain"
-        run: |
-          mkdir -p "$RUNNER_TEMP/simd-zero-evidence"
-          git rev-parse HEAD | tee "$RUNNER_TEMP/simd-zero-evidence/head.txt"
-          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
-          test "$(go env GOVERSION)" = go1.27.4
-          test "$(go env GOARCH)" = amd64
-          printf 'UPROOT1274=%s\n' "$(go env GOROOT)" >> "$GITHUB_ENV"
-          go version | tee "$RUNNER_TEMP/simd-zero-evidence/bootstrap.txt"
-          lscpu | tee "$RUNNER_TEMP/simd-zero-evidence/cpu.txt"
-      - name: "Build the default toolchain"
-        id: "build"
-        run: |
-          GOROOT_BOOTSTRAP="$UPROOT1274" ./make.bash 2>&1 | tee "$RUNNER_TEMP/simd-zero-evidence/build.txt"
-          printf '%s\n' "$GITHUB_WORKSPACE/lib/wasm" "$GITHUB_WORKSPACE/bin" >> "$GITHUB_PATH"
-      - name: "Run the complete SIMD standard library at the baseline target"
-        if: "!cancelled() && steps.build.outcome == 'success'"
-        run: |
-          test "$(go env GOROOT)" = "$GITHUB_WORKSPACE"
-          env -u GOMEMLIMIT -u GOMAXPROCS GOEXPERIMENT=simd GOAMD64=v1 go test -count=1 -timeout 30m std 2>&1 | tee "$RUNNER_TEMP/simd-zero-evidence/simd-std.txt"
-      - uses: "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9" # v7.0.2
-        if: "always()"
-        with:
-          name: "simd-zero-std-${{ github.run_id }}-${{ github.run_attempt }}"
           path: "${{ runner.temp }}/simd-zero-evidence"

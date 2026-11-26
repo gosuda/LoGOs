@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Path routing. The workflow has no on.paths filter, so derive one true/false output per suite from the
-# changed files (pull request: vs its base, push: the last commit, dispatch: the "suites" input).
+# changed files (pull request: vs its base, push: the complete event range,
+# dispatch: the "suites" input).
 # A change under .github/scripts/, .github/workflows/, or .depot/workflows/ runs every suite, as each
 # old workflow ran when its own file changed.
 set -euo pipefail
@@ -17,8 +18,23 @@ case $ev in
   base=$(git merge-base "$target" HEAD 2>/dev/null) || base=$target
   files=$(git diff --name-only "$base" HEAD) ;;
   push)
-    git fetch -q --no-tags --depth=2 origin "$GITHUB_SHA"
-    files=$(git diff --name-only HEAD~1 HEAD) || files= ;;
+    before=${PUSH_BEFORE_SHA:-}
+    after=${PUSH_AFTER_SHA:-${GITHUB_SHA:-}}
+    if [[ "$before" =~ ^[0-9a-f]{40}$ && "$after" =~ ^[0-9a-f]{40}$ &&
+          "$before" != 0000000000000000000000000000000000000000 ]]; then
+      for revision in "$before" "$after"; do
+        if ! git cat-file -e "$revision^{commit}" 2>/dev/null &&
+           ! git fetch -q --no-tags --depth=1 origin "$revision"; then
+          all=true
+        fi
+      done
+      if [ "$all" = false ]; then
+        files=$(git diff --name-only "$before" "$after") || all=true
+      fi
+    else
+      # Initial pushes and unavailable endpoints must not silently skip code.
+      all=true
+    fi ;;
 esac
 if grep -Eq '^\.github/scripts/|^\.github/workflows/|^\.depot/workflows/' <<< "$files"; then all=true; fi
 want() { [[ " ${INPUT_SUITES:-all} " == *" all "* || " ${INPUT_SUITES:-all} " == *" $1 "* ]]; }
@@ -39,8 +55,8 @@ flag() {
 }
 # core: every change except docs-only ones (the old logos.yml paths-ignore)
 core=false
-if [ "$ev" = workflow_dispatch ]; then if want core; then core=true; fi
-elif grep -Evq '^(AGENTS|CONTRIBUTING|README|SECURITY)\.md$' <<< "$files"; then core=true
+if [ "$ev" = workflow_dispatch ]; then if want core || want gc; then core=true; fi
+elif [ "$all" = true ] || { [ -n "$files" ] && grep -Evq '^(AGENTS|CONTRIBUTING|README|SECURITY)\.md$' <<< "$files"; }; then core=true
 fi
 if ! in_only core; then core=false; fi
 if [ $core = true ]; then any=true; fi

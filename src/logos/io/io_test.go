@@ -383,7 +383,7 @@ func TestStream(t *testing.T) {
 		{"op limit binds", "test bytes", logosio.Unlimited, logosio.Limited(4), 16, "test", 4, false},
 		{"zero limit", "foobar", logosio.Unlimited, logosio.Limited(0), 16, "", 0, false},
 		{"empty", "", logosio.Unlimited, logosio.Unlimited, 16, "", 0, false},
-		{"dst overflow", "foobar", logosio.Unlimited, logosio.Unlimited, 3, "foo", 0, true},
+		{"dst overflow", "foobar", logosio.Unlimited, logosio.Unlimited, 3, "foo", 3, true},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
@@ -507,4 +507,66 @@ func FuzzFramingOracle(f *testing.F) {
 			t.Fatalf("round trip = %q, want %q", full, data)
 		}
 	})
+}
+
+// A source error that arrives with data must surface instead of a clean
+// end of stream. Planted fault: Fill drops an error returned alongside
+// bytes, and Stream reports a truncated copy as successful.
+type errDataSource struct {
+	data  []byte
+	err   error
+	calls int
+}
+
+func (s *errDataSource) Read(p []byte) (int, error) {
+	s.calls++
+	if len(s.data) == 0 {
+		return 0, stdio.EOF
+	}
+	n := copy(p, s.data)
+	s.data = s.data[n:]
+	if len(s.data) == 0 {
+		return n, s.err
+	}
+	return n, nil
+}
+
+func TestStreamSurfacesErrorWithData(t *testing.T) {
+	src := &errDataSource{data: []byte("abc"), err: stdio.ErrUnexpectedEOF}
+	r := logosio.NewReader(src, make([]byte, 16))
+	w := logosio.NewFixedWriter(make([]byte, 16))
+	total, err := logosio.Stream(r, w, logosio.Unlimited)
+	if total != 3 {
+		t.Fatalf("Stream total = %d, want 3", total)
+	}
+	if !errors.Is(err, stdio.ErrUnexpectedEOF) {
+		t.Fatalf("Stream err = %v, want unexpected EOF", err)
+	}
+	if string(w.Buffered()) != "abc" {
+		t.Fatalf("Stream out = %q, want %q", w.Buffered(), "abc")
+	}
+}
+
+// A Take past a capped stream's buffered end must fail instead of
+// reading past the limit. Planted fault: Fill keeps reading after the
+// remainder is buffered, waiting on bytes beyond the limit.
+type fillCounter struct {
+	logosio.Reader
+	fills int
+}
+
+func (r *fillCounter) Fill() error {
+	r.fills++
+	return r.Reader.Fill()
+}
+
+func TestTakePastLimitEndsWithoutFilling(t *testing.T) {
+	src := &fillCounter{Reader: logosio.NewFixedReader([]byte("a"))}
+	inner := logosio.NewLimited(src, logosio.Limited(1))
+	if _, err := logosio.Take(inner, 2); !errors.Is(err, logosio.ErrEndOfStream) {
+		t.Fatalf("Take past limit = %v, want end of stream", err)
+	}
+	if src.fills != 0 {
+		t.Fatalf("underlying fills = %d, want 0", src.fills)
+	}
 }

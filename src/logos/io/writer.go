@@ -148,20 +148,24 @@ const streamChunk = 8192
 
 // Stream moves bytes from r to w until r ends or l runs out, returning
 // the moved count. End of stream and a spent limit both return a nil
-// error. A short destination window is flushed, never grown.
+// error. A short destination window is flushed, never grown. Bytes the
+// writer commits before a short-window failure count as moved, and the
+// source advances past them, so resuming from the same reader never
+// duplicates the committed prefix.
 func Stream(r Reader, w Writer, l Limit) (int64, error) {
 	var total int64
 	rem := l
 	for rem == Unlimited || rem > 0 {
 		p := r.Peek(rem.Clamp(streamChunk))
 		if len(p) > 0 {
-			if err := WriteAll(w, p); err != nil {
-				return total, err
-			}
-			r.Discard(len(p))
-			total += int64(len(p))
+			n, err := streamWrite(w, p)
+			r.Discard(n)
+			total += int64(n)
 			if rem != Unlimited {
-				rem -= Limit(len(p))
+				rem -= Limit(n)
+			}
+			if err != nil {
+				return total, err
 			}
 			continue
 		}
@@ -175,4 +179,28 @@ func Stream(r Reader, w Writer, l Limit) (int64, error) {
 		return total, err
 	}
 	return total, nil
+}
+
+// streamWrite commits p to w, flushing as needed, and reports the bytes
+// committed before the first failure. Unlike WriteAll it advances past
+// a partial commit instead of leaving the caller at the chunk start.
+func streamWrite(w Writer, p []byte) (int, error) {
+	moved := 0
+	for len(p) > 0 {
+		q := w.Reserve(len(p))
+		if len(q) == 0 {
+			if err := w.Flush(); err != nil {
+				return moved, err
+			}
+			q = w.Reserve(len(p))
+			if len(q) == 0 {
+				return moved, ErrWriteFailed
+			}
+		}
+		c := copy(q, p)
+		w.Commit(c)
+		moved += c
+		p = p[c:]
+	}
+	return moved, nil
 }

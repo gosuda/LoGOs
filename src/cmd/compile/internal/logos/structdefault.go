@@ -1106,7 +1106,15 @@ func (w ctWalker) ctDefaultFactoryCall(pos syntax.Pos, path, symbol string, args
 
 func (w ctWalker) ctDefaultFactorySymbol(pkg *types2.Package, field types2.LogosFieldDefault) string {
 	ct := w.fl.ct
-	if (ct.consumer != nil && pkg.Path() != ct.consumer.Path()) || (ct.consumer == nil && pkg.Path() != ct.owner.Path()) {
+	if ct.consumer != nil {
+		// The instance is emitted into the instantiating package, so a
+		// struct owned there resolves its default factory from the
+		// consumer's own plan; structs owned by the defining package
+		// keep their existing owner-based resolution.
+		if pkg.Path() != ct.consumer.Path() && pkg.Path() != ct.owner.Path() {
+			return ""
+		}
+	} else if pkg.Path() != ct.owner.Path() {
 		return ""
 	}
 	if f := facts.Current(); f != nil {

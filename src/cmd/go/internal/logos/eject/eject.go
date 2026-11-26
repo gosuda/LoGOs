@@ -37,6 +37,7 @@ import (
 	"cmd/go/internal/load"
 	"cmd/go/internal/modload"
 	"cmd/go/internal/work"
+	"cmd/internal/logos/editmap"
 	"cmd/internal/sys"
 )
 
@@ -214,7 +215,14 @@ func ejectToDir(ctx context.Context, out string) {
 	}
 	load.ArmLogosEject(staging)
 	defer load.DisarmLogosEject()
-	opts := load.PackageOpts{AutoVCS: true}
+	// Eject builds test variants for every reachable package (see
+	// collectTestBuilds), including the tests of regular dependencies,
+	// so the module loader must resolve test dependencies of those
+	// packages up front. Without this, a test-only import reached by
+	// neither the roots nor their loaded imports is missing from the
+	// loader's package set and the eject fails with
+	// "cannot find package".
+	opts := load.PackageOpts{AutoVCS: true, ModResolveTests: true}
 	patterns := []string{"all"}
 	if isEjectVariant() {
 		if packages := os.Getenv("LOGOSEJECT_PACKAGES"); packages != "" {
@@ -223,6 +231,18 @@ func ejectToDir(ctx context.Context, out string) {
 	}
 	pkgs := load.PackagesAndErrors(moduleLoader, ctx, opts, patterns)
 	load.CheckPackageErrors(pkgs)
+	if isEjectVariant() {
+		// The helper loads only the packages owning inactive files, so
+		// only those are roots whose test dependencies the first load
+		// resolves. Reload with the full non-test closure as roots so
+		// the loader also resolves the test dependencies of regular
+		// dependencies; otherwise their test-only imports stay missing
+		// from the loader's package set (see above).
+		if roots := ejectClosureRoots(pkgs); len(roots) > 0 {
+			pkgs = load.PackagesAndErrors(moduleLoader, ctx, opts, roots)
+			load.CheckPackageErrors(pkgs)
+		}
+	}
 	plan := arrangeEjectPlan(pkgs)
 	builds := collectTestBuilds(moduleLoader, ctx, opts, plan)
 	makeEjectStagingDirs(plan, staging, builds)
@@ -239,7 +259,7 @@ func ejectToDir(ctx context.Context, out string) {
 	if !isEjectVariant() {
 		variantOuts = stageInactiveVariantsIntoStaging(ctx, plan, staging)
 	}
-	writeEjectedTree(ctx, plan, staging, out, builds)
+	writeEjectedTree(ctx, plan, staging, out)
 	for _, dir := range variantOuts {
 		_ = os.RemoveAll(dir)
 		_ = os.RemoveAll(variantStatePath(dir))
@@ -534,6 +554,27 @@ func hasLogosTestFiles(p *load.Package) bool {
 	return false
 }
 
+// ejectClosureRoots returns the sorted import paths of every loaded
+// non-test, non-standard package with a module, so a follow-up load can
+// treat the whole closure as roots. Only roots get their test
+// dependencies resolved (see ModResolveTests), so without this the test
+// imports of regular dependencies stay out of the loader's package set.
+func ejectClosureRoots(pkgs []*load.Package) []string {
+	seen := map[string]bool{}
+	var roots []string
+	for _, p := range load.PackageList(pkgs) {
+		if isTestArtifact(p) || p.Standard || p.Module == nil || p.ImportPath == "" {
+			continue
+		}
+		if !seen[p.ImportPath] {
+			seen[p.ImportPath] = true
+			roots = append(roots, p.ImportPath)
+		}
+	}
+	slices.Sort(roots)
+	return roots
+}
+
 // collectTestBuilds discovers test dependencies of packages being copied
 // and prepares compilation only for loGo/s test files that need lowering.
 func collectTestBuilds(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, plan *ejectPlan) []testBuild {
@@ -735,9 +776,9 @@ func withoutEjectFlags(flags []string) []string {
 
 // writeEjectedTree assembles the output directory from copied sources,
 // compiler-emitted files, the support module, and rewritten go.mod files.
-// tests carries the test-variant builds whose test files are emitted, so
-// the support closure also covers logos/ packages their tests import.
-func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string, tests []testBuild) {
+// Test roots reach the support closure through plan.testRoots, which
+// ejectSupportRoots seeds from the arranged plan.
+func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string) {
 	abs, err := filepath.Abs(out)
 	if err != nil {
 		base.Fatalf("logos eject: %s: %v", out, err)
@@ -1051,6 +1092,7 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 	type span struct{ s, e int }
 	var moved []span
 	var movedText [][]byte
+	var movedFns []*ast.FuncDecl
 	offset := func(p token.Pos) int {
 		return fset.Position(p).Offset
 	}
@@ -1068,6 +1110,7 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 		}
 		moved = append(moved, span{s, e})
 		movedText = append(movedText, bytes.TrimRight(fixed[s:e], "\n"))
+		movedFns = append(movedFns, fn)
 	}
 	if len(moved) == 0 {
 		return fixed, nil
@@ -1115,9 +1158,21 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 		}
 		main = bytes.Join(kept, nil)
 	}
-	// Imports for the extra file: every import whose alias is used by the
-	// moved declarations.
-	joinedMoved := bytes.Join(movedText, []byte("\n"))
+	// Imports for the extra file: every import whose alias the moved
+	// declarations use as a package qualifier. Selector bases are exact
+	// identifiers, so _logos_json.CallerOptionsAreV1Default counts as a
+	// use of _logos_json only, never of json.
+	used := map[string]bool{}
+	for _, fn := range movedFns {
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok {
+				if id, ok := sel.X.(*ast.Ident); ok {
+					used[id.Name] = true
+				}
+			}
+			return true
+		})
+	}
 	var extraImports []string
 	for _, decl := range f.Decls {
 		gen, ok := decl.(*ast.GenDecl)
@@ -1139,7 +1194,7 @@ func splitJSONv2File(fixed []byte) (mainBytes []byte, extraBytes []byte) {
 			if alias == "_" || alias == "." {
 				continue
 			}
-			if bytes.Contains(joinedMoved, []byte(alias+".")) {
+			if used[alias] {
 				impPath := strings.TrimSpace(imp.Path.Value)
 				extraImports = append(extraImports, "import "+alias+" "+impPath)
 			}
@@ -1233,6 +1288,15 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 		}
 		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw) {
 			used = true
+		}
+		// The compiler writes one edit-map sidecar per ejected file
+		// into staging; carry it to the output so the map can be
+		// checked against the sources. A file without a sidecar
+		// (plain Go, or an older staging layout) ejects unchanged.
+		if editRaw, editErr := os.ReadFile(filepath.Join(dest.staging, filepath.FromSlash(p.ImportPath), stem+".go"+editmap.Suffix)); editErr == nil {
+			if writeErr := os.WriteFile(filepath.Join(dest.dstRoot, rel, stem+".go"+editmap.Suffix), editRaw, 0666); writeErr != nil {
+				base.Fatalf("logos eject: %s", writeErr)
+			}
 		}
 	}
 	return used
@@ -1925,6 +1989,13 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	}
 	edits, uses := ejectedImportEdits(data, fset, f)
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
+	h2edits := h2ExtendedConnectEdits(fset, data, f)
+	if off, overlap := h2OverlapOffset(edits, h2edits); overlap {
+		pos := fset.Position(token.Pos(fset.File(f.Pos()).Base() + off))
+		base.Errorf("logos eject: overlapping h2extendedconnect import edit at line %d: EnableHTTP2ExtendedConnect left unrewritten", pos.Line)
+		h2edits = nil
+	}
+	edits = append(edits, h2edits...)
 	out, ok := applyTextEdits(data, edits)
 	if !ok {
 		return nil, false, false

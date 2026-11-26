@@ -1007,8 +1007,8 @@ type ctPreparedUnit struct {
 	context *ctLowerContext
 }
 
-func stageCtPreparedUnit(rec *types2.LogosCtInst, sites *ctTraceSites) (ctPreparedUnit, error) {
-	ct := &ctLowerContext{owner: rec.Pkg, sites: sites, instanceName: rec.Sym}
+func stageCtPreparedUnit(rec *types2.LogosCtInst, sites *ctTraceSites, consumer *types2.Package) (ctPreparedUnit, error) {
+	ct := &ctLowerContext{owner: rec.Pkg, consumer: consumer, sites: sites, instanceName: rec.Sym}
 	fl := &fileLower{ct: ct, pkg: &packageLower{tpkg: rec.Pkg, info: rec.Info}}
 	decl, info, err := fl.reduceComptimeInstance(rec)
 	if err != nil {
@@ -1123,7 +1123,7 @@ func stageCtPreparedPackage(pkg *types2.Package, info *types2.Info) (*ctPrepared
 				files[scope] = file
 			}
 		}
-		unit, err := stageCtPreparedUnit(record, &p.sites)
+		unit, err := stageCtPreparedUnit(record, &p.sites, pkg)
 		if err != nil {
 			return nil, fmt.Errorf("logos: prepare %s: %w", record.Origin, err)
 		}
