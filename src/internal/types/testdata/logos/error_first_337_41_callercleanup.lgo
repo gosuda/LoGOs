@@ -1,0 +1,44 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_41() (int, error) { return 1, nil }
+func use337_41(n int) {}
+
+// The outer reset runs whether or not the inner literal panics: the
+// recovered exit must keep the caller's cleanup stack definite.
+func callerResetSurvivesInnerRecover337_41(stop bool) {
+	n, err := fetch337_41()
+	_ = err
+	func() {
+		defer func() { n = 0 }()
+		func() {
+			defer func() { _ = recover() }()
+			if stop {
+				panic("stop")
+			}
+		}()
+	}()
+	use337_41(n)
+}
+
+// A reset registered only on one branch stays conditional: the read must
+// still fail after the join.
+func conditionalCallerReset337_41(stop bool) {
+	n, err := fetch337_41()
+	_ = err
+	func() {
+		if stop {
+			defer func() { n = 0 }()
+		}
+		func() {
+			defer func() { _ = recover() }()
+			if stop {
+				panic("stop")
+			}
+		}()
+	}()
+	use337_41(n /* ERROR "[correctness::result_before_error_check]" */)
+}

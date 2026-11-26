@@ -4414,7 +4414,7 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 			continue
 		}
 		if r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true }); r != nil {
-			end = logosEFJoin(end, r)
+			end = logosEFJoin(end, r.withCleanups(st.cleanups))
 		}
 	}
 	end = end.withoutLocals(inside)
