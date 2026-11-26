@@ -157,17 +157,18 @@ func collectInactiveGoImports(plan *ejectPlan) []inactiveFile {
 		}
 		for _, entry := range entries {
 			name := entry.Name()
-			if entry.IsDir() || !isSupportCopyFile(name) {
+			if entry.IsDir() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !isSupportCopyFile(name) {
 				continue
 			}
 			data, err := fsys.ReadFile(filepath.Join(dir, name))
 			if err != nil {
 				base.Fatalf("logos eject: read GOROOT source %s: %v", filepath.Join(dir, name), err)
 			}
-			for _, imp := range goSourceImports(data) {
+			imports := goSourceImports(data)
+			for _, imp := range imports {
 				rest, ok := strings.CutPrefix(imp, "logos/")
 				if ok && rest != "" && len(plan.provenance[imp]) == 0 {
-					out = append(out, inactiveFile{pkg: dirs[dir], name: name})
+					out = append(out, inactiveFile{pkg: dirs[dir], name: name, goImports: imports})
 					break
 				}
 			}
