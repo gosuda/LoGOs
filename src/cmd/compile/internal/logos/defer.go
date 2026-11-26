@@ -548,13 +548,17 @@ func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGo
 	tw := &twin{}
 	_, argN, _, _ := fc.planUses(plan, nil)
 	_, argT, _, _ := fc.planUses(plan, tw)
-	funN := calleeN
-	funT := tw.mark(pos, cat(gen(w.lv), gen(accSuffix)))
+	// Capture the selected method value before the arguments: a value
+	// method through a pointer binds its receiver copy now, and a
+	// function-valued callee cannot be replaced by a later assignment.
+	fTmp := fc.nextFun()
+	calleeDefN := defineOf(cpos, []syntax.Expr{nameOf(cpos, fTmp)}, []syntax.Expr{calleeN})
+	calleeDefT := defineOf(cpos, []syntax.Expr{nameOf(cpos, fTmp)}, []syntax.Expr{tw.mark(pos, cat(gen(w.lv), gen(accSuffix)))})
 	inner := "_logos_e"
-	callN := callOf(cpos, funN, argN)
+	callN := callOf(cpos, nameOf(cpos, fTmp), argN)
 	callN.HasDots = call.HasDots
 	deferN := deferOf(cpos, callOf(cpos, rtSel(cpos, "DeferTry"), []syntax.Expr{addrOf(cpos, nameOf(cpos, fc.errName)), callN}))
-	callT := callOf(cpos, funT, argT)
+	callT := callOf(cpos, nameOf(cpos, fTmp), argT)
 	callT.HasDots = call.HasDots
 	checkT := ifOf(cpos, defineOf(cpos, []syntax.Expr{nameOf(cpos, inner)}, []syntax.Expr{callT}), notNil(cpos, nameOf(cpos, inner)), joinAssign(cpos, fc.errName, inner))
 	closureT := deferClosure(cpos, []syntax.Stmt{checkT})
@@ -562,9 +566,10 @@ func (fc *funcLower) lowerOptDeferTryGuarded(call *syntax.CallExpr, w optDeferGo
 	// selection and every argument bind inside the guard, at defer
 	// registration, so an absent receiver evaluates nothing else in
 	// either output.
+	inGuardN := []syntax.Stmt{calleeDefN}
+	inGuardT := []syntax.Stmt{calleeDefT}
 	recvDefN := defineOf(cpos, nameList(plan.recv), valList(plan.recv, nil))
 	recvDefT := defineOf(cpos, nameList(plan.recv), valList(plan.recv, tw))
-	var inGuardN, inGuardT []syntax.Stmt
 	for _, piece := range plan.args {
 		if !piece.capture {
 			continue

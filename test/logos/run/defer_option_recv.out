@@ -4,3 +4,6 @@ ok box-absent-err
 ok item-err
 ok item-ran
 ok item-absent-err
+ok value-err
+ok value-saw-registration
+ok value-absent-err
