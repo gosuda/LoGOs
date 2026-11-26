@@ -1,0 +1,75 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type signed interface {
+	int | int8 | int16 | int32 | int64
+}
+
+func storeOptInt[E signed](raw string, bits int, set func(E)) (bool, error) {
+	n, perr := strconv.ParseInt(raw, 10, bits)
+	if perr != nil {
+		return true, perr
+	}
+	set(E(n))
+	return true, nil
+}
+
+func assign[F any](dst *F, raw string) (bool, error) {
+	const switch F {
+	case int8?:
+		return storeOptInt[int8](raw, 8, v => { *dst = v })
+	}
+	return false, nil
+}
+
+func Take[F any](dst *F) string {
+	const switch F {
+	case string?:
+		return "string?"
+	case int64?:
+		return "int64?"
+	}
+	return "other"
+}
+
+func Probe() string {
+	var x int64?
+	return Take[int64?](&x)
+}
+
+func main() {
+	var n int8?
+	ok, err := assign(&n, "7")
+	check("closure-captures-rebinding", err == nil && ok && (n ?? 0) == 7, n ?? 0, 7)
+	var m int8?
+	ok, err = assign[int8?](&m, "not-a-number")
+	check("closure-bad-input", err != nil, err, "parse error")
+	var x int64?
+	check("option-case-int64", Take(&x) == "int64?", Take(&x), "int64?")
+	var s string?
+	check("option-case-string", Take(&s) == "string?", Take(&s), "string?")
+	var f float64?
+	check("option-case-other", Take(&f) == "other", Take(&f), "other")
+	check("option-probe", Probe() == "int64?", Probe(), "int64?")
+	if failed {
+		os.Exit(1)
+	}
+}

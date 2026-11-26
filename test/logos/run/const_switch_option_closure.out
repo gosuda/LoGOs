@@ -1,0 +1,6 @@
+ok closure-captures-rebinding
+ok closure-bad-input
+ok option-case-int64
+ok option-case-string
+ok option-case-other
+ok option-probe

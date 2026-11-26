@@ -1,0 +1,17 @@
+// compile
+
+package p
+
+func fetch3242() (int, error) { return 1, nil }
+func use3242(v int) {}
+
+// Scope cleanup runs at block exit: the reset replaces the unchecked
+// result, so the later read observes zero and needs no check.
+func ef3242() {
+	n, err := fetch3242()
+	_ = err
+	{
+		scope defer func() { n = 0 }()
+	}
+	use3242(n)
+}

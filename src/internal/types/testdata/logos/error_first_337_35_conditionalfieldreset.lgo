@@ -1,0 +1,47 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_35() (int, error) { return 1, nil }
+func use337_35(v int) {}
+
+type h337_35 struct {
+	stats int
+	err   error
+}
+
+// Conditional deferred reset: when reset is false the original result
+// reaches the read without a check, so the read must fail.
+func conditionalFieldReset337_35(reset bool) {
+	h := h337_35{}
+	h.stats, h.err = fetch337_35()
+	func() {
+		defer func() {
+			if reset {
+				h.stats = 0
+			}
+		}()
+	}()
+	use337_35(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	_ = h.err
+}
+
+// A conditional error reset followed by a check stays unproven: the check
+// reads the cleared error on one path, not the call's, so the read must fail.
+func conditionalFieldErrorReset337_35(reset bool) {
+	h := h337_35{}
+	h.stats, h.err = fetch337_35()
+	func() {
+		defer func() {
+			if reset {
+				h.err = nil
+			}
+		}()
+	}()
+	if h.err != nil {
+		return
+	}
+	use337_35(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+}

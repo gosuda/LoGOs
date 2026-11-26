@@ -1,0 +1,32 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_39() (int, error) { return 1, nil }
+func use337_39(n int) {}
+
+// An ordinary cleanup cannot recover an active panic: the invocation
+// never returns, so the trailing read is unreachable and stays silent.
+func unwindingNeverReturns337_39() {
+	n, err := fetch337_39()
+	_ = err
+	func() {
+		defer func() { println("done") }()
+		defer func() { panic("stop") }()
+	}()
+	use337_39(n)
+}
+
+// A recovering cleanup ends unwinding: the invocation returns and the
+// trailing read of the unchecked result must fail.
+func recoveredUnwindingReturns337_39() {
+	n, err := fetch337_39()
+	_ = err
+	func() {
+		defer func() { _ = recover() }()
+		defer func() { panic("stop") }()
+	}()
+	use337_39(n /* ERROR "[correctness::result_before_error_check]" */)
+}

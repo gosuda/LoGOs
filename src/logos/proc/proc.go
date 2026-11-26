@@ -225,18 +225,24 @@ func (c *Child) Pid() int {
 // StdinPipe returns the parent write end when stdin used PipeStdIO.
 // Close releases it.
 func (c *Child) StdinPipe() *os.File {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.stdinW
 }
 
 // StdoutPipe returns the parent read end when stdout used PipeStdIO.
 // Close releases it.
 func (c *Child) StdoutPipe() *os.File {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.stdoutR
 }
 
 // StderrPipe returns the parent read end when stderr used PipeStdIO.
 // Close releases it.
 func (c *Child) StderrPipe() *os.File {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.stderrR
 }
 
@@ -251,7 +257,7 @@ func (c *Child) Close() error {
 		if f == nil {
 			continue
 		}
-		if err := f.Close(); err != nil {
+		if err := f.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
 			errs = append(errs, err)
 		}
 	}
@@ -365,6 +371,9 @@ func resolvePath(path string, cwd Cwd) (string, error) {
 	}
 	if cwd.HasPath && isExplicitRelative(path) {
 		if cand := filepath.Join(cwd.Path, path); isExecutableFile(cand) {
+			if abs, err := filepath.Abs(cand); err == nil {
+				return abs, nil
+			}
 			return cand, nil
 		}
 	}
@@ -378,7 +387,7 @@ func resolvePath(path string, cwd Cwd) (string, error) {
 // isExplicitRelative reports whether path names a file relative to a
 // directory instead of through PATH lookup.
 func isExplicitRelative(path string) bool {
-	return strings.ContainsRune(path, '/') || strings.ContainsRune(path, filepath.Separator)
+	return !filepath.IsAbs(path) && (strings.ContainsRune(path, '/') || strings.ContainsRune(path, filepath.Separator))
 }
 
 // isExecutableFile reports whether cand exists and is not a directory.

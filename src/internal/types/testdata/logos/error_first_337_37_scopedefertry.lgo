@@ -1,0 +1,39 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch337_37() (int, error) { return 1, nil }
+func use337_37(n int) {}
+func closeIt337_37() error { return nil }
+func step337_37() error { return nil }
+
+// A plain-deferred ?-call runs at exit: registering it must not check
+// scope cleanups against the pre-reset state.
+func plainDeferTryRegisters337_37() error {
+	n, err := fetch337_37()
+	_ = err
+	{
+		scope defer func() { use337_37(n) }()
+		defer closeIt337_37()?
+		if err != nil {
+			n = 0
+			return err
+		}
+		return nil
+	}
+}
+
+// An ordinary ?-call still checks scope cleanups on its failure edge:
+// the scope exits there with the result unchecked.
+func ordinaryTryChecksCleanup337_37() error {
+	n, err := fetch337_37()
+	_ = err
+	{
+		scope defer func() { use337_37(n /* ERROR "[correctness::result_before_error_check]" */) }()
+		step337_37()?
+		n = 0
+		return nil
+	}
+}

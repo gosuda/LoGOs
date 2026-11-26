@@ -245,6 +245,7 @@ def test_source_identity_uses_the_active_ci_workflow(tmp_path: Path) -> None:
         *(relative for relative, _ in gate.FROZEN_PINS),
         f"{gate.SOURCE_DIR}/optfacts.go",
         ".github/workflows/ci.yml",
+        ".github/scripts/unit-evidence.sh",
     ]
     for relative in files:
         target = tmp_path / relative
@@ -271,6 +272,9 @@ def test_source_identity_uses_the_active_ci_workflow(tmp_path: Path) -> None:
     identity = gate.source_identity(tmp_path, head)
     assert identity["workflow_sha256"] == gate.digest(
         tmp_path / ".github/workflows/ci.yml"
+    )
+    assert identity["driver_sha256"] == gate.digest(
+        tmp_path / ".github/scripts/unit-evidence.sh"
     )
     assert identity["head"] == head
 

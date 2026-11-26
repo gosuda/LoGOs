@@ -87,7 +87,9 @@ func ReadInto[T any](r io.Reader, order Order, data *T) error {
 				// destination would consume stream bytes. Reject it
 				// here, before touching the reader, with the same
 				// text the original reports.
-				if kind := reflect.TypeOf(held).Kind(); kind != reflect.Pointer && kind != reflect.Slice {
+				value := reflect.ValueOf(held)
+				kind := value.Kind()
+				if (kind != reflect.Pointer && kind != reflect.Slice) || (kind == reflect.Pointer && value.IsNil()) {
 					return errors.New("binary.Read: invalid type " + reflect.TypeOf(held).String())
 				}
 				return stdbinary.Read(r, order, held)

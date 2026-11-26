@@ -1,0 +1,63 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+env GOEXPERIMENT=
+
+cd co
+
+# data.lgo carries generated JSON methods, so its companion wants the
+# data_jsonv2 stem; data_jsonv2.lgo already owns that stem for its own
+# Version function. Reservation must give the companion a free name
+# instead of letting one output silently discard the other.
+logos run .
+stdout '^v1: \{"title":"hi"\} version 7$'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+exists out/main.go
+exists out/data.go
+exists out/data_jsonv2.go
+exists out/data_jsonv2_jsonv2.go
+
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+go vet ./...
+exec $GOROOT/bin/gofmt -l .
+! stdout .
+cd ..
+
+-- co/go.mod --
+module example.com/collide
+
+go 1.27
+
+-- co/main.lgo --
+package main
+
+import "fmt"
+
+func main() {
+	v := Data{Title: "hi"}
+	buf, err := v.MarshalJSON()
+	if err != nil {
+		fmt.Println("marshal err:", err)
+		return
+	}
+	fmt.Println("v1:", string(buf), "version", Version())
+}
+
+-- co/data.lgo --
+package main
+
+type Data struct {
+	Title string `json:"title"`
+}
+
+-- co/data_jsonv2.lgo --
+package main
+
+func Version() int {
+	return 7
+}

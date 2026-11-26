@@ -1,0 +1,119 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetchPaths() (int, error) { return 1, nil }
+func usePaths(v int) {}
+
+func cleanupReturn() {
+	n, err := fetchPaths()
+	_ = err
+	func() {
+		{ scope defer func() { n = 0 }(); return }
+	}()
+	usePaths(n)
+}
+
+func cleanupGoto() {
+	n, err := fetchPaths()
+	_ = err
+	{ scope defer func() { n = 0 }(); goto done }
+done:
+	usePaths(n)
+}
+
+func cleanupLabeledBreak() {
+	n, err := fetchPaths()
+	_ = err
+outer:
+	for {
+		for { scope defer func() { n = 0 }(); break outer }
+	}
+	usePaths(n)
+}
+
+func cleanupSwitchCases(tag int) {
+	n, err := fetchPaths()
+	_ = err
+	switch tag {
+	case 1:
+		scope defer func() { n = 0 }()
+	default:
+		scope defer func() { n = 0 }()
+	}
+	usePaths(n)
+}
+
+func cleanupEarlyReturn(skip bool) {
+	n, err := fetchPaths()
+	_ = err
+	func() {
+		if skip { return }
+		defer func() { n = 0 }()
+	}()
+	usePaths(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func cleanupConditionalScope(reset bool) {
+	n, err := fetchPaths()
+	_ = err
+	if reset { scope defer func() { n = 0 }() }
+	usePaths(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func cleanupKnownLastAfterConditional(other bool) {
+	n := 0
+	var first, second error
+	func() {
+		defer func() { n, first = fetchPaths() }()
+		if other { defer func() { n, second = fetchPaths() }() }
+	}()
+	if first != nil { return }
+	_ = second
+	usePaths(n)
+}
+
+func cleanupRepeatedRegistration(count int) {
+	n := 0
+	var first, second error
+	func() {
+		for i := 0; i < count; i++ {
+			defer func() { n, first = fetchPaths() }()
+			defer func() { n, second = fetchPaths() }()
+		}
+	}()
+	if second != nil { return }
+	_ = first
+	usePaths(n /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+func cleanupReadDuringPanic() {
+	n, err := fetchPaths()
+	_ = err
+	func() {
+		defer func() { usePaths(n /* ERROR "[correctness::result_before_error_check]" */) }()
+		panic("stop")
+	}()
+}
+
+func cleanupScopeReadDuringPanic() {
+	n, err := fetchPaths()
+	_ = err
+	func() {
+		scope defer func() { usePaths(n /* ERROR "[correctness::result_before_error_check]" */) }()
+		panic("stop")
+	}()
+}
+
+func cleanupValueBeforeDeferredStore() {
+	n := 0
+	var err error
+	func() {
+		defer func() { n, err = fetchPaths() }()
+		usePaths(n)
+	}()
+	if err != nil { return }
+	usePaths(n)
+}
