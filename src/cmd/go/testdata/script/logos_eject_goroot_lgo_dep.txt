@@ -60,12 +60,11 @@ cmp stdout $WORK/native-json.txt
 exec env -u GOROOT $UPROOT1272/bin/go run .
 cmp stdout $WORK/native-json.txt
 
-# A shipped .lgo package outside the fixed set is also materialized from
-# the real toolchain, with no fixture GOROOT. logos/expect lands under
-# rt/logos/ like every other non-runtime toolchain package.
 cd ../../r
 logos run .
 stdout '^count: 42$'
+stdout '^equal-pass-ok$'
+stdout '^equal-mismatch-ok$'
 cp stdout $WORK/native-real.txt
 logos eject -o out
 exists out/main.go
@@ -222,10 +221,44 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"logos/expect"
 )
 
+type order struct {
+	ID   string
+	Qty  int
+	Paid bool
+	Note string
+}
+
+type recorder struct {
+	msg string
+}
+
+func (r *recorder) Helper() {}
+
+func (r *recorder) Errorf(format string, args ...any) {
+	r.msg += fmt.Sprintf(format, args...)
+}
+
 func main() {
 	fmt.Println(expect.FieldText("count", 42))
+	a := order{ID: "abc", Qty: 3, Paid: true, Note: "hi"}
+	r := &recorder{}
+	expect.Equal(r, a, a)
+	if r.msg != "" {
+		fmt.Println("equal-pass-fail")
+	} else {
+		fmt.Println("equal-pass-ok")
+	}
+	b := order{ID: "abc", Qty: 4, Paid: true, Note: "hi"}
+	m := &recorder{}
+	expect.Equal(m, a, b)
+	if strings.Contains(m.msg, "- Qty: 3") && strings.Contains(m.msg, "+ Qty: 4") {
+		fmt.Println("equal-mismatch-ok")
+	} else {
+		fmt.Println("equal-mismatch-fail")
+	}
 }
