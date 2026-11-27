@@ -213,3 +213,41 @@ func probeBrokeDiscSwap(reset bool) {
 	}()
 	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
 }
+
+// A literal that rewrites the guard only before an unrecovered panic
+// changes nothing when it returns: the caller read stays silent.
+func probePanicOnlyBreak(reset bool, stop bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	if reset {
+		h.err = nil
+	}
+	func() {
+		if stop {
+			h.err = nil
+			panic("stop")
+		}
+	}()
+	use(h.stats)
+}
+
+// The same with split error fields: a panic-only overwrite of one
+// possible guard leaves the caller read silent.
+func probePanicOnlyBreakSplit(cond bool, reset bool, stop bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if reset {
+		h.errA = nil
+	}
+	func() {
+		if stop {
+			h.errA = nil
+			panic("stop")
+		}
+	}()
+	use(h.stats)
+}
