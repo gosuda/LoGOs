@@ -145,9 +145,10 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 // not cover is ambiguous with the stdlib opt-in: eject cannot tell it
 // apart from the genuine call, so it is reported for refusal instead of
 // passing the wrong behavior through. A call with arguments can never be
-// the genuine opt-in, but lowering would still bind its callee through a
-// marked temporary, so a method call with arguments is refused as well;
-// only the package-qualified helper, which takes the server as an
+// the genuine opt-in, and the rewrite never touches it (direct calls need
+// zero arguments, and a lowered capture used with arguments keeps its
+// binding), so argument-bearing calls are left to the ordinary upstream
+// check; only the package-qualified helper, which takes the server as an
 // argument, stays exempt.
 //
 // The decision resolves the callee's receiver type. Only the stdlib or
@@ -183,18 +184,14 @@ func mappedEjectStdlibCalls(pkg *types2.Package, info *types2.Info, roots []synt
 			return true
 		}
 		if len(call.ArgList) != 0 {
-			// The stdlib opt-in takes no arguments, so a call with
-			// arguments can never be the genuine call. Group and
-			// defer lowering would still bind its callee through a
-			// marked temporary the rewrite trusts by spelling, so
-			// refuse it instead of mangling the capture. A
-			// package-qualified call names no method: the helper
-			// takes the server as an argument and stays exempt,
-			// unless the file declares the name and eject skips
-			// the whole file by spelling.
-			if definesName || info.Selections[selector] != nil {
-				markAmbiguous(selector)
-			}
+			// A call with arguments can never be the genuine opt-in: the
+			// stdlib method takes none, the text rewrite rebinds only
+			// zero-argument direct calls, and a lowered capture used with
+			// arguments keeps its binding (the rewrite decides by arity,
+			// not spelling). Leave every argument-bearing call to the
+			// ordinary upstream check below: a user method passes it, the
+			// package-qualified helper passes it, and a genuine fork-only
+			// call still fails it by type.
 			return true
 		}
 		// The emitter leaves this file alone: either it never imports
