@@ -56,3 +56,74 @@ func TestSupportCopyDoesNotDependOnToolchainBuildTags(t *testing.T) {
 		}
 	}
 }
+
+// A source that already owns a companion stem must not collide with the
+// JSONv2 companion the support copy emits: copyPackage reserves every
+// output stem up front, so the companion takes the next free name.
+func TestSupportCopyReservesCompanionStems(t *testing.T) {
+	src := t.TempDir()
+	staging := t.TempDir()
+	out := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestcopy")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]string{
+		"item.lgo":        "package ejecttestcopy\n",
+		"item_jsonv2.lgo": "package ejecttestcopy\n\nconst OwnedMarker = 1\n",
+	} {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staged := filepath.Join(staging, "logos", "ejecttestcopy")
+	if err := os.MkdirAll(staged, 0777); err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]string{
+		"item.go": `package ejecttestcopy
+
+import _logos_jsontext "encoding/json/jsontext"
+
+type Item struct{}
+
+func (_logos_v Item) MarshalJSONTo(_logos_enc *_logos_jsontext.Encoder) error { return nil }
+`,
+		"item_jsonv2.go": "package ejecttestcopy\n\nconst OwnedMarker = 1\n",
+	} {
+		if err := os.WriteFile(filepath.Join(staged, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      staging,
+		dst:          out,
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestcopy", dst: "rt/logos/ejecttestcopy"}
+	if err := c.copyPackage(p); err != nil {
+		t.Fatalf("copyPackage: %v", err)
+	}
+	for file, declaration := range map[string]string{
+		"item.go":               "type Item struct{}",
+		"item_jsonv2.go":        "OwnedMarker",
+		"item_jsonv2_jsonv2.go": "MarshalJSONTo",
+	} {
+		data, err := os.ReadFile(filepath.Join(out, "rt", "logos", "ejecttestcopy", file))
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		if !strings.Contains(string(data), declaration) {
+			t.Errorf("%s lost %s:\n%s", file, declaration, data)
+		}
+	}
+}

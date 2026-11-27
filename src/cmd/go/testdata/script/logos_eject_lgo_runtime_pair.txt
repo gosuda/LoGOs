@@ -36,12 +36,16 @@ go build -mod=readonly ./...
 go run .
 stdout '^ejected$'
 # The specialized guard keeps the fallback out of plain-Go Windows builds
-# too, while the default build still lists it.
+# too, while the default build still lists it. The positive list pins
+# linux explicitly: on a Windows host the script runner inherits GOOS
+# from the environment and the fallback is correctly excluded there too.
+env GOOS=linux
 go list -f '{{.GoFiles}}' github.com/gosuda/loGos/rt/logos/ejecttestrt
 stdout 'winfallback.go'
 env GOOS=windows
 go list -f '{{.GoFiles}}' github.com/gosuda/loGos/rt/logos/ejecttestrt
 ! stdout 'winfallback.go'
+env GOOS=$TESTGO_GOHOSTOS
 
 -- mkgoroot.go --
 package main

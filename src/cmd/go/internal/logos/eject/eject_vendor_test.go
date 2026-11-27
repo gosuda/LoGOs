@@ -38,6 +38,12 @@ func TestEjectedSelectedRejectsNativeOnly(t *testing.T) {
 		{"//go:build logosejected && windows", true},
 		{"//go:build !logosejected && t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 && t11", false},
 		{"//go:build logosejected && t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 && t11", true},
+		// A late ejected-mode tag still decides after the solver walks the
+		// earlier disjunctions: rejection backtracks across every branch
+		// instead of admitting the file or hanging on the open tags.
+		{"//go:build (t1 || t2) && !logosejected", false},
+		{"//go:build (t1 || t2) && (t3 || t4) && !logosejected", false},
+		{"//go:build (t1 || t2) && logosejected", true},
 	}
 	for _, tc := range cases {
 		if got := ejectedSelected(parseEjectedGuard(t, tc.line)); got != tc.want {
