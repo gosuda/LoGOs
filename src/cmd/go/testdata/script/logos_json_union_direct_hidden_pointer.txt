@@ -1,0 +1,85 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A direct alias for a pointer to a hidden decoder type is rejected: the
+# holder cannot name the element the trial would allocate, so validation
+# and the generated decoder agree on a diagnostic instead of emitting
+# code that cannot build.
+cd bad
+! logos run .
+stderr 'points to an unexported type'
+
+-- bad/go.mod --
+module example.com/unionaliasdirecthidden
+
+go 1.27
+-- bad/lib/lib.lgo --
+package lib
+
+import (
+	"encoding/json"
+	"errors"
+)
+
+type hidden struct {
+	X int64 `json:"x"`
+}
+
+func (h *hidden) UnmarshalJSON(data []byte) error {
+	var m map[string]int64
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	v, ok := m["x"]
+	if !ok {
+		return errors.New("hidden requires x")
+	}
+	h.X = v
+	return nil
+}
+
+type Ptr = *hidden
+-- bad/main.lgo --
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"example.com/unionaliasdirecthidden/lib"
+)
+
+type Other struct {
+	Y string `json:"y"`
+}
+
+func (o *Other) UnmarshalJSON(data []byte) error {
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	v, ok := m["y"]
+	if !ok {
+		return errors.New("Other requires y")
+	}
+	o.Y = v
+	return nil
+}
+
+type U interface {
+	lib.Ptr | *Other
+}
+
+type H struct {
+	Item U `json:"item"`
+}
+
+func main() {
+	var h H
+	if err := json.Unmarshal([]byte(`{"item":{"x":31}}`), &h); err != nil {
+		fmt.Println("decode err:", err)
+		return
+	}
+	fmt.Printf("decoded %T\n", h.Item)
+}

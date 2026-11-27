@@ -569,6 +569,80 @@ func logosAccessibleAlias(t Type, pkg *Package) (*TypeName, bool) {
 	}
 }
 
+// logosWrittenPointedElem returns the element of a pointer reached through
+// aliases as written, without consulting the alias expansion cache: type
+// checking may already have expanded an alias elsewhere, which would hide
+// an accessible middle spelling. A nil right-hand side or a non-pointer
+// shape reports false.
+func logosWrittenPointedElem(t Type) (Type, bool) {
+	for {
+		if a, ok := t.(*Alias); ok {
+			rhs := a.Rhs()
+			if rhs == nil {
+				return nil, false
+			}
+			t = rhs
+			continue
+		}
+		if cv, ok := t.(*ConstView); ok {
+			t = cv.Elem
+			continue
+		}
+		if p, ok := t.(*Pointer); ok {
+			return p.Elem(), true
+		}
+		return nil, false
+	}
+}
+
+// logosNameAccessible reports whether the holder package can name obj: a
+// nil holder or a nil package accepts, otherwise the name must be declared
+// in the holder's own package or exported.
+func logosNameAccessible(obj *TypeName, pkg *Package) bool {
+	if obj == nil {
+		return false
+	}
+	op := obj.Pkg()
+	if op == nil || pkg == nil {
+		return true
+	}
+	if op.Path() == pkg.Path() {
+		return true
+	}
+	return obj.Exported()
+}
+
+// logosSpellableInPkg reports whether the holder package can spell t. An
+// alias counts by its own accessible name, a defined type by its exported
+// or same-package name. Anything else keeps the conservative answer true
+// so only a clearly unspellable element is ever rejected.
+func logosSpellableInPkg(t Type, pkg *Package) bool {
+	switch t := t.(type) {
+	case *Alias:
+		return logosNameAccessible(t.Obj(), pkg)
+	case *Named:
+		return logosNameAccessible(t.Obj(), pkg)
+	default:
+		return true
+	}
+}
+
+// logosUnionPointerAllocSpellable reports whether the trial allocation for
+// a pointer union member can be spelled by holder: the written pointed
+// element when the holder can name it, else the unaliased element. It
+// mirrors the trial's allocation choice in json_unmarshal, so validation
+// and the generated decoder agree.
+func logosUnionPointerAllocSpellable(term Type, pkg *Package) bool {
+	elem, ok := logosWrittenPointedElem(term)
+	if !ok {
+		return true
+	}
+	if logosSpellableInPkg(elem, pkg) {
+		return true
+	}
+	return logosSpellableInPkg(Unalias(elem), pkg)
+}
+
 func logosAppendImportedMembers(name logosForeignName, out *[]LogosUnionMember, seen, visited map[string]bool) {
 	key := name.pkgPath + "." + name.typeName
 	if visited[key] {
