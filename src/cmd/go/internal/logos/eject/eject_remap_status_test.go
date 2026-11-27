@@ -18,7 +18,7 @@ import "comptime"
 func enable(s *http.Server) { s.EnableHTTP2ExtendedConnect() }
 `
 	before := base.GetExitStatus()
-	out, uses, ok := remapEjectedFile([]byte(input), "")
+	out, uses, ok := remapEjectedFile([]byte(input), "", nil)
 	if ok || uses || out != nil {
 		t.Fatalf("overlapping fixture reported partial success: ok=%v uses=%v output=%q", ok, uses, out)
 	}
