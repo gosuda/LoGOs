@@ -134,12 +134,51 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		return true
 	}
 	for _, root := range roots {
-		if f, ok := root.(*syntax.File); ok && !fileImportsNetHTTP(f) {
-			continue
+		if f, ok := root.(*syntax.File); ok {
+			if !fileImportsNetHTTP(f) {
+				continue
+			}
+			// Eject skips files that declare the method name by
+			// spelling, so verification must not exempt their calls
+			// by type: the rewrite will leave every one of them
+			// behind for upstream Go to reject.
+			if h2DefinedInFile(f) {
+				continue
+			}
 		}
 		syntax.Inspect(root, inspect)
 	}
 	return mapped
+}
+
+// h2extendedConnectMethod mirrors eject.h2extendedConnectMethod: the two
+// must name the same fork-only method or verification and rewriting drift
+// apart and a same-named declaration lets a genuine call through.
+const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
+
+// h2DefinedInFile reports whether f declares the extended-CONNECT method
+// name itself, mirroring eject.h2DefinesExtendedConnect on the eject side.
+func h2DefinedInFile(f *syntax.File) bool {
+	found := false
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch x := n.(type) {
+		case *syntax.Field:
+			if x.Name != nil && x.Name.Value == h2extendedConnectMethod {
+				found = true
+				return false
+			}
+		case *syntax.FuncDecl:
+			if x.Name != nil && x.Name.Value == h2extendedConnectMethod {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // fileImportsNetHTTP reports whether f directly imports net/http.

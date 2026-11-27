@@ -21,6 +21,15 @@ logos build ./...
 stderr 'server\.lgo:5.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
 ! exists out
 
+cd ../samename
+# A file that declares the method name itself is skipped by the eject
+# rewrite, so verification must refuse even the genuine server call in
+# it instead of exempting it by type.
+logos build ./...
+! logos eject -o out
+stderr 'server\.lgo:.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
+! exists out
+
 cd ../ok
 # The stock-library control ejects cleanly.
 logos build ./...
@@ -67,3 +76,23 @@ package h2expression
 import "net/http"
 
 var Enable = (*http.Server).EnableHTTP2ExtendedConnect
+
+-- samename/go.mod --
+module example.com/h2samename
+
+go 1.27
+
+-- samename/server.lgo --
+package h2samename
+
+import "net/http"
+
+type Mine struct{}
+
+func (Mine) EnableHTTP2ExtendedConnect() {}
+
+func Enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+	var m Mine
+	m.EnableHTTP2ExtendedConnect()
+}
