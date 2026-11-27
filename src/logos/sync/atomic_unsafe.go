@@ -185,7 +185,7 @@ func (a *Atomic[T]) CompareAndSwap(old T, next T, order Order) bool {
 	return a.u32.CompareAndSwap(uint32(old), uint32(next))
 }
 
-// And clears every bit absent from v and reports the new value,
+// And clears every bit absent from v and reports the previous value,
 // like sync/atomic. It accepts any Order.
 func (a *Atomic[T]) And(v T, order Order) T {
 	order.checkUpdate()
@@ -201,7 +201,7 @@ func (a *Atomic[T]) And(v T, order Order) T {
 	return T(a.u32.And(uint32(v)))
 }
 
-// Or sets every bit present in v and reports the new value,
+// Or sets every bit present in v and reports the previous value,
 // like sync/atomic. It accepts any Order.
 func (a *Atomic[T]) Or(v T, order Order) T {
 	order.checkUpdate()

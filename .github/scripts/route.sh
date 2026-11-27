@@ -29,7 +29,11 @@ case $ev in
         fi
       done
       if [ "$all" = false ]; then
-        files=$(git diff --name-only "$before" "$after") || all=true
+        # Never follow renames here: a push that moves a file out of a
+        # watched path reports only the destination when renames are
+        # detected, and the deleted watched path would silently skip
+        # its suite (for example the cgo checks for misc/cgo/).
+        files=$(git diff --no-renames --name-only "$before" "$after") || all=true
       fi
     else
       # Initial pushes and unavailable endpoints must not silently skip code.

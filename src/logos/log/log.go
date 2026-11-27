@@ -128,14 +128,17 @@ func (l *Logger) Log(m Level, msg string) {
 	_, _ = fmt.Fprintf(l.out, "[%s] (%s): %s\n", m, l.scope, msg)
 }
 
-// Logf writes the formatted message as one line when m passes.
+// Logf writes the formatted message as one line when m passes. The
+// arguments format before the writer lock is taken, so a String
+// method that logs through the same logger cannot deadlock on it.
 func (l *Logger) Logf(m Level, format string, args ...any) {
 	if !l.Enabled(m) {
 		return
 	}
+	msg := fmt.Sprintf(format, args...)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	_, _ = fmt.Fprintf(l.out, "[%s] (%s): %s\n", m, l.scope, fmt.Sprintf(format, args...))
+	_, _ = fmt.Fprintf(l.out, "[%s] (%s): %s\n", m, l.scope, msg)
 }
 
 // Debug writes msg when Debug passes the threshold.
