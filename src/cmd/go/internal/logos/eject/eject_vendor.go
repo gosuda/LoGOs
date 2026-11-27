@@ -179,6 +179,25 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 			taken[logosStem(name)] = true
 		}
 	}
+	// A package that selects constants by ejected mode and consumes them
+	// under const-if cannot ship host lowering: the ejected tree builds
+	// without the ejected tag, so refuse instead of publishing a host
+	// specialization.
+	if !p.vendored {
+		var logosNames []string
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || name[0] == '.' || name[0] == '_' || !isLoweredSupportFile(name) {
+				continue
+			}
+			logosNames = append(logosNames, name)
+		}
+		if len(logosNames) > 0 && modeDependentSupportLowering(func(name string) ([]byte, error) {
+			return c.readOriginal(p, name)
+		}, logosNames) {
+			return fmt.Errorf("support package %s mixes ejected-mode sources with const-if lowering", p.src)
+		}
+	}
 	goFiles := 0
 	var embeds []string
 	for _, entry := range entries {
@@ -258,8 +277,11 @@ func ejectedSelected(expr constraint.Expr) bool {
 // same language version (a folded go1.N tag would pin the file to that
 // version's semantics, such as shared loop variables before go1.22). A
 // versionless file whose residual still names a release tag keeps the
-// selection with a version-neutral, always-false disjunct, which drops
-// the implied version without selecting anything new.
+// selection with a version-neutral, never-selected disjunct, which drops
+// the implied version without selecting anything new: the disjunct is
+// ignore && !ignore, unsatisfiable under every tag set, because a bare
+// ignore tag is satisfiable with -tags ignore and would newly select
+// the file.
 func foldEjectedGuard(expr constraint.Expr, version string) (guard constraint.Expr, excluded bool) {
 	guard, excluded = foldEjectedModeTags(expr)
 	if excluded {
@@ -268,13 +290,24 @@ func foldEjectedGuard(expr constraint.Expr, version string) (guard constraint.Ex
 	if constraint.GoVersion(guard) != version {
 		if version == "" {
 			if constraint.GoVersion(guard) != "" {
-				guard = &constraint.OrExpr{X: guard, Y: &constraint.TagExpr{Tag: "ignore"}}
+				guard = &constraint.OrExpr{X: guard, Y: neverSelected()}
 			}
 		} else {
 			guard = neutralizeEjectedGuard(expr)
 		}
 	}
 	return guard, false
+}
+
+// neverSelected is a constraint no tag set satisfies. A bare ignore tag
+// is satisfiable with -tags ignore, so it cannot serve as the
+// version-neutral disjunct; conjoining it with its own negation keeps the
+// versionless shape while selecting nothing.
+func neverSelected() constraint.Expr {
+	return &constraint.AndExpr{
+		X: &constraint.TagExpr{Tag: "ignore"},
+		Y: &constraint.NotExpr{X: &constraint.TagExpr{Tag: "ignore"}},
+	}
 }
 
 // logosejected and !logosconc become !ignore (always true), !logosejected
@@ -517,7 +550,10 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 			return nil, false, err
 		}
 	}
-	if !p.vendored {
+	if !p.vendored && !lowered {
+		// Handwritten Go sources only: lowered output already had its
+		// header rewritten to the ejected residual, so the whole-file
+		// legacy strip would also eat matching lines inside raw strings.
 		data = stripEjectedBuildTag(data)
 	}
 	// The support copy is the ejected form: a lowered LoGOs source belongs
@@ -556,11 +592,22 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	if lowered {
 		edits = append(edits, siteIdentEdits(fset, f, siteNamespace(logosStem(name)))...)
 	}
-	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, nil)
+	// The generated support import must avoid package-level names from
+	// sibling files, exactly as the main-module copy does: an alias that
+	// collides with a sibling declaration makes the exported package fail
+	// to build.
+	var h2reserved map[string]bool
+	if bytes.Contains(data, []byte(h2extendedConnectMethod)) {
+		h2reserved = h2PackageReserved(c.absSrcDir(p), filepath.Join(c.staging, filepath.FromSlash(p.src)))
+	}
+	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, h2reserved)
 	if h2Overlaps(edits, h2edits) {
 		return nil, false, fmt.Errorf("overlapping extended-CONNECT rewrite")
 	}
 	edits = append(edits, h2edits...)
+	if len(h2edits) > 0 && !lowered && c.packageDeclaresExtendedConnect(p, name) {
+		return nil, false, fmt.Errorf("ambiguous extended-CONNECT opt-in in %s: package declares %s and %s calls it, so eject cannot tell the fork method from the user method", p.src, h2extendedConnectMethod, name)
+	}
 	embeds := false
 	for _, imp := range f.Imports {
 		importPath, err := strconv.Unquote(imp.Path.Value)
@@ -614,6 +661,90 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		}
 	}
 	return patterns, true, nil
+}
+
+// modeDependentSupportLowering reports whether a toolchain support package
+// mixes ejected-mode source selection with const-if lowering: one of its
+// LoGOs sources carries a logosejected build constraint while another
+// holds a const-if or const-switch. The support copy ships host lowering
+// without the ejected tag, so such a package cannot lower the same way in
+// both modes.
+func modeDependentSupportLowering(read func(name string) ([]byte, error), names []string) bool {
+	var twin, branch bool
+	for _, name := range names {
+		if !isSupportLogosFile(name) {
+			continue
+		}
+		data, err := read(name)
+		if err != nil {
+			continue
+		}
+		if selectsEjectedMode(data) {
+			twin = true
+		}
+		if bytes.Contains(data, []byte("const if")) || bytes.Contains(data, []byte("const switch")) {
+			branch = true
+		}
+		if twin && branch {
+			return true
+		}
+	}
+	return false
+}
+
+// selectsEjectedMode reports whether a LoGOs source mentions the ejected
+// build tag in its header constraint. Only the header parses: the body
+// may hold LoGOs syntax the Go parser rejects.
+func selectsEjectedMode(data []byte) bool {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", data, parser.PackageClauseOnly|parser.ParseComments)
+	if err != nil {
+		return false
+	}
+	expr, err := ownedHeaderExpr(f)
+	if err != nil || expr == nil {
+		return false
+	}
+	var tags []string
+	collectConstraintTags(expr, &tags)
+	for _, tag := range tags {
+		if tag == "logosejected" {
+			return true
+		}
+	}
+	return false
+}
+
+// packageDeclaresExtendedConnect reports whether any handwritten Go file
+// of the support source package other than name declares the extended
+// CONNECT method name. Lowered files carry the compiler's own ambiguity
+// verification, so only handwritten sources need this package-wide check:
+// the text rewrite cannot tell a genuine server opt-in from a same-named
+// user method in a sibling file.
+func (c *supportCopy) packageDeclaresExtendedConnect(p supportSourcePackage, name string) bool {
+	entries, err := c.readDir(p)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		other := entry.Name()
+		if entry.IsDir() || other == name || !strings.HasSuffix(other, ".go") || strings.HasSuffix(other, "_test.go") {
+			continue
+		}
+		data, err := c.readOriginal(p, other)
+		if err != nil {
+			continue
+		}
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, other, data, 0)
+		if err != nil {
+			continue
+		}
+		if h2DefinesExtendedConnect(f) {
+			return true
+		}
+	}
+	return false
 }
 
 // copyAsset copies one non-Go build asset. Vendored assets keep the rooted
