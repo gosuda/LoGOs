@@ -182,3 +182,48 @@ func TestCheckDiscoveredPackageErrorsKeepsTransitiveNoGo(t *testing.T) {
 		t.Errorf("transitive platform-only logos/b not recorded unloadable: %v", unloadable)
 	}
 }
+
+// With cgo enabled, a logos import named only by an inactive owned Go
+// file joins discovery: the host load never sees it, so without this
+// the support copy misses the package and only the selecting build
+// fails. Active files, ignore-tagged files, .lgo files and nested
+// modules never seed the search; with cgo disabled nothing is
+// reported and the gap refusal keeps applying.
+func TestOwnedInactiveGoLogosImports(t *testing.T) {
+	saved := cfg.BuildContext
+	t.Cleanup(func() { cfg.BuildContext = saved })
+	dir := t.TempDir()
+	write := func(name, source string) {
+		t.Helper()
+		file := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(file), 0777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/cgoown\n\ngo 1.27\n")
+	write("active.go", "package feat\n\nfunc Name() string { return \"feat\" }\n")
+	write("feat_native.go", "//go:build native\n\npackage feat\n\nimport \"C\"\n\nimport \"logos/ejecttestfake\"\n\nfunc Leaf() string { return \"fake\" }\n")
+	write("ignored.go", "//go:build ignore\n\npackage feat\n\nimport \"logos/ejecttestignored\"\n")
+	write("helper.lgo", "package feat\n")
+	write("nested/go.mod", "module example.com/nested\n\ngo 1.27\n")
+	write("nested/hidden.go", "//go:build native\n\npackage nested\n\nimport \"C\"\n\nimport \"logos/ejecttestnested\"\n")
+	host := ownedTestMainPackage(dir, "example.com/cgoown/feat", "feat")
+	host.Dir = dir
+	host.GoFiles = []string{"active.go"}
+	plan := ownedTestPlan(dir, host)
+	cfg.BuildContext.CgoEnabled = true
+	got := ownedInactiveGoLogosImports(plan, map[string]bool{}, map[string]bool{})
+	if !slices.Equal(got, []string{"logos/ejecttestfake"}) {
+		t.Fatalf("inactive imports = %q, want [logos/ejecttestfake]", got)
+	}
+	if got := ownedInactiveGoLogosImports(plan, map[string]bool{"logos/ejecttestfake": true}, map[string]bool{}); len(got) != 0 {
+		t.Fatalf("known import rediscovered: %q", got)
+	}
+	cfg.BuildContext.CgoEnabled = false
+	if got := ownedInactiveGoLogosImports(plan, map[string]bool{}, map[string]bool{}); len(got) != 0 {
+		t.Fatalf("cgo-disabled discovery = %q, want none", got)
+	}
+}

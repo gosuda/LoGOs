@@ -282,6 +282,91 @@ func ejectDiscoverDirs(plan *ejectPlan, unloadable map[string]bool) []string {
 	return slices.Sorted(maps.Keys(dirs))
 }
 
+// ownedInactiveGoLogosImports scans owned modules for Go files the host
+// build leaves out that import LoGOs packages the load never reached.
+// With cgo enabled such a file is inactive by platform or tag, not by
+// toolchain, so its imports must join discovery for the support copy to
+// carry them. With cgo disabled nothing is reported here and the
+// cgo-gap refusal keeps applying. Only files the support copy would
+// read seed the search, exactly as in the variant inventory.
+func ownedInactiveGoLogosImports(plan *ejectPlan, known, added map[string]bool) []string {
+	if !cfg.BuildContext.CgoEnabled {
+		return nil
+	}
+	activeGo := map[string]bool{}
+	for _, module := range append([]*ejectModule{plan.main}, plan.deps...) {
+		for _, p := range module.pkgs {
+			for _, files := range [][]string{p.GoFiles, p.CgoFiles} {
+				for _, name := range files {
+					activeGo[filepath.Join(p.Dir, name)] = true
+				}
+			}
+		}
+	}
+	var newPaths []string
+	for _, module := range append([]*ejectModule{plan.main}, plan.deps...) {
+		modFile := parseGoModFile(filepath.Join(module.dir, "go.mod"))
+		if module.path == "" {
+			module.path = modFile.Module.Mod.Path
+		}
+		var patterns []string
+		for _, ignored := range modFile.Ignore {
+			patterns = append(patterns, ignored.Path)
+		}
+		ignored := search.NewIgnorePatterns(patterns)
+		root := filepath.Clean(module.dir)
+		var walk func(string) error
+		walk = func(dir string) error {
+			entries, err := fsys.ReadDir(dir)
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				name := entry.Name()
+				path := filepath.Join(dir, name)
+				if entry.IsDir() {
+					rel, err := filepath.Rel(root, path)
+					if err != nil {
+						return err
+					}
+					if name == "vendor" || name == "testdata" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || ignored.ShouldIgnore(filepath.ToSlash(rel)) {
+						continue
+					}
+					if info, err := fsys.Stat(filepath.Join(path, "go.mod")); err == nil && !info.IsDir() {
+						continue
+					} else if err != nil && !os.IsNotExist(err) {
+						return err
+					}
+					if err := walk(path); err != nil {
+						return err
+					}
+					continue
+				}
+				if !entry.Type().IsRegular() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !isSupportCopyFile(name) || activeGo[path] {
+					continue
+				}
+				data, err := fsys.ReadFile(path)
+				if err != nil {
+					return fmt.Errorf("read inactive Go source %s: %w", path, err)
+				}
+				for _, imp := range goSourceImports(data) {
+					rest, ok := strings.CutPrefix(imp, "logos/")
+					if !ok || rest == "" || imp == load.LogosRTPkg || known[imp] || added[imp] {
+						continue
+					}
+					added[imp] = true
+					newPaths = append(newPaths, imp)
+				}
+			}
+			return nil
+		}
+		if err := walk(root); err != nil {
+			base.Fatalf("logos eject: inventory module %s: %v", module.path, err)
+		}
+	}
+	return newPaths
+}
+
 func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, plan *ejectPlan) {
 	unloadable := map[string]bool{}
 	// Host-active GOROOT sources need no gap check: the main load already
@@ -342,6 +427,9 @@ func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, op
 				}
 			}
 		}
+		// Owned inactive Go files join the same discovery when cgo is
+		// enabled: the host load never sees their imports either.
+		newPaths = append(newPaths, ownedInactiveGoLogosImports(plan, known, added)...)
 		if len(cgoGaps) > 0 {
 			slices.Sort(cgoGaps)
 			base.Fatalf("logos eject: cgo-only Go sources reach logos packages the load cannot see without cgo:\n%s\nexport with CGO_ENABLED=1 and a C compiler", strings.Join(cgoGaps, "\n"))

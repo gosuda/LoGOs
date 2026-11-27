@@ -346,6 +346,13 @@ func TestRebaseAbsoluteReplaceTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A kept nested module carries its go.mod into the export; the
+	// rebase only follows targets that hold one.
+	for _, d := range []string{filepath.Join(mainDir, "testonly"), filepath.Join(outDir, "testonly")} {
+		if err := os.WriteFile(filepath.Join(d, "go.mod"), []byte("module example.com/testonly\n\ngo 1.27\n"), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
 	absTarget := filepath.Join(mainDir, "testonly")
 	mainMod := "module example.com/ejectabs\n\ngo 1.27\n\nrequire example.com/testonly v0.0.0\n\nreplace example.com/testonly => " + strconv.Quote(absTarget) + "\n"
 	if err := os.WriteFile(filepath.Join(mainDir, "go.mod"), []byte(mainMod), 0666); err != nil {

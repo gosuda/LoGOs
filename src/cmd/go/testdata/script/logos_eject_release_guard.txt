@@ -28,8 +28,8 @@ stdout -count=2 '^2$'
 logos eject -o out
 exists out/_logos_deps/rt/logos/ejecttestrel/item.go
 exists out/_logos_deps/rt/logos/ejecttestlegacy/item.go
-grep '^//go:build go1.21 || (ignore && !ignore)$' out/_logos_deps/rt/logos/ejecttestrel/item.go
-grep '^//go:build go1.27 || (ignore && !ignore)$' out/_logos_deps/rt/logos/ejecttestlegacy/item.go
+grep -count=1 '^//go:build go1.21 [|][|] [(]ignore && !ignore[)]' out/_logos_deps/rt/logos/ejecttestrel/item.go
+grep -count=1 '^//go:build go1.27 [|][|] [(]ignore && !ignore[)]' out/_logos_deps/rt/logos/ejecttestlegacy/item.go
 ! grep 'logosejected' out/_logos_deps/rt/logos/ejecttestrel/item.go
 ! grep 'logosejected' out/_logos_deps/rt/logos/ejecttestlegacy/item.go
 
