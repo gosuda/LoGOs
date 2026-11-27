@@ -112,6 +112,7 @@ The output `go.mod` MUST carry a `replace` line for each ejected module [T-0.3].
 A Go dependency module MUST stay a `require` entry of the output `go.mod` [T-0.3][R-U2].
 The support sources MUST become one shared support module `github.com/gosuda/loGos/rt` [T-0.3][A-RTMOD].
 The shared module MUST land in `DIR/_logos_deps/rt` [T-0.3].
+Each toolchain package `logos/<path>` that the program imports, other than `logos/rt`, `logos/arena`, `logos/sync`, and their subpackages, MUST land in the shared module as `github.com/gosuda/loGos/rt/logos/<path>` [T-0.3].
 The output MUST carry a `replace` line for the shared module [T-0.3].
 The tool MUST remove `import "comptime"` during eject [T-0.3].
 The output MUST NOT include a `//go:build !logos` line [T-0.3][R-U3].

@@ -1,0 +1,192 @@
+[!symlink] skip 'fake GOROOT needs symlinks'
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOWORK=off
+env CGO_ENABLED=0
+
+# Overlays replace the effective toolchain tree: an inserted .lgo file in a
+# GOROOT logos/* package must be copied from its lowered output, and a
+# deleted file must not be requested from staging. The test installs fixture
+# packages in a private toolchain root inside $WORK and selects it with
+# GOROOT. Nothing is written into the real GOROOT.
+# An overlay-inserted header is a build asset with no physical file: the
+# support copy reads it from the effective filesystem.
+go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
+go run mkovl.go $WORK/fakegoroot $WORK/ovl
+env GOROOT=$WORK/fakegoroot
+
+cd m
+
+# Without the overlay the program is broken: Extra only exists in it.
+! logos run .
+logos run -overlay=$WORK/ovl/overlay.json .
+stdout '^ovl base plus ovl extra$'
+
+logos build -overlay=$WORK/ovl/overlay.json --emit-go=out .
+exists out/_logos_deps/rt/logos/ejecttestovl/extra.go
+! exists out/_logos_deps/rt/logos/ejecttestovl/removed.go
+exists out/_logos_deps/rt/logos/ejecttestovl/extra.h
+
+env GOROOT=$TESTGO_GOROOT
+cd out
+go build -mod=readonly ./...
+go run .
+stdout '^ovl base plus ovl extra$'
+
+-- mkgoroot.go --
+package main
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func must(err error, what string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkgoroot: %s: %v\n", what, err)
+		os.Exit(1)
+	}
+}
+
+func link(oldname, newname string) {
+	must(os.MkdirAll(filepath.Dir(newname), 0777), "mkdir "+filepath.Dir(newname))
+	must(os.Symlink(oldname, newname), "symlink "+newname)
+}
+
+func main() {
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: mkgoroot <realGOROOT> <fakeRoot> <fixtures>")
+		os.Exit(2)
+	}
+	real, fake, fixtures := os.Args[1], os.Args[2], os.Args[3]
+
+	must(os.MkdirAll(filepath.Join(fake, "src", "logos"), 0777), "mkdir fake src/logos")
+
+	ents, err := os.ReadDir(filepath.Join(real, "src"))
+	must(err, "read real src")
+	for _, e := range ents {
+		if e.Name() == "logos" {
+			continue
+		}
+		link(filepath.Join(real, "src", e.Name()), filepath.Join(fake, "src", e.Name()))
+	}
+
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(filepath.Join(real, "src", "logos"))), "copy support sources")
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(fixtures)), "install fixture packages")
+
+	// The package index distinguishes .lgo-only standard packages, but
+	// bypasses files with recent mtimes. Age only the private copies.
+	old := time.Now().Add(-time.Hour)
+	must(filepath.WalkDir(filepath.Join(fake, "src", "logos"), func(name string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		return os.Chtimes(name, old, old)
+	}), "age copied support and fixture files")
+
+	link(filepath.Join(real, "pkg"), filepath.Join(fake, "pkg"))
+	link(filepath.Join(real, "VERSION"), filepath.Join(fake, "VERSION"))
+	if _, err := os.Stat(filepath.Join(real, "go.env")); err == nil {
+		link(filepath.Join(real, "go.env"), filepath.Join(fake, "go.env"))
+	}
+	if _, err := os.Stat(filepath.Join(real, "lib")); err == nil {
+		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
+	}
+}
+
+-- mkovl.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func quote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\', '"':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+func main() {
+	if len(os.Args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: mkovl <fakeGOROOT> <outdir>")
+		os.Exit(2)
+	}
+	fake, out := os.Args[1], os.Args[2]
+	if err := os.MkdirAll(out, 0777); err != nil {
+		fmt.Fprintf(os.Stderr, "mkovl: mkdir %s: %v\n", out, err)
+		os.Exit(1)
+	}
+	extra := "package ejecttestovl\n\nfunc Extra() string { return \"ovl extra\" }\n"
+	extraPath := filepath.Join(out, "extra.lgo")
+	if err := os.WriteFile(extraPath, []byte(extra), 0666); err != nil {
+		fmt.Fprintf(os.Stderr, "mkovl: write %s: %v\n", extraPath, err)
+		os.Exit(1)
+	}
+	// Keep the replacement recent so dirHash sees a file newer than
+	// modTimeCutoff and returns ErrNotIndexed: the build must exercise
+	// the unindexed overlay fallback, not a cached index entry. Aging
+	// it (as mkgoroot does for physical copies) would let the package
+	// become indexable after 2s and pass without covering the fallback.
+	header := "#pragma once\n"
+	headerPath := filepath.Join(out, "extra.h")
+	if err := os.WriteFile(headerPath, []byte(header), 0666); err != nil {
+		fmt.Fprintf(os.Stderr, "mkovl: write %s: %v\n", headerPath, err)
+		os.Exit(1)
+	}
+	removed := filepath.Join(fake, "src", "logos", "ejecttestovl", "removed.lgo")
+	inserted := filepath.Join(fake, "src", "logos", "ejecttestovl", "extra.lgo")
+	insertedHeader := filepath.Join(fake, "src", "logos", "ejecttestovl", "extra.h")
+	doc := "{\n\"Replace\": {\n" +
+		quote(removed) + ": \"\",\n" +
+		quote(inserted) + ": " + quote(extraPath) + ",\n" +
+		quote(insertedHeader) + ": " + quote(headerPath) + "\n}\n}\n"
+	if err := os.WriteFile(filepath.Join(out, "overlay.json"), []byte(doc), 0666); err != nil {
+		fmt.Fprintf(os.Stderr, "mkovl: write overlay.json: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+-- dep/ejecttestovl/base.lgo --
+package ejecttestovl
+
+func Base() string { return "ovl base" }
+
+-- dep/ejecttestovl/removed.lgo --
+package ejecttestovl
+
+func Removed() string { return missing() }
+
+-- m/go.mod --
+module example.com/ovltoolchain
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/ejecttestovl"
+)
+
+func main() {
+	fmt.Println(ejecttestovl.Base() + " plus " + ejecttestovl.Extra())
+}

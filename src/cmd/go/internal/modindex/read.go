@@ -711,7 +711,10 @@ func IsStandardPackage(goroot_, compiler, path string) bool {
 	} else if errors.Is(err, ErrNotIndexed) {
 		// Fall back because package isn't indexable. (Probably because
 		// a file was modified recently)
-		return goroot.IsStandardPackage(fsys.ReadDir, goroot_, compiler, path)
+		if goroot.IsStandardPackage(fsys.ReadDir, goroot_, compiler, path) {
+			return true
+		}
+		return logosStandardPackageFallback(goroot_, path)
 	}
 	return false
 }
