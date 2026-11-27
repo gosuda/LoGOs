@@ -390,3 +390,30 @@ func TestSupportCopyRefusesModeDependentLowering(t *testing.T) {
 		t.Errorf("copyPackage = %v, want an ejected-mode lowering refusal", err)
 	}
 }
+
+// A comment naming the branch is not a branch: the mode check reads
+// tokens, so incidental "const if" text in a comment never refuses a
+// package with no compile-time branch.
+func TestModeDependentSupportLoweringIgnoresComments(t *testing.T) {
+	files := map[string][]byte{
+		"ejected.lgo": []byte("//go:build logosejected\n\npackage ejecttestcomment\n\nconst Ejected = true\n"),
+		"use.lgo":     []byte("package ejecttestcomment\n\n// This package does not use const if.\n\nconst Chosen = 1\n"),
+	}
+	read := func(name string) ([]byte, error) { return files[name], nil }
+	if modeDependentSupportLowering(read, []string{"ejected.lgo", "use.lgo"}) {
+		t.Fatal("modeDependentSupportLowering refused a package whose only const-if is in a comment")
+	}
+}
+
+// A tab between const and if is still a branch: the compiler accepts any
+// whitespace between the keywords, so the mode check must too.
+func TestModeDependentSupportLoweringSeesTabBranch(t *testing.T) {
+	files := map[string][]byte{
+		"ejected.lgo": []byte("//go:build logosejected\n\npackage ejecttesttab\n\nconst Native = false\n"),
+		"use.lgo":     []byte("package ejecttesttab\n\nconst\tif Native {\nconst Chosen = 1\n}\n"),
+	}
+	read := func(name string) ([]byte, error) { return files[name], nil }
+	if !modeDependentSupportLowering(read, []string{"ejected.lgo", "use.lgo"}) {
+		t.Fatal("modeDependentSupportLowering missed a const-if branch separated by a tab")
+	}
+}

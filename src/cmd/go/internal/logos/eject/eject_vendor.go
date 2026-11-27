@@ -11,6 +11,7 @@ import (
 	"go/ast"
 	"go/build/constraint"
 	"go/parser"
+	"go/scanner"
 	"go/token"
 	"internal/logosfile"
 	"io/fs"
@@ -669,6 +670,43 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 // holds a const-if or const-switch. The support copy ships host lowering
 // without the ejected tag, so such a package cannot lower the same way in
 // both modes.
+// hasConstBranch reports whether data holds a const-if or const-switch
+// branch. It reads tokens, never bytes: comments and strings never
+// count, while any whitespace between the keywords still counts, exactly
+// matching the compiler's keyword lookahead. Only the header parses as
+// Go, so a byte scan would mistake incidental text for a branch and miss
+// non-space separations. Adjacent const and if or switch tokens can only
+// be the branch construct: const must open a declaration, and only the
+// branch continues it with if or switch.
+func hasConstBranch(data []byte) bool {
+	var sawConst bool
+	fset := token.NewFileSet()
+	file := fset.AddFile("", fset.Base(), len(data))
+	var scan scanner.Scanner
+	scan.Init(file, data, func(pos token.Position, msg string) {}, 0)
+	for {
+		_, tok, _ := scan.Scan()
+		if tok == token.EOF {
+			return false
+		}
+		if sawConst {
+			if tok == token.IF || tok == token.SWITCH {
+				return true
+			}
+			sawConst = false
+		}
+		if tok == token.CONST {
+			sawConst = true
+		}
+	}
+}
+
+// modeDependentSupportLowering reports whether a toolchain support package
+// mixes ejected-mode source selection with const-if lowering: one of its
+// LoGOs sources carries a logosejected build constraint while another
+// holds a const-if or const-switch. The support copy ships host lowering
+// without the ejected tag, so such a package cannot lower the same way in
+// both modes.
 func modeDependentSupportLowering(read func(name string) ([]byte, error), names []string) bool {
 	var twin, branch bool
 	for _, name := range names {
@@ -682,7 +720,7 @@ func modeDependentSupportLowering(read func(name string) ([]byte, error), names 
 		if selectsEjectedMode(data) {
 			twin = true
 		}
-		if bytes.Contains(data, []byte("const if")) || bytes.Contains(data, []byte("const switch")) {
+		if hasConstBranch(data) {
 			branch = true
 		}
 		if twin && branch {
