@@ -5645,7 +5645,7 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 		var bodies [][]syntax.Stmt
 		hasDefault := false
 		for _, c := range s.Cases {
-			if c.Type == nil {
+			if c.Default {
 				hasDefault = true
 			}
 			bodies = append(bodies, c.Body)
