@@ -23,12 +23,28 @@ import (
 // would report success for output that upstream Go rejects. Each miss is
 // reported at its source location; the staging build failure makes logos
 // eject exit nonzero before it writes any output.
+// VerifyEjectStdlib reports fork-only standard-library selectors in the main
+// files. Call before lowering: the unlowered tree still holds every call
+// site, including go-group children that lowering desugars away.
 func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
+	verifyEjectStdlib(pkg, info, files, false)
+}
+
+// VerifyEjectStdlibPrepared verifies comptime-prepared instances, which only
+// exist after LogosCtFinish runs. Main files are covered separately by
+// VerifyEjectStdlib before lowering.
+func VerifyEjectStdlibPrepared(pkg *types2.Package, info *types2.Info) {
+	verifyEjectStdlib(pkg, info, nil, true)
+}
+
+func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File, preparedOnly bool) {
 	if base.LogosEject == "" {
 		return
 	}
-	if _, dup := verifyEjectStdlibDone.LoadOrStore(pkg.Path(), true); dup {
-		return
+	if preparedOnly {
+		if _, dup := verifyEjectStdlibDone.LoadOrStore(pkg.Path(), true); dup {
+			return
+		}
 	}
 	t := loadUpstreamAPI()
 	if t == nil {
@@ -61,11 +77,13 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 			}
 		}
 	}
-	roots := make([]syntax.Node, len(files))
-	for i, file := range files {
-		roots[i] = file
+	if !preparedOnly {
+		roots := make([]syntax.Node, len(files))
+		for i, file := range files {
+			roots[i] = file
+		}
+		verify(info, roots)
 	}
-	verify(info, roots)
 	for _, rec := range info.LogosCtPrepared {
 		if rec == nil || rec.Info == nil {
 			continue
@@ -115,9 +133,17 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		// The text rewrite declines receivers containing generated site
 		// names because their independent edits would overlap the call.
 		// Keep exactly that boundary here instead of approving output
-		// which the later rewrite cannot materialize.
+		// which the later rewrite cannot materialize. Before lowering the
+		// site names do not exist yet: a `?` in the receiver (for example
+		// inside an inline callback) lowers into a TraceErr carrying a
+		// fresh site temporary inside the receiver span, so the rewrite
+		// will decline it there. Refuse that shape here too.
 		hasSite := false
 		syntax.Inspect(selector.X, func(node syntax.Node) bool {
+			if _, ok := node.(*syntax.TryExpr); ok {
+				hasSite = true
+				return false
+			}
 			if name, ok := node.(*syntax.Name); ok {
 				rest, site := strings.CutPrefix(name.Value, "_logos_site")
 				hasSite = hasSite || site && rest != "" && strings.Trim(rest, "0123456789") == ""
@@ -134,12 +160,51 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		return true
 	}
 	for _, root := range roots {
-		if f, ok := root.(*syntax.File); ok && !fileImportsNetHTTP(f) {
-			continue
+		if f, ok := root.(*syntax.File); ok {
+			if !fileImportsNetHTTP(f) {
+				continue
+			}
+			// Eject skips files that declare the method name by
+			// spelling, so verification must not exempt their calls
+			// by type: the rewrite will leave every one of them
+			// behind for upstream Go to reject.
+			if h2DefinedInFile(f) {
+				continue
+			}
 		}
 		syntax.Inspect(root, inspect)
 	}
 	return mapped
+}
+
+// h2extendedConnectMethod mirrors eject.h2extendedConnectMethod: the two
+// must name the same fork-only method or verification and rewriting drift
+// apart and a same-named declaration lets a genuine call through.
+const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
+
+// h2DefinedInFile reports whether f declares the extended-CONNECT method
+// name itself, mirroring eject.h2DefinesExtendedConnect on the eject side.
+func h2DefinedInFile(f *syntax.File) bool {
+	found := false
+	syntax.Inspect(f, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch x := n.(type) {
+		case *syntax.Field:
+			if x.Name != nil && x.Name.Value == h2extendedConnectMethod {
+				found = true
+				return false
+			}
+		case *syntax.FuncDecl:
+			if x.Name != nil && x.Name.Value == h2extendedConnectMethod {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // fileImportsNetHTTP reports whether f directly imports net/http.
