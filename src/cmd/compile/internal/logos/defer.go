@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"fmt"
 	"go/token"
+	"internal/buildcfg"
 	"slices"
 	"strings"
 
@@ -339,28 +340,261 @@ func (fc *funcLower) checkPair(plan *callPlan, cpos syntax.Pos) ([]syntax.Stmt, 
 	return append(native, checkN), append(text, checkT), tw
 }
 
-// definePieces emits one short declaration per captured piece, in use
-// order, so a multi-result argument never shares its right-hand side
-// with another capture. A call can supply all parameters of another
-// call with its multiple results only when it is the sole expression,
-// so combining the receiver with a two-result argument in one
-// declaration rejects programs the language accepts.
+// definePieces binds the captured operands so the ejected evaluation
+// order matches the native single-assignment spill: calls and early
+// interface copies first in use order, plain reads last. An argument
+// call runs before a plain function variable is read, and a composite
+// literal boxed into an interface is copied before a later call mutates
+// the fields it reads. A multi-result argument keeps its own declaration,
+// since combining it with another value rejects programs the language
+// accepts.
 func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []syntax.Stmt {
 	var pieces []capturePiece
+	var argIdx []int
 	if plan.isMethod {
 		pieces = append(pieces, plan.recv)
+		argIdx = append(argIdx, -1)
 	} else if plan.fun.capture {
 		pieces = append(pieces, plan.fun)
+		argIdx = append(argIdx, -1)
 	}
-	pieces = append(pieces, plan.args...)
-	var out []syntax.Stmt
-	for _, piece := range pieces {
+	for i, arg := range plan.args {
+		pieces = append(pieces, arg)
+		argIdx = append(argIdx, i)
+	}
+	sig := fc.callSignature(plan)
+	const (
+		piecePure = iota
+		pieceCall
+		pieceAlone
+	)
+	kind := make([]int, len(pieces))
+	for j, piece := range pieces {
 		if !piece.capture {
 			continue
 		}
-		out = append(out, defineOf(cpos, nameList(piece), valList(piece, tw)))
+		if len(piece.multi) > 0 {
+			kind[j] = pieceAlone
+			continue
+		}
+		if fc.groupHasCall(piece.expr) || fc.groupHasRecv(piece.expr) {
+			kind[j] = pieceCall
+			continue
+		}
+		var param types2.Type
+		if argIdx[j] >= 0 {
+			param = sigParamType(sig, argIdx[j], len(plan.args), plan.dots)
+		}
+		if fc.ifaceLitCopy(piece.expr, param) {
+			kind[j] = pieceAlone
+			continue
+		}
+	}
+	var out []syntax.Stmt
+	var names, vals []syntax.Expr
+	flush := func() {
+		if len(names) > 0 {
+			out = append(out, defineOf(cpos, names, vals))
+			names, vals = nil, nil
+		}
+	}
+	for j, piece := range pieces {
+		if !piece.capture || kind[j] == piecePure {
+			continue
+		}
+		if kind[j] == pieceAlone {
+			flush()
+			out = append(out, defineOf(cpos, nameList(piece), valList(piece, tw)))
+			continue
+		}
+		names = append(names, nameList(piece)...)
+		vals = append(vals, valList(piece, tw)...)
+	}
+	flush()
+	var pnames, pvals []syntax.Expr
+	for j, piece := range pieces {
+		if !piece.capture || kind[j] != piecePure {
+			continue
+		}
+		pnames = append(pnames, nameList(piece)...)
+		pvals = append(pvals, valList(piece, tw)...)
+	}
+	if len(pnames) > 0 {
+		out = append(out, defineOf(cpos, pnames, pvals))
 	}
 	return out
+}
+
+// callSignature returns the callee signature for a planned call, or nil
+// when the callee is not statically known.
+func (fc *funcLower) callSignature(plan *callPlan) *types2.Signature {
+	if isBuiltinExpr(fc, plan.fun.expr) {
+		return nil
+	}
+	if fn, ok := fc.calleeFunc(plan.fun.expr); ok {
+		if sig, ok := fn.Type().(*types2.Signature); ok {
+			return sig
+		}
+	}
+	if sig, ok := types2.Unalias(fc.fl.pkg.info.TypeOf(plan.fun.expr)).(*types2.Signature); ok {
+		return sig
+	}
+	return nil
+}
+
+// sigParamType returns the parameter type for argument i, or nil when the
+// signature is unknown or the argument is a variadic spread.
+func sigParamType(sig *types2.Signature, i, nargs int, dots bool) types2.Type {
+	if sig == nil || sig.Params() == nil || sig.Params().Len() == 0 {
+		return nil
+	}
+	params := sig.Params()
+	if dots && i == nargs-1 {
+		return nil
+	}
+	last := params.Len() - 1
+	if sig.Variadic() && i >= last {
+		if s, ok := params.At(last).Type().(*types2.Slice); ok {
+			return s.Elem()
+		}
+		return nil
+	}
+	if i >= params.Len() {
+		return nil
+	}
+	return params.At(i).Type()
+}
+
+// ifaceLitCopy reports whether raw captures a composite literal through
+// an interface conversion that order.go copies before later calls. The
+// param argument covers implicit boxing, where the parameter supplies
+// the interface type; pass nil when the raw form already converts.
+func (fc *funcLower) ifaceLitCopy(raw syntax.Expr, param types2.Type) bool {
+	info := fc.fl.pkg.info
+	node := syntax.Unparen(raw)
+	if call, ok := node.(*syntax.CallExpr); ok && len(call.ArgList) == 1 {
+		if tv, ok := info.Types[syntax.Unparen(call.Fun)]; ok && tv.IsType() {
+			if t := info.TypeOf(raw); t != nil {
+				if _, isI := types2.Unalias(t).Underlying().(*types2.Interface); isI {
+					node = syntax.Unparen(call.ArgList[0])
+				}
+			}
+		}
+	}
+	if _, ok := node.(*syntax.CompositeLit); !ok {
+		return false
+	}
+	var (
+		ot types2.Type
+		pt = param
+	)
+	if node == syntax.Unparen(raw) {
+		if pt == nil {
+			return false
+		}
+		if _, isTP := types2.Unalias(pt).(*types2.TypeParam); isTP {
+			return false
+		}
+		if _, isI := types2.Unalias(pt).Underlying().(*types2.Interface); !isI {
+			return false
+		}
+		ot = cmp.Or(info.TypeOf(raw), info.TypeOf(node))
+	} else {
+		ot = info.TypeOf(node)
+	}
+	if ot == nil || ot == types2.Typ[types2.Invalid] || !fixedLayout(ot) {
+		return false
+	}
+	sizes := types2.SizesFor("gc", buildcfg.GOARCH)
+	if _, ok := types2.Unalias(ot).Underlying().(*types2.Interface); ok {
+		return false
+	}
+	if sc := soleIfaceComponent(ot); sc != nil {
+		if b, ok := sc.Underlying().(*types2.Basic); ok && b.Info()&types2.IsString != 0 {
+			return false
+		}
+		if _, ok := sc.Underlying().(*types2.Slice); ok {
+			return false
+		}
+	}
+	sz := sizes.Sizeof(ot)
+	al := sizes.Alignof(ot)
+	u64 := sizes.Alignof(types2.Typ[types2.Uint64])
+	hasptr := types2.LogosHasPointers(ot)
+	switch {
+	case sz == 2 && al == 2:
+		return false
+	case sz == 4 && al == 4 && !hasptr:
+		return false
+	case sz == 8 && al == u64 && !hasptr:
+		return false
+	}
+	return true
+}
+
+// fixedLayout reports whether t has a target-independent layout, so the
+// boxing path order.go picks cannot depend on instantiation. A type
+// parameter nested inside a composite literal makes its size and
+// alignment variable until the generic call is instantiated, and the
+// size helpers assert on it; such literals stay on the general capture
+// path instead of being classified by a layout they cannot answer.
+func fixedLayout(t types2.Type) bool {
+	if _, isTP := types2.Unalias(t).(*types2.TypeParam); isTP {
+		return false
+	}
+	switch u := types2.Unalias(t).Underlying().(type) {
+	case *types2.Struct:
+		for i := range u.NumFields() {
+			if !fixedLayout(u.Field(i).Type()) {
+				return false
+			}
+		}
+	case *types2.Array:
+		return fixedLayout(u.Elem())
+	}
+	return true
+}
+
+// groupHasRecv reports whether e contains a channel receive outside a
+// nested function literal. Receives block and observe channel state, so
+// a deferred operand holding one keeps its position among the ordered
+// captures instead of moving to the plain reads at the end.
+func (fc *funcLower) groupHasRecv(e syntax.Expr) bool {
+	found := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return false
+		case syntax.Expr:
+			if _, ok := groupRecvOp(n); ok {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// soleIfaceComponent returns the only primitive component in t, or nil.
+func soleIfaceComponent(t types2.Type) types2.Type {
+	u := types2.Unalias(t)
+	if u == nil {
+		return nil
+	}
+	switch u := u.Underlying().(type) {
+	case *types2.Struct:
+		if u.NumFields() != 1 {
+			return nil
+		}
+		return soleIfaceComponent(u.Field(0).Type())
+	case *types2.Array:
+		if u.Len() != 1 {
+			return nil
+		}
+		return soleIfaceComponent(u.Elem())
+	default:
+		return u
+	}
 }
 
 func (fc *funcLower) planUses(plan *callPlan, tw *twin) (syntax.Expr, []syntax.Expr, []syntax.Expr, []syntax.Expr) {

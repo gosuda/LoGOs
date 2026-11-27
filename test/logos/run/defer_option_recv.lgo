@@ -56,7 +56,7 @@ func (v Item) Touch() error {
 
 func mkItemP(present bool) Item? {
 	if !present {
-		return Item{}
+		return nil
 	}
 	return Item{n: 3}
 }
@@ -95,17 +95,23 @@ func main() {
 	errb := useBox(mkBoxP(true))
 	check("box-err", errb == nil, errb, nil)
 	check("box-ran", len(closedLog) == 1, len(closedLog), 1)
+	closedLog = nil
 	check("box-absent-err", useBox(mkBoxP(false)) == nil, true, true)
+	check("box-absent-skip", len(closedLog) == 0, len(closedLog), 0)
 	touched = nil
 	erri := useItem(mkItemP(true))
 	check("item-err", erri == nil, erri, nil)
 	check("item-ran", len(touched) == 1 && touched[0] == 3, touched, []int{3})
+	touched = nil
 	check("item-absent-err", useItem(mkItemP(false)) == nil, true, true)
+	check("item-absent-skip", len(touched) == 0, len(touched), 0)
 	seenStatus = ""
 	errv := useValueRecv(mkVS())
 	check("value-err", errv == nil, errv, nil)
 	check("value-saw-registration", seenStatus == "ready", seenStatus, "ready")
+	seenStatus = ""
 	check("value-absent-err", useValueRecv(nil) == nil, true, true)
+	check("value-absent-skip", seenStatus == "", seenStatus, "")
 	if failed {
 		os.Exit(1)
 	}
