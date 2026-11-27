@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"cmd/go/internal/cfg"
@@ -292,5 +293,19 @@ func TestSupportDestinationsCollision(t *testing.T) {
 		if err.Error() != want {
 			t.Errorf("supportDestinations(%v) error = %q, want %q", paths, err.Error(), want)
 		}
+	}
+}
+
+func TestEjectSupportRootsSkipsUnusedHTTP(t *testing.T) {
+	plain := &load.Package{PackagePublic: load.PackagePublic{ImportPath: "example.com/plain", Imports: []string{"net/http"}}}
+	plan := &ejectPlan{main: &ejectModule{pkgs: []*load.Package{plain}}}
+	roots := ejectSupportRoots(plan)
+	for _, r := range roots {
+		if r == "logos/net/http" {
+			t.Errorf("stock net/http import pulled %s without a rewrite", r)
+		}
+	}
+	if !slices.Equal(roots, []string{"logos/rt"}) {
+		t.Errorf("roots = %v, want only the fixed runtime root", roots)
 	}
 }
