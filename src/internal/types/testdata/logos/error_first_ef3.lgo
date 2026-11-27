@@ -339,3 +339,12 @@ func probeCleanupLocalCallAssign() {
 	}()
 }
 
+// A callback forwarding a field pair populated after its creation is not a
+// read: every call forwards the exact pair.
+func probeFwdPopulated() func() (int, error) {
+	h := heldField{}
+	cb := func() (int, error) { return h.stats, h.err }
+	h.stats, h.err = fetchHeld()
+	return cb
+}
+

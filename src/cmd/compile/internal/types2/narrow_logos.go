@@ -4766,6 +4766,21 @@ func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState 
 					continue
 				}
 			}
+			// A callback can forward a field pair the enclosing function
+			// populates after the callback is created: the inventory seeds
+			// the pairing on the capture entry, outside the live pairing
+			// map. A return of that pair with its error unchanged is still
+			// forwarding, not a read. Field stores never leave flow
+			// entries, so a capture entry for a field path is
+			// inventory-backed; a live pairing contradicting it keeps the
+			// rejection, as does a vetoed guard.
+			if e, found := st.m[k]; found && e.err == nil && e.errKey != (logosEFKey{}) && passedKeys[e.errKey] {
+				if len(st.mayAlt[k]) == 0 && len(st.mayBroke[k]) == 0 {
+					if _, live := st.mayErr[k]; !live {
+						continue
+					}
+				}
+			}
 		}
 		st = p.expr(r, st)
 		if st == nil {
