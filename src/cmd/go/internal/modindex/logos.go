@@ -88,6 +88,7 @@ func checkLogosPackage(p *build.Package, badGoFile func(string, error)) {
 		seen[stem] = name
 	}
 }
+
 // logosStandardPackageFallback reports whether an unindexed directory
 // holds a LoGOs toolchain package. The upstream fallback recognizes
 // only .go files; under an overlay a .lgo-only package stays standard
