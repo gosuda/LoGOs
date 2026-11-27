@@ -2731,15 +2731,27 @@ func localReplaceDirs(modDir string) map[string]bool {
 	}
 	dirs := map[string]bool{}
 	for _, r := range f.Replace {
-		if r.New.Version != "" || r.New.Path == "" || filepath.IsAbs(r.New.Path) {
+		if r.New.Version != "" || r.New.Path == "" {
 			continue
 		}
-		target := filepath.Join(absMod, filepath.FromSlash(r.New.Path))
+		target := absReplaceTarget(absMod, r.New.Path)
 		if rel, err := filepath.Rel(absMod, target); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			dirs[filepath.Clean(rel)] = true
 		}
 	}
 	return dirs
+}
+
+// absReplaceTarget resolves a local replacement target against the module
+// that declares it. Absolute targets stand; relative targets join the
+// declaring module directory. Callers then rebase inside-module targets
+// at the ejected copy, so the export never points at the source checkout.
+func absReplaceTarget(absBase, newPath string) string {
+	absTarget := filepath.FromSlash(newPath)
+	if !filepath.IsAbs(absTarget) {
+		absTarget = filepath.Join(absBase, absTarget)
+	}
+	return absTarget
 }
 
 func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[string]string) {
@@ -2761,10 +2773,10 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 		if _, ok := ejected[r.Old.Path]; ok {
 			continue
 		}
-		if r.New.Version != "" || r.New.Path == "" || filepath.IsAbs(r.New.Path) {
+		if r.New.Version != "" || r.New.Path == "" {
 			continue
 		}
-		target := filepath.Join(absOrig, filepath.FromSlash(r.New.Path))
+		target := absReplaceTarget(absOrig, r.New.Path)
 		if relOrig, err := filepath.Rel(absOrig, target); err == nil && relOrig != ".." && !strings.HasPrefix(relOrig, ".."+string(filepath.Separator)) {
 			dstTarget := filepath.Join(absDst, relOrig)
 			if fi, err := os.Stat(dstTarget); err == nil && fi.IsDir() {
@@ -2831,11 +2843,13 @@ func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string,
 
 // rebaseDepReplacesOnMain repoints a dependency replace that names a
 // directory outside the dependency module at the ejected copy when the
-// target is a kept nested module of the main module. The shared
-// rebasing resolves such targets against the source tree, which the
-// exported module must not reference; the eject copies those nested
-// modules to the same main-relative path under out. A target already
-// inside the ejected tree or outside the main module is left alone.
+// target is a kept nested module of the main module. Absolute targets
+// resolve directly; relative targets resolve against the ejected
+// dependency. The shared rebasing resolves such targets against the
+// source tree, which the exported module must not reference; the eject
+// copies those nested modules to the same main-relative path under out.
+// A target already inside the ejected tree or outside the main module
+// is left alone.
 func rebaseDepReplacesOnMain(f *modfile.File, ejected map[string]string, plan *ejectPlan, dst, out string) {
 	absDst, err := filepath.Abs(dst)
 	if err != nil {
@@ -2853,10 +2867,10 @@ func rebaseDepReplacesOnMain(f *modfile.File, ejected map[string]string, plan *e
 		if _, ok := ejected[r.Old.Path]; ok {
 			continue
 		}
-		if r.New.Version != "" || r.New.Path == "" || filepath.IsAbs(r.New.Path) {
+		if r.New.Version != "" || r.New.Path == "" {
 			continue
 		}
-		absTarget := filepath.Join(absDst, filepath.FromSlash(r.New.Path))
+		absTarget := absReplaceTarget(absDst, r.New.Path)
 		if rel, err := filepath.Rel(absOut, absTarget); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
 		}
