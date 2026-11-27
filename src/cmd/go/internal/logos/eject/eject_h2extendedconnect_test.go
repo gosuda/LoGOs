@@ -5,9 +5,42 @@
 package eject
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestH2ExtendedConnectEmitsSupportDelegation(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, uses, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	if !uses {
+		t.Error("support import not reported as used")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no support delegation naming the server:\n%s", got)
+	}
+	if strings.Contains(got, "strings.Contains(os.Getenv") {
+		t.Errorf("inline GODEBUG parsing survives:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("missing aliased support import:\n%s", got)
+	}
+}
 
 func TestH2ExtendedConnectEmitsStockForm(t *testing.T) {
 	const in = `package main
@@ -26,21 +59,70 @@ func enable(s *http.Server) {
 	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
 		t.Errorf("direct call survives:\n%s", got)
 	}
-	if !strings.Contains(got, "http2xconnect=1") {
-		t.Errorf("no GODEBUG guard:\n%s", got)
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no helper call with the receiver as argument:\n%s", got)
 	}
-	if !strings.Contains(got, `"os"`) || !strings.Contains(got, `"strings"`) {
-		t.Errorf("missing injected imports:\n%s", got)
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("missing ejectedhttp support import:\n%s", got)
 	}
-	if !strings.Contains(got, "_ = s") {
-		t.Errorf("receiver not preserved:\n%s", got)
-	}
-	if !strings.Contains(got, `\"s\"`) {
-		t.Errorf("panic does not name the server:\n%s", got)
+	if strings.Contains(got, "os.Getenv") || strings.Contains(got, "strings.Contains") {
+		t.Errorf("guard inlined with file bindings instead of the helper:\n%s", got)
 	}
 }
 
-func TestH2ExtendedConnectSkipsOverlappingImportEdit(t *testing.T) {
+func TestH2ExtendedConnectReceiverEvaluatesAtCallSite(t *testing.T) {
+	// Planted fault: the rewrite moved receiver evaluation into the
+	// generated closure, so go and defer calls evaluated it late.
+	const in = `package main
+
+import "net/http"
+
+func enable(s *http.Server) {
+	go s.EnableHTTP2ExtendedConnect()
+	defer s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if !strings.Contains(got, "go ejectedhttp.RequireExtendedConnect(\"s\", s)") {
+		t.Errorf("go call keeps late evaluation:\n%s", got)
+	}
+	if !strings.Contains(got, "defer ejectedhttp.RequireExtendedConnect(\"s\", s)") {
+		t.Errorf("defer call keeps late evaluation:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectEvaluatesReceiverEagerly(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+	defer s.EnableHTTP2ExtendedConnect()
+	go s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "func() {") {
+		t.Errorf("receiver moved inside a deferred closure:\n%s", got)
+	}
+	if !strings.Contains(got, `defer ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("deferred call does not evaluate the receiver as an argument:\n%s", got)
+	}
+	if !strings.Contains(got, `go ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("go call does not evaluate the receiver as an argument:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectRejectsOverlappingImportEdit(t *testing.T) {
 	const in = `package main
 
 import "net/http"
@@ -50,19 +132,29 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "", nil)
-	if !ok {
-		t.Fatal("remapEjectedFile failed")
+	out, uses, ok := remapEjectedFile([]byte(in), "", nil)
+	if ok || uses || out != nil {
+		t.Fatalf("overlapping edit reported partial success: ok=%v uses=%v output=%q", ok, uses, out)
 	}
-	got := string(out)
-	if strings.Contains(got, "http2xconnect=1") {
-		t.Errorf("overlapping rewrite applied:\n%s", got)
+
+	saved := ejectGofmtFiles
+	t.Cleanup(func() { ejectGofmtFiles = saved })
+	ejectGofmtFiles = nil
+	dir := t.TempDir()
+	src, dst := filepath.Join(dir, "input.go"), filepath.Join(dir, "out", "input.go")
+	if err := os.WriteFile(src, []byte(in), 0666); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(got, `"comptime"`) {
-		t.Errorf("non-overlapping import edit dropped:\n%s", got)
+	uses, err := copyDataFile(src, dst)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(got, "s.EnableHTTP2ExtendedConnect()") {
-		t.Errorf("skipped call lost:\n%s", got)
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uses || string(got) != in || len(ejectGofmtFiles) != 0 {
+		t.Errorf("copy changed rejected source: uses=%v format=%v output=%q", uses, ejectGofmtFiles, got)
 	}
 }
 
@@ -85,7 +177,133 @@ func enable(s *http.Server) {
 	}
 	got := string(out)
 	if strings.Count(got, `"os"`) != 1 || strings.Count(got, `"strings"`) != 1 {
-		t.Errorf("duplicate imports:\n%s", got)
+		t.Errorf("existing imports disturbed:\n%s", got)
+	}
+	if strings.Count(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) != 1 {
+		t.Errorf("support import missing or duplicated:\n%s", got)
+	}
+	if strings.Contains(got, "os.Getenv") || strings.Contains(got, "strings.Contains") {
+		t.Errorf("guard inlined with file bindings instead of the helper:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectAvoidsFileBindings(t *testing.T) {
+	const in = `package main
+
+import (
+	"net/http"
+	sys "os"
+)
+
+var mode = sys.Getenv("H2XCONNECT_MODE")
+
+func enable(s *http.Server) {
+	strings := "shadow"
+	_ = strings
+	_ = mode
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "os.Getenv") || strings.Contains(got, "strings.Contains") {
+		t.Errorf("rewrite uses the file's os/strings bindings:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no hygienic helper call with the receiver as argument:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("missing ejectedhttp support import:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectRebindsLoweredMethodValue(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func spawn(recv *http.Server) {
+	_f0 := recv.EnableHTTP2ExtendedConnect
+	go _f0()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect\"") || strings.Contains(got, ".EnableHTTP2ExtendedConnect") {
+		t.Errorf("method value left unrewritten:\n%s", got)
+	}
+	if !strings.Contains(got, `_f0 := ejectedhttp.RequireExtendedConnectFunc("recv", recv)`) {
+		t.Errorf("method value not rebound through the deferred guard:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectReusesExistingSupportImport(t *testing.T) {
+	const in = `package main
+
+import (
+	"net/http"
+	ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
+)
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Count(got, `"github.com/gosuda/loGos/rt/logos/net/http"`) != 1 {
+		t.Errorf("support import duplicated:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectReusesLogosNetHTTPBinding(t *testing.T) {
+	const aliased = `package main
+
+import (
+	"net/http"
+	logoshttp "logos/net/http"
+)
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(aliased), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if !strings.Contains(got, `logoshttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("existing logos/net/http binding not reused:\n%s", got)
+	}
+	if strings.Contains(got, "ejectedhttp") {
+		t.Errorf("fresh support import added despite existing binding:\n%s", got)
+	}
+
+	for _, src := range []string{
+		"package main\n\nimport (\n\t\"net/http\"\n\t_ \"logos/net/http\"\n)\n\nfunc enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n",
+		"package main\n\nimport (\n\t\"net/http\"\n\t. \"logos/net/http\"\n)\n\nfunc enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n",
+	} {
+		out, _, ok := remapEjectedFile([]byte(src), "", nil)
+		if !ok {
+			t.Fatal("remapEjectedFile failed")
+		}
+		got := string(out)
+		if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+			t.Errorf("blank/dot binding not given a helper call:\n%s", got)
+		}
+		if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
+			t.Errorf("fresh support import missing for blank/dot binding:\n%s", got)
+		}
 	}
 }
 
@@ -144,15 +362,15 @@ func enable(s *http.Server) {
 	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
 		t.Errorf("direct call survives:\n%s", got)
 	}
-	if !strings.Contains(got, "logosH2Os \"os\"") || !strings.Contains(got, "logosH2Strings \"strings\"") {
-		t.Errorf("missing fresh named imports:\n%s", got)
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no delegation call with the receiver as argument:\n%s", got)
 	}
 	if strings.Contains(got, "..") || strings.Contains(got, "_.") {
 		t.Errorf("dot or blank binding used as qualifier:\n%s", got)
 	}
 }
 
-func TestH2ExtendedConnectClosureAvoidsShadowableAny(t *testing.T) {
+func TestH2ExtendedConnectIgnoresShadowableAny(t *testing.T) {
 	const in = `package main
 
 import "net/http"
@@ -171,11 +389,11 @@ func enable(s *http.Server) {
 	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
 		t.Errorf("direct call survives:\n%s", got)
 	}
-	if !strings.Contains(got, "interface{})") {
-		t.Errorf("closure parameter does not use the unshadowable type:\n%s", got)
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no delegation call with the receiver as argument:\n%s", got)
 	}
 	if strings.Contains(got, " any)") {
-		t.Errorf("closure parameter uses shadowable any:\n%s", got)
+		t.Errorf("emitted code uses shadowable any:\n%s", got)
 	}
 }
 
@@ -199,8 +417,8 @@ func enable(panic *http.Server) {
 	if strings.Contains(got, "func(panic ") {
 		t.Errorf("parameter shadows builtin panic:\n%s", got)
 	}
-	if !strings.Contains(got, "panic(") {
-		t.Errorf("generated guard lost its panic call:\n%s", got)
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("panic", panic)`) {
+		t.Errorf("receiver not passed verbatim to the delegation:\n%s", got)
 	}
 }
 
@@ -213,7 +431,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	extra := map[string]bool{"logosH2Os": true, "logosH2Strings": true}
+	extra := map[string]bool{"ejectedhttp": true}
 	out, _, ok := remapEjectedFile([]byte(in), "", extra)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
@@ -222,7 +440,10 @@ func enable(s *http.Server) {
 	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
 		t.Errorf("direct call survives:\n%s", got)
 	}
-	if !strings.Contains(got, "logosH2Os2 \"os\"") || !strings.Contains(got, "logosH2Strings2 \"strings\"") {
-		t.Errorf("aliases do not avoid sibling names:\n%s", got)
+	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("support import does not avoid the sibling name:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("delegation does not use the reserved alias:\n%s", got)
 	}
 }

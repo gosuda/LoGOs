@@ -1,0 +1,175 @@
+[!symlink] skip 'fake GOROOT needs symlinks'
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env CGO_ENABLED=0
+env GOEXPERIMENT=jsonv2
+
+# A toolchain .lgo package holding JSON-eligible records must eject its
+# synthesized JSONv2 methods into a guarded extra file, not into the
+# unguarded support file. The support copier shares the lowered-source
+# finishing logic (JSONv2 split), so the ejected tree rebuilds with
+# GOEXPERIMENT=nojsonv2 under both the fork and upstream Go.
+go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
+env GOROOT=$WORK/fakegoroot
+
+cd m
+logos run .
+stdout '^item ok name$'
+stdout '^pair a b$'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+exists out/_logos_deps/rt/logos/ejecttestjson/item.go
+exists out/_logos_deps/rt/logos/ejecttestjson/item_jsonv2.go
+exists out/_logos_deps/rt/logos/ejecttestjson/pair.go
+exists out/_logos_deps/rt/logos/ejecttestjson/pair_jsonv2.go
+# item.lgo carries its own guard, so the extra file narrows it with jsonv2.
+grep 'ejecttestjsonoff' out/_logos_deps/rt/logos/ejecttestjson/item_jsonv2.go
+grep '&& goexperiment.jsonv2' out/_logos_deps/rt/logos/ejecttestjson/item_jsonv2.go
+# pair.lgo has no guard, so the extra file carries the bare jsonv2 guard.
+grep '^//go:build goexperiment.jsonv2$' out/_logos_deps/rt/logos/ejecttestjson/pair_jsonv2.go
+# Both methods of both records in item.lgo move to the extra file.
+grep 'Item\) MarshalJSONTo' out/_logos_deps/rt/logos/ejecttestjson/item_jsonv2.go
+grep 'Entry\) MarshalJSONTo' out/_logos_deps/rt/logos/ejecttestjson/item_jsonv2.go
+! grep 'MarshalJSONTo' out/_logos_deps/rt/logos/ejecttestjson/item.go
+! grep 'jsontext' out/_logos_deps/rt/logos/ejecttestjson/item.go
+! grep 'jsontext' out/_logos_deps/rt/logos/ejecttestjson/pair.go
+
+env GOROOT=$TESTGO_GOROOT
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native.txt
+
+env GOEXPERIMENT=nojsonv2
+go build ./...
+go run .
+cmp stdout $WORK/native.txt
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/native.txt
+
+-- mkgoroot.go --
+package main
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func must(err error, what string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkgoroot: %s: %v\n", what, err)
+		os.Exit(1)
+	}
+}
+
+func link(oldname, newname string) {
+	must(os.MkdirAll(filepath.Dir(newname), 0777), "mkdir "+filepath.Dir(newname))
+	must(os.Symlink(oldname, newname), "symlink "+newname)
+}
+
+func main() {
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: mkgoroot <realGOROOT> <fakeRoot> <fixtures>")
+		os.Exit(2)
+	}
+	real, fake, fixtures := os.Args[1], os.Args[2], os.Args[3]
+
+	must(os.MkdirAll(filepath.Join(fake, "src", "logos"), 0777), "mkdir fake src/logos")
+
+	ents, err := os.ReadDir(filepath.Join(real, "src"))
+	must(err, "read real src")
+	for _, e := range ents {
+		if e.Name() == "logos" {
+			continue
+		}
+		link(filepath.Join(real, "src", e.Name()), filepath.Join(fake, "src", e.Name()))
+	}
+
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(filepath.Join(real, "src", "logos"))), "copy support sources")
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(fixtures)), "install fixture packages")
+
+	// The package index distinguishes .lgo-only standard packages, but
+	// bypasses files with recent mtimes. Age only the private copies.
+	old := time.Now().Add(-time.Hour)
+	must(filepath.WalkDir(filepath.Join(fake, "src", "logos"), func(name string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		return os.Chtimes(name, old, old)
+	}), "age copied support and fixture files")
+
+	link(filepath.Join(real, "pkg"), filepath.Join(fake, "pkg"))
+	link(filepath.Join(real, "VERSION"), filepath.Join(fake, "VERSION"))
+	if _, err := os.Stat(filepath.Join(real, "go.env")); err == nil {
+		link(filepath.Join(real, "go.env"), filepath.Join(fake, "go.env"))
+	}
+	if _, err := os.Stat(filepath.Join(real, "lib")); err == nil {
+		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
+	}
+}
+
+-- dep/ejecttestjson/item.lgo --
+//go:build !ejecttestjsonoff
+
+package ejecttestjson
+
+// Item is a JSON-eligible record: every field carries a json tag, so
+// lowering synthesizes static Marshal/Unmarshal methods for it.
+type Item struct {
+	Name string `json:"name"`
+	Next *Item `json:"next,omitempty"`
+}
+
+// Entry is a second eligible record in the same file, so the split
+// moves more than one method pair into the extra file.
+type Entry struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+func Describe(it Item) string {
+	if it.Next == nil {
+		return "item ok " + it.Name
+	}
+	return "item nested"
+}
+
+-- dep/ejecttestjson/pair.lgo --
+package ejecttestjson
+
+// Pair is an eligible record in a file without a build guard, so its
+// extra file carries the bare jsonv2 guard.
+type Pair struct {
+	A string `json:"a"`
+	B string `json:"b"`
+}
+
+func (p Pair) String() string { return "pair " + p.A + " " + p.B }
+
+-- m/go.mod --
+module example.com/ejectjsonv2
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/ejecttestjson"
+)
+
+func main() {
+	fmt.Println(ejecttestjson.Describe(ejecttestjson.Item{Name: "name"}))
+	fmt.Println(ejecttestjson.Pair{A: "a", B: "b"}.String())
+}

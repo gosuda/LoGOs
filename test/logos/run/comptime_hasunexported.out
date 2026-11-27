@@ -1,0 +1,16 @@
+ok exported-false
+ok hidden-true
+ok nested-true
+ok blank-true
+ok array-true
+ok scalar-false
+ok cond-hidden-true
+ok cond-exported-false
+ok const-hidden-true
+ok option-hidden-true
+ok array-option-hidden-true
+ok const-option-hidden-true
+ok option-pointer-false
+ok zero-array-false
+ok const-exported-false
+ok option-exported-false

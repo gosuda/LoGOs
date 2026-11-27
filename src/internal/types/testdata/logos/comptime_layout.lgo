@@ -75,3 +75,18 @@ func layoutRuntimeAlign() int {
 func layoutRuntimeHasPointers() bool {
 	return comptime /* ERROR "comptime::runtime_use" */ .HasPointers[LayoutPair]()
 }
+
+func layoutGenericHasUnexported[T any]() bool {
+	return comptime.HasUnexported[T]()
+}
+
+func layoutGenericUnexportedCond[T any]() bool {
+	const if comptime.HasUnexported[T]() {
+		return true
+	}
+	return false
+}
+
+func layoutRuntimeHasUnexported() bool {
+	return comptime /* ERROR "comptime::runtime_use" */ .HasUnexported[LayoutPair]()
+}

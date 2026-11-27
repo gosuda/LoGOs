@@ -66,9 +66,9 @@
       "sha256": "884666bdbf5956560246c837a619e6157ea7ff8ad2f4bc27e3ef1fdaa2a8a1f6"
     },
     {
-      "bytes": 15610,
+      "bytes": 15673,
       "path": "src/cmd/link/internal/ld/capabilities_logos_test.go",
-      "sha256": "0dbc548fcc6fec9d01106a686e83a285a21119c8e2a463700fa52e1e69754ce9"
+      "sha256": "bce49658b6b02baa50c24ba86b7c92c16ba49edfa5be6dc6805ef11d9d83fa69"
     }
   ],
   "schema": 1
