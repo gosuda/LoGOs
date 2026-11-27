@@ -321,3 +321,21 @@ func probeNestedBreak(cond bool, reset bool) {
 	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
 }
 
+// A lambda bound to a local the cleanup calls before it returns runs in
+// cleanup mode: its discarded-error store fails the inner read.
+func probeCleanupLocalCall() {
+	defer func() {
+		var cb func() int = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }()
+		use(cb())
+	}()
+}
+
+// Same through a separate declaration and assignment.
+func probeCleanupLocalCallAssign() {
+	defer func() {
+		var cb func() int
+		cb = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }()
+		use(cb())
+	}()
+}
+

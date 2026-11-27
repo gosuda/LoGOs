@@ -6144,6 +6144,71 @@ func (p *logosEFPass) litValueEscapes(lam *syntax.LambdaExpr) bool {
 	return false
 }
 
+// cleanupCallsBoundVar reports whether the cleanup holding lam calls the
+// variable bound by lam's escaping position before it returns. A local the
+// cleanup invokes synchronously runs in cleanup mode; a binding saved
+// without a synchronous call runs later in ordinary mode.
+func (p *logosEFPass) cleanupCallsBoundVar(lam *syntax.LambdaExpr) bool {
+	var bound *Var
+	switch par := p.litParent(lam).(type) {
+	case *syntax.AssignStmt:
+		for _, l := range syntax.UnpackListExpr(par.Lhs) {
+			if v := p.varOf(l); v != nil {
+				bound = v
+				break
+			}
+		}
+	case *syntax.VarDecl:
+		for _, id := range par.NameList {
+			if v, _ := p.check.Defs[id].(*Var); v != nil {
+				bound = v
+				break
+			}
+		}
+	default:
+		return false
+	}
+	if bound == nil {
+		return false
+	}
+	var outer *syntax.FuncLit
+	for n := p.litParent(lam); n != nil; {
+		if fl, ok := n.(*syntax.FuncLit); ok {
+			outer = fl
+			break
+		}
+		n = p.litParent(n)
+	}
+	if outer == nil || outer.Body == nil {
+		return false
+	}
+	found := false
+	syntax.Inspect(outer.Body, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.CallStmt:
+			if n.Tok == syntax.Defer || n.Tok == syntax.Go {
+				return false
+			}
+			return true
+		case *syntax.CallExpr:
+			if id, ok := syntax.Unparen(n.Fun).(*syntax.Name); ok {
+				if v, _ := p.check.Uses[id].(*Var); v == bound {
+					found = true
+					return false
+				}
+			}
+			return true
+		}
+		return true
+	})
+	return found
+}
+
 func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFState {
 	body, isBlock := lam.Body.(*syntax.BlockStmt)
 	if p.check.logosInPlace[lam] {
@@ -6152,11 +6217,12 @@ func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFS
 	if isBlock {
 		return p.later(lam, body, st)
 	}
-	if p.inCleanup > 0 && p.litValueEscapes(lam) {
+	if p.inCleanup > 0 && p.litValueEscapes(lam) && !p.cleanupCallsBoundVar(lam) {
 		// An escaping expression body runs after the cleanup that
 		// registers it, not under it: analyze it in ordinary mode so
 		// its own locals stay silent, while capture checks remain
-		// through lateCaptures.
+		// through lateCaptures. A local the cleanup calls before it
+		// returns runs in cleanup mode and keeps the check.
 		saved := p.inCleanup
 		p.inCleanup = 0
 		p.expr(lam.Body, p.lateCaptures(p.capture(st), lam, p.defsIn(lam)))
