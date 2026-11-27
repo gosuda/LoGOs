@@ -2026,6 +2026,7 @@ func copyModuleTree(srcRoot, dstRoot, skip string) bool {
 	uses := false
 	keep := localReplaceDirs(srcRoot)
 	nested := map[string]bool{}
+	reserveCache := map[string]map[string]bool{}
 	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -2072,7 +2073,7 @@ func copyModuleTree(srcRoot, dstRoot, skip string) bool {
 		if name == "logos.toml" || logosfile.Is(name) {
 			return nil
 		}
-		fileUses, err := copyDataFile(path, filepath.Join(dstRoot, rel))
+		fileUses, err := copyDataFile(path, filepath.Join(dstRoot, rel), reserveCache)
 		if fileUses {
 			uses = true
 		}
@@ -2110,15 +2111,29 @@ func inCopiedModule(nested map[string]bool, rel string) bool {
 // are rewritten to the ejected import paths and formatted by the gofmt
 // pass, so the tree stays gofmt-clean; anything else rides along byte
 // for byte. It reports whether the written file imports the loGo/s
-// support packages.
-func copyDataFile(src, dst string) (bool, error) {
+// support packages. A copied Go file takes the same package-wide
+// reserved names as a lowered file in that package, so a fresh import
+// alias avoids a top-level name declared by a sibling file; the set is
+// computed once per source directory and only when the file can carry
+// an extended CONNECT call.
+func copyDataFile(src, dst string, reserveCache map[string]map[string]bool) (bool, error) {
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return false, err
 	}
 	uses := false
 	if strings.HasSuffix(src, ".go") {
-		if fixed, fixedUses, ok := remapEjectedFile(data, "", nil); ok {
+		var extra map[string]bool
+		if bytes.Contains(data, []byte(h2extendedConnectMethod)) {
+			dir := filepath.Dir(src)
+			cached, ok := reserveCache[dir]
+			if !ok {
+				cached = h2PackageReserved(dir)
+				reserveCache[dir] = cached
+			}
+			extra = cached
+		}
+		if fixed, fixedUses, ok := remapEjectedFile(data, "", extra); ok {
 			data = fixed
 			uses = fixedUses
 			queueEjectGofmt(dst)

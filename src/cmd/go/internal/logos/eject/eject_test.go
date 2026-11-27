@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"cmd/go/internal/cfg"
@@ -348,4 +349,31 @@ func replacePath(f *modfile.File, old string) string {
 		}
 	}
 	return ""
+}
+
+func TestCopyDataFileAvoidsSiblingAlias(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	sibling := "package p\n\nconst ejectedhttp = 1\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "sibling.go"), []byte(sibling), 0666); err != nil {
+		t.Fatal(err)
+	}
+	caller := "package p\n\nimport \"net/http\"\n\nfunc enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "caller.go"), []byte(caller), 0666); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dstDir, "caller.go")
+	if _, err := copyDataFile(filepath.Join(srcDir, "caller.go"), dst, map[string]map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("copied file does not avoid the sibling name:\n%s", got)
+	}
+	if !strings.Contains(string(got), `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("delegation does not use the reserved alias:\n%s", got)
+	}
 }

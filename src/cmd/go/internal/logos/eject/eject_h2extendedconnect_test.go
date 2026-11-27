@@ -148,7 +148,7 @@ func enable(s *http.Server) {
 	if err := os.WriteFile(src, []byte(in), 0666); err != nil {
 		t.Fatal(err)
 	}
-	uses, err := copyDataFile(src, dst)
+	uses, err := copyDataFile(src, dst, map[string]map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
