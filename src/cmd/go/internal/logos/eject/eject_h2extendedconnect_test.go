@@ -207,3 +207,62 @@ func TestH2ExtendedConnectSkipsTempReceivers(t *testing.T) {
 		}
 	}
 }
+
+func TestH2ExtendedConnectKeepsSavedHelperValue(t *testing.T) {
+	const in = `package main
+
+import (
+	"net/http"
+	logohttp "logos/net/http"
+)
+
+func save() {
+	enable := logohttp.EnableHTTP2ExtendedConnect
+	_ = enable
+}
+
+func spawn(srv *http.Server) {
+	_f0 := srv.EnableHTTP2ExtendedConnect
+	go _f0()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "")
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if !strings.Contains(got, "enable := logohttp.EnableHTTP2ExtendedConnect") {
+		t.Errorf("saved helper value rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, `_f0 := logohttp.RequireExtendedConnectFunc("srv", srv)`) {
+		t.Errorf("server capture not rebound through the existing binding:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectComposesNestedOptIn(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func spawn(backup *http.Server, make func(func()) *http.Server) {
+	_f0 := make(func() { backup.EnableHTTP2ExtendedConnect() }).EnableHTTP2ExtendedConnect
+	go _f0()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "")
+	if !ok {
+		t.Fatal("remapEjectedFile failed: nested capture and inner call overlap")
+	}
+	got := string(out)
+	// The original receiver text survives only as the guard's name
+	// argument; no fork-only reference may remain in code position.
+	if n := strings.Count(got, "EnableHTTP2ExtendedConnect"); n != 1 {
+		t.Errorf("expected the opt-in name only in the guard label, found %d references:\n%s", n, got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("backup", backup)`) {
+		t.Errorf("inner guard missing from the composed capture:\n%s", got)
+	}
+	if !strings.Contains(got, "ejectedhttp.RequireExtendedConnectFunc(") {
+		t.Errorf("capture not rebound through the deferred guard:\n%s", got)
+	}
+}
