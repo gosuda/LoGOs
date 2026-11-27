@@ -1013,6 +1013,18 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 				}
 				delete(brokeOut, v)
 			}
+			if _, ok := hereOut[v]; ok {
+				if !hereChanged {
+					hereOut = maps.Clone(s.brokeHere)
+					hereChanged = true
+				}
+				delete(hereOut, v)
+			}
+			continue
+		}
+		// A checked result carries no live pairing to break: overwriting
+		// its guard records nothing.
+		if !s.may[v] {
 			continue
 		}
 		merged := append([]logosEFKey(nil), brokeOut[v]...)
@@ -1055,6 +1067,13 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 			brokeChanged = true
 		}
 		delete(brokeOut, v)
+		if _, ok := hereOut[v]; ok {
+			if !hereChanged {
+				hereOut = maps.Clone(s.brokeHere)
+				hereChanged = true
+			}
+			delete(hereOut, v)
+		}
 	}
 	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
@@ -1089,9 +1108,16 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 				}
 				delete(brokeOut, v)
 			}
+			if _, ok := hereOut[v]; ok {
+				if !hereChanged {
+					hereOut = maps.Clone(s.brokeHere)
+					hereChanged = true
+				}
+				delete(hereOut, v)
+			}
 			continue
 		}
-		if len(broken) != 0 {
+		if len(broken) != 0 && s.may[v] {
 			merged := append([]logosEFKey(nil), brokeOut[v]...)
 			for _, g := range broken {
 				if !slices.Contains(merged, g) {
@@ -1210,6 +1236,16 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 				}
 				delete(brokeOut, v)
 			}
+			if _, ok := hereOut[v]; ok {
+				if !hereChanged {
+					hereOut = maps.Clone(s.brokeHere)
+					hereChanged = true
+				}
+				delete(hereOut, v)
+			}
+			continue
+		}
+		if !s.may[v] {
 			continue
 		}
 		merged := append([]logosEFKey(nil), brokeOut[v]...)
@@ -1252,6 +1288,13 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 			brokeChanged = true
 		}
 		delete(brokeOut, v)
+		if _, ok := hereOut[v]; ok {
+			if !hereChanged {
+				hereOut = maps.Clone(s.brokeHere)
+				hereChanged = true
+			}
+			delete(hereOut, v)
+		}
 	}
 	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
@@ -1284,9 +1327,16 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 				}
 				delete(brokeOut, v)
 			}
+			if _, ok := hereOut[v]; ok {
+				if !hereChanged {
+					hereOut = maps.Clone(s.brokeHere)
+					hereChanged = true
+				}
+				delete(hereOut, v)
+			}
 			continue
 		}
-		if len(broken) != 0 {
+		if len(broken) != 0 && s.may[v] {
 			merged := append([]logosEFKey(nil), brokeOut[v]...)
 			for _, g := range broken {
 				if !slices.Contains(merged, g) {
@@ -4774,6 +4824,21 @@ func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState 
 					continue
 				}
 			}
+			// A callback can forward a field pair the enclosing function
+			// populates after the callback is created: the inventory seeds
+			// the pairing on the capture entry, outside the live pairing
+			// map. A return of that pair with its error unchanged is still
+			// forwarding, not a read. Field stores never leave flow
+			// entries, so a capture entry for a field path is
+			// inventory-backed; a live pairing contradicting it keeps the
+			// rejection, as does a vetoed guard.
+			if e, found := st.m[k]; found && e.err == nil && e.errKey != (logosEFKey{}) && passedKeys[e.errKey] {
+				if len(st.mayAlt[k]) == 0 && len(st.mayBroke[k]) == 0 {
+					if _, live := st.mayErr[k]; !live {
+						continue
+					}
+				}
+			}
 		}
 		st = p.expr(r, st)
 		if st == nil {
@@ -5473,6 +5538,36 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 		end = p.projectInvocationMay(st, end, lit, eff)
 	}
 	end = end.withoutLocals(inside)
+	// A nested call starts from an empty per-invocation set so its exit
+	// projection stays scoped to its own writes. Its empty exit must not
+	// hide breaks the enclosing invocation already established: restore
+	// caller breaks that survive in the cumulative history. A result the
+	// nested call superseded drops its break, so only guards still in the
+	// exit history return.
+	if end != nil && len(st.brokeHere) != 0 {
+		var restore map[logosEFKey][]logosEFKey
+		for k, gs := range st.brokeHere {
+			if inside[k.root] {
+				continue
+			}
+			live, ok := end.mayBroke[k]
+			if !ok {
+				continue
+			}
+			for _, g := range gs {
+				if inside[g.root] || !slices.Contains(live, g) || slices.Contains(end.brokeHere[k], g) {
+					continue
+				}
+				if restore == nil {
+					restore = make(map[logosEFKey][]logosEFKey)
+				}
+				restore[k] = append(restore[k], g)
+			}
+		}
+		if len(restore) != 0 {
+			end = end.unionBrokeHere(&logosEFState{brokeHere: restore}, inside)
+		}
+	}
 	if saved != nil {
 		for k := range eff.assigned {
 			p.noteAssigned(k)
@@ -6285,6 +6380,71 @@ func (p *logosEFPass) litValueEscapes(lam *syntax.LambdaExpr) bool {
 	return false
 }
 
+// cleanupCallsBoundVar reports whether the cleanup holding lam calls the
+// variable bound by lam's escaping position before it returns. A local the
+// cleanup invokes synchronously runs in cleanup mode; a binding saved
+// without a synchronous call runs later in ordinary mode.
+func (p *logosEFPass) cleanupCallsBoundVar(lam *syntax.LambdaExpr) bool {
+	var bound *Var
+	switch par := p.litParent(lam).(type) {
+	case *syntax.AssignStmt:
+		for _, l := range syntax.UnpackListExpr(par.Lhs) {
+			if v := p.varOf(l); v != nil {
+				bound = v
+				break
+			}
+		}
+	case *syntax.VarDecl:
+		for _, id := range par.NameList {
+			if v, _ := p.check.Defs[id].(*Var); v != nil {
+				bound = v
+				break
+			}
+		}
+	default:
+		return false
+	}
+	if bound == nil {
+		return false
+	}
+	var outer *syntax.FuncLit
+	for n := p.litParent(lam); n != nil; {
+		if fl, ok := n.(*syntax.FuncLit); ok {
+			outer = fl
+			break
+		}
+		n = p.litParent(n)
+	}
+	if outer == nil || outer.Body == nil {
+		return false
+	}
+	found := false
+	syntax.Inspect(outer.Body, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.CallStmt:
+			if n.Tok == syntax.Defer || n.Tok == syntax.Go {
+				return false
+			}
+			return true
+		case *syntax.CallExpr:
+			if id, ok := syntax.Unparen(n.Fun).(*syntax.Name); ok {
+				if v, _ := p.check.Uses[id].(*Var); v == bound {
+					found = true
+					return false
+				}
+			}
+			return true
+		}
+		return true
+	})
+	return found
+}
+
 func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFState {
 	body, isBlock := lam.Body.(*syntax.BlockStmt)
 	if p.check.logosInPlace[lam] {
@@ -6293,11 +6453,12 @@ func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFS
 	if isBlock {
 		return p.later(lam, body, st)
 	}
-	if p.inCleanup > 0 && p.litValueEscapes(lam) {
+	if p.inCleanup > 0 && p.litValueEscapes(lam) && !p.cleanupCallsBoundVar(lam) {
 		// An escaping expression body runs after the cleanup that
 		// registers it, not under it: analyze it in ordinary mode so
 		// its own locals stay silent, while capture checks remain
-		// through lateCaptures.
+		// through lateCaptures. A local the cleanup calls before it
+		// returns runs in cleanup mode and keeps the check.
 		saved := p.inCleanup
 		p.inCleanup = 0
 		p.expr(lam.Body, p.lateCaptures(p.capture(st), lam, p.defsIn(lam)))

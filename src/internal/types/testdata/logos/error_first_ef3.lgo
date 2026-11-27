@@ -301,3 +301,116 @@ func probeBrokeDiscCheckedSwap(reset bool) {
 		use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
 	}
 }
+
+// A nested call after a repeated guard overwrite must not hide the break:
+// the caller read still fails.
+func probeNestedBreak(cond bool, reset bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if reset {
+		h.errA = nil
+	}
+	func() {
+		h.errA = nil
+		func() {}()
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
+}
+
+// A lambda bound to a local the cleanup calls before it returns runs in
+// cleanup mode: its discarded-error store fails the inner read.
+func probeCleanupLocalCall() {
+	defer func() {
+		var cb func() int = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }()
+		use(cb())
+	}()
+}
+
+// Same through a separate declaration and assignment.
+func probeCleanupLocalCallAssign() {
+	defer func() {
+		var cb func() int
+		cb = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }()
+		use(cb())
+	}()
+}
+
+// A callback forwarding a field pair populated after its creation is not a
+// read: every call forwards the exact pair.
+func probeFwdPopulated() func() (int, error) {
+	h := heldField{}
+	cb := func() (int, error) { return h.stats, h.err }
+	h.stats, h.err = fetchHeld()
+	return cb
+}
+
+// A safe read with an early check plus a saved callback stays silent: the
+// guard overwrite after the check records no break.
+func probeSafeChecked() {
+	h := heldField{}
+	var refresh func()
+	h.stats, h.err = fetchHeld()
+	if h.err != nil {
+		return
+	}
+	func() {
+		h.err = nil
+		refresh = func() { h.stats, _ = fetchHeld() }
+	}()
+	use(h.stats)
+	_ = refresh
+}
+
+// A safe read with a plain result reset between the overwrite and the save
+// stays silent: the reset clears the break.
+func probeSafeReset() {
+	h := heldField{}
+	var refresh func()
+	h.stats, h.err = fetchHeld()
+	func() {
+		h.err = nil
+		h.stats = 0
+		refresh = func() { h.stats, _ = fetchHeld() }
+	}()
+	use(h.stats)
+	_ = refresh
+}
+
+// Control: a guard break with the unchecked result surviving still fails.
+func probeStaleGuardControl() {
+	h := heldField{}
+	var refresh func()
+	h.stats, h.err = fetchHeld()
+	func() {
+		h.err = nil
+		refresh = func() { h.stats, _ = fetchHeld() }
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+	_ = refresh
+}
+
+// The panic-only overwrite with deferred recovery returns: the recovered
+// path carries the break, so the caller read fails.
+func probeRecoveredBreakSplit(cond bool, reset bool, stop bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if reset {
+		h.errA = nil
+	}
+	func() {
+		defer func() { _ = recover() }()
+		if stop {
+			h.errA = nil
+			panic("stop")
+		}
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
+}
