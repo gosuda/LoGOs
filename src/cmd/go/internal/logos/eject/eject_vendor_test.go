@@ -5,7 +5,10 @@
 package eject
 
 import (
+	"bytes"
 	"go/build/constraint"
+	"go/parser"
+	"go/token"
 	"testing"
 )
 
@@ -77,5 +80,23 @@ func TestFoldEjectedGuardSpecializes(t *testing.T) {
 		if got != tc.residual {
 			t.Errorf("foldEjectedGuard(%q) = %q, want %q", tc.line, got, tc.residual)
 		}
+	}
+}
+
+// A UTF-8 BOM before the build line must not duplicate it: the guard
+// line is dropped with its BOM and the residual is emitted once, so the
+// exported package still builds.
+func TestRewriteEjectedGuardDropsBOMGuard(t *testing.T) {
+	guard := parseEjectedGuard(t, "//go:build !windows")
+	data := []byte("\ufeff//go:build !windows\n\npackage p\n")
+	out := rewriteEjectedGuard(data, guard)
+	if n := bytes.Count(out, []byte("//go:build")); n != 1 {
+		t.Fatalf("rewrote BOM header to %d build lines, want 1:\n%s", n, out)
+	}
+	if !bytes.Contains(out, []byte("//go:build !windows\n")) {
+		t.Errorf("rewrote BOM header without the residual:\n%s", out)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "", out, parser.PackageClauseOnly); err != nil {
+		t.Errorf("rewrote BOM header to unparsable Go: %v\n%s", err, out)
 	}
 }

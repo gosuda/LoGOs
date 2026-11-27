@@ -330,7 +330,9 @@ func (c *supportCopy) ejectedSupportGuard(p supportSourcePackage, name string) (
 // the lowered data and, unless guard selects unconditionally, prepends the
 // specialized residual as a single modern build line. Legacy lines never
 // survive: a modern line governs the file, so dropping them preserves the
-// constraint.
+// constraint. A leading UTF-8 BOM is not part of a build line for the
+// constraint package, so the first line is matched without it; the BOM
+// leaves with the dropped line.
 func rewriteEjectedGuard(data []byte, guard constraint.Expr) []byte {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", data, parser.PackageClauseOnly)
@@ -340,8 +342,12 @@ func rewriteEjectedGuard(data []byte, guard constraint.Expr) []byte {
 	pkgOff := fset.Position(f.Package).Offset
 	var kept []string
 	hasBuild := false
-	for _, ln := range strings.Split(string(data[:pkgOff]), "\n") {
-		t := strings.TrimSpace(ln)
+	for i, ln := range strings.Split(string(data[:pkgOff]), "\n") {
+		t := ln
+		if i == 0 {
+			t = strings.TrimPrefix(t, "\ufeff")
+		}
+		t = strings.TrimSpace(t)
 		if constraint.IsGoBuild(t) || constraint.IsPlusBuild(t) {
 			hasBuild = true
 			continue
