@@ -237,6 +237,20 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 			v = tmp
 		}
 	}
+	// The result must not overwrite a retained prefix: when s overlaps
+	// the free interval, the slot at the cursor can land inside s and
+	// the copy below would rewrite bytes the caller still holds. The
+	// slot is its own prefix only when it starts exactly at s, which
+	// the copy preserves; any other overlap reports exhaustion before
+	// writing or advancing the cursor.
+	if len(s) > 0 {
+		slot := base + uintptr(at)
+		ss := uintptr(unsafe.Pointer(&s[0]))
+		se := ss + uintptr(len(s))*uintptr(size)
+		if slot != ss && slot < se && ss < slot+uintptr(want) {
+			panic(fixedExhausted(want, len(st.buf)-st.used))
+		}
+	}
 	st.used = at + want
 	out := unsafe.Slice((*T)(unsafe.Pointer(&st.buf[at])), total)
 	copy(out, s)

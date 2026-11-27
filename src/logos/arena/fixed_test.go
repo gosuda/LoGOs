@@ -488,6 +488,23 @@ func TestFixedAppendOffsetSubsliceCapClipped(t *testing.T) {
 	}
 }
 
+func TestFixedAppendCopyDisjointFromRetainedPrefix(t *testing.T) {
+	big := []byte{1, 2, 3, 4, 5, 6, 7, 8, 0, 0}
+	r := arena.OpenFixed(big[:8])
+	s := big[3:8]
+	msg := fixedPanicText(t, func() { _ = arena.Append(r, s, 9) })
+	want := "arena: fixed region exhausted (want 6, have 8)"
+	if msg != want {
+		t.Errorf("got %q, want %q", msg, want)
+	}
+	if used := arena.FixedUsed(r); used != 0 {
+		t.Errorf("FixedUsed = %d, want 0: the failed append must not advance the cursor", used)
+	}
+	if !slices.Equal(big, []byte{1, 2, 3, 4, 5, 6, 7, 8, 0, 0}) {
+		t.Errorf("buffer changed to %v: nothing may be written before exhaustion", big)
+	}
+}
+
 func TestFixedAppendOffsetSubsliceAcrossCursor(t *testing.T) {
 	buf := []byte{1, 2, 3, 0, 0, 0, 0, 0}
 	r := arena.OpenFixed(buf)
