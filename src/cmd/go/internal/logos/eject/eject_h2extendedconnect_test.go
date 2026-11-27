@@ -226,8 +226,8 @@ func TestH2ExtendedConnectRebindsLoweredMethodValue(t *testing.T) {
 import "net/http"
 
 func spawn(recv *http.Server) {
-	_f0 := recv.EnableHTTP2ExtendedConnect
-	go _f0()
+	_logos_f0 := recv.EnableHTTP2ExtendedConnect
+	go _logos_f0()
 }
 `
 	out, _, ok := remapEjectedFile([]byte(in), "")
@@ -238,8 +238,37 @@ func spawn(recv *http.Server) {
 	if strings.Contains(got, "EnableHTTP2ExtendedConnect\"") || strings.Contains(got, ".EnableHTTP2ExtendedConnect") {
 		t.Errorf("method value left unrewritten:\n%s", got)
 	}
-	if !strings.Contains(got, `_f0 := ejectedhttp.RequireExtendedConnectFunc("recv", recv)`) {
+	if !strings.Contains(got, `_logos_f0 := ejectedhttp.RequireExtendedConnectFunc("recv", recv)`) {
 		t.Errorf("method value not rebound through the deferred guard:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectLeavesUserMethodValue(t *testing.T) {
+	// A user method value with the same selector name is not lowering
+	// output: generic lowering binds its callee captures through reserved
+	// _logos_f temporaries, so a user binding must survive the rewrite.
+	const in = `package main
+
+import "net/http"
+
+func spawn(s *http.Server, m *Meter) {
+	_ = s
+	f := m.EnableHTTP2ExtendedConnect
+	defer f()
+}
+
+type Meter struct{ hits int }
+`
+	out, _, ok := remapEjectedFile([]byte(in), "")
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("user method value rewritten into the guard:\n%s", got)
+	}
+	if !strings.Contains(got, "f := m.EnableHTTP2ExtendedConnect") {
+		t.Errorf("user method value binding lost:\n%s", got)
 	}
 }
 

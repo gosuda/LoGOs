@@ -27,9 +27,12 @@ const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 // h2ExtendedConnectEdits rewrites direct EnableHTTP2ExtendedConnect calls to
 // a call into the ejected support module, which fails fast unless the stock
 // process-global GODEBUG=http2xconnect=1 was in effect at process startup.
-// It fires only in files importing net/http; the method name is
-// fork-specific, so a user type with the same zero-argument method name in
-// such a file would also be rewritten (no such type exists in the wild).
+// It fires only in files importing net/http. A method value with the same
+// name is rewritten only when it is marked lowering output: generic
+// lowering binds every callee capture through a reserved _logos_f
+// temporary (rewrite.go nextFun), which user code cannot declare
+// ([correctness::reserved_identifier]), so only a marked assignment is
+// trusted and a same-named user method value is left alone.
 // A call whose receiver needs another rewrite (a compiler-temporary
 // _logos_site name) is left alone. The receiver passes as a call argument,
 // so go and defer statements wrapping the call evaluate it in the calling
@@ -83,12 +86,17 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 	ast.Inspect(f, func(n ast.Node) bool {
 		if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
 			// Group lowering binds the opt-in as a method value before
-			// spawning its child. The verifier exempts the source call
-			// by type, so a file that reaches the rewrite can only hold
-			// this shape as lowering output: a same-named user method
-			// value never passes verification. Rebind it through the
+			// spawning its child. Only a marked assignment is trusted:
+			// the left-hand side must be a lowering-generated callee
+			// temporary, so a same-named user method value in another
+			// file keeps its own binding and is never rewritten into
+			// the guard. Rebind the marked capture through the
 			// deferred guard so the receiver still evaluates exactly
 			// once, eagerly, and the spawned child runs the same check.
+			lhsIdent, ok := as.Lhs[0].(*ast.Ident)
+			if !ok || !h2IsLoweredCalleeTemp(lhsIdent.Name) {
+				return true
+			}
 			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
 			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
 				return true
@@ -284,6 +292,17 @@ func h2HasSiteIdent(n ast.Node) bool {
 		return true
 	})
 	return found
+}
+
+// h2IsLoweredCalleeTemp reports whether name is a lowering-generated callee
+// temporary (_logos_f with a numeric suffix, from rewrite.go nextFun).
+// Generic lowering binds every group and defer callee capture through one
+// of these reserved temporaries, which user code cannot declare, so the
+// name marks exactly the assignments lowering created. The eject method
+// value rewrite trusts only marked assignments.
+func h2IsLoweredCalleeTemp(name string) bool {
+	rest, ok := strings.CutPrefix(name, "_logos_f")
+	return ok && rest != "" && strings.Trim(rest, "0123456789") == ""
 }
 
 // h2ImportEdit appends a fresh import declaration holding the missing paths

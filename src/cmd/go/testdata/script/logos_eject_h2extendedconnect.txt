@@ -52,6 +52,27 @@ stdout '^trace receiver stays native$'
 stderr 'fork_stdlib_api'
 cd ..
 
+# A user type with the same method name keeps its own binding: the method
+# value in a net/http file is not lowering output, so the rewrite leaves
+# it alone and the ejected program builds and runs with upstream Go.
+cd uservalue
+logos run .
+stdout '^before defer: 0$'
+stdout '^after defer: 1$'
+cp stdout $WORK/usernative.txt
+logos eject -o out
+exists out/main.go
+grep 'f := m.EnableHTTP2ExtendedConnect' out/main.go
+! grep 'RequireExtendedConnect' out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/usernative.txt
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/usernative.txt
+cd ../..
+
 # A module whose only net/http import and extended-CONNECT call live in
 # a non-host variant still needs the helper package in the output: the
 # variant inventory carries no import edges, so the seed-based roots miss
@@ -201,3 +222,37 @@ package main
 import "fmt"
 
 func main() { fmt.Println("other ready") }
+
+-- uservalue/go.mod --
+module example.com/h2uservalue
+
+go 1.27
+
+-- uservalue/meter.lgo --
+package main
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. Its method value must survive ejection.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- uservalue/main.lgo --
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	m := &Meter{}
+	func() {
+		f := m.EnableHTTP2ExtendedConnect
+		defer f()
+		fmt.Println("before defer:", m.Hits)
+	}()
+	fmt.Println("after defer:", m.Hits)
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+}
