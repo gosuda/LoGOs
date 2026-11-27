@@ -2,7 +2,7 @@
 # toolchain and the logos toolchain, and eject vendors it into the
 # support module so the ejected tree builds under upstream Go 1.27.2. The
 # vendored path follows the generic supportRelPath rule (logos/enum
-# maps to enum under the rt support root); the dense index values
+# maps to logos/enum under the rt support root); the dense index values
 # below are the enum guarantee, not the wiring.
 env GOPROXY=off
 env GOTOOLCHAIN=local
@@ -19,8 +19,8 @@ cmp stdout $WORK/gorun.txt
 # Eject keeps the enum table working through the vendored support module.
 logos eject -o out
 exists out/main.go
-exists out/_logos_deps/rt/enum/enum.go
-grep 'gosuda/loGos/rt/enum' out/main.go
+exists out/_logos_deps/rt/logos/enum/enum.go
+grep 'gosuda/loGos/rt/logos/enum' out/main.go
 
 cd out
 exists $UPROOT1272/bin/go

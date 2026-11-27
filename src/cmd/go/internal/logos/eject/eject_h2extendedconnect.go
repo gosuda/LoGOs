@@ -23,7 +23,7 @@ const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 // ejected support module. The support package owns the os, strings and
 // GODEBUG parsing privately, so rewritten call sites stay correct when
 // the file aliases os or strings or declares those names itself.
-const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/net/http"`
+const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`
 
 // h2ExtendedConnectEdits rewrites direct EnableHTTP2ExtendedConnect calls to
 // a call into the ejected support module, which requires

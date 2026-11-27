@@ -16,10 +16,10 @@ logos eject -o out
 exists out/main.go
 ! grep 'EnableHTTP2ExtendedConnect' out/main.go
 grep 'RequireExtendedConnect' out/main.go
-grep 'ejectedhttp "github.com/gosuda/loGos/rt/net/http"' out/main.go
+grep 'ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"' out/main.go
 ! grep 'os.Getenv' out/main.go
 ! grep 'strings.Contains' out/main.go
-grep 'func RequireExtendedConnect' out/_logos_deps/rt/net/http/h2extendedconnect.go
+grep 'func RequireExtendedConnect' out/_logos_deps/rt/logos/net/http/h2extendedconnect.go
 cd out
 go build ./...
 env GODEBUG=http2xconnect=1
@@ -75,7 +75,7 @@ stdout '^helper ready$'
 logos eject -o out
 ! grep 'RequireExtendedConnectFunc' out/main.go
 grep 'logohttp.EnableHTTP2ExtendedConnect' out/main.go
-grep 'logohttp "github.com/gosuda/loGos/rt/net/http"' out/main.go
+grep 'logohttp "github.com/gosuda/loGos/rt/logos/net/http"' out/main.go
 cd out
 go build ./...
 env GODEBUG=http2xconnect=1
@@ -100,7 +100,7 @@ cd variant
 [GOOS:windows] stdout '^windows ready$'
 logos eject -o out
 grep 'RequireExtendedConnect' out/server_windows.go
-grep 'ejectedhttp "github.com/gosuda/loGos/rt/net/http"' out/server_windows.go
+grep 'ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"' out/server_windows.go
 env GOOS=windows
 env CGO_ENABLED=0
 cd out
