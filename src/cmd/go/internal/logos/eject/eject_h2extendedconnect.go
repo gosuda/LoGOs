@@ -74,8 +74,38 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 	if h2DefinesExtendedConnect(f) {
 		return nil
 	}
+	local := supportLocal
+	if local == "" {
+		local = "ejectedhttp"
+	}
 	var edits []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
+		if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
+			// Group lowering binds the opt-in as a method value before
+			// spawning its child. The verifier exempts the source call
+			// by type, so a file that reaches the rewrite can only hold
+			// this shape as lowering output: a same-named user method
+			// value never passes verification. Rebind it through the
+			// deferred guard so the receiver still evaluates exactly
+			// once, eagerly, and the spawned child runs the same check.
+			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
+				return true
+			}
+			recvStart := fset.Position(sel.X.Pos()).Offset
+			recvEnd := fset.Position(sel.X.End()).Offset
+			lhsStart := fset.Position(as.Lhs[0].Pos()).Offset
+			lhsEnd := fset.Position(as.Lhs[0].End()).Offset
+			if recvStart < 0 || recvEnd < recvStart || recvEnd > len(data) ||
+				lhsStart < 0 || lhsEnd < lhsStart || lhsEnd > len(data) {
+				return true
+			}
+			receiver := string(data[recvStart:recvEnd])
+			lhs := string(data[lhsStart:lhsEnd])
+			repl := lhs + " " + as.Tok.String() + " " + local + ".RequireExtendedConnectFunc(" + strconv.Quote(receiver) + ", " + receiver + ")"
+			edits = append(edits, textEdit{lhsStart, fset.Position(as.End()).Offset, repl})
+			return true
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) != 0 {
 			return true
@@ -93,10 +123,6 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 			return true
 		}
 		receiver := string(data[recvStart:recvEnd])
-		local := supportLocal
-		if local == "" {
-			local = "ejectedhttp"
-		}
 		repl := local + ".RequireExtendedConnect(" + strconv.Quote(receiver) + ", " + receiver + ")"
 		edits = append(edits, textEdit{start, end, repl})
 		return true

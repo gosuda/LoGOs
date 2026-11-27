@@ -152,6 +152,29 @@ func enable(s *http.Server) {
 	}
 }
 
+func TestH2ExtendedConnectRebindsLoweredMethodValue(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func spawn(recv *http.Server) {
+	_f0 := recv.EnableHTTP2ExtendedConnect
+	go _f0()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "")
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect\"") || strings.Contains(got, ".EnableHTTP2ExtendedConnect") {
+		t.Errorf("method value left unrewritten:\n%s", got)
+	}
+	if !strings.Contains(got, `_f0 := ejectedhttp.RequireExtendedConnectFunc("recv", recv)`) {
+		t.Errorf("method value not rebound through the deferred guard:\n%s", got)
+	}
+}
+
 func TestH2ExtendedConnectSkipsForeignFiles(t *testing.T) {
 	const in = `package main
 

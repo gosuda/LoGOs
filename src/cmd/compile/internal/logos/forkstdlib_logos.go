@@ -23,12 +23,28 @@ import (
 // would report success for output that upstream Go rejects. Each miss is
 // reported at its source location; the staging build failure makes logos
 // eject exit nonzero before it writes any output.
+// VerifyEjectStdlib reports fork-only standard-library selectors in the main
+// files. Call before lowering: the unlowered tree still holds every call
+// site, including go-group children that lowering desugars away.
 func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
+	verifyEjectStdlib(pkg, info, files, false)
+}
+
+// VerifyEjectStdlibPrepared verifies comptime-prepared instances, which only
+// exist after LogosCtFinish runs. Main files are covered separately by
+// VerifyEjectStdlib before lowering.
+func VerifyEjectStdlibPrepared(pkg *types2.Package, info *types2.Info) {
+	verifyEjectStdlib(pkg, info, nil, true)
+}
+
+func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File, preparedOnly bool) {
 	if base.LogosEject == "" {
 		return
 	}
-	if _, dup := verifyEjectStdlibDone.LoadOrStore(pkg.Path(), true); dup {
-		return
+	if preparedOnly {
+		if _, dup := verifyEjectStdlibDone.LoadOrStore(pkg.Path(), true); dup {
+			return
+		}
 	}
 	t := loadUpstreamAPI()
 	if t == nil {
@@ -61,11 +77,13 @@ func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 			}
 		}
 	}
-	roots := make([]syntax.Node, len(files))
-	for i, file := range files {
-		roots[i] = file
+	if !preparedOnly {
+		roots := make([]syntax.Node, len(files))
+		for i, file := range files {
+			roots[i] = file
+		}
+		verify(info, roots)
 	}
-	verify(info, roots)
 	for _, rec := range info.LogosCtPrepared {
 		if rec == nil || rec.Info == nil {
 			continue
