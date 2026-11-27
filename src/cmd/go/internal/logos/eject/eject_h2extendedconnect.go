@@ -7,6 +7,7 @@ package eject
 import (
 	"go/ast"
 	"go/token"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -18,34 +19,62 @@ import (
 // line may set (the key is unregistered, so the build rejects it).
 const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 
+// h2SupportImport is the local name and path the rewrite uses for the
+// ejected support module. The support package owns the os, strings and
+// GODEBUG parsing privately, so rewritten call sites stay correct when
+// the file aliases os or strings or declares those names itself.
+const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/net/http"`
+
 // h2ExtendedConnectEdits rewrites direct EnableHTTP2ExtendedConnect calls to
-// a self-contained stock form: an immediately-invoked check that requires
-// GODEBUG=http2xconnect=1 and panics otherwise, naming the server and the
-// setting. It fires only in files importing net/http; the method name is
-// fork-specific, so a user type with the same zero-argument method name in
-// such a file would also be rewritten (no such type exists in the wild).
-// A call whose receiver needs another rewrite (a compiler-temporary
-// _logos_site name) is left alone. The rewrite keeps the receiver text
-// verbatim, so go and defer statements wrapping the call keep working, and
-// the receiver still counts as used. Needed os and strings imports are added
-// when missing; the gofmt pass normalizes layout.
+// a call into the ejected support module, which requires
+// GODEBUG=http2xconnect=1 and panics naming the server otherwise. The
+// receiver passes as a call argument, so go and defer statements wrapping
+// the call evaluate it in the calling goroutine at the call site, exactly
+// like the native method call. It fires only in files importing net/http;
+// the method name is fork-specific, so a user type with the same
+// zero-argument method name in such a file would also be rewritten (no such
+// type exists in the wild). A call whose receiver needs another rewrite (a
+// compiler-temporary _logos_site name) is left alone. When the file already
+// imports the support package, the rewrite uses that binding; otherwise the
+// support import is added. The gofmt pass normalizes layout.
+//
+// A saved value of the public logos/net/http helper is not a capture: its
+// receiver names the support package itself, so the rewrite leaves it
+// alone. Rewriting it would pass a package as the server and change the
+// signature from func(*Server) error to func(). The logos/net/http import
+// still remaps to the ejected support copy, so the saved value keeps
+// working.
+//
+// A capture whose receiver holds another opt-in call composes the inner
+// guard into the capture's replacement, so the receiver still evaluates
+// once and both guards run. Emitting both edits would overlap and stop the
+// export.
 //
 // Widening: the fork enables extended CONNECT per server, while stock Go
 // offers only the process-global GODEBUG=http2xconnect=1, so after eject
 // the per-server intent becomes a process-global requirement. Every
-// rewritten call in the process checks the same setting, and a process
-// without it fails fast at the first call instead of serving without the
-// feature.
+// rewritten call in the process checks the same startup setting, and a
+// process without it fails fast at the first call instead of serving
+// without the feature.
 func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []textEdit {
 	hasNetHTTP := false
+	supportLocal := ""
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
 			continue
 		}
-		if path == "net/http" {
+		switch path {
+		case "net/http":
 			hasNetHTTP = true
-			break
+		case "logos/net/http":
+			// A blank or dot import binds no usable call prefix; fall
+			// through to the fresh ejectedhttp import below.
+			if imp.Name == nil {
+				supportLocal = "http"
+			} else if imp.Name.Name != "_" && imp.Name.Name != "." {
+				supportLocal = imp.Name.Name
+			}
 		}
 	}
 	if !hasNetHTTP {
@@ -58,25 +87,45 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 	if h2DefinesExtendedConnect(f) {
 		return nil
 	}
-	// Reuse existing os/strings bindings by their actual local names so
-	// aliased imports keep working and no duplicate import is added.
-	// Only missing paths get a fresh collision-free alias.
-	osName, osOk := h2ImportLocal(f, "os")
-	stringsName, stringsOk := h2ImportLocal(f, "strings")
-	used := h2UsedNames(f)
-	var missing []string
-	if !osOk {
-		osName = h2FreshName(used, "logosH2Os")
-		used[osName] = true
-		missing = append(missing, osName+" \"os\"")
+	local := supportLocal
+	if local == "" {
+		local = "ejectedhttp"
 	}
-	if !stringsOk {
-		stringsName = h2FreshName(used, "logosH2Strings")
-		used[stringsName] = true
-		missing = append(missing, stringsName+" \"strings\"")
-	}
-	var edits []textEdit
+	var assigns []h2assignSite
+	var calls []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
+		if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
+			// Group lowering binds the opt-in as a method value before
+			// spawning its child. The verifier exempts the source call
+			// by type, so a file that reaches the rewrite can only hold
+			// this shape as lowering output, except for a saved value
+			// of the public logos/net/http helper (handled below): a
+			// same-named user method value never passes verification.
+			// Rebind it through the deferred guard so the receiver
+			// still evaluates exactly once, eagerly, and the spawned
+			// child runs the same check.
+			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && supportLocal != "" && id.Name == supportLocal {
+				return true
+			}
+			recvStart := fset.Position(sel.X.Pos()).Offset
+			recvEnd := fset.Position(sel.X.End()).Offset
+			lhsStart := fset.Position(as.Lhs[0].Pos()).Offset
+			lhsEnd := fset.Position(as.Lhs[0].End()).Offset
+			if recvStart < 0 || recvEnd < recvStart || recvEnd > len(data) ||
+				lhsStart < 0 || lhsEnd < lhsStart || lhsEnd > len(data) {
+				return true
+			}
+			assigns = append(assigns, h2assignSite{
+				start: lhsStart, end: fset.Position(as.End()).Offset,
+				recvStart: recvStart, recvEnd: recvEnd,
+				lhs: string(data[lhsStart:lhsEnd]), tok: as.Tok.String(),
+			})
+			return true
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) != 0 {
 			return true
@@ -94,105 +143,75 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 			return true
 		}
 		receiver := string(data[recvStart:recvEnd])
-		msg := "net/http: extended CONNECT on server " + strconv.Quote(receiver) + " needs GODEBUG=http2xconnect=1 in the ejected process environment"
-		// Evaluate the receiver as an argument so defer/go preserve
-		// registration-time side effects; only the GODEBUG check runs
-		// later. Name a simple identifier receiver with itself so the
-		// output keeps _ = s; complex receivers get a fresh name.
-		param := h2RecvParam(used, osName, stringsName, receiver)
-		repl := "func(" + param + " any) {\n_ = " + param + "\nif !" + stringsName + ".Contains(" + osName + ".Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}(" + receiver + ")"
-		edits = append(edits, textEdit{start, end, repl})
+		repl := local + ".RequireExtendedConnect(" + strconv.Quote(receiver) + ", " + receiver + ")"
+		calls = append(calls, textEdit{start, end, repl})
 		return true
 	})
+	// A capture whose receiver holds another opt-in call takes the inner
+	// guard into its own replacement: the composed receiver still
+	// evaluates once, eagerly, and both guards run. The name argument
+	// keeps the receiver as written; only the value carries the composed
+	// form. An inner overlap that cannot be composed (which no lowering
+	// shape produces) leaves the capture alone while the inner guards
+	// still apply, so the export names the fork-only value instead of
+	// stopping.
+	used := make([]bool, len(calls))
+	var edits []textEdit
+	for _, a := range assigns {
+		var inner []int
+		for i := range calls {
+			if !used[i] && calls[i].start >= a.recvStart && calls[i].end <= a.recvEnd {
+				inner = append(inner, i)
+			}
+		}
+		slices.SortFunc(inner, func(x, y int) int { return calls[x].start - calls[y].start })
+		composable := true
+		for j := 1; j < len(inner); j++ {
+			if calls[inner[j]].start < calls[inner[j-1]].end {
+				composable = false
+				break
+			}
+		}
+		if !composable {
+			continue
+		}
+		name := string(data[a.recvStart:a.recvEnd])
+		receiver := name
+		if len(inner) > 0 {
+			var b strings.Builder
+			prev := a.recvStart
+			for _, i := range inner {
+				b.WriteString(string(data[prev:calls[i].start]))
+				b.WriteString(calls[i].text)
+				prev = calls[i].end
+				used[i] = true
+			}
+			b.WriteString(string(data[prev:a.recvEnd]))
+			receiver = b.String()
+		}
+		repl := a.lhs + " " + a.tok + " " + local + ".RequireExtendedConnectFunc(" + strconv.Quote(name) + ", " + receiver + ")"
+		edits = append(edits, textEdit{a.start, a.end, repl})
+	}
+	for i, c := range calls {
+		if !used[i] {
+			edits = append(edits, c)
+		}
+	}
 	if len(edits) == 0 {
 		return nil
 	}
-	if len(missing) > 0 {
-		edits = append(edits, h2ImportEdit(fset, f, missing))
+	if supportLocal == "" {
+		edits = append(edits, h2ImportEdit(fset, f, []string{h2SupportImport}))
 	}
 	return edits
 }
 
-// h2ImportLocal returns the file-local name bound to path, or false when
-// the file does not import it.
-func h2ImportLocal(f *ast.File, path string) (string, bool) {
-	for _, imp := range f.Imports {
-		p, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || p != path {
-			continue
-		}
-		if imp.Name != nil {
-			return imp.Name.Name, true
-		}
-		if i := strings.LastIndex(p, "/"); i >= 0 {
-			return p[i+1:], true
-		}
-		return p, true
-	}
-	return "", false
-}
-
-// h2RecvParam picks the closure parameter name: a simple identifier
-// receiver reuses itself (keeping _ = s), otherwise a fresh name that
-// cannot collide with the helper imports.
-func h2RecvParam(used map[string]bool, osName, stringsName, receiver string) string {
-	trimmed := strings.TrimSpace(receiver)
-	if trimmed != "" && trimmed[0] != '*' {
-		ok := true
-		for i := range len(trimmed) {
-			c := trimmed[i]
-			if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9') {
-				ok = false
-				break
-			}
-		}
-		if ok && trimmed != "_" && trimmed != osName && trimmed != stringsName && !used[trimmed+"_"] {
-			return trimmed
-		}
-	}
-	return h2FreshName(used, "logosH2Recv")
-}
-
-// h2UsedNames collects local import names and all identifiers in f so
-// generated bindings cannot collide with an alias, a local variable, or
-// an existing import, generally for any file shape.
-func h2UsedNames(f *ast.File) map[string]bool {
-	used := make(map[string]bool)
-	for _, imp := range f.Imports {
-		if imp.Name != nil {
-			used[imp.Name.Name] = true
-			continue
-		}
-		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil {
-			continue
-		}
-		if i := strings.LastIndex(path, "/"); i >= 0 {
-			used[path[i+1:]] = true
-		} else {
-			used[path] = true
-		}
-	}
-	ast.Inspect(f, func(n ast.Node) bool {
-		if id, ok := n.(*ast.Ident); ok {
-			used[id.Name] = true
-		}
-		return true
-	})
-	return used
-}
-
-// h2FreshName returns base or the first base+N unused in used.
-func h2FreshName(used map[string]bool, base string) string {
-	if !used[base] {
-		return base
-	}
-	for i := 2; ; i++ {
-		cand := base + strconv.Itoa(i)
-		if !used[cand] {
-			return cand
-		}
-	}
+// h2assignSite is a lowered method-value capture of the opt-in:
+// _fN := <receiver>.EnableHTTP2ExtendedConnect.
+type h2assignSite struct {
+	start, end         int
+	recvStart, recvEnd int
+	lhs, tok           string
 }
 
 // h2DefinesExtendedConnect reports whether f declares the method name

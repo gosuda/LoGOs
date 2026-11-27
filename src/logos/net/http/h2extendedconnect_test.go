@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//go:build !logosejected
+
 package http
 
 import (
@@ -10,9 +12,20 @@ import (
 )
 
 func TestH2ExtendedConnectEnableReturnsNil(t *testing.T) {
+	t.Setenv("GODEBUG", "http2xconnect=1")
 	s := &stdhttp.Server{Addr: "127.0.0.1:0"}
 	if err := EnableHTTP2ExtendedConnect(s); err != nil {
 		t.Fatalf("EnableHTTP2ExtendedConnect = %v, want nil", err)
+	}
+}
+
+func TestH2ExtendedConnectEnableReturnsNilWithoutGodebug(t *testing.T) {
+	// The native helper enables the per-server opt-in directly and never
+	// reads the process GODEBUG setting the ejected helper requires.
+	t.Setenv("GODEBUG", "")
+	s := &stdhttp.Server{Addr: "127.0.0.1:0"}
+	if err := EnableHTTP2ExtendedConnect(s); err != nil {
+		t.Fatalf("EnableHTTP2ExtendedConnect with unset GODEBUG = %v, want nil", err)
 	}
 }
 

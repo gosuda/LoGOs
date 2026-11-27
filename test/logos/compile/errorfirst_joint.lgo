@@ -1535,9 +1535,8 @@ func efFieldErrInClosureMixed(cond bool) {
 }
 
 // Two unconditional stores agree on the latest pairing, and the nil check
-// proves it for flow reads. A differently-paired store in between would
-// break the agreement instead. A top-level deferred body re-checks under
-// capture, which withholds the proof from repeated stores.
+// proves it, so the deferred read stays accepted. A differently-paired
+// store in between would break the agreement instead.
 func efFieldErrObsoletePairing() {
 	h := efHeld{}
 	a := efHeld{}
@@ -1547,7 +1546,7 @@ func efFieldErrObsoletePairing() {
 		return
 	}
 	defer func() {
-		println(h.stats) // ERROR "result_before_error_check"
+		println(h.stats)
 	}()
 	_ = a
 }

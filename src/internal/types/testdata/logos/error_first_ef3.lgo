@@ -1,0 +1,186 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+import "slices"
+
+func fetch() (int, error) {
+	return 1, nil
+}
+
+func use(v int) {}
+
+type heldField struct {
+	stats int
+	err   error
+}
+
+func fetchHeld() (int, error) {
+	return 1, nil
+}
+
+type heldSplit struct {
+	stats int
+	errA  error
+	errB  error
+}
+
+// Forwarding a result with a replaced error reads the unchecked result:
+// only a live pairing exempts the return.
+func probeD1() (int, error) {
+	h := heldField{}
+	func() { h.stats, h.err = fetchHeld() }()
+	h.err = nil
+	return h.stats /* ERROR "read of h.stats before h.err is checked" */, h.err
+}
+
+// Forwarding with the unchanged error stays silent: the caller still
+// checks the pair intact.
+func probeD1Control() (int, error) {
+	h := heldField{}
+	func() { h.stats, h.err = fetchHeld() }()
+	return h.stats, h.err
+}
+
+// A guarded arm joined with a discarded-error arm leaves no single guard:
+// the caller read fails whatever order the arms ran in.
+func probeMixedAB(c bool) {
+	h := heldField{}
+	func() {
+		if c {
+			h.stats, h.err = fetchHeld()
+		} else {
+			h.stats, _ = fetchHeld()
+		}
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+func probeMixedBA(c bool) {
+	h := heldField{}
+	func() {
+		if c {
+			h.stats, _ = fetchHeld()
+		} else {
+			h.stats, h.err = fetchHeld()
+		}
+	}()
+	use(h.stats /* ERROR "read of h.stats before its error is checked" */)
+}
+
+// Overwriting the guard on the only returning path breaks the pairing the
+// invocation established: the caller read fails even though the discarded
+// store ran on a path that never returns.
+func probeXLu(stop bool) {
+	h := heldField{}
+	func() {
+		h.stats, h.err = fetchHeld()
+		if stop {
+			h.stats, _ = fetchHeld()
+			panic("stop")
+		}
+		h.err = nil
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// A discarded store in a saved-but-uncalled closure plus a literal that
+// writes only before panicking leaves no named pairing anywhere: the
+// caller read stays silent.
+func probe83145(stop bool) {
+	h := heldField{}
+	keep := func() { h.stats, _ = fetchHeld() }
+	_ = keep
+	func() {
+		if stop {
+			h.stats = 0
+			panic("stop")
+		}
+	}()
+	use(h.stats)
+}
+
+// A fresh pairing broken by a later invocation fails the caller read even
+// when the guard was already broken on another path before.
+func probeRKZ(cond bool, refresh bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	h.errA = nil
+	if refresh {
+		h.stats, h.errA = fetchHeld()
+	}
+	func() { h.errA = nil }()
+	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
+}
+
+// A conditional overwrite masks a later break of the same guard: the
+// repeated break on the remaining path still fails the caller read.
+func probePzX(cond bool, reset bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if reset {
+		h.errA = nil
+	}
+	func() { h.errA = nil }()
+	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
+}
+
+// An expression callback saved by a cleanup runs later in ordinary mode:
+// its own locals stay silent.
+func probeP0k() func() int {
+	var cb func() int
+	defer func() {
+		cb = () => func() int { n, _ := fetch(); return n }()
+	}()
+	return cb
+}
+
+// A synchronous call-argument callback runs inside the cleanup: its read
+// of a cleanup-stored value fails.
+func probe3EG(xs []int) {
+	func() {
+		defer func() {
+			n, _ := fetch()
+			_ = slices.IndexFunc(xs, func(x int) bool { return x == n /* ERROR "read of n before its error is checked" */ })
+		}()
+	}()
+}
+
+// Same through a direct named-function defer.
+func probe3EGExact(xs []int) {
+	var n int
+	defer func() {
+		n, _ = fetch()
+		_ = slices.IndexFunc(xs, func(x int) bool { return x == n /* ERROR "read of n before its error is checked" */ })
+	}()
+}
+
+// Same for an expression-lambda call argument.
+func probe3EGExpr(xs []int) {
+	var n int
+	defer func() {
+		n, _ = fetch()
+		_ = slices.IndexFunc(xs, x => x == n /* ERROR "read of n before its error is checked" */)
+	}()
+}
+
+// A scope cleanup that overwrites only the error field breaks the pairing
+// the seed describes: the later ordinary read fails.
+func probeD6() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	{
+		scope defer func() { h.err = nil }()
+	}
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}

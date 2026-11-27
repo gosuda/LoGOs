@@ -67,7 +67,7 @@ from collections import Counter
 from pathlib import Path
 from typing import NoReturn, cast
 
-FROZEN_SHA256 = "0a2ed87e4b0e9af5b05ffd6fbac0c7cf4bbdf78a094e160ec6cd76725531b6ee"
+FROZEN_SHA256 = "4626fdfee79a8cfafc800d15f73fcd87771270f83833cff17f3009c9add1b7f7"
 SCRIPT = "TestScript/logos_cap_inline_context"
 EXPECTED = Counter({"TestScript": 1, SCRIPT: 1})
 

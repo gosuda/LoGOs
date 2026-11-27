@@ -806,15 +806,13 @@ A call that cannot return MUST discharge the `err == nil` proof. The calls that 
 
 An `err == nil` proof MUST remain valid for a captured result in a function literal, lambda, or `go group` child when that result is initialized at its declaration, is never assigned again, and never has its address taken. A result assigned anywhere besides its declaration or whose address is taken MUST NOT inherit that proof across the capture boundary. [T-202]
 
-A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result. [T-202]
+A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result, whether the err has a tracked variable identity or a field pairing, when the same return passes that exact error destination unchanged. [T-202]
 
-Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
-
-A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. [T-202]
+A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. When the storing call's error has no tracked identity (a field error or a discarded error), an ordinary flow read of the result stays silent; the read MUST fail only where a deferred capture or a deferred cleanup can observe the stored value, or after a directly invoked function literal whose exit still holds the unchecked result. A cleanup body MUST check the values it stores before reading them, in every deferred body including an ordinary defer in a named function; a callback or goroutine body the cleanup saves for later execution is analyzed in ordinary mode, while checks on captured values remain. A branch join MUST keep only the guard every unchecked input agrees on, clearing an ordinary entry's guard when any unchecked input uses a different guard or none; the diagnostic MUST name the guard that proves the joined read. An invocation exit MUST project only the live pairing: a guard broken on any normal or recovered exit path leaves an entry no check can discharge even when another path keeps it, and breaking a possible guard on a returning path counts the same even when an earlier break already recorded it. Where the exit keeps no live pairing, no possible guard, and no break, and no path paired the result with a named error, every path discarded the latest store and ordinary reads stay silent; otherwise the exit seeds an entry no check can discharge. A cleanup that overwrites a guard without re-pairing the result leaves an entry no check can discharge behind. [T-202]
 
 A read of a result stored in a slice or map element, or reached through a pointer, MAY stay accepted. [T-202]
 
-A plain assignment destination MUST NOT count as a read. [T-202]
+A plain assignment destination MUST NOT count as a read. Discarding a plain name or a direct value-struct field path to the blank identifier MUST NOT count as a read. [T-202]
 
 A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract, so use of n first stays allowed. [T-202][R-U2]
 

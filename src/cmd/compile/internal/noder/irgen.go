@@ -279,6 +279,10 @@ recheck:
 			logosCtFreezeTemplates(info)
 			info.LogosCtExportNamedDefaults = logosCtCaptureNamedTypeProvenance(pkg, info)
 		}
+		// logos eject verifier, main-files half: run before lowering so it
+		// sees the unlowered tree, where every call site (including go-group
+		// children that lowering desugars away) is still present.
+		logos.VerifyEjectStdlib(pkg, info, files)
 		changed := logosRecheckHook(&conf, pkg, info, files)
 		logosCtCarry = types2.Info{
 			LogosCtPrepared:            info.LogosCtPrepared,
@@ -334,10 +338,10 @@ recheck:
 		}
 		logosEjectCtInstances(pkg, info, files)
 	}
-	// logos eject verifier: fork-only standard-library selectors have no
-	// upstream spelling and must fail here, at their source location,
-	// before logos eject writes any output (SPEC T-0.3).
-	logos.VerifyEjectStdlib(pkg, info, files)
+	// logos eject verifier, prepared-instances half: comptime instances only
+	// exist after LogosCtFinish fills them. Main files were verified before
+	// lowering by VerifyEjectStdlib.
+	logos.VerifyEjectStdlibPrepared(pkg, info)
 	logos.LogosClearErasedAnonReadonly()
 	for _, path := range info.LogosCtImports {
 		if _, err := importer.Import(path); err != nil {

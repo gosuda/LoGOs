@@ -1613,7 +1613,7 @@ func selectVariantContext(pkgDir, name, hostGOOS, hostGOARCH string, hostTags []
 		// all 2^n overrides up front, and the platform fallback below
 		// reuses the same stream instead of rebuilding a stored list.
 		preferJSONv2 := slices.Contains(expKnown, "jsonv2")
-		for pass := 0; pass < 2; pass++ {
+		for pass := range 2 {
 			if pass == 1 && !preferJSONv2 {
 				break
 			}
@@ -2164,6 +2164,9 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 		h2edits = nil
 	}
 	edits = append(edits, h2edits...)
+	if len(h2edits) > 0 {
+		uses = true
+	}
 	out, ok := applyTextEdits(data, edits)
 	if !ok {
 		return nil, false, false
@@ -2366,13 +2369,50 @@ func applyTextEdits(data []byte, edits []textEdit) ([]byte, bool) {
 func writeSupportModule(out, goVer string, plan *ejectPlan) {
 	src := filepath.Join(cfg.GOROOT, "src")
 	dst := filepath.Join(out, "_logos_deps", "rt")
-	if err := copyEjectedSupport(src, dst, ejectSupportRoots(plan)); err != nil {
+	roots := ejectSupportRoots(plan)
+	if !slices.Contains(roots, "logos/net/http") && ejectedUsesSupportHTTP(out) {
+		roots = append(roots, "logos/net/http")
+		slices.Sort(roots)
+	}
+	if err := copyEjectedSupport(src, dst, roots); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 	copyJSONScanSupport(filepath.Join(src, "internal", "jsonscan"), filepath.Join(dst, "internal", "jsonscan"))
 	if err := os.WriteFile(filepath.Join(dst, "go.mod"), []byte("module "+rtModulePath+"\n\ngo "+goVer+"\n"), 0666); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
+}
+
+// ejectedUsesSupportHTTP reports whether the emitted tree already imports
+// the ejected HTTP support module. A rewrite in an inactive variant adds
+// the helper import to staged files the loader inventories never describe,
+// so the seed-based roots miss logos/net/http for exactly those outputs.
+func ejectedUsesSupportHTTP(out string) bool {
+	want := []byte(strconv.Quote(rtModulePath + "/net/http"))
+	found := false
+	_ = filepath.WalkDir(out, func(path string, e fs.DirEntry, err error) error {
+		if err != nil || found {
+			return err
+		}
+		if e.IsDir() {
+			if e.Name() == "_logos_deps" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(e.Name(), ".go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if bytes.Contains(data, want) {
+			found = true
+		}
+		return nil
+	})
+	return found
 }
 
 // ejectSupportRoots keeps support imports from owned packages, their tests,
@@ -2386,12 +2426,26 @@ func ejectSupportRoots(plan *ejectPlan) []string {
 	seeds = append(seeds, plan.testRoots...)
 	seen := map[string]bool{load.LogosRTPkg: true}
 	roots := []string{load.LogosRTPkg}
+	needHTTP := false
 	for _, p := range load.PackageList(seeds) {
-		if p == nil || !strings.HasPrefix(p.ImportPath, "logos/") || seen[p.ImportPath] {
+		if p == nil {
+			continue
+		}
+		for _, imp := range p.Imports {
+			if imp == "net/http" || imp == "logos/net/http" {
+				needHTTP = true
+				break
+			}
+		}
+		if !strings.HasPrefix(p.ImportPath, "logos/") || seen[p.ImportPath] {
 			continue
 		}
 		seen[p.ImportPath] = true
 		roots = append(roots, p.ImportPath)
+	}
+	if needHTTP && !seen["logos/net/http"] {
+		seen["logos/net/http"] = true
+		roots = append(roots, "logos/net/http")
 	}
 	// Variant inventories retain package identities but not dependency edges.
 	for path := range plan.provenance {
