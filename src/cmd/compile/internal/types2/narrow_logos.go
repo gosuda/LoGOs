@@ -811,9 +811,11 @@ type logosEFState struct {
 	// may marks results stored by a trailing-error call whose error has
 	// no tracked identity (field or discarded): the value can reach a
 	// later deferred read without a check. It is killed by any overwrite
-	// and merged by union across branches, and it is only consulted when
-	// seeding a deferred capture, so ordinary reads (including blank
-	// discards like v, _ := f(); return v) are unaffected.
+	// and merged by union across branches. It is consulted when seeding
+	// a deferred capture or a cleanup read, when projecting an invoked
+	// literal's exit, and when joining a proof against a may-only input,
+	// so ordinary reads (including blank discards like v, _ := f();
+	// return v) are unaffected.
 	may map[logosEFKey]bool
 	// mayErr pairs each may-marked result with the error destination its
 	// latest store used. Unlike the body-wide inventory it follows the
@@ -1196,21 +1198,28 @@ func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 
 // projectInvocationMay seeds ordinary entries for field pairings that
 // survive a directly invoked literal: after the invocation, later reads
-// check the guard instead of staying silent. Only invocations that wrote
-// something project, so side-effect-free wrappers never seed. A pairing
-// the invocation broke (empty guard) seeds an entry no check can
-// discharge. Results never paired with a named error stay silent.
-func (p *logosEFPass) projectInvocationMay(st *logosEFState, lit *syntax.FuncLit) *logosEFState {
-	if st == nil || len(st.may) == 0 {
-		return st
+// check the guard instead of staying silent. Only results the invocation
+// wrote, or whose incoming guard it broke, project: an unrelated write
+// leaves incoming marks silent. A pairing the invocation broke (empty
+// guard) seeds an entry no check can discharge. Results never paired
+// with a named error stay silent.
+func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *syntax.FuncLit, eff *logosEFEffects) *logosEFState {
+	if end == nil || len(end.may) == 0 {
+		return end
 	}
 	if p.assigns == nil {
 		p.collectAssigns()
 	}
 	var out map[logosEFKey]logosEFEntry
-	for k := range st.may {
-		if _, ok := st.m[k]; ok {
+	for k := range end.may {
+		if _, ok := end.m[k]; ok {
 			continue
+		}
+		if !invocationWrote(eff, k) {
+			ekIn, ok := before.mayErr[k]
+			if !ok || ekIn == (logosEFKey{}) || !invocationWrote(eff, ekIn) {
+				continue
+			}
 		}
 		paired := false
 		for _, ek := range p.storeErrKey[k] {
@@ -1220,6 +1229,58 @@ func (p *logosEFPass) projectInvocationMay(st *logosEFState, lit *syntax.FuncLit
 			}
 		}
 		if !paired {
+			continue
+		}
+		ek := end.mayErr[k]
+		name := "its error"
+		if ek != (logosEFKey{}) {
+			name = ek.displayName()
+		} else if n, ok := p.tracked[k]; ok {
+			name = n
+		}
+		if out == nil {
+			out = maps.Clone(end.m)
+			if out == nil {
+				out = make(map[logosEFKey]logosEFEntry, 1)
+			}
+		}
+		out[k] = logosEFEntry{name: name, errKey: ek, pos: lit.Pos()}
+	}
+	if out == nil {
+		return end
+	}
+	return &logosEFState{m: out, may: end.may, mayErr: end.mayErr, cleanups: end.cleanups}
+}
+
+// invocationWrote reports whether the effects of a directly invoked
+// literal wrote a destination that overlaps k: a plain, created, or
+// may-reach store in its body, or in a cleanup it registered (those run
+// when the literal returns, before the caller continues).
+func invocationWrote(eff *logosEFEffects, k logosEFKey) bool {
+	if eff == nil {
+		return false
+	}
+	if eff.writes(k) {
+		return true
+	}
+	return eff.deferred != nil && eff.deferred.writes(k)
+}
+
+// seedCleanupReads materializes ordinary entries for unchecked field
+// pairings live at a cleanup's entry, so a cleanup read needs the same
+// check a flow read would. The entries exist only for the cleanup body:
+// ordinary reads elsewhere stay silent. A cleanup that checks the guard
+// first proves its own read through dropMayFor.
+func (p *logosEFPass) seedCleanupReads(lit *syntax.FuncLit, st *logosEFState) *logosEFState {
+	if st == nil || len(st.may) == 0 {
+		return st
+	}
+	if p.assigns == nil {
+		p.collectAssigns()
+	}
+	var out map[logosEFKey]logosEFEntry
+	for k := range st.may {
+		if _, ok := st.m[k]; ok {
 			continue
 		}
 		ek := st.mayErr[k]
@@ -1283,9 +1344,23 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 	if m == nil {
 		m = make(map[logosEFKey]logosEFEntry, len(b.m))
 	}
+	// A may-only input vetoes a proof the other branch holds: the merged
+	// value may come from a path that never checked it, so a carried
+	// entry stays unproven and keeps no error variable a later check
+	// could misuse.
+	for v := range a.m {
+		if _, ok := b.m[v]; !ok && b.may[v] {
+			e := m[v]
+			e.err, e.proven = nil, false
+			m[v] = e
+		}
+	}
 	for v, eb := range b.m {
 		ea, ok := m[v]
 		if !ok {
+			if a.may[v] {
+				eb.err, eb.proven = nil, false
+			}
 			m[v] = eb
 			continue
 		}
@@ -4403,9 +4478,6 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 					hadMay2 := st.may != nil && st.may[k2]
 					if e, ok := p.seedEntry(k2, lit); ok {
 						st = st.set(k2, e)
-						if hadMay2 {
-							st = unprove(st, k2)
-						}
 					} else if hadMay2 {
 						st = unprove(st, k2)
 					}
@@ -4463,7 +4535,7 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 		}
 	}
 	if len(eff.assigned) != 0 || len(eff.created) != 0 || eff.deferred != nil {
-		end = p.projectInvocationMay(end, lit)
+		end = p.projectInvocationMay(st, end, lit, eff)
 	}
 	end = end.withoutLocals(inside)
 	if saved != nil {
