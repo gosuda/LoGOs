@@ -599,7 +599,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	// to build.
 	var h2reserved map[string]bool
 	if bytes.Contains(data, []byte(h2extendedConnectMethod)) {
-		h2reserved = h2PackageReserved(c.absSrcDir(p), filepath.Join(c.staging, filepath.FromSlash(p.src)))
+		h2reserved = c.supportReservedNames(p, filepath.Join(c.staging, filepath.FromSlash(p.src)))
 	}
 	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, h2reserved)
 	if h2Overlaps(edits, h2edits) {
@@ -662,6 +662,31 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		}
 	}
 	return patterns, true, nil
+}
+
+// supportReservedNames collects the reserved names for the h2 rewrite of
+// one support package: every Go source the copy reads, plus the lowered
+// staging files. The sources inventory through the effective filesystem,
+// so an overlay-inserted sibling counts exactly as the copy sees it.
+func (c *supportCopy) supportReservedNames(p supportSourcePackage, stagingDir string) map[string]bool {
+	used := map[string]bool{}
+	if entries, err := c.readDir(p); err == nil {
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") {
+				continue
+			}
+			data, err := c.readOriginal(p, name)
+			if err != nil {
+				continue
+			}
+			h2ReserveGoNames(used, name, data)
+		}
+	}
+	for name := range h2PackageReserved(stagingDir) {
+		used[name] = true
+	}
+	return used
 }
 
 // modeDependentSupportLowering reports whether a toolchain support package

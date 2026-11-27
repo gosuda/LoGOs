@@ -5,12 +5,15 @@
 package eject
 
 import (
+	"encoding/json"
 	"internal/testenv"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"cmd/go/internal/fsys"
 )
 
 // The support copy has one form. A build tag of the toolchain that
@@ -415,5 +418,74 @@ func TestModeDependentSupportLoweringSeesTabBranch(t *testing.T) {
 	read := func(name string) ([]byte, error) { return files[name], nil }
 	if !modeDependentSupportLowering(read, []string{"ejected.lgo", "use.lgo"}) {
 		t.Fatal("modeDependentSupportLowering missed a const-if branch separated by a tab")
+	}
+}
+
+// An overlay-inserted sibling declaring the fresh alias must move the
+// generated import alias too: the reservation reads the support package
+// through the same effective filesystem as the copy, not the physical
+// directory.
+func TestSupportCopyReservesOverlaySiblingAlias(t *testing.T) {
+	if os.Getenv("LOGOS_TEST_OVERLAY_ALIAS") != "1" {
+		cmd := testenv.Command(t, os.Args[0], "-test.run=^TestSupportCopyReservesOverlaySiblingAlias$")
+		cmd.Env = append(os.Environ(), "LOGOS_TEST_OVERLAY_ALIAS=1")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("overlay alias subprocess: %v\n%s", err, output)
+		}
+		return
+	}
+	fake := t.TempDir()
+	pkg := filepath.Join(fake, "src", "logos", "ejecttestoverlay")
+	overlayDir := filepath.Join(fake, ".overlay")
+	for _, dir := range []string{pkg, overlayDir} {
+		if err := os.MkdirAll(dir, 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const server = "package ejecttestoverlay\n\nimport \"net/http\"\n\nfunc Enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "server.go"), []byte(server), 0666); err != nil {
+		t.Fatal(err)
+	}
+	const alias = "package ejecttestoverlay\n\nvar ejectedhttp = 1\n"
+	if err := os.WriteFile(filepath.Join(overlayDir, "alias.go"), []byte(alias), 0666); err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(struct {
+		Replace map[string]string
+	}{Replace: map[string]string{
+		filepath.Join(pkg, "alias.go"): filepath.Join(overlayDir, "alias.go"),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsys.OverlayFile = filepath.Join(fake, "overlay.json")
+	if err := os.WriteFile(fsys.OverlayFile, data, 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsys.Init(); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	c := supportCopy{
+		srcDir:       filepath.Join(fake, "src"),
+		staging:      t.TempDir(),
+		dst:          out,
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestoverlay", dst: "rt/logos/ejecttestoverlay"}
+	if _, _, err := c.copyPackageGo(p, "server.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	copied, err := os.ReadFile(filepath.Join(out, "rt", "logos", "ejecttestoverlay", "server.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(copied)
+	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("copied file does not avoid the overlaid sibling name:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("delegation does not use the reserved alias:\n%s", got)
 	}
 }
