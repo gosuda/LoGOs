@@ -7,8 +7,11 @@ package eject
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestH2ExtendedConnectEmitsSupportDelegation(t *testing.T) {
@@ -445,5 +448,28 @@ func enable(s *http.Server) {
 	}
 	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
 		t.Errorf("delegation does not use the reserved alias:\n%s", got)
+	}
+}
+
+func TestH2PackageReservedSkipsNonregular(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs FIFOs")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package p\n\nconst A = 1\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "_input.go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan map[string]bool, 1)
+	go func() { done <- h2PackageReserved(dir) }()
+	select {
+	case used := <-done:
+		if !used["A"] {
+			t.Errorf("regular file names missing: %v", used)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("h2PackageReserved hangs on a .go-named pipe")
 	}
 }

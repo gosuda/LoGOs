@@ -295,6 +295,8 @@ func h2ImportEdit(fset *token.FileSet, f *ast.File, missing []string) textEdit {
 // import alias in any file of the package must avoid all of them,
 // because no identifier may be declared in both the file and package
 // block. Over-reservation is safe: it only lengthens a fresh alias.
+// Non-regular entries are skipped unread, as in copyModuleTree: parsing
+// a .go-named pipe would block waiting for a writer the loader ignores.
 // Files that fail to parse are skipped; their names stay reserved
 // through the importing file's own identifiers.
 func h2PackageReserved(dirs ...string) map[string]bool {
@@ -306,7 +308,7 @@ func h2PackageReserved(dirs ...string) map[string]bool {
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, ".go") {
+			if !e.Type().IsRegular() || !strings.HasSuffix(name, ".go") {
 				continue
 			}
 			fset := token.NewFileSet()
