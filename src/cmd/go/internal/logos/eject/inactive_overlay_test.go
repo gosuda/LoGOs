@@ -90,3 +90,63 @@ func TestInactiveCensusHonorsOverlay(t *testing.T) {
 		t.Fatalf("inactive census = %q, want effective sources %q", got, want)
 	}
 }
+
+func TestEjectedPureGoPackageHonorsOverlay(t *testing.T) {
+	if os.Getenv("LOGOS_TEST_PUREGO_OVERLAY") != "1" {
+		cmd := testenv.Command(t, os.Args[0], "-test.run=^TestEjectedPureGoPackageHonorsOverlay$")
+		cmd.Env = append(os.Environ(), "LOGOS_TEST_PUREGO_OVERLAY=1")
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("overlay purego subprocess: %v\n%s", err, output)
+		}
+		return
+	}
+	fake := t.TempDir()
+	helper := filepath.Join(fake, "src", "logos", "helper")
+	helper2 := filepath.Join(fake, "src", "logos", "helper2")
+	overlayDir := filepath.Join(fake, ".overlay")
+	for _, dir := range []string{helper, helper2, overlayDir} {
+		if err := os.MkdirAll(dir, 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(helper, "helper.lgo"), []byte("package helper\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helper, "helper.go"), []byte("package helper\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helper2, "helper.go"), []byte("package helper2\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overlayDir, "inserted.lgo"), []byte("package helper2\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	replacements := map[string]string{
+		filepath.Join(helper, "helper.lgo"):    "",
+		filepath.Join(helper2, "inserted.lgo"): filepath.Join(overlayDir, "inserted.lgo"),
+	}
+	data, err := json.Marshal(struct{ Replace map[string]string }{replacements})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsys.OverlayFile = filepath.Join(fake, "overlay.json")
+	if err := os.WriteFile(fsys.OverlayFile, data, 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := fsys.Init(); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(fake, "src")
+	if got := logosNeedsLowering(src, "logos/helper", map[string]bool{}); got {
+		t.Errorf("logosNeedsLowering(helper) with overlay deletion = true, want false")
+	}
+	if got := ejectedPureGoPackage(src, "logos/helper"); !got {
+		t.Errorf("ejectedPureGoPackage(helper) with overlay deletion = false, want true")
+	}
+	if got := logosNeedsLowering(src, "logos/helper2", map[string]bool{}); !got {
+		t.Errorf("logosNeedsLowering(helper2) with overlay insertion = false, want true")
+	}
+	if got := ejectedPureGoPackage(src, "logos/helper2"); got {
+		t.Errorf("ejectedPureGoPackage(helper2) with overlay insertion = true, want false")
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"cmd/go/internal/cfg"
@@ -292,5 +293,43 @@ func TestSupportDestinationsCollision(t *testing.T) {
 		if err.Error() != want {
 			t.Errorf("supportDestinations(%v) error = %q, want %q", paths, err.Error(), want)
 		}
+	}
+}
+
+func TestEjectSupportRootsSkipsUnusedHTTP(t *testing.T) {
+	plain := &load.Package{PackagePublic: load.PackagePublic{ImportPath: "example.com/plain", Imports: []string{"net/http"}}}
+	plan := &ejectPlan{main: &ejectModule{pkgs: []*load.Package{plain}}}
+	roots := ejectSupportRoots(plan)
+	for _, r := range roots {
+		if r == "logos/net/http" {
+			t.Errorf("stock net/http import pulled %s without a rewrite", r)
+		}
+	}
+	if !slices.Equal(roots, []string{"logos/rt"}) {
+		t.Errorf("roots = %v, want only the fixed runtime root", roots)
+	}
+}
+
+func TestEjectDiscoverDirsCoversUnloadable(t *testing.T) {
+	saved := cfg.GOROOT
+	t.Cleanup(func() { cfg.GOROOT = saved })
+	cfg.GOROOT = filepath.Join("fake", "goroot")
+	a := &load.Package{PackagePublic: load.PackagePublic{
+		Dir: "fake/goroot/src/logos/a", ImportPath: "logos/a",
+		Goroot: true, Standard: true,
+	}}
+	plan := &ejectPlan{provenance: map[string][]*load.Package{"logos/a": {a}}}
+	unloadable := map[string]bool{"logos/b": true}
+	dirs := ejectDiscoverDirs(plan, unloadable)
+	want := filepath.Join("fake", "goroot", "src", "logos", "b")
+	found := false
+	for _, d := range dirs {
+		if d == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("discover dirs = %q, want unloadable dir %q", dirs, want)
 	}
 }
