@@ -38,7 +38,7 @@ func VerifyEjectStdlibPrepared(pkg *types2.Package, info *types2.Info) {
 }
 
 func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File, preparedOnly bool) {
-	if base.LogosEject == "" {
+	if base.LogosEject == "" && !base.LogosEjectCheck {
 		return
 	}
 	if preparedOnly {
@@ -111,7 +111,11 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 // still have no upstream spelling. A zero-argument call the exemption does
 // not cover is ambiguous with the stdlib opt-in: eject cannot tell it
 // apart from the genuine call, so it is reported for refusal instead of
-// passing the wrong behavior through.
+// passing the wrong behavior through. A call with arguments can never be
+// the genuine opt-in, but lowering would still bind its callee through a
+// marked temporary, so a method call with arguments is refused as well;
+// only the package-qualified helper, which takes the server as an
+// argument, stays exempt.
 func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) (map[*syntax.Name]bool, map[*syntax.Name]string) {
 	var mapped map[*syntax.Name]bool
 	var ambiguous map[*syntax.Name]string
@@ -130,11 +134,26 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) (map[*syntax
 	var definesName bool
 	inspect := func(node syntax.Node) bool {
 		call, ok := node.(*syntax.CallExpr)
-		if !ok || len(call.ArgList) != 0 {
+		if !ok {
 			return true
 		}
 		selector, ok := call.Fun.(*syntax.SelectorExpr)
 		if !ok || selector.Sel.Value != "EnableHTTP2ExtendedConnect" {
+			return true
+		}
+		if len(call.ArgList) != 0 {
+			// The stdlib opt-in takes no arguments, so a call with
+			// arguments can never be the genuine call. Group and
+			// defer lowering would still bind its callee through a
+			// marked temporary the rewrite trusts by spelling, so
+			// refuse it instead of mangling the capture. A
+			// package-qualified call names no method: the helper
+			// takes the server as an argument and stays exempt,
+			// unless the file declares the name and eject skips
+			// the whole file by spelling.
+			if definesName || info.Selections[selector] != nil {
+				markAmbiguous(selector)
+			}
 			return true
 		}
 		// Eject skips files that declare the method name by spelling,
