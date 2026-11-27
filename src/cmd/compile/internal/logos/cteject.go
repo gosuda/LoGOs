@@ -376,8 +376,35 @@ func (fl *fileLower) ejectMethodText(s *ctMethodSite, sites []*ctMethodSite, ctx
 		recvExpr = s.sel.X
 	}
 	recv := fl.ejectMethodOperand(recvExpr, sites, ctx)
+	recvTyp := info.TypeOf(recvExpr)
+	sel := s.sel
+	{
+		if selection, ok := info.Selections[sel]; ok && selection != nil && len(selection.Index()) >= 2 {
+			if rec := ctInstByID(info, s.id); rec != nil {
+				if prom, _, ok := types2.LogosCtPromotedRecv(recvTyp, selection, rec.Origin); ok && prom != nil {
+					curTyp := recvTyp
+					for _, fi := range selection.Index()[:len(selection.Index())-1] {
+						curUn := types2.Unalias(curTyp)
+						if ptr, ok := curUn.(*types2.Pointer); ok {
+							curUn = types2.Unalias(ptr.Elem())
+						}
+						if named, ok := curUn.(*types2.Named); ok {
+							curUn = named.Underlying()
+						}
+						st, ok := curUn.(*types2.Struct)
+						if !ok || fi < 0 || fi >= st.NumFields() {
+							break
+						}
+						recv += "." + st.Field(fi).Name()
+						curTyp = st.Field(fi).Type()
+					}
+					recvTyp = prom
+				}
+			}
+		}
+	}
 	if rec := ctInstByID(info, s.id); rec != nil && rec.Sig != nil && rec.Sig.Params().Len() > 0 {
-		if got := info.TypeOf(recvExpr); got != nil {
+		if got := recvTyp; got != nil {
 			switch ctMethodRecvAdjust(rec.Sig.Params().At(0).Type(), got) {
 			case 1:
 				recv = "&" + recv

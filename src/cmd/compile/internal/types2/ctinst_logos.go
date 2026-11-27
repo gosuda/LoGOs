@@ -525,6 +525,11 @@ func logosCtEdges(info *Info, root syntax.Node, generics map[*syntax.FuncDecl]bo
 				if !isValid(recvTyp) {
 					return true
 				}
+				if s, ok := info.Selections[sel]; ok {
+					if prom, _, ok := LogosCtPromotedRecv(recvTyp, s, fn.Origin()); ok && isValid(prom) {
+						recvTyp = prom
+					}
+				}
 				var methodTargs []Type
 				if nparams := fn.Signature().TypeParams().Len(); nparams != 0 {
 					inst, found := info.Instances[sel.Sel]
@@ -874,6 +879,45 @@ func logosCtNamedRecv(t Type) *Named {
 	}
 	named, _ := t.(*Named)
 	return named
+}
+
+// LogosCtPromotedRecv resolves a promoted comptime method call to the
+// concrete embedded receiver type. recv is the type of the selector's X,
+// s is its checked selection, and origin is the method's generic origin.
+// It returns the embedded field type and its field-index path (excluding
+// the trailing method index), or false when the call is not a promoted
+// method of origin.
+func LogosCtPromotedRecv(recv Type, s *Selection, origin *Func) (Type, []int, bool) {
+	if s == nil || !isValid(recv) {
+		return nil, nil, false
+	}
+	idx := s.Index()
+	if len(idx) < 2 {
+		return nil, nil, false
+	}
+	cur := recv
+	for _, fi := range idx[:len(idx)-1] {
+		curUn := Unalias(cur)
+		if ptr, ok := curUn.(*Pointer); ok {
+			curUn = Unalias(ptr.Elem())
+		}
+		if named, ok := curUn.(*Named); ok {
+			curUn = named.Underlying()
+		}
+		st, ok := curUn.(*Struct)
+		if !ok {
+			return nil, nil, false
+		}
+		if fi < 0 || fi >= st.NumFields() {
+			return nil, nil, false
+		}
+		cur = st.Field(fi).Type()
+	}
+	if _, _, ok := logosCtMethodSplit(origin, []Type{cur}); !ok {
+		return nil, nil, false
+	}
+	path := append([]int(nil), idx[:len(idx)-1]...)
+	return cur, path, true
 }
 
 // LogosCtNormalizedRecv returns the declared receiver type of origin

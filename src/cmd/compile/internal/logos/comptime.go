@@ -1359,9 +1359,29 @@ func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string
 	} else {
 		newArgs = append([]syntax.Expr{syntax.Expr(syntax.Unparen(sel.X))}, call.ArgList...)
 	}
+	var projTyp types2.Type
+	if got := info.TypeOf(recvExpr); got != nil {
+		methodOrigin := target.fn.Origin()
+		if dfn, ok := info.Uses[sel.Sel].(*types2.Func); ok && dfn.Signature().Recv() != nil {
+			methodOrigin = dfn.Origin()
+		}
+		if proj, ptyp := ctPromotedProject(recvExpr, got, sel, info, methodOrigin); ptyp != nil {
+			recvExpr = proj
+			projTyp = ptyp
+			if !methodExpr {
+				newArgs[0] = proj
+			} else if len(newArgs) != 0 {
+				newArgs[0] = proj
+			}
+		}
+	}
 	recv := syntax.Unparen(recvExpr)
 	arg := syntax.Expr(recv)
-	if got := info.TypeOf(recvExpr); got != nil {
+	var got types2.Type = info.TypeOf(recvExpr)
+	if projTyp != nil {
+		got = projTyp
+	}
+	if got != nil {
 		switch ctMethodRecvAdjust(sig.Params().At(0).Type(), got) {
 		case 1:
 			arg = addrOf(recv.Pos(), recv)
@@ -1402,6 +1422,49 @@ func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string
 	}
 	info.LogosCtGlobalRefs[target.fn] = true
 	return name, id
+}
+
+// ctPromotedProject rewrites a promoted comptime-method receiver to the
+// embedded field that declares the method, following the checked
+// selection's embedding path. It returns the projected expression and
+// its type, or the original pair when the call is not promoted.
+func ctPromotedProject(recvExpr syntax.Expr, recvTyp types2.Type, sel *syntax.SelectorExpr, info *types2.Info, origin *types2.Func) (syntax.Expr, types2.Type) {
+	s, ok := info.Selections[sel]
+	if !ok || s == nil || len(s.Index()) < 2 || recvTyp == nil {
+		return recvExpr, recvTyp
+	}
+	if _, _, ok := types2.LogosCtPromotedRecv(recvTyp, s, origin); !ok {
+		return recvExpr, recvTyp
+	}
+	curTyp := recvTyp
+	proj := syntax.Unparen(recvExpr)
+	for _, fi := range s.Index()[:len(s.Index())-1] {
+		curUn := types2.Unalias(curTyp)
+		if ptr, ok := curUn.(*types2.Pointer); ok {
+			curUn = types2.Unalias(ptr.Elem())
+		}
+		if named, ok := curUn.(*types2.Named); ok {
+			curUn = named.Underlying()
+		}
+		st, ok := curUn.(*types2.Struct)
+		if !ok || fi < 0 || fi >= st.NumFields() {
+			return recvExpr, recvTyp
+		}
+		fld := st.Field(fi)
+		name := nameOf(sel.Sel.Pos(), fld.Name())
+		selNew := &syntax.SelectorExpr{X: proj, Sel: name}
+		at(selNew, proj.Pos())
+		tvFld := syntax.TypeAndValue{Type: fld.Type()}
+		tvFld.SetIsValue()
+		selNew.SetTypeInfo(tvFld)
+		if fsel, ok := types2.LookupSelection(curTyp, true, origin.Pkg(), fld.Name()); ok {
+			info.Selections[selNew] = &fsel
+			info.Uses[name] = fsel.Obj()
+		}
+		proj = selNew
+		curTyp = fld.Type()
+	}
+	return proj, curTyp
 }
 
 // ctMethodRecvAdjust reports how a method-call receiver argument must be
@@ -1463,6 +1526,23 @@ func (inst ctPreparedInstance) check(consumer *types2.Package, info *types2.Info
 	return fn, &result, nil
 }
 
+// ctMethodReceiverBase returns the name of the defined receiver base type
+// of a comptime generic method origin.
+func ctMethodReceiverBase(origin *types2.Func) (string, bool) {
+	recv := origin.Signature().Recv()
+	if recv == nil {
+		return "", false
+	}
+	t := types2.Unalias(recv.Type())
+	if ptr, ok := t.(*types2.Pointer); ok {
+		t = types2.Unalias(ptr.Elem())
+	}
+	named, ok := t.(*types2.Named)
+	if !ok || named.Obj() == nil {
+		return "", false
+	}
+	return named.Obj().Name(), true
+}
 func (inst ctPreparedInstance) ownerScope(info *types2.Info) (*types2.Scope, error) {
 	ct := inst.unit.context
 	if inst.file != nil {
@@ -1478,8 +1558,30 @@ func (inst ctPreparedInstance) ownerScope(info *types2.Info) (*types2.Scope, err
 		return nil, fmt.Errorf("no complete canonical comptime owner for %q", path)
 	}
 	ct.owner = owner
-	origin, ok := owner.Scope().Lookup(inst.record.Origin.Name()).(*types2.Func)
-	if !ok || info.LogosCtImport == nil {
+	origin := inst.record.Origin
+	if origin.Signature().Recv() != nil {
+		recvBase, ok := ctMethodReceiverBase(origin)
+		if !ok {
+			return nil, fmt.Errorf("missing canonical comptime receiver for %s", inst.record.Origin)
+		}
+		typeName, ok := owner.Scope().Lookup(recvBase).(*types2.TypeName)
+		if !ok {
+			return nil, fmt.Errorf("missing canonical comptime receiver %s for %s", recvBase, inst.record.Origin)
+		}
+		canonical, _, _ := types2.LookupFieldOrMethod(typeName.Type(), false, owner, origin.Name())
+		fn, ok := canonical.(*types2.Func)
+		if !ok {
+			return nil, fmt.Errorf("missing canonical comptime origin %s", inst.record.Origin)
+		}
+		origin = fn.Origin()
+	} else {
+		fn, ok := owner.Scope().Lookup(origin.Name()).(*types2.Func)
+		if !ok {
+			return nil, fmt.Errorf("missing canonical comptime origin %s", inst.record.Origin)
+		}
+		origin = fn
+	}
+	if info.LogosCtImport == nil {
 		return nil, fmt.Errorf("missing canonical comptime origin %s", inst.record.Origin)
 	}
 	generic, ok := info.LogosCtImport(origin)
