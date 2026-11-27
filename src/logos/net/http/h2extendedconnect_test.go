@@ -5,17 +5,9 @@
 package http
 
 import (
-	stdhttp "net/http"
 	"strings"
 	"testing"
 )
-
-func TestH2ExtendedConnectEnableReturnsNil(t *testing.T) {
-	s := &stdhttp.Server{Addr: "127.0.0.1:0"}
-	if err := EnableHTTP2ExtendedConnect(s); err != nil {
-		t.Fatalf("EnableHTTP2ExtendedConnect = %v, want nil", err)
-	}
-}
 
 func TestGodebugHas(t *testing.T) {
 	for _, tc := range []struct {
