@@ -1,0 +1,108 @@
+# Display names do not identify runtime types. Distinct packages below
+# deliberately use the same package name, type name, and rendered value.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^same-named dynamic types rejected$'
+logos eject -o out
+cd out
+exists $UPROOT1272/bin/go$GOEXE
+exec $UPROOT1272/bin/go$GOEXE version
+stdout '^go version go1\.27\.2 '
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+stdout '^same-named dynamic types rejected$'
+
+-- m/go.mod --
+module example.com/expectidentity
+
+go 1.27
+
+require (
+	example.com/left v0.0.0
+	example.com/right v0.0.0
+)
+
+replace example.com/left => ../left
+replace example.com/right => ../right
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+	"logos/expect"
+	"strings"
+
+	left "example.com/left"
+	right "example.com/right"
+)
+
+type recorder struct { message string }
+
+func (r *recorder) Helper() {}
+func (r *recorder) Errorf(format string, args ...any) {
+	r.message += fmt.Sprintf(format, args...)
+}
+
+type holder struct { Value any }
+type described interface { String() string }
+type interfaceHolder struct { Value described }
+
+func checkMismatch(name string, message string) {
+	if !strings.Contains(message, "differ in type") {
+		panic(name + ": distinct dynamic types compared equal: " + message)
+	}
+	if !strings.Contains(message, "example.com/left") || !strings.Contains(message, "example.com/right") {
+		panic(name + ": type identity was not disambiguated: " + message)
+	}
+}
+
+func main() {
+	same := &recorder{}
+	expect.Equal(same, holder{Value: left.Count(7)}, holder{Value: left.Count(7)})
+	if same.message != "" { panic("same type compared unequal: " + same.message) }
+	fields := &recorder{}
+	expect.Equal(fields, holder{Value: left.Count(7)}, holder{Value: right.Count(7)})
+	checkMismatch("any field", fields.message)
+	named := &recorder{}
+	expect.Equal(named, interfaceHolder{Value: left.Count(7)}, interfaceHolder{Value: right.Count(7)})
+	checkMismatch("named interface field", named.message)
+	leaf := &recorder{}
+	expect.Equal[any](leaf, left.Count(7), right.Count(7))
+	checkMismatch("any leaf", leaf.message)
+	namedLeaf := &recorder{}
+	expect.Equal[described](namedLeaf, left.Count(7), right.Count(7))
+	checkMismatch("named interface leaf", namedLeaf.message)
+	fmt.Println("same-named dynamic types rejected")
+}
+
+-- left/go.mod --
+module example.com/left
+
+go 1.27
+
+-- left/count.go --
+package units
+
+import "strconv"
+
+type Count int
+
+func (n Count) String() string { return strconv.Itoa(int(n)) }
+
+-- right/go.mod --
+module example.com/right
+
+go 1.27
+
+-- right/count.go --
+package units
+
+import "strconv"
+
+type Count int
+
+func (n Count) String() string { return strconv.Itoa(int(n)) }

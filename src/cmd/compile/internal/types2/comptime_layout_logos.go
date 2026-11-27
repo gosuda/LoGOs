@@ -12,7 +12,7 @@ import (
 
 func isLogosLayoutName(name string) bool {
 	switch name {
-	case "SizeOf", "AlignOf", "HasPointers":
+	case "SizeOf", "AlignOf", "HasPointers", "HasUnexported":
 		return true
 	}
 	return false
@@ -71,7 +71,7 @@ func (check *Checker) logosComptimePosition() bool {
 }
 
 func logosLayoutPlaceholder(fname string) constant.Value {
-	if fname == "HasPointers" {
+	if fname == "HasPointers" || fname == "HasUnexported" {
 		return constant.MakeBool(false)
 	}
 	return constant.MakeInt64(1)
@@ -81,6 +81,8 @@ func (check *Checker) logosLayoutFolded(targ Type, fname string) constant.Value 
 	switch fname {
 	case "HasPointers":
 		return constant.MakeBool(LogosHasPointers(targ))
+	case "HasUnexported":
+		return constant.MakeBool(LogosHasUnexported(targ))
 	case "SizeOf":
 		return constant.MakeInt64(check.conf.sizeof(targ))
 	}
@@ -88,14 +90,14 @@ func (check *Checker) logosLayoutFolded(targ Type, fname string) constant.Value 
 }
 
 func logosLayoutDeclaredType(fname string) Type {
-	if fname == "HasPointers" {
+	if fname == "HasPointers" || fname == "HasUnexported" {
 		return Typ[Bool]
 	}
 	return Typ[Int]
 }
 
 func logosLayoutConstantType(fname string) Type {
-	if fname == "HasPointers" {
+	if fname == "HasPointers" || fname == "HasUnexported" {
 		return Typ[UntypedBool]
 	}
 	return Typ[UntypedInt]
@@ -120,6 +122,33 @@ func LogosHasPointers(t Type) bool {
 	case *Struct:
 		for i := range u.NumFields() {
 			if LogosHasPointers(u.Field(i).Type()) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// LogosHasUnexported reports whether the layout of t holds a field that
+// comptime field iteration cannot project: any unexported field,
+// including a blank field, in a struct or array element at any depth.
+// Slice, map, pointer, and interface elements are separate values with
+// their own instantiations, so they do not count toward the container.
+func LogosHasUnexported(t Type) bool {
+	switch u := Unalias(t).Underlying().(type) {
+	case *ConstView:
+		return LogosHasUnexported(u.Elem)
+	case *ReadonlyDescendants:
+		return LogosHasUnexported(u.Elem)
+	case *Option:
+		return LogosHasUnexported(u.Elem)
+	case *LogosTuple:
+		return LogosHasUnexported(u.under)
+	case *Array:
+		return u.Len() > 0 && LogosHasUnexported(u.Elem())
+	case *Struct:
+		for i := range u.NumFields() {
+			if f := u.Field(i); !f.Exported() || LogosHasUnexported(f.Type()) {
 				return true
 			}
 		}

@@ -96,7 +96,12 @@ func (s *logosEFState) deferCall(call logosEFDeferredCall) *logosEFState {
 }
 
 func (p *logosEFPass) runCleanup(call logosEFDeferredCall, st *logosEFState) *logosEFState {
-	out := p.inlineFuncLit(call.lit, st)
+	// A cleanup runs against the state at its entry, before the
+	// enclosing invocation projects its exit. Materialize the live
+	// unchecked pairings so the cleanup reads need the same check a
+	// flow read would; a cleanup that checks the guard first proves
+	// its own read.
+	out := p.inlineFuncLit(call.lit, p.seedCleanupReads(call.lit, st))
 	if call.onError {
 		// The error return is not generally known at this join. Keep
 		// the success path, on which errdefer does not execute.

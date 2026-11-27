@@ -112,6 +112,7 @@ The output `go.mod` MUST carry a `replace` line for each ejected module [T-0.3].
 A Go dependency module MUST stay a `require` entry of the output `go.mod` [T-0.3][R-U2].
 The support sources MUST become one shared support module `github.com/gosuda/loGos/rt` [T-0.3][A-RTMOD].
 The shared module MUST land in `DIR/_logos_deps/rt` [T-0.3].
+Each toolchain package `logos/<path>` that the program imports, other than `logos/rt`, `logos/arena`, `logos/sync`, and their subpackages, MUST land in the shared module as `github.com/gosuda/loGos/rt/logos/<path>` [T-0.3].
 The output MUST carry a `replace` line for the shared module [T-0.3].
 The tool MUST remove `import "comptime"` during eject [T-0.3].
 The output MUST NOT include a `//go:build !logos` line [T-0.3][R-U3].
@@ -809,7 +810,7 @@ A return that passes a result and the err it came with, both unread and unchange
 
 Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
 
-A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. [T-202]
+A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. When the storing call's error has no tracked identity (a field error or a discarded error), an ordinary flow read of the result stays silent; the read MUST fail only where a deferred capture or a deferred cleanup can observe the stored value, or after a directly invoked function literal whose exit still holds the unchecked result. [T-202]
 
 A read of a result stored in a slice or map element, or reached through a pointer, MAY stay accepted. [T-202]
 
@@ -1196,19 +1197,23 @@ The condition MUST end at the `{` that opens the branch, so a name or `true` bef
 
 `comptime.IsStruct[T]()` MUST be a constant `const if` condition, true when the underlying type of `T` is a struct. [T-205]
 
+`comptime.IsInterface[T]()` MUST be a constant `const if` condition, true when the underlying type of `T`, after removing transparent const-view and read-only-descendant wrappers, is an interface. It includes named interfaces and value unions; pointers and other containers are not interfaces. The predicate MUST fold per instantiation or field, so a library MAY restrict runtime type-identity checks to interface values. [T-205]
+
 Inside a comptime generic its value MUST be taken per instantiation, and a condition built from it with `!`, `&&`, `||`, `==`, `!=` and constants MUST NOT fail `[comptime::not_constant]`. [T-205]
 
 `comptime.SizeOf[T]()`, `comptime.AlignOf[T]()`, and `comptime.HasPointers[T]()` are compile-time constants describing the size, alignment, and pointer-containing status of `T`.
 
-Each of them MUST equal what `unsafe.Sizeof`, `unsafe.Alignof`, and the garbage collector pointer map give for the Go type that the lowering emits for `T` on the target. That holds for every LoGOs type form: an option that the lowering keeps bare or wraps, a const view, a tuple, a closed union, and any struct, array, or option that holds them. [T-205]
+`comptime.HasUnexported[T]()` is a compile-time constant, true when the layout of `T` holds a source-declared unexported field, including a blank field, in a struct or array element at any depth, including inline option, tuple, const-view, and read-only-descendant wrappers. A zero-length array has no element storage. Slice, map, pointer, and interface elements are separate values with their own instantiations and do not count toward the container. [T-205]
 
-A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, the field facts `f.Name`, `f.Index`, `f.Exported` and `f.Tag.Get(k)` with a constant `k`, the type identity `comptime.TypeOf[X]() == comptime.TypeOf[Y]()`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
+The three size, alignment, and pointer intrinsics MUST equal what `unsafe.Sizeof`, `unsafe.Alignof`, and the garbage collector pointer map give for the Go type that the lowering emits for `T` on the target. That holds for every LoGOs type form: an option that the lowering keeps bare or wraps, a const view, a tuple, a closed union, and any struct, array, or option that holds them. [T-205]
+
+A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, the field facts `f.Name`, `f.Index`, `f.Exported` and `f.Tag.Get(k)` with a constant `k`, `comptime.IsInterface[X]()` over the same type forms, the type identity `comptime.TypeOf[X]() == comptime.TypeOf[Y]()`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
 
 Any other non-constant condition MUST fail with `[comptime::not_constant]`, including a condition on the `const for` index variable. [T-205]
 
 A `const for` in a dead `const if` branch MUST NOT fail with `[comptime::const_for_fields]`. [T-205]
 
-`comptime.Fields[T]()`, `f.Type` used as a value, `comptime.IsStruct[T]()`, `comptime.TypeOf[X]()`, and `comptime.Error(msg)` MUST be compile-time only. `val.[f]`, `f.Name`, and `f.Tag.Get(k)` inside a `const for` body expand to per-field code; outside the body they are scope or projection errors, not run-time uses. [T-205]
+`comptime.Fields[T]()`, `f.Type` used as a value, `comptime.IsStruct[T]()`, `comptime.IsInterface[T]()`, `comptime.TypeOf[X]()`, and `comptime.Error(msg)` MUST be compile-time only. `val.[f]`, `f.Name`, and `f.Tag.Get(k)` inside a `const for` body expand to per-field code; outside the body they are scope or projection errors, not run-time uses. [T-205]
 
 Any run-time use of those compile-time-only forms MUST fail with `[comptime::runtime_use]`. A use of `val.[f]`, `f.Name`, or `f.Tag` outside a `const for` body fails with the scope or projection diagnostic. [T-205]
 

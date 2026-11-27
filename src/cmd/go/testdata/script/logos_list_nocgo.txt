@@ -3,6 +3,7 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env CGO_ENABLED=0
+env GOCACHE=$WORK/gocache
 env CC=review-missing-c-compiler
 env PATH=$WORK/no-compiler
 cd plain

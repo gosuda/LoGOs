@@ -1,0 +1,56 @@
+// run
+
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+)
+
+type mapBox322 struct {
+	M map[string]string `json:"m"`
+}
+
+type mapBox322Mirror struct {
+	M map[string]string `json:"m"`
+	// NoGen defeats static MarshalJSON generation (any is not a static
+	// kind), so json.Marshal takes the reflective path and stays an
+	// independent oracle instead of a second copy of the generator.
+	NoGen any `json:"-"`
+}
+
+func checkMap322(name string, value map[string]string, want string) {
+	got, err := (mapBox322{M: value}).MarshalJSON()
+	if err != nil {
+		panic("map braces " + name + ": " + err.Error())
+	}
+	if string(got) != want {
+		panic("map braces " + name + ": got " + string(got) + ", want " + want)
+	}
+}
+
+func checkMap322Parity(name string, value map[string]string) {
+	got, err := (mapBox322{M: value}).MarshalJSON()
+	if err != nil {
+		panic("map parity " + name + ": " + err.Error())
+	}
+	want, err := json.Marshal(mapBox322Mirror{M: value})
+	if err != nil {
+		panic("map parity " + name + " oracle: " + err.Error())
+	}
+	if !bytes.Equal(got, want) {
+		panic("map parity " + name + ": got " + string(got) + ", want " + string(want))
+	}
+	if !json.Valid(got) {
+		panic("map parity " + name + ": invalid JSON " + string(got))
+	}
+}
+
+func main() {
+	checkMap322("nil", nil, `{"m":null}`)
+	checkMap322("empty", map[string]string{}, `{"m":{}}`)
+	checkMap322("one", map[string]string{"k": "v"}, `{"m":{"k":"v"}}`)
+	checkMap322("ordered", map[string]string{"b": "two", "a": "one"}, `{"m":{"a":"one","b":"two"}}`)
+	checkMap322Parity("surrogate-key", map[string]string{"\xed\xa0\x80": "bad"})
+	checkMap322Parity("surrogate-value", map[string]string{"k": "\xed\xa0\x80"})
+}

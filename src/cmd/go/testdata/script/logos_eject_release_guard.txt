@@ -1,0 +1,141 @@
+[!symlink] skip 'fake GOROOT needs symlinks'
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOWORK=off
+env CGO_ENABLED=0
+
+# A residual that names a Go release tag must not pin the emitted file
+# to that version's semantics: the export keeps the original structure
+# with version-neutral mode tags, so plain-Go builds select the file
+# under the package language version. The fixture closes over its loop
+# variable, which older per-file versions share across iterations while
+# the package version keeps distinct. The test installs fixture packages
+# in a private toolchain root inside $WORK and selects it with GOROOT.
+# Nothing is written into the real GOROOT.
+go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
+env GOROOT=$WORK/fakegoroot
+
+cd m
+
+# Native semantics: logosejected is unset, so the file is selected with
+# no implied file version and each closure keeps its iteration's value.
+logos run .
+stdout '^1$'
+stdout '^2$'
+
+logos eject -o out
+exists out/_logos_deps/rt/logos/ejecttestrel/item.go
+grep '^//go:build ignore || go1.21$' out/_logos_deps/rt/logos/ejecttestrel/item.go
+! grep 'logosejected' out/_logos_deps/rt/logos/ejecttestrel/item.go
+
+env GOROOT=$TESTGO_GOROOT
+cd out
+go build -mod=readonly ./...
+go run .
+stdout '^1$'
+stdout '^2$'
+# The neutralized guard selects like the folded release tag: the default
+# list keeps the file.
+go list -f '{{.GoFiles}}' github.com/gosuda/loGos/rt/logos/ejecttestrel
+stdout 'item.go'
+
+-- mkgoroot.go --
+package main
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func must(err error, what string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkgoroot: %s: %v\n", what, err)
+		os.Exit(1)
+	}
+}
+
+func link(oldname, newname string) {
+	must(os.MkdirAll(filepath.Dir(newname), 0777), "mkdir "+filepath.Dir(newname))
+	must(os.Symlink(oldname, newname), "symlink "+newname)
+}
+
+func main() {
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: mkgoroot <realGOROOT> <fakeRoot> <fixtures>")
+		os.Exit(2)
+	}
+	real, fake, fixtures := os.Args[1], os.Args[2], os.Args[3]
+
+	must(os.MkdirAll(filepath.Join(fake, "src", "logos"), 0777), "mkdir fake src/logos")
+
+	ents, err := os.ReadDir(filepath.Join(real, "src"))
+	must(err, "read real src")
+	for _, e := range ents {
+		if e.Name() == "logos" {
+			continue
+		}
+		link(filepath.Join(real, "src", e.Name()), filepath.Join(fake, "src", e.Name()))
+	}
+
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(filepath.Join(real, "src", "logos"))), "copy support sources")
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(fixtures)), "install fixture packages")
+
+	// The package index distinguishes .lgo-only standard packages, but
+	// bypasses files with recent mtimes. Age only the private copies.
+	old := time.Now().Add(-time.Hour)
+	must(filepath.WalkDir(filepath.Join(fake, "src", "logos"), func(name string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		return os.Chtimes(name, old, old)
+	}), "age copied support and fixture files")
+
+	link(filepath.Join(real, "pkg"), filepath.Join(fake, "pkg"))
+	link(filepath.Join(real, "VERSION"), filepath.Join(fake, "VERSION"))
+	if _, err := os.Stat(filepath.Join(real, "go.env")); err == nil {
+		link(filepath.Join(real, "go.env"), filepath.Join(fake, "go.env"))
+	}
+	if _, err := os.Stat(filepath.Join(real, "lib")); err == nil {
+		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
+	}
+}
+
+-- dep/ejecttestrel/item.lgo --
+//go:build !logosejected || go1.21
+
+package ejecttestrel
+
+func Vals() []int {
+	var fns []func() int
+	for _, v := range []int{1, 2} {
+		fns = append(fns, func() int { return v })
+	}
+	out := make([]int, 0, len(fns))
+	for _, fn := range fns {
+		out = append(out, fn())
+	}
+	return out
+}
+
+-- m/go.mod --
+module example.com/reldep
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/ejecttestrel"
+)
+
+func main() {
+	for _, v := range ejecttestrel.Vals() {
+		fmt.Println(v)
+	}
+}
