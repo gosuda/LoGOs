@@ -836,6 +836,7 @@ type heldSplit struct {
 	stats int
 	errA  error
 	errB  error
+	errC  error
 }
 
 // Branches that pair one result with different errors leave no single
@@ -923,7 +924,7 @@ func joinStaleGuardCheckStaysUnproven(cond bool) {
 		h.stats, h.errB = fetchHeld()
 	}
 	if h.errA == nil {
-		use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+		use(h.stats /* ERROR "read of h.stats before h.errB is checked" */)
 	}
 }
 
@@ -1040,4 +1041,176 @@ func joinUnrelatedClosureKeepsVeto(cond bool) {
 		h.errA = nil
 	}()
 	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// A literal that clears one possible guard on one returning branch breaks
+// the pairing: the caller read fails even though the other branch keeps it.
+func joinConditionalGuardOverwriteFails(cond bool, reset bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	func() {
+		if reset {
+			h.errA = nil
+		}
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// A callback that only discards the error leaves ordinary reads silent:
+// the result still holds its initial value before the callback runs.
+func callbackDiscardBeforeCallStaysSilent() {
+	h := heldField{}
+	var refresh func()
+	func() {
+		refresh = func() { h.stats, _ = fetchHeld() }
+	}()
+	use(h.stats)
+	refresh()
+}
+
+// A nested callback that only discards the error leaves the outer read silent.
+func nestedCallbackDiscardStaysSilent() {
+	var n int
+	func() {
+		save := func() { n, _ = fetch() }
+		save()
+	}()
+	use(n)
+}
+
+// A callback that stores the result with a live guard keeps the check: the
+// invocation exit projects the pairing the callback may establish.
+func escapingCallbackNamedStoreFails() {
+	h := heldField{}
+	var save func()
+	func() {
+		save = func() { h.stats, h.err = fetchHeld() }
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	_ = save
+}
+
+// A callback a cleanup saves for later runs outside the cleanup: its own
+// locals stay silent under the ordinary read rule.
+func cleanupSavedCallbackOwnLocalStaysSilent() {
+	callback := func() {}
+	func() {
+		scope defer func() {
+			callback = func() {
+				n, _ := fetch()
+				use(n)
+			}
+		}()
+	}()
+	callback()
+}
+
+// A goroutine a cleanup launches runs outside the cleanup: its own locals
+// stay silent under the ordinary read rule.
+func cleanupGoroutineOwnLocalStaysSilent() {
+	func() {
+		defer func() {
+			go /* ERROR "concurrency::unsupervised_goroutine" */ func() {
+				n, _ := fetch()
+				use(n)
+			}()
+		}()
+	}()
+}
+
+// A callback saved by a cleanup still observes captured stores: reading a
+// value the cleanup stored without a check fails.
+func cleanupSavedCallbackCapturedFails() {
+	h := heldField{}
+	callback := func() {}
+	func() {
+		h.stats, h.err = fetchHeld()
+		scope defer func() {
+			callback = func() {
+				use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+			}
+		}()
+	}()
+	callback()
+}
+
+// A named-function defer runs at exit under the cleanup check: an unchecked
+// store read there fails like an invoked-literal defer.
+func namedDeferStoreUncheckedFails() {
+	h := heldField{}
+	defer func() {
+		h.stats, h.err = fetchHeld()
+		use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	}()
+}
+
+// A named-function defer checks whole-value reads the same way.
+func namedDeferWholeRootUncheckedFails() {
+	var n int
+	defer func() {
+		n, _ = fetch()
+		use(n /* ERROR "[correctness::result_before_error_check]" */)
+	}()
+}
+
+// A cleanup helper that forwards its result with its unchanged error does
+// not read the result: the caller checks the returned error instead.
+func cleanupForwardPairStaysSilent() {
+	h := heldField{}
+	func() {
+		defer func() {
+			stats, err := func() (int, error) {
+				h.stats, h.err = fetchHeld()
+				return h.stats, h.err
+			}()
+			if err != nil {
+				return
+			}
+			use(stats)
+		}()
+	}()
+}
+
+// A cleanup return of a computed result still reads it: only an unchanged
+// forwarded pair is exempt.
+func cleanupForwardComputedFails() {
+	h := heldField{}
+	func() {
+		defer func() {
+			stats, err := func() (int, error) {
+				h.stats, h.err = fetchHeld()
+				return h.stats /* ERROR "[correctness::result_before_error_check]" */ + 1, h.err
+			}()
+			if err != nil {
+				return
+			}
+			use(stats)
+		}()
+	}()
+}
+
+// A check of one unchecked arm's guard cannot prove a value a third arm
+// pairs elsewhere: the joined read keeps failing.
+func joinThreeArmCheckFirstLiveGuardStaysUnproven(c int) {
+	h := heldSplit{}
+	switch c {
+	case 1:
+		func() {
+			h.stats, h.errA = fetchHeld()
+		}()
+		if h.errA != nil {
+			return
+		}
+	case 2:
+		h.stats, h.errB = fetchHeld()
+	default:
+		h.stats, h.errC = fetchHeld()
+	}
+	if h.errB == nil {
+		use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	}
 }

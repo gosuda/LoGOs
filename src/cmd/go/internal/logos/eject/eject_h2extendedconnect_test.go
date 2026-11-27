@@ -372,114 +372,6 @@ func TestH2ExtendedConnectSkipsTempReceivers(t *testing.T) {
 	}
 }
 
-func TestH2ExtendedConnectSkipsDotBlankBindings(t *testing.T) {
-	const in = `package main
-
-import (
-	"net/http"
-	_ "os"
-	. "strings"
-)
-
-func enable(s *http.Server) {
-	_ = TrimSpace("x")
-	s.EnableHTTP2ExtendedConnect()
-}
-`
-	out, _, ok := remapEjectedFile([]byte(in), "", nil)
-	if !ok {
-		t.Fatal("remapEjectedFile failed")
-	}
-	got := string(out)
-	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
-		t.Errorf("direct call survives:\n%s", got)
-	}
-	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
-		t.Errorf("no delegation call with the receiver as argument:\n%s", got)
-	}
-	if strings.Contains(got, "..") || strings.Contains(got, "_.") {
-		t.Errorf("dot or blank binding used as qualifier:\n%s", got)
-	}
-}
-
-func TestH2ExtendedConnectIgnoresShadowableAny(t *testing.T) {
-	const in = `package main
-
-import "net/http"
-
-type any = string
-
-func enable(s *http.Server) {
-	s.EnableHTTP2ExtendedConnect()
-}
-`
-	out, _, ok := remapEjectedFile([]byte(in), "", nil)
-	if !ok {
-		t.Fatal("remapEjectedFile failed")
-	}
-	got := string(out)
-	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
-		t.Errorf("direct call survives:\n%s", got)
-	}
-	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
-		t.Errorf("no delegation call with the receiver as argument:\n%s", got)
-	}
-	if strings.Contains(got, " any)") {
-		t.Errorf("emitted code uses shadowable any:\n%s", got)
-	}
-}
-
-func TestH2ExtendedConnectPanicReceiver(t *testing.T) {
-	const in = `package main
-
-import "net/http"
-
-func enable(panic *http.Server) {
-	panic.EnableHTTP2ExtendedConnect()
-}
-`
-	out, _, ok := remapEjectedFile([]byte(in), "", nil)
-	if !ok {
-		t.Fatal("remapEjectedFile failed")
-	}
-	got := string(out)
-	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
-		t.Errorf("direct call survives:\n%s", got)
-	}
-	if strings.Contains(got, "func(panic ") {
-		t.Errorf("parameter shadows builtin panic:\n%s", got)
-	}
-	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("panic", panic)`) {
-		t.Errorf("receiver not passed verbatim to the delegation:\n%s", got)
-	}
-}
-
-func TestH2ExtendedConnectReservesSiblingNames(t *testing.T) {
-	const in = `package main
-
-import "net/http"
-
-func enable(s *http.Server) {
-	s.EnableHTTP2ExtendedConnect()
-}
-`
-	extra := map[string]bool{"ejectedhttp": true}
-	out, _, ok := remapEjectedFile([]byte(in), "", extra)
-	if !ok {
-		t.Fatal("remapEjectedFile failed")
-	}
-	got := string(out)
-	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
-		t.Errorf("direct call survives:\n%s", got)
-	}
-	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
-		t.Errorf("support import does not avoid the sibling name:\n%s", got)
-	}
-	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
-		t.Errorf("delegation does not use the reserved alias:\n%s", got)
-	}
-}
-
 func TestH2ExtendedConnectAvoidsShadowedSupportBinding(t *testing.T) {
 	const in = `package main
 
@@ -734,5 +626,195 @@ func TestH2PackageReservedSkipsNonregular(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("h2PackageReserved hangs on a .go-named pipe")
+	}
+}
+
+func TestH2ExtendedConnectRewritesShadowedServerCapture(t *testing.T) {
+	// A server capture through a local that shadows the support
+	// import alias is still the server method: the verifier approves
+	// it by type, so the rewrite must rebind it through a fresh
+	// alias instead of skipping it by spelling. Skipping keeps a
+	// method upstream Go does not provide.
+	const in = `package main
+
+import (
+	"net/http"
+	logohttp "logos/net/http"
+)
+
+func clean(srv *http.Server) {
+	_ = logohttp.EnableHTTP2ExtendedConnect(srv)
+}
+
+func spawn() {
+	logohttp := &http.Server{Addr: "127.0.0.1:0"}
+	_logos_f0 := logohttp.EnableHTTP2ExtendedConnect
+	go _logos_f0()
+}
+
+func other(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if !strings.Contains(got, `_logos_f0 := ejectedhttp.RequireExtendedConnectFunc("logohttp", logohttp)`) {
+		t.Errorf("shadowed server capture not rebound through a fresh alias:\n%s", got)
+	}
+	if strings.Contains(got, "_logos_f0 := logohttp.EnableHTTP2ExtendedConnect") {
+		t.Errorf("fork-only method value left in the export:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("fresh support import missing:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectKeepsHelperCaptureInShadowedFile(t *testing.T) {
+	// A helper capture in a file whose import alias is shadowed
+	// elsewhere keeps its binding: the capture is used with an
+	// argument, so it is the helper value, never the zero-argument
+	// server method. Arity, not spelling, decides.
+	const in = `package main
+
+import (
+	"net/http"
+	logohttp "logos/net/http"
+)
+
+func clean(srv *http.Server) {
+	_logos_f0 := logohttp.EnableHTTP2ExtendedConnect
+	defer _logos_f0(srv)
+	srv.EnableHTTP2ExtendedConnect()
+}
+
+func shadowed() {
+	logohttp := &http.Server{Addr: "127.0.0.1:0"}
+	_ = logohttp
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "RequireExtendedConnectFunc") {
+		t.Errorf("helper capture rebound through the guard:\n%s", got)
+	}
+	if !strings.Contains(got, "_logos_f0 := logohttp.EnableHTTP2ExtendedConnect") {
+		t.Errorf("helper capture lost:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("srv", srv)`) {
+		t.Errorf("direct call not on the fresh alias:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectSkipsDotBlankBindings(t *testing.T) {
+	const in = `package main
+
+import (
+	"net/http"
+	_ "os"
+	. "strings"
+)
+
+func enable(s *http.Server) {
+	_ = TrimSpace("x")
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no delegation call with the receiver as argument:\n%s", got)
+	}
+	if strings.Contains(got, "..") || strings.Contains(got, "_.") {
+		t.Errorf("dot or blank binding used as qualifier:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectIgnoresShadowableAny(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+type any = string
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no delegation call with the receiver as argument:\n%s", got)
+	}
+	if strings.Contains(got, " any)") {
+		t.Errorf("emitted code uses shadowable any:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectPanicReceiver(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func enable(panic *http.Server) {
+	panic.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if strings.Contains(got, "func(panic ") {
+		t.Errorf("parameter shadows builtin panic:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("panic", panic)`) {
+		t.Errorf("receiver not passed verbatim to the delegation:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectReservesSiblingNames(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	extra := map[string]bool{"ejectedhttp": true}
+	out, _, ok := remapEjectedFile([]byte(in), "", extra)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("support import does not avoid the sibling name:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("delegation does not use the reserved alias:\n%s", got)
 	}
 }

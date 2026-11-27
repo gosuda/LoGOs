@@ -557,7 +557,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		edits = append(edits, siteIdentEdits(fset, f, siteNamespace(logosStem(name)))...)
 	}
 	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, nil)
-	if _, overlap := h2OverlapOffset(edits, h2edits); overlap {
+	if h2Overlaps(edits, h2edits) {
 		return nil, false, fmt.Errorf("overlapping extended-CONNECT rewrite")
 	}
 	edits = append(edits, h2edits...)

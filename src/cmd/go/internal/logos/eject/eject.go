@@ -942,9 +942,38 @@ func ejectedSupportRefs(root string) []string {
 // compiler staging (built as plan roots, or staged by variant helpers);
 // pure-Go packages are copied from GOROOT. A referenced package with no
 // lowered output is a loud failure, never a dangling import. The support
+// module ships no tests, so test files stay out on both paths.
+// hasEjectedGoFiles reports whether dir already holds ejected Go sources.
+// The support copy writes every GOROOT package it reaches with ejected-guard
+// specialization and exclusion; materializing the same package again from
+// staging without that specialization would overwrite the correct files and
+// resurrect excluded ones (for example !logosejected twins).
+func hasEjectedGoFiles(dir string) bool {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".go") {
+			return true
+		}
+	}
+	return false
+}
+
+// materializeGorootLogos emits every reached GOROOT logos/* package
+// outside the fixed set into the shared support module, following the
+// import graph transitively. Packages owning .lgo files are emitted from
+// compiler staging (built as plan roots, or staged by variant helpers);
+// pure-Go packages are copied from GOROOT. A referenced package with no
+// lowered output is a loud failure, never a dangling import. The support
 // module ships no tests, so test files stay out on both paths. Stems the
 // support copy already decided stay out: the copy specializes ejected
 // guards, so a second write would restore files the copy excluded.
+
 func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string, decided map[string]map[string]bool) {
 	done := map[string]bool{}
 	queue := ejectedSupportRefs(out)
@@ -954,7 +983,6 @@ func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string, decided
 		if done[path] || gorootCovered(path) {
 			continue
 		}
-		done[path] = true
 		recs := plan.provenance[path]
 		if len(recs) == 0 {
 			continue
@@ -987,6 +1015,12 @@ func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string, decided
 		dst := rtDir
 		if rel != "" {
 			dst = filepath.Join(rtDir, filepath.FromSlash(rel))
+		}
+		// The support copy already emitted this package with guard
+		// specialization; writing it again from staging would clobber the
+		// residual and resurrect excluded files.
+		if hasEjectedGoFiles(dst) {
+			continue
 		}
 		if len(names) == 0 {
 			// Pure-Go packages ride the support closure, which copies
@@ -2220,7 +2254,7 @@ func remapEjectedFile(data []byte, siteNS string, extraUsed map[string]bool) ([]
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
 	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, extraUsed)
 	uses = uses || h2uses
-	if _, overlap := h2OverlapOffset(edits, h2edits); overlap {
+	if h2Overlaps(edits, h2edits) {
 		// The caller owns failure policy: compiled output fails loudly,
 		// while an uncompiled data fixture keeps its original bytes.
 		return nil, false, false
