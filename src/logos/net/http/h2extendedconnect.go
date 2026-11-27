@@ -7,6 +7,7 @@ package http
 import (
 	stdhttp "net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -32,6 +33,20 @@ func EnableHTTP2ExtendedConnect(s *stdhttp.Server) error {
 	return h2extendedConnectEnable(s)
 }
 
+// RequireExtendedConnect is the eject spelling of
+// (*net/http.Server).EnableHTTP2ExtendedConnect. The textual eject rewrite
+// calls it with the source receiver text and value, so the receiver keeps
+// its evaluation point (including under defer and go) and the call site
+// needs no os or strings binding of its own; only this package's private
+// imports serve the guard. It panics naming the server unless the process
+// enables the stock GODEBUG setting.
+func RequireExtendedConnect(name string, recv any) {
+	s, _ := recv.(*stdhttp.Server)
+	if err := h2extendedConnectEnable(s); err != nil {
+		panic("logos/net/http: extended CONNECT on server " + strconv.Quote(name) + " needs GODEBUG=http2xconnect=1 in the ejected process environment")
+	}
+}
+
 // godebugHas reports whether key's last GODEBUG setting equals value.
 // Shared by both variants so the parsing stays identical.
 func godebugHas(key, value string) bool {
@@ -46,4 +61,13 @@ func godebugHas(key, value string) bool {
 		matched = val == value
 	}
 	return seen && matched
+}
+
+// RequireExtendedConnectFunc is the eject spelling of a method value over
+// (*net/http.Server).EnableHTTP2ExtendedConnect, which group lowering binds
+// before spawning its child. The receiver passes once as an argument, so it
+// keeps its single eager evaluation; the returned closure runs the same
+// guard when the spawned child calls it.
+func RequireExtendedConnectFunc(name string, recv any) func() {
+	return func() { RequireExtendedConnect(name, recv) }
 }

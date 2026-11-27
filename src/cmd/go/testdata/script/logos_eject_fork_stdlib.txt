@@ -2,17 +2,32 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 
 cd m
-# An escaping fork-only method value has no upstream spelling. Only
-# direct calls have the explicit extended-CONNECT rewrite.
+# A fork-only standard-library selector has no upstream spelling
+# (SPEC T-0.3): logos build accepts it, but logos eject must refuse it
+# at its source location instead of reporting a successful eject.
+# The direct EnableHTTP2ExtendedConnect call is exempt: eject rewrites it
+# to the ejectedhttp.RequireExtendedConnect helper form
+# (see logos_eject_h2extendedconnect). This case keeps a method value,
+# which no rewrite covers, so eject must still refuse it here.
 logos build ./...
 ! logos eject -o out
 stderr 'server\.lgo:6.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
 ! exists out
 
 cd ../expression
+# A method expression likewise has no upstream spelling and no rewrite.
 logos build ./...
 ! logos eject -o out
 stderr 'server\.lgo:5.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
+! exists out
+
+cd ../samename
+# A file that declares the method name itself is skipped by the eject
+# rewrite, so verification must refuse even the genuine server call in
+# it instead of exempting it by type.
+logos build ./...
+! logos eject -o out
+stderr 'server\.lgo:.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
 ! exists out
 
 cd ../ok
@@ -31,8 +46,23 @@ package h2portability
 
 import "net/http"
 
-func Enable(s *http.Server) func() {
-	return s.EnableHTTP2ExtendedConnect
+func Enable(s *http.Server) {
+	f := s.EnableHTTP2ExtendedConnect
+	_ = f
+}
+
+-- ok/go.mod --
+module example.com/h2ok
+
+go 1.27
+
+-- ok/server.lgo --
+package h2ok
+
+import "net/http"
+
+func KeepAlive(s *http.Server) {
+	s.SetKeepAlivesEnabled(true)
 }
 
 -- expression/go.mod --
@@ -47,16 +77,22 @@ import "net/http"
 
 var Enable = (*http.Server).EnableHTTP2ExtendedConnect
 
--- ok/go.mod --
-module example.com/h2ok
+-- samename/go.mod --
+module example.com/h2samename
 
 go 1.27
 
--- ok/server.lgo --
-package h2ok
+-- samename/server.lgo --
+package h2samename
 
 import "net/http"
 
-func KeepAlive(s *http.Server) {
-	s.SetKeepAlivesEnabled(true)
+type Mine struct{}
+
+func (Mine) EnableHTTP2ExtendedConnect() {}
+
+func Enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+	var m Mine
+	m.EnableHTTP2ExtendedConnect()
 }
