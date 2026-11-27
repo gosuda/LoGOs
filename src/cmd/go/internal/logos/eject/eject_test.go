@@ -312,6 +312,30 @@ func TestEjectSupportRootsSkipsUnusedHTTP(t *testing.T) {
 	}
 }
 
+func TestEjectDiscoverDirsCoversUnloadable(t *testing.T) {
+	saved := cfg.GOROOT
+	t.Cleanup(func() { cfg.GOROOT = saved })
+	cfg.GOROOT = filepath.Join("fake", "goroot")
+	a := &load.Package{PackagePublic: load.PackagePublic{
+		Dir: "fake/goroot/src/logos/a", ImportPath: "logos/a",
+		Goroot: true, Standard: true,
+	}}
+	plan := &ejectPlan{provenance: map[string][]*load.Package{"logos/a": {a}}}
+	unloadable := map[string]bool{"logos/b": true}
+	dirs := ejectDiscoverDirs(plan, unloadable)
+	want := filepath.Join("fake", "goroot", "src", "logos", "b")
+	found := false
+	for _, d := range dirs {
+		if d == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("discover dirs = %q, want unloadable dir %q", dirs, want)
+	}
+}
+
 func TestRebaseAbsoluteReplaceTargets(t *testing.T) {
 	root := t.TempDir()
 	mainDir := filepath.Join(root, "main")

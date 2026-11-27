@@ -258,18 +258,32 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 // missing staged output even for the default build. Only files the support
 // copy would read seed the search, and ignore-tagged files stay out exactly
 // as in the copy.
+// ejectDiscoverDirs returns the GOROOT source directories to scan for
+// logos imports: every reached GOROOT logos package plus every
+// platform-only dependency the host load could not resolve. Without the
+// unloadable dirs, an inactive Go import that reaches another
+// platform-only package hides that package's LoGOs dependencies from
+// staging, and the support copy fails on their missing output.
+func ejectDiscoverDirs(plan *ejectPlan, unloadable map[string]bool) []string {
+	dirs := map[string]bool{}
+	for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
+		for _, p := range plan.provenance[path] {
+			if !isGorootLogos(p) {
+				continue
+			}
+			dirs[p.Dir] = true
+		}
+	}
+	for path := range unloadable {
+		dirs[filepath.Join(cfg.GOROOT, "src", filepath.FromSlash(path))] = true
+	}
+	return slices.Sorted(maps.Keys(dirs))
+}
+
 func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, plan *ejectPlan) {
 	unloadable := map[string]bool{}
 	for {
-		dirs := map[string]bool{}
-		for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
-			for _, p := range plan.provenance[path] {
-				if !isGorootLogos(p) {
-					continue
-				}
-				dirs[p.Dir] = true
-			}
-		}
+		dirs := ejectDiscoverDirs(plan, unloadable)
 		known := map[string]bool{}
 		for path := range plan.provenance {
 			known[path] = true
@@ -279,7 +293,7 @@ func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, op
 		}
 		added := map[string]bool{}
 		var newPaths []string
-		for _, dir := range slices.Sorted(maps.Keys(dirs)) {
+		for _, dir := range dirs {
 			entries, err := fsys.ReadDir(dir)
 			if err != nil {
 				base.Fatalf("logos eject: inventory GOROOT sources in %s: %v", dir, err)

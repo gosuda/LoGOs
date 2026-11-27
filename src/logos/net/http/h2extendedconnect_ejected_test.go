@@ -7,6 +7,8 @@
 package http
 
 import (
+	"errors"
+	stdhttp "net/http"
 	"strings"
 	"testing"
 )
@@ -35,4 +37,24 @@ func TestRequireExtendedConnectIgnoresLateSetenv(t *testing.T) {
 		}
 	}()
 	RequireExtendedConnect("srv", nil)
+}
+
+func TestH2ExtendedConnectEjectedNeedsGodebug(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  string
+		want error
+	}{
+		{name: "unset", env: "", want: errHTTP2ExtendedConnectNeedsGodebug},
+		{name: "off", env: "http2xconnect=0", want: errHTTP2ExtendedConnectNeedsGodebug},
+		{name: "other key", env: "http2debug=1", want: errHTTP2ExtendedConnectNeedsGodebug},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GODEBUG", tc.env)
+			got := EnableHTTP2ExtendedConnect(&stdhttp.Server{Addr: "127.0.0.1:0"})
+			if !errors.Is(got, tc.want) {
+				t.Fatalf("EnableHTTP2ExtendedConnect with GODEBUG=%q = %v, want %v", tc.env, got, tc.want)
+			}
+		})
+	}
 }

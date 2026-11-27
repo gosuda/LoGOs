@@ -748,3 +748,296 @@ func invokedLitBreaksGuard() {
 	}()
 	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
 }
+
+type deferInner struct {
+	stats int
+}
+
+type deferOuter struct {
+	in  deferInner
+	err error
+}
+
+func useDeferInner(v deferInner) {}
+
+// A deferred read of a parent struct still observes an earlier
+// discarded-error store: the nested field keeps its may mark, so the
+// whole-struct read fails even when a later store pairs it with a
+// checked error.
+func deferredParentSeesDiscardedStore(cond bool) {
+	var err error
+	o := deferOuter{}
+	o.in.stats, _ = fetchHeld()
+	defer func() {
+		if err == nil {
+			useDeferInner(o.in /* ERROR "[correctness::result_before_error_check]" */)
+		}
+	}()
+	if cond {
+		o.in.stats, err = fetchHeld()
+	}
+}
+
+// A cleanup that does nothing leaves no entries behind: a caller read
+// of an unchanged field result stays silent.
+func cleanupNoopLeavesNothing() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {}()
+	}()
+	use(h.stats)
+}
+
+// A checked plain arm does not mask a field arm: checking the field
+// guard afterwards proves the joined read.
+func joinFieldCheckProvesAfterJoin(cond bool) {
+	h := heldField{}
+	var err error
+	func() {
+		if cond {
+			h.stats, err = fetchHeld()
+			if err != nil {
+				panic("boom")
+			}
+		} else {
+			h.stats, h.err = fetchHeld()
+		}
+	}()
+	if h.err != nil {
+		return
+	}
+	use(h.stats)
+	_ = err
+}
+
+// Same, with the arms swapped.
+func joinFieldCheckProvesAfterJoinSwapped(cond bool) {
+	h := heldField{}
+	var err error
+	func() {
+		if cond {
+			h.stats, h.err = fetchHeld()
+		} else {
+			h.stats, err = fetchHeld()
+			if err != nil {
+				panic("boom")
+			}
+		}
+	}()
+	if h.err != nil {
+		return
+	}
+	use(h.stats)
+	_ = err
+}
+
+type heldSplit struct {
+	stats int
+	errA  error
+	errB  error
+}
+
+// Branches that pair one result with different errors leave no single
+// guard: a literal that breaks one guard makes the caller read fail.
+func joinSplitGuardsBrokenByLiteral(cond bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	func() {
+		h.errA = nil
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// A cleanup that stores its result inside the body must check the guard
+// before reading: the may-reach mark fails the cleanup read.
+func cleanupBodyStoreUnchecked() {
+	h := heldField{}
+	func() {
+		defer func() {
+			h.stats, h.err = fetchHeld()
+			use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+		}()
+	}()
+}
+
+// A whole-value read in a cleanup observes the same mark.
+func cleanupBodyStoreWholeRootUnchecked() {
+	var n int
+	func() {
+		defer func() {
+			n, _ = fetch()
+			use(n /* ERROR "[correctness::result_before_error_check]" */)
+		}()
+	}()
+}
+
+// An ordinary read after a discarded-error store stays silent: the
+// cleanup-only check applies inside cleanup bodies alone.
+func discardedStoreOrdinaryReadStaysSilent() {
+	var n int
+	n, _ = fetch()
+	use(n)
+}
+
+// A scope defer that never touches a discarded result leaves no check
+// behind: the ordinary read stays silent.
+func scopeDeferDiscardedSeedStaysSilent() {
+	h := heldField{}
+	h.stats, _ = fetchHeld()
+	{
+		scope defer func() {
+			println("done")
+		}()
+	}
+	use(h.stats)
+}
+
+// Same for a field-error store.
+func scopeDeferFieldSeedStaysSilent() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	{
+		scope defer func() {
+		}()
+	}
+	use(h.stats)
+}
+
+// A check of the checked branch's stale guard cannot prove a value the
+// other branch paired elsewhere: the joined read keeps failing.
+func joinStaleGuardCheckStaysUnproven(cond bool) {
+	h := heldSplit{}
+	if cond {
+		func() {
+			h.stats, h.errA = fetchHeld()
+		}()
+		if h.errA != nil {
+			return
+		}
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if h.errA == nil {
+		use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	}
+}
+
+// A check of the live guard proves the joined read: every unchecked
+// input pairs with it.
+func joinLiveGuardCheckProves(cond bool) {
+	h := heldSplit{}
+	if cond {
+		func() {
+			h.stats, h.errA = fetchHeld()
+		}()
+		if h.errA != nil {
+			return
+		}
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if h.errB != nil {
+		return
+	}
+	use(h.stats)
+}
+
+// A checked arm plus a discarded-error arm leaves no possible guard: a
+// literal that breaks the checked guard cannot break an unchecked one,
+// so the ordinary read stays silent.
+func joinCheckedAndDiscardedArmsStaySilent(cond bool) {
+	h := heldField{}
+	if cond {
+		h.stats, h.err = fetchHeld()
+		if h.err != nil {
+			return
+		}
+	} else {
+		h.stats, _ = fetchHeld()
+	}
+	func() {
+		h.err = nil
+	}()
+	use(h.stats)
+}
+
+// One checked arm does not veto the other arm's guard: clearing the
+// checked guard and checking the live one proves the read.
+func joinPhantomGuardStaysSilent(cond bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+		if h.errA != nil {
+			return
+		}
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	func() {
+		h.errA = nil
+	}()
+	if h.errB != nil {
+		return
+	}
+	use(h.stats)
+}
+
+// A guard write on a path that panics without recovery dies with the
+// path: checking both unchanged guards proves the read.
+func joinPanicPathGuardWriteStaysSilent(cond bool, stop bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	func() {
+		if stop {
+			h.errA = nil
+			panic("stop")
+		}
+	}()
+	if h.errA != nil {
+		return
+	}
+	if h.errB != nil {
+		return
+	}
+	use(h.stats)
+}
+
+// A discarded-error store overwrites the pairing: the live value has no
+// guard, so the ordinary read after the invocation stays silent.
+func invokedDiscardedOverwriteStaysSilent() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		h.stats, _ = fetchHeld()
+	}()
+	use(h.stats)
+}
+
+// An escaping closure that pairs another result keeps the veto on this
+// one: a later literal that breaks a vetoed guard fails the read.
+func joinUnrelatedClosureKeepsVeto(cond bool) {
+	h := heldSplit{}
+	o := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	keep := func() {
+		o.stats, o.errA = fetchHeld()
+	}
+	_ = keep
+	func() {
+		h.errA = nil
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+}

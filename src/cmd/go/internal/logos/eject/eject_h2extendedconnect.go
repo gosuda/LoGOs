@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -46,6 +47,18 @@ const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 // import under a fresh file-wide alias. The gofmt pass
 // normalizes layout.
 //
+// A saved value of the public logos/net/http helper is not a capture: its
+// receiver names the support package itself, so the rewrite leaves it
+// alone. Rewriting it would pass a package as the server and change the
+// signature from func(*Server) error to func(). The logos/net/http import
+// still remaps to the ejected support copy, so the saved value keeps
+// working.
+//
+// A capture whose receiver holds another opt-in call composes the inner
+// guard into the capture's replacement, so the receiver still evaluates
+// once and both guards run. Emitting both edits would overlap and stop the
+// export.
+//
 // Widening: the fork enables extended CONNECT per server, while stock Go
 // offers only the process-global GODEBUG=http2xconnect=1, so after eject
 // the per-server intent becomes a process-global requirement. Every
@@ -53,6 +66,11 @@ const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 // process without it fails fast at the first call instead of serving
 // without the feature. Last-wins GODEBUG parsing lives in the shared
 // support helper, so the emitted code carries no parsing of its own.
+//
+// extraUsed holds package-level names from sibling files in the ejected
+// package; the chosen qualifier avoids those too, because no identifier
+// may be declared in both the file and package block. A nil map keeps
+// the file-local decision for generated sources with no package context.
 func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extraUsed map[string]bool) ([]textEdit, bool) {
 	supportPath := rtModulePath + "/logos/net/http"
 	hasNetHTTP := false
@@ -86,23 +104,28 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 		return nil, false
 	}
 	local, needImport := h2SupportLocal(f, supportPath, supportLocal, extraUsed)
-	var edits []textEdit
+	var assigns []h2assignSite
+	var calls []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
 		if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
 			// Group lowering binds the opt-in as a method value before
-			// spawning its child. Only a marked assignment is trusted:
-			// the left-hand side must be a lowering-generated callee
-			// temporary, so a same-named user method value in another
-			// file keeps its own binding and is never rewritten into
-			// the guard. Rebind the marked capture through the
-			// deferred guard so the receiver still evaluates exactly
-			// once, eagerly, and the spawned child runs the same check.
-			lhsIdent, ok := as.Lhs[0].(*ast.Ident)
-			if !ok || !h2IsLoweredCalleeTemp(lhsIdent.Name) {
-				return true
-			}
+			// spawning its child. The verifier exempts the source call
+			// by type, so a file that reaches the rewrite can only hold
+			// this shape as lowering output, except for a saved value
+			// of the public logos/net/http helper (handled below): a
+			// same-named user method value never passes verification.
+			// Rebind it through the deferred guard so the receiver
+			// still evaluates exactly once, eagerly, and the spawned
+			// child runs the same check.
 			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
 			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && supportLocal != "" && id.Name == supportLocal {
+				return true
+			}
+			lhsIdent, ok := as.Lhs[0].(*ast.Ident)
+			if !ok || !h2IsLoweredCalleeTemp(lhsIdent.Name) {
 				return true
 			}
 			recvStart := fset.Position(sel.X.Pos()).Offset
@@ -113,10 +136,11 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 				lhsStart < 0 || lhsEnd < lhsStart || lhsEnd > len(data) {
 				return true
 			}
-			receiver := string(data[recvStart:recvEnd])
-			lhs := string(data[lhsStart:lhsEnd])
-			repl := lhs + " " + as.Tok.String() + " " + local + ".RequireExtendedConnectFunc(" + strconv.Quote(receiver) + ", " + receiver + ")"
-			edits = append(edits, textEdit{lhsStart, fset.Position(as.End()).Offset, repl})
+			assigns = append(assigns, h2assignSite{
+				start: lhsStart, end: fset.Position(as.End()).Offset,
+				recvStart: recvStart, recvEnd: recvEnd,
+				lhs: string(data[lhsStart:lhsEnd]), tok: as.Tok.String(),
+			})
 			return true
 		}
 		call, ok := n.(*ast.CallExpr)
@@ -137,9 +161,59 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 		}
 		receiver := string(data[recvStart:recvEnd])
 		repl := local + ".RequireExtendedConnect(" + strconv.Quote(receiver) + ", " + receiver + ")"
-		edits = append(edits, textEdit{start, end, repl})
+		calls = append(calls, textEdit{start, end, repl})
 		return true
 	})
+	// A capture whose receiver holds another opt-in call takes the inner
+	// guard into its own replacement: the composed receiver still
+	// evaluates once, eagerly, and both guards run. The name argument
+	// keeps the receiver as written; only the value carries the composed
+	// form. An inner overlap that cannot be composed (which no lowering
+	// shape produces) leaves the capture alone while the inner guards
+	// still apply, so the export names the fork-only value instead of
+	// stopping.
+	used := make([]bool, len(calls))
+	var edits []textEdit
+	for _, a := range assigns {
+		var inner []int
+		for i := range calls {
+			if !used[i] && calls[i].start >= a.recvStart && calls[i].end <= a.recvEnd {
+				inner = append(inner, i)
+			}
+		}
+		slices.SortFunc(inner, func(x, y int) int { return calls[x].start - calls[y].start })
+		composable := true
+		for j := 1; j < len(inner); j++ {
+			if calls[inner[j]].start < calls[inner[j-1]].end {
+				composable = false
+				break
+			}
+		}
+		if !composable {
+			continue
+		}
+		name := string(data[a.recvStart:a.recvEnd])
+		receiver := name
+		if len(inner) > 0 {
+			var b strings.Builder
+			prev := a.recvStart
+			for _, i := range inner {
+				b.WriteString(string(data[prev:calls[i].start]))
+				b.WriteString(calls[i].text)
+				prev = calls[i].end
+				used[i] = true
+			}
+			b.WriteString(string(data[prev:a.recvEnd]))
+			receiver = b.String()
+		}
+		repl := a.lhs + " " + a.tok + " " + local + ".RequireExtendedConnectFunc(" + strconv.Quote(name) + ", " + receiver + ")"
+		edits = append(edits, textEdit{a.start, a.end, repl})
+	}
+	for i, c := range calls {
+		if !used[i] {
+			edits = append(edits, c)
+		}
+	}
 	if len(edits) == 0 {
 		return nil, false
 	}
@@ -162,13 +236,19 @@ func h2SupportImportFor(local string) string {
 // h2SupportLocal picks the qualifier for generated support calls. An
 // existing support import binding is reused only where no other file
 // binding shadows it: a local, parameter, or same-file declaration with
-// the same name would capture the generated call. Otherwise a binding
-// with a fresh file-wide name is used. The second result reports whether
+// the same name would capture the generated call. A fresh alias avoids
+// the file bindings and the package-level names in extraUsed. It also
+// avoids every identifier the file mentions: an unaliased import's
+// package name can differ from its path basename, and the file's own
+// uses are the only signal for that binding. The existing-import reuse
+// decision stays before that scan so references to the support import
+// itself do not count as shadowing. The second result reports whether
 // the import still needs adding.
 func h2SupportLocal(f *ast.File, supportPath, supportLocal string, extraUsed map[string]bool) (string, bool) {
 	bound := map[string]bool{}
 	// extraUsed holds package-level names from sibling files in the
-	// ejected package; a fresh alias avoids those too.
+	// ejected package; the support import of this file must not reuse
+	// one of those either.
 	for name := range extraUsed {
 		bound[name] = true
 	}
@@ -226,11 +306,31 @@ func h2SupportLocal(f *ast.File, supportPath, supportLocal string, extraUsed map
 	if supportLocal != "" && !bound[supportLocal] {
 		return supportLocal, false
 	}
+	// Reserve every identifier the file mentions before choosing a
+	// fresh alias. The import scan above only knows an unaliased
+	// import by its path basename, while Go binds it by its package
+	// clause name; a use such as ejectedhttp.Probe is the only
+	// file-local trace of that binding, and reusing it would emit a
+	// duplicate file-scope binding.
+	ast.Inspect(f, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			bound[id.Name] = true
+		}
+		return true
+	})
 	local := "ejectedhttp"
 	for i := 2; bound[local]; i++ {
 		local = "ejectedhttp" + strconv.Itoa(i)
 	}
 	return local, true
+}
+
+// h2assignSite is a lowered method-value capture of the opt-in:
+// _fN := <receiver>.EnableHTTP2ExtendedConnect.
+type h2assignSite struct {
+	start, end         int
+	recvStart, recvEnd int
+	lhs, tok           string
 }
 
 // h2DefinesExtendedConnect reports whether f declares the method name
@@ -391,11 +491,11 @@ func h2PackageReserved(dirs ...string) map[string]bool {
 	return used
 }
 
-// h2PackageReservedFor returns the package-wide reserved names for
-// the h2 rewrite of one package, or nil when no emitted file in the
-// package can carry an h2 call. The gate is a substring scan of the
-// staging files: only a file mentioning the method name can produce
-// h2 edits, and only h2 edits add fresh imports.
+// h2PackageReservedFor returns the package-wide reserved names for the
+// h2 rewrite of one package, or nil when no emitted file in the package
+// can carry an h2 call. The gate is a substring scan of the staging
+// files: only a file mentioning the method name can produce h2 edits,
+// and only h2 edits add fresh imports.
 func h2PackageReservedFor(names []string, stagingPkgDir, srcDir string) map[string]bool {
 	for _, name := range names {
 		raw, err := os.ReadFile(filepath.Join(stagingPkgDir, logosStem(name)+".go"))
