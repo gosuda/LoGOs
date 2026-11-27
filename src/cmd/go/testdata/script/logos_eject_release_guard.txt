@@ -9,34 +9,41 @@ env CGO_ENABLED=0
 # with version-neutral mode tags, so plain-Go builds select the file
 # under the package language version. The fixture closes over its loop
 # variable, which older per-file versions share across iterations while
-# the package version keeps distinct. The test installs fixture packages
+# the package version keeps distinct. A legacy-only guard never set a
+# per-file version at all, so its residual must stay versionless too:
+# the second fixture carries only a // +build line and asserts the same
+# behavior from the exported build. The test installs fixture packages
 # in a private toolchain root inside $WORK and selects it with GOROOT.
 # Nothing is written into the real GOROOT.
 go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
 env GOROOT=$WORK/fakegoroot
-
 cd m
 
-# Native semantics: logosejected is unset, so the file is selected with
+# Native semantics: logosejected is unset, so each file is selected with
 # no implied file version and each closure keeps its iteration's value.
 logos run .
-stdout '^1$'
-stdout '^2$'
+stdout -count=2 '^1$'
+stdout -count=2 '^2$'
 
 logos eject -o out
 exists out/_logos_deps/rt/logos/ejecttestrel/item.go
-grep '^//go:build ignore || go1.21$' out/_logos_deps/rt/logos/ejecttestrel/item.go
+exists out/_logos_deps/rt/logos/ejecttestlegacy/item.go
+grep '^//go:build go1.21 \|\| ignore$' out/_logos_deps/rt/logos/ejecttestrel/item.go
+grep '^//go:build go1.27 \|\| ignore$' out/_logos_deps/rt/logos/ejecttestlegacy/item.go
 ! grep 'logosejected' out/_logos_deps/rt/logos/ejecttestrel/item.go
+! grep 'logosejected' out/_logos_deps/rt/logos/ejecttestlegacy/item.go
 
 env GOROOT=$TESTGO_GOROOT
 cd out
 go build -mod=readonly ./...
 go run .
-stdout '^1$'
-stdout '^2$'
-# The neutralized guard selects like the folded release tag: the default
-# list keeps the file.
+stdout -count=2 '^1$'
+stdout -count=2 '^2$'
+# Each residual selects like its source guard: the default list keeps
+# both files.
 go list -f '{{.GoFiles}}' github.com/gosuda/loGos/rt/logos/ejecttestrel
+stdout 'item.go'
+go list -f '{{.GoFiles}}' github.com/gosuda/loGos/rt/logos/ejecttestlegacy
 stdout 'item.go'
 
 -- mkgoroot.go --
@@ -125,17 +132,38 @@ module example.com/reldep
 
 go 1.27
 
+
+-- dep/ejecttestlegacy/item.lgo --
+// +build !logosejected,go1.21 go1.27
+
+package ejecttestlegacy
+
+func Vals() []int {
+	var fns []func() int
+	for _, v := range []int{1, 2} {
+		fns = append(fns, func() int { return v })
+	}
+	out := make([]int, 0, len(fns))
+	for _, fn := range fns {
+		out = append(out, fn())
+	}
+	return out
+}
 -- m/main.lgo --
 package main
 
 import (
 	"fmt"
 
+	"logos/ejecttestlegacy"
 	"logos/ejecttestrel"
 )
 
 func main() {
 	for _, v := range ejecttestrel.Vals() {
+		fmt.Println(v)
+	}
+	for _, v := range ejecttestlegacy.Vals() {
 		fmt.Println(v)
 	}
 }
