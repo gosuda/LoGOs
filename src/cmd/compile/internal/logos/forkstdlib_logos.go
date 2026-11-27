@@ -25,20 +25,27 @@ import (
 // eject exit nonzero before it writes any output.
 // VerifyEjectStdlib reports fork-only standard-library selectors in the main
 // files. Call before lowering: the unlowered tree still holds every call
-// site, including go-group children that lowering desugars away.
+// site, including go-group children that lowering desugars away. After
+// lowering, VerifyEjectStdlibPrepared walks the main files again for call
+// sites lowering created.
 func VerifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
 	verifyEjectStdlib(pkg, info, files, false)
 }
 
 // VerifyEjectStdlibPrepared verifies comptime-prepared instances, which only
-// exist after LogosCtFinish runs. Main files are covered separately by
-// VerifyEjectStdlib before lowering.
-func VerifyEjectStdlibPrepared(pkg *types2.Package, info *types2.Info) {
-	verifyEjectStdlib(pkg, info, nil, true)
+// exist after LogosCtFinish runs, and re-verifies the main files after
+// lowering. Lowering creates call sites the source check cannot see (for
+// example the ordinary method call an optional `?.` call desugars into),
+// so verification after lowering must cover every call site the export
+// will contain, main files included. Exemptions the source check granted
+// are re-derived from the same rule, never replayed, so a lowered shape
+// that the text rewrite cannot handle is still refused.
+func VerifyEjectStdlibPrepared(pkg *types2.Package, info *types2.Info, files []*syntax.File) {
+	verifyEjectStdlib(pkg, info, files, true)
 }
 
 func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File, preparedOnly bool) {
-	if base.LogosEject == "" {
+	if base.LogosEject == "" && !base.LogosEjectCheck {
 		return
 	}
 	if preparedOnly {
@@ -50,8 +57,25 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 	if t == nil {
 		return
 	}
-	check := func(name *syntax.Name, obj types2.Object) {
+	// pkgRewritable reports whether any package file can reach the eject
+	// text rewrite: it imports net/http without declaring the method name.
+	// A prepared instance may land in any package file, so a user-method
+	// call inside one is only provably safe when no file can rewrite it.
+	pkgRewritable := false
+	for _, f := range files {
+		if fileImportsNetHTTP(f) && !h2DefinedInFile(f) {
+			pkgRewritable = true
+			break
+		}
+	}
+	check := func(live map[*syntax.Name]bool, lowered map[*syntax.Name]bool, name *syntax.Name, obj types2.Object) {
 		if obj == nil {
+			return
+		}
+		if live != nil && !live[name] {
+			return
+		}
+		if lowered[name] {
 			return
 		}
 		if !isExportedName(obj.Name()) {
@@ -69,8 +93,16 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 		}
 		base.Errorf("%s: [portability::fork_stdlib_api] logos eject: %s.%s has no upstream spelling (absent from the Go 1.27 API files); ejected output must build with upstream Go (SPEC T-0.3)", name.Pos(), p.Path(), obj.Name())
 	}
-	verify := func(info *types2.Info, roots []syntax.Node) {
-		mapped, ambiguous := mappedEjectStdlibCalls(info, roots)
+	verify := func(info *types2.Info, roots []syntax.Node, prepSafe bool) {
+		mapped, ambiguous := mappedEjectStdlibCalls(pkg, info, roots, prepSafe)
+		lowered := loweredH2CalleeSels(roots)
+		// After lowering, judge only the call sites the export will
+		// contain: lowering replaces nodes, and type-checker entries
+		// for replaced nodes must not be reported at stale positions.
+		var live map[*syntax.Name]bool
+		if preparedOnly {
+			live = syntaxNames(roots)
+		}
 		for name, obj := range info.Uses {
 			if mapped[name] {
 				continue
@@ -79,15 +111,15 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 				base.Errorf("%s: [portability::fork_stdlib_api] logos eject: ambiguous EnableHTTP2ExtendedConnect call (%s); eject rewrites the name by spelling, so only (*net/http.Server) and logos/net/http calls are safe to eject (SPEC T-0.3)", name.Pos(), reason)
 				continue
 			}
-			check(name, obj)
+			check(live, lowered, name, obj)
 		}
 	}
-	if !preparedOnly {
+	if len(files) != 0 {
 		roots := make([]syntax.Node, len(files))
 		for i, file := range files {
 			roots[i] = file
 		}
-		verify(info, roots)
+		verify(info, roots, false)
 	}
 	for _, rec := range info.LogosCtPrepared {
 		if rec == nil || rec.Info == nil {
@@ -100,7 +132,7 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 		for _, helper := range rec.Helpers {
 			roots = append(roots, helper)
 		}
-		verify(rec.Info, roots)
+		verify(rec.Info, roots, !pkgRewritable && !recRefsNetHTTP(rec.Info))
 	}
 }
 
@@ -111,10 +143,21 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 // still have no upstream spelling. A zero-argument call the exemption does
 // not cover is ambiguous with the stdlib opt-in: eject cannot tell it
 // apart from the genuine call, so it is reported for refusal instead of
-// passing the wrong behavior through.
-func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) (map[*syntax.Name]bool, map[*syntax.Name]string) {
-	var mapped map[*syntax.Name]bool
-	var ambiguous map[*syntax.Name]string
+// passing the wrong behavior through. A call with arguments can never be
+// the genuine opt-in, but lowering would still bind its callee through a
+// marked temporary, so a method call with arguments is refused as well;
+// only the package-qualified helper, which takes the server as an
+// argument, stays exempt.
+//
+// The decision resolves the callee's receiver type. Only the stdlib or
+// fork (*net/http.Server) method is mapped or refused here; a method
+// declared on a user type is left to the ordinary upstream check, which
+// passes it when no rewrite can steal it and still rejects a genuine
+// fork-only call. Files the text rewrite skips (no net/http import, or a
+// local declaration of the name) never mark a call: the rewrite cannot
+// touch them, so even a nested receiver that returns the user type needs
+// no spelling guard there.
+func mappedEjectStdlibCalls(pkg *types2.Package, info *types2.Info, roots []syntax.Node, prepSafe bool) (mapped map[*syntax.Name]bool, ambiguous map[*syntax.Name]string) {
 	markMapped := func(sel *syntax.Name) {
 		if mapped == nil {
 			mapped = make(map[*syntax.Name]bool)
@@ -127,20 +170,38 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) (map[*syntax
 		}
 		ambiguous[selector.Sel] = h2CallDescription(info, selector)
 	}
+	var mayRewrite bool
 	var definesName bool
 	inspect := func(node syntax.Node) bool {
 		call, ok := node.(*syntax.CallExpr)
-		if !ok || len(call.ArgList) != 0 {
+		if !ok {
 			return true
 		}
 		selector, ok := call.Fun.(*syntax.SelectorExpr)
-		if !ok || selector.Sel.Value != "EnableHTTP2ExtendedConnect" {
+		if !ok || selector.Sel.Value != h2extendedConnectMethod {
 			return true
 		}
-		// Eject skips files that declare the method name by spelling,
-		// so none of their calls is exempt: fail closed on every one.
-		if definesName {
-			markAmbiguous(selector)
+		if len(call.ArgList) != 0 {
+			// The stdlib opt-in takes no arguments, so a call with
+			// arguments can never be the genuine call. Group and
+			// defer lowering would still bind its callee through a
+			// marked temporary the rewrite trusts by spelling, so
+			// refuse it instead of mangling the capture. A
+			// package-qualified call names no method: the helper
+			// takes the server as an argument and stays exempt,
+			// unless the file declares the name and eject skips
+			// the whole file by spelling.
+			if definesName || info.Selections[selector] != nil {
+				markAmbiguous(selector)
+			}
+			return true
+		}
+		// The emitter leaves this file alone: either it never imports
+		// net/http, or it declares the method name and the rewrite
+		// skips it. A same-named user method call needs no rewrite,
+		// and a genuine fork-only Server call still fails the
+		// ordinary upstream check. Leave both unmarked.
+		if !mayRewrite {
 			return true
 		}
 		selection := info.Selections[selector]
@@ -163,88 +224,214 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) (map[*syntax
 		// through an embedded *http.Server records the outer struct as
 		// selection.Recv, but the method object is still the Server method
 		// the textual eject rewrite accepts. Embedding paths stay allowed.
-		// Any other method object with this name is ambiguous with the
-		// stdlib opt-in, so refuse it instead of rewriting the wrong
-		// behavior by spelling.
 		fn, ok := selection.Obj().(*types2.Func)
 		if !ok || fn.Name() != h2extendedConnectMethod {
 			markAmbiguous(selector)
 			return true
 		}
-		if fn.Pkg() == nil || fn.Pkg().Path() != "net/http" {
-			markAmbiguous(selector)
-			return true
-		}
-		sig, ok := fn.Type().(*types2.Signature)
-		if !ok || sig.Recv() == nil {
-			markAmbiguous(selector)
-			return true
-		}
-		recv := types2.Unalias(sig.Recv().Type())
-		if pointer, ok := recv.(*types2.Pointer); ok {
-			recv = types2.Unalias(pointer.Elem())
-		}
-		named, ok := recv.(*types2.Named)
-		if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "net/http" || named.Obj().Name() != "Server" {
-			markAmbiguous(selector)
-			return true
-		}
-		// The text rewrite declines receivers containing generated site
-		// names because their independent edits would overlap the call.
-		// Keep exactly that boundary here instead of approving output
-		// which the later rewrite cannot materialize. Before lowering the
-		// site names do not exist yet, so refuse the shapes lowering lifts
-		// into a site temporary inside the receiver span: a `?` (for
-		// example inside an inline callback) lowers into a TraceErr
-		// carrying a fresh site temporary, and a call nested in another
-		// call's arguments feeds a platform argument check that parks the
-		// result in one the same way. A receiver that is itself one flat
-		// call over plain arguments needs no temporary and stays exempt.
-		// The nested-call rule is conservative: value-parameter nesting
-		// needs no check and the rewrite would accept it, but no fixture
-		// shapes it that way and the error names the mechanism, so a
-		// future hit stays diagnosable instead of slipping a fork-only
-		// call into output upstream Go rejects.
-		hasSite := false
-		syntax.Inspect(selector.X, func(node syntax.Node) bool {
-			if _, ok := node.(*syntax.TryExpr); ok {
-				hasSite = true
-				return false
+		if isH2ServerMethod(fn) {
+			// The text rewrite declines receivers containing generated
+			// site names because their independent edits would overlap
+			// the call. Keep exactly that boundary here instead of
+			// approving output which the later rewrite cannot
+			// materialize. Before lowering the site names do not exist
+			// yet, so refuse the shapes lowering lifts into a site
+			// temporary inside the receiver span: a `?` (for example
+			// inside an inline callback) lowers into a TraceErr
+			// carrying a fresh site temporary, and a call nested in
+			// another call's arguments feeds a platform argument check
+			// that parks the result in one the same way. A receiver
+			// that is itself one flat call over plain arguments needs
+			// no temporary and stays exempt. The nested-call rule is
+			// conservative: value-parameter nesting needs no check and
+			// the rewrite would accept it, but no fixture shapes it
+			// that way and the error names the mechanism, so a future
+			// hit stays diagnosable instead of slipping a fork-only
+			// call into output upstream Go rejects.
+			if h2ReceiverHasSite(selector.X) {
+				markAmbiguous(selector)
+				return true
 			}
-			if _, ok := node.(*syntax.CallExpr); ok && node != selector.X {
-				hasSite = true
-				return false
-			}
-			if name, ok := node.(*syntax.Name); ok {
-				rest, site := strings.CutPrefix(name.Value, "_logos_site")
-				hasSite = hasSite || site && rest != "" && strings.Trim(rest, "0123456789") == ""
-			}
-			return !hasSite
-		})
-		if hasSite {
-			markAmbiguous(selector)
+			markMapped(selector.Sel)
 			return true
 		}
-		markMapped(selector.Sel)
+		// A method on a user type. In a file the rewrite processes,
+		// the text rewrite would steal it by spelling, so refuse it.
+		// A prepared instance whose destination provably cannot reach
+		// the rewrite (prepSafe) keeps the call: the ordinary check
+		// passes a same-package method, and no spelling guard applies.
+		if prepSafe && fn.Pkg() != nil && fn.Pkg().Path() == pkg.Path() {
+			return true
+		}
+		markAmbiguous(selector)
 		return true
 	}
 	for _, root := range roots {
 		if f, ok := root.(*syntax.File); ok {
-			if !fileImportsNetHTTP(f) {
-				continue
-			}
-			// Eject skips files that declare the method name by
-			// spelling, so none of their calls is exempt: the
-			// rewrite leaves every one of them behind, and a
-			// genuine stdlib call there has no upstream spelling
-			// either. Record the declaration and fail closed.
 			definesName = h2DefinedInFile(f)
+			mayRewrite = fileImportsNetHTTP(f) && !definesName
 		} else {
 			definesName = false
+			mayRewrite = true
 		}
 		syntax.Inspect(root, inspect)
 	}
 	return mapped, ambiguous
+}
+
+// isH2ServerMethod reports whether fn is the fork-only opt-in on
+// (*net/http.Server): the stdlib method the fork adds, whatever the
+// receiver expression spells (a user struct embedding *http.Server still
+// carries this method object). Any other method object with this name is
+// a user method the text rewrite must not steal.
+func isH2ServerMethod(fn *types2.Func) bool {
+	if fn.Name() != h2extendedConnectMethod {
+		return false
+	}
+	if fn.Pkg() == nil || fn.Pkg().Path() != "net/http" {
+		return false
+	}
+	sig, ok := fn.Type().(*types2.Signature)
+	if !ok || sig.Recv() == nil {
+		return false
+	}
+	recv := types2.Unalias(sig.Recv().Type())
+	if pointer, ok := recv.(*types2.Pointer); ok {
+		recv = types2.Unalias(pointer.Elem())
+	}
+	named, ok := recv.(*types2.Named)
+	if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "net/http" || named.Obj().Name() != "Server" {
+		return false
+	}
+	return true
+}
+
+// h2ReceiverHasSite reports whether lowering may lift a site temporary
+// out of the receiver span, which the eject text rewrite cannot overlap.
+func h2ReceiverHasSite(x syntax.Node) bool {
+	hasSite := false
+	syntax.Inspect(x, func(node syntax.Node) bool {
+		if _, ok := node.(*syntax.TryExpr); ok {
+			hasSite = true
+			return false
+		}
+		if _, ok := node.(*syntax.CallExpr); ok && node != x {
+			hasSite = true
+			return false
+		}
+		if name, ok := node.(*syntax.Name); ok {
+			rest, site := strings.CutPrefix(name.Value, "_logos_site")
+			hasSite = hasSite || site && rest != "" && strings.Trim(rest, "0123456789") == ""
+		}
+		return !hasSite
+	})
+	return hasSite
+}
+
+// loweredH2CalleeSels collects the method-value selectors that group and
+// defer lowering binds through a reserved callee temporary: `_logos_fN :=
+// <receiver>.EnableHTTP2ExtendedConnect`. The eject text rewrite rebinds
+// exactly these captures through its deferred guard, so the ordinary
+// upstream check must not report them: the staging build sees the
+// rewritten guard, never the fork-only value. A capture whose receiver
+// holds a compiler-temporary site name is left alone by the emitter and
+// stays reportable, mirroring the rewrite's own boundary, which matches
+// only site names and not other receiver shapes. User code cannot declare
+// these temporaries, so the name marks exactly the shapes lowering
+// created.
+func loweredH2CalleeSels(roots []syntax.Node) map[*syntax.Name]bool {
+	var out map[*syntax.Name]bool
+	for _, root := range roots {
+		syntax.Inspect(root, func(node syntax.Node) bool {
+			as, ok := node.(*syntax.AssignStmt)
+			if !ok || as.Op == 0 || as.Rhs == nil {
+				return true
+			}
+			lhs, ok := as.Lhs.(*syntax.Name)
+			if !ok || !isLoweredH2CalleeTemp(lhs.Value) {
+				return true
+			}
+			sel, ok := as.Rhs.(*syntax.SelectorExpr)
+			if !ok || sel.Sel.Value != h2extendedConnectMethod {
+				return true
+			}
+			if h2SubtreeHasSiteIdent(sel.X) {
+				return true
+			}
+			if out == nil {
+				out = make(map[*syntax.Name]bool)
+			}
+			out[sel.Sel] = true
+			return true
+		})
+	}
+	return out
+}
+
+// h2SubtreeHasSiteIdent reports whether the subtree holds a
+// compiler-temporary _logos_site name that the eject text rewrite renames.
+// It mirrors the rewrite's own boundary, which matches only these names.
+func h2SubtreeHasSiteIdent(x syntax.Node) bool {
+	found := false
+	syntax.Inspect(x, func(node syntax.Node) bool {
+		if name, ok := node.(*syntax.Name); ok {
+			rest, site := strings.CutPrefix(name.Value, "_logos_site")
+			found = found || site && rest != "" && strings.Trim(rest, "0123456789") == ""
+		}
+		return !found
+	})
+	return found
+}
+
+// isLoweredH2CalleeTemp reports whether name is a lowering-generated callee
+// temporary (_logos_f with a numeric suffix, from group lowering). User
+// code cannot declare these names, so the name marks exactly the
+// assignments lowering created.
+func isLoweredH2CalleeTemp(name string) bool {
+	rest, ok := strings.CutPrefix(name, "_logos_f")
+	return ok && rest != "" && strings.Trim(rest, "0123456789") == ""
+}
+
+// syntaxNames collects every name under roots. Verification after lowering
+// must only judge the call sites the export will contain: lowering
+// replaces nodes, and type-checker entries for replaced nodes must not be
+// reported at stale positions.
+func syntaxNames(roots []syntax.Node) map[*syntax.Name]bool {
+	out := make(map[*syntax.Name]bool)
+	for _, root := range roots {
+		syntax.Inspect(root, func(node syntax.Node) bool {
+			if name, ok := node.(*syntax.Name); ok {
+				out[name] = true
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// recRefsNetHTTP reports whether a prepared instance references the
+// net/http package: through a value, a type, or a package qualifier. When
+// it does, emitting the instance may add a net/http import to its
+// destination file, so the eject text rewrite could reach a same-named
+// user-method call inside it.
+func recRefsNetHTTP(info *types2.Info) bool {
+	if info == nil {
+		return true
+	}
+	for _, obj := range info.Uses {
+		if obj == nil {
+			continue
+		}
+		if p := obj.Pkg(); p != nil && p.Path() == "net/http" {
+			return true
+		}
+		if pn, ok := obj.(*types2.PkgName); ok {
+			if imp := pn.Imported(); imp != nil && imp.Path() == "net/http" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // h2CallDescription names what a same-named call actually resolves to, so

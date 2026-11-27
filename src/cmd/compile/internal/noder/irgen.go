@@ -339,9 +339,10 @@ recheck:
 		logosEjectCtInstances(pkg, info, files)
 	}
 	// logos eject verifier, prepared-instances half: comptime instances only
-	// exist after LogosCtFinish fills them. Main files were verified before
-	// lowering by VerifyEjectStdlib.
-	logos.VerifyEjectStdlibPrepared(pkg, info)
+	// exist after LogosCtFinish fills them. The main files walk again too:
+	// lowering creates call sites the source check cannot see, so the
+	// export must be verified after lowering with the same precision.
+	logos.VerifyEjectStdlibPrepared(pkg, info, files)
 	logos.LogosClearErasedAnonReadonly()
 	for _, path := range info.LogosCtImports {
 		if _, err := importer.Import(path); err != nil {
