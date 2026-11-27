@@ -251,3 +251,21 @@ func probePanicOnlyBreakSplit(cond bool, reset bool, stop bool) {
 	}()
 	use(h.stats)
 }
+
+func runSync(fn func()) {
+	fn()
+}
+
+// A plain reset of the result clears the break a guard-only overwrite
+// left: a later callback that discards its error starts clean, and the
+// caller read stays silent.
+func probeResetClearsBroke() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		h.err = nil
+		h.stats = 0
+		runSync(func() { h.stats, _ = fetchHeld() })
+	}()
+	use(h.stats)
+}

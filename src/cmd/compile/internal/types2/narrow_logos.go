@@ -1039,6 +1039,23 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 		}
 		hereOut = noteBrokeHere(hereOut, v, ek)
 	}
+	// A write that supersedes the result drops any record of guards
+	// broken before it, even when no pairing remains to drive the
+	// removal: the reset value carries no broken guard. Overlap in
+	// either direction supersedes, mirroring the pairing drop above.
+	for v := range s.mayBroke {
+		if _, ok := brokeOut[v]; !ok {
+			continue
+		}
+		if v.root != k.root || (!logosEFPathUnder(v.path, k.path) && !logosEFPathUnder(k.path, v.path)) {
+			continue
+		}
+		if !brokeChanged {
+			brokeOut = maps.Clone(s.mayBroke)
+			brokeChanged = true
+		}
+		delete(brokeOut, v)
+	}
 	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
 		vHit := v.root == k.root && (logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path))
@@ -1218,6 +1235,23 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 			hereChanged = true
 		}
 		hereOut = noteBrokeHere(hereOut, v, ek)
+	}
+	// A write that covers the result drops any record of guards broken
+	// before it, even when no pairing remains to drive the removal: the
+	// reset value carries no broken guard. Full coverage supersedes,
+	// mirroring the pairing drop above.
+	for v := range s.mayBroke {
+		if _, ok := brokeOut[v]; !ok {
+			continue
+		}
+		if v.root != k.root || !logosEFPathUnder(v.path, k.path) {
+			continue
+		}
+		if !brokeChanged {
+			brokeOut = maps.Clone(s.mayBroke)
+			brokeChanged = true
+		}
+		delete(brokeOut, v)
 	}
 	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
