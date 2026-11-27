@@ -560,3 +560,26 @@ func TestFixedAppendCrossingInputSlidesPastInput(t *testing.T) {
 		t.Errorf("FixedUsed = %d, want 7", used)
 	}
 }
+
+func TestFixedAppendCrossingInputAliasedValues(t *testing.T) {
+	buf := make([]byte, 16)
+	for i := range buf[:8] {
+		buf[i] = byte(i + 1)
+	}
+	r := arena.OpenFixed(buf[2:])
+	prefix := slices.Clone(buf[:4])
+	values := slices.Clone(buf[6:8])
+	got := arena.Append(r, buf[:4:4], buf[6:8]...)
+	if want := append(prefix, values...); !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if !slices.Equal(buf[:4], prefix) {
+		t.Fatalf("input changed to %v: the copy must leave the input untouched", buf[:4])
+	}
+	if &got[0] != &buf[4] {
+		t.Errorf("result starts at %p, want &buf[4]: the slot must skip the input range", &got[0])
+	}
+	if used := arena.FixedUsed(r); used != 8 {
+		t.Errorf("FixedUsed = %d, want 8", used)
+	}
+}
