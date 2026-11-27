@@ -269,3 +269,35 @@ func probeResetClearsBroke() {
 	}()
 	use(h.stats)
 }
+
+// A replacement check after the call cannot discharge the broken guard:
+// the read still fails in both arm orders.
+func probeBrokeDiscChecked(reset bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		if reset {
+			h.err = nil
+		} else {
+			h.stats, _ = fetchHeld()
+		}
+	}()
+	if h.err == nil {
+		use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+	}
+}
+
+func probeBrokeDiscCheckedSwap(reset bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		if reset {
+			h.stats, _ = fetchHeld()
+		} else {
+			h.err = nil
+		}
+	}()
+	if h.err == nil {
+		use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+	}
+}
