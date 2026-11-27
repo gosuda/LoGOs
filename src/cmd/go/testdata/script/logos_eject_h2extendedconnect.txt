@@ -73,6 +73,16 @@ exec env -u GOROOT $UPROOT1272/bin/go run .
 cmp stdout $WORK/usernative.txt
 cd ../..
 
+# A direct call of the same name on a user type is ambiguous with the
+# stdlib opt-in: the text rewrite matches by spelling, so verification
+# refuses it instead of ejecting the wrong behavior.
+cd usercall
+logos build ./...
+! logos eject -o out
+stderr 'fork_stdlib_api.*ambiguous.*EnableHTTP2ExtendedConnect'
+! exists out
+cd ..
+
 # A module whose only net/http import and extended-CONNECT call live in
 # a non-host variant still needs the helper package in the output: the
 # variant inventory carries no import edges, so the seed-based roots miss
@@ -255,4 +265,31 @@ func main() {
 	fmt.Println("after defer:", m.Hits)
 	srv := &http.Server{Addr: "127.0.0.1:0"}
 	_ = srv
+}
+
+-- usercall/go.mod --
+module example.com/h2usercall
+
+go 1.27
+
+-- usercall/meter.lgo --
+package main
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. A direct call is ambiguous with the
+// stdlib call the eject rewrite matches by spelling.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- usercall/main.lgo --
+package main
+
+import "net/http"
+
+func main() {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect()
 }
