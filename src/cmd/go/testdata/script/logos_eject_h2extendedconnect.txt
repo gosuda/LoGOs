@@ -185,6 +185,55 @@ stderr 'needs GODEBUG=http2xconnect=1'
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
 cd ../..
 
+# A user method declared in the same file as its call needs no rewrite:
+# the emitter skips files declaring the name, so ejection keeps the method
+# and the call unchanged, including through a nested receiver that returns
+# the user type, and upstream Go builds them.
+cd samefile
+logos run .
+stdout '^samefile meter: 1 4$'
+logos eject -o out
+exists out/main.go
+grep 'm.EnableHTTP2ExtendedConnect()' out/main.go
+! grep 'RequireExtendedConnect' out/main.go
+cd out
+go build ./...
+go run .
+stdout '^samefile meter: 1 4$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^samefile meter: 1 4$'
+cd ../..
+
+# An optional call desugared by lowering is verified after lowering: the
+# source `?.` records no selector, but the lowered ordinary call on
+# *http.Server in a file without net/http has no rewrite and must be
+# refused instead of reaching output upstream Go rejects.
+cd optalias
+logos run .
+stdout '^optalias ready$'
+! logos eject -o out
+stderr 'fork_stdlib_api'
+! exists out
+cd ..
+
+# A comptime instance calling a user method in a package without net/http
+# keeps the call: no destination file can reach the rewrite, so there is
+# nothing to refuse.
+cd ctuser
+logos run .
+stdout '^ctuser meter: 1$'
+logos eject -o out
+exists out/main.go
+grep 'm.EnableHTTP2ExtendedConnect()' out/main.go
+! grep 'RequireExtendedConnect' out/main.go
+cd out
+go build ./...
+go run .
+stdout '^ctuser meter: 1$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ../..
+
 # A module whose only net/http import and extended-CONNECT call live in
 # a non-host variant still needs the helper package in the output: the
 # variant inventory carries no import edges, so the seed-based roots miss
@@ -738,4 +787,98 @@ func main() {
 	if err := run(); err != nil {
 		panic(err)
 	}
+-- samefile/go.mod --
+module example.com/h2samefile
+
+go 1.27
+
+-- samefile/main.lgo --
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. This file declares the name, so the eject
+// text rewrite skips it and the calls below need no guard.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+func meterFor(port int) *Meter { return &Meter{Hits: port} }
+
+func main() {
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect()
+	n := meterFor(3)
+	n.EnableHTTP2ExtendedConnect()
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+	fmt.Println("samefile meter:", m.Hits, n.Hits)
+}
+
+-- optalias/go.mod --
+module example.com/h2optalias
+
+go 1.27
+
+-- optalias/alias.lgo --
+package main
+
+import "net/http"
+
+type Server = http.Server
+
+-- optalias/main.lgo --
+package main
+
+import "fmt"
+
+func enable(s *Server?) {
+	s?.EnableHTTP2ExtendedConnect()
+}
+
+func main() {
+	enable(nil)
+	fmt.Println("optalias ready")
+}
+
+-- ctuser/go.mod --
+module example.com/h2ctuser
+
+go 1.27
+
+-- ctuser/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. No file here imports net/http, so no
+// destination file can reach the eject text rewrite.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+func Touch[T any](m *Meter, v T) {
+	const if comptime.IsStruct[T]() {
+		m.EnableHTTP2ExtendedConnect()
+		_ = v
+	} else {
+		_ = v
+	}
+}
+
+type point struct{ X int }
+
+func main() {
+	m := &Meter{}
+	Touch[point](m, point{X: 1})
+	Touch[int](m, 2)
+	fmt.Println("ctuser meter:", m.Hits)
 }

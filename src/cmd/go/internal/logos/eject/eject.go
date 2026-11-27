@@ -2737,6 +2737,13 @@ func localReplaceDirs(modDir string) map[string]bool {
 	return dirs
 }
 
+// rebaseLocalReplaces points each module-relative replace of f at the
+// ejected copy. Every directive is edited independently by its exact old
+// path and version, so two versions of one module keep two replace lines
+// and a wildcard replace stays a wildcard replace. Absolute filesystem
+// targets stay untouched: they lie outside the module, and rebasing them
+// as relative paths would break the export once it moves (filepath.Rel
+// even fails across Windows drives).
 func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[string]string) {
 	absOrig, err := filepath.Abs(origDir)
 	if err != nil {
@@ -2746,12 +2753,6 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 	if err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
-	type pending struct {
-		oldPath string
-		oldVers string
-		newPath string
-	}
-	var work []pending
 	for _, r := range slices.Clone(f.Replace) {
 		if _, ok := ejected[r.Old.Path]; ok {
 			continue
@@ -2770,10 +2771,19 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 		if err != nil {
 			base.Fatalf("logos eject: %v", err)
 		}
-		work = append(work, pending{r.Old.Path, r.Old.Version, "./" + filepath.ToSlash(rel)})
-	}
-	for _, w := range work {
-		setGoReplace(f, w.oldPath, w.oldVers, w.newPath)
+		newPath := "./" + filepath.ToSlash(rel)
+		if newPath == r.New.Path {
+			continue
+		}
+		// Copy the identity first: DropReplace zeroes the entry in
+		// place through the shared pointer.
+		oldPath, oldVers := r.Old.Path, r.Old.Version
+		if err := f.DropReplace(oldPath, oldVers); err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+		if err := f.AddReplace(oldPath, oldVers, newPath, ""); err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
 	}
 }
 
@@ -2835,18 +2845,82 @@ func ensureGoRequire(f *modfile.File, path, vers string) {
 	}
 }
 
-// setGoReplace points every replace of oldPath at newPath, dropping
-// stale targets first so no duplicate replaces remain.
+// setGoReplace points the replace of oldPath at oldVers at newPath,
+// dropping only that directive's stale target so no duplicate replaces
+// remain. A wildcard replace (oldVers "") and an exact-version replace
+// are distinct directives: each call edits exactly one, so replaces of
+// other versions of the same module keep their own targets. The vendored
+// AddReplace matches an empty version against every existing version of
+// the path, so a wildcard edit saves the exact-version directives, drops
+// every directive of the path, and adds them all back instead of calling
+// through.
 func setGoReplace(f *modfile.File, oldPath, oldVers, newPath string) {
+	if oldVers == "" {
+		setGoReplaceWildcard(f, oldPath, newPath)
+		return
+	}
 	for _, r := range slices.Clone(f.Replace) {
-		if r.Old.Path == oldPath && (r.New.Path != newPath || r.New.Version != "") {
+		if r.Old.Path == oldPath && r.Old.Version == oldVers && (r.New.Path != newPath || r.New.Version != "") {
 			if err := f.DropReplace(r.Old.Path, r.Old.Version); err != nil {
 				base.Fatalf("logos eject: %v", err)
 			}
 		}
 	}
 	for _, r := range f.Replace {
-		if r.Old.Path == oldPath && r.New.Path == newPath && r.New.Version == "" {
+		if r.Old.Path == oldPath && r.Old.Version == oldVers && r.New.Path == newPath && r.New.Version == "" {
+			return
+		}
+	}
+	if err := f.AddReplace(oldPath, oldVers, newPath, ""); err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+}
+
+// setGoReplaceWildcard points the wildcard replace of oldPath at newPath
+// and leaves every exact-version replace of oldPath on its own target.
+func setGoReplaceWildcard(f *modfile.File, oldPath, newPath string) {
+	type exact struct{ vers, target string }
+	var keep []exact
+	for _, r := range slices.Clone(f.Replace) {
+		if r.Old.Path == oldPath && r.Old.Version != "" {
+			keep = append(keep, exact{r.Old.Version, r.New.Path})
+		}
+	}
+	if len(keep) == 0 {
+		setGoReplaceExact(f, oldPath, "", newPath)
+		return
+	}
+	for _, e := range keep {
+		if err := f.DropReplace(oldPath, e.vers); err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+	}
+	if err := f.DropReplace(oldPath, ""); err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	if err := f.AddReplace(oldPath, "", newPath, ""); err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	for _, e := range keep {
+		if err := f.AddReplace(oldPath, e.vers, e.target, ""); err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+	}
+}
+
+// setGoReplaceExact points the replace of oldPath at oldVers at newPath.
+// oldVers names one exact version here, so the vendored AddReplace can
+// only match that same directive.
+func setGoReplaceExact(f *modfile.File, oldPath, oldVers, newPath string) {
+	for _, r := range slices.Clone(f.Replace) {
+		if r.Old.Path == oldPath && r.Old.Version == oldVers && (r.New.Path != newPath || r.New.Version != "") {
+			if err := f.DropReplace(r.Old.Path, r.Old.Version); err != nil {
+				base.Fatalf("logos eject: %v", err)
+			}
+		}
+	}
+	for _, r := range f.Replace {
+		if r.Old.Path == oldPath && r.Old.Version == oldVers && r.New.Path == newPath && r.New.Version == "" {
 			return
 		}
 	}
