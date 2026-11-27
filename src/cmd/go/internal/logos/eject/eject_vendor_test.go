@@ -73,16 +73,19 @@ func TestFoldEjectedGuardSpecializes(t *testing.T) {
 		{"//go:build logosconc", "", true},
 		{"//go:build !ejecttestjsonoff", "!ejecttestjsonoff", false},
 		// A folded release tag would pin the file to that Go version's
-		// semantics, so the residual keeps the original structure with
+		// semantics, so a versionless file keeps the folded residual and
+		// drops the implied version with an always-false disjunct, while
+		// a versioned file keeps the original structure with
 		// version-neutral mode tags instead.
-		{"//go:build !logosejected || go1.21", "ignore || go1.21", false},
+		{"//go:build !logosejected || go1.21", "go1.21 || ignore", false},
 		{"//go:build !logosconc || go1.21", "", false},
 		// The original already implies this version, so the folded tag
 		// stays: no structure is needed to preserve it.
 		{"//go:build logosejected && go1.21", "go1.21", false},
 	}
 	for _, tc := range cases {
-		guard, excluded := foldEjectedGuard(parseEjectedGuard(t, tc.line))
+		expr := parseEjectedGuard(t, tc.line)
+		guard, excluded := foldEjectedGuard(expr, constraint.GoVersion(expr))
 		if excluded != tc.excluded {
 			t.Errorf("foldEjectedGuard(%q) excluded = %v, want %v", tc.line, excluded, tc.excluded)
 			continue
@@ -116,7 +119,7 @@ func TestFoldEjectedGuardPreservesGoVersion(t *testing.T) {
 	}
 	for _, line := range lines {
 		expr := parseEjectedGuard(t, line)
-		guard, excluded := foldEjectedGuard(expr)
+		guard, excluded := foldEjectedGuard(expr, constraint.GoVersion(expr))
 		if excluded {
 			continue
 		}
@@ -126,6 +129,67 @@ func TestFoldEjectedGuardPreservesGoVersion(t *testing.T) {
 		}
 		if want := constraint.GoVersion(expr); got != want {
 			t.Errorf("foldEjectedGuard(%q) implies Go version %q, want %q (residual %v)", line, got, want, guard)
+		}
+	}
+}
+
+// A neutralized residual must parse: the support copy reparses the
+// emitted header, and a doubly-negated mode tag would otherwise leave a
+// consecutive negation the constraint parser rejects. Collapsing the two
+// negations keeps the truth value and the implied version: the min-version
+// analysis cancels a double sign flip exactly as truth does.
+func TestNeutralizeEjectedGuardCollapsesNegation(t *testing.T) {
+	expr := parseEjectedGuard(t, "//go:build !(!logosconc) || go1.21")
+	got := neutralizeEjectedGuard(expr).String()
+	if want := "ignore || go1.21"; got != want {
+		t.Errorf("neutralizeEjectedGuard = %q, want %q", got, want)
+	}
+	if _, err := constraint.Parse("//go:build " + got); err != nil {
+		t.Errorf("reparse neutralized guard %q: %v", got, err)
+	}
+	if got, want := constraint.GoVersion(parseEjectedGuard(t, "//go:build "+got)), constraint.GoVersion(expr); got != want {
+		t.Errorf("neutralized guard implies Go version %q, want %q", got, want)
+	}
+}
+
+// A legacy-only guard never set the file's language version: the compiler
+// reads per-file versions from //go:build lines alone. A residual that
+// names a release tag must therefore stay versionless, keeping the
+// selection with a version-neutral, always-false disjunct instead of
+// restoring the lower version the legacy selection expression implies.
+func TestFoldEjectedGuardLegacyGuardStaysVersionless(t *testing.T) {
+	cases := []struct {
+		line     string
+		residual string
+		excluded bool
+	}{
+		{"// +build !logosejected,go1.21 go1.27", "go1.27 || ignore", false},
+		{"// +build logosejected", "", false},
+		{"// +build !logosejected", "", true},
+		{"// +build !logosconc", "", false},
+		{"//go:build !(!logosconc) || go1.21", "go1.21 || ignore", false},
+	}
+	for _, tc := range cases {
+		expr := parseEjectedGuard(t, tc.line)
+		guard, excluded := foldEjectedGuard(expr, "")
+		if excluded != tc.excluded {
+			t.Errorf("foldEjectedGuard(%q) excluded = %v, want %v", tc.line, excluded, tc.excluded)
+			continue
+		}
+		got := ""
+		if guard != nil {
+			got = guard.String()
+		}
+		if got != tc.residual {
+			t.Errorf("foldEjectedGuard(%q) = %q, want %q", tc.line, got, tc.residual)
+		}
+		if guard != nil {
+			if _, err := constraint.Parse("//go:build " + got); err != nil {
+				t.Errorf("reparse residual %q: %v", got, err)
+			}
+			if v := constraint.GoVersion(guard); v != "" {
+				t.Errorf("foldEjectedGuard(%q) implies Go version %q, want versionless", tc.line, v)
+			}
 		}
 	}
 }

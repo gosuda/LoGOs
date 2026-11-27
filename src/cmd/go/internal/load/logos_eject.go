@@ -20,7 +20,18 @@ func DisarmLogosEject() {
 }
 
 func logosEjectGcflags(p *Package) []string {
-	if logosEjectDir == "" || !p.IsLogos() {
+	if logosEjectDir == "" {
+		return nil
+	}
+	if !p.IsLogos() {
+		// Plain Go packages in the main module are copied verbatim, so
+		// a fork-only method value would reach upstream Go unrejected.
+		// Verify their portability without enabling source emission:
+		// the check flag runs only the verifier, and compilation is
+		// otherwise native.
+		if !p.Standard && p.Module != nil && p.Module.Main {
+			return []string{"-logos.eject_check"}
+		}
 		return nil
 	}
 	if p.Standard && !isEjectableGorootLogos(p.ImportPath) {

@@ -151,7 +151,7 @@ func (c *cswLower) caseAtElem(syn *syntax.ConstSwitchCase, elem int, body []synt
 		elem:  elem,
 		body:  body,
 		kind:  cswExact,
-		spell: c.elemSpell(e),
+		spell: c.caseSpell(e, typ),
 		lo:    fl.off(syn.Colon) + 1,
 		hi:    fl.off(s.Rbrace),
 		close: s.Rbrace,
@@ -160,12 +160,6 @@ func (c *cswLower) caseAtElem(syn *syntax.ConstSwitchCase, elem int, body []synt
 	if i := slices.Index(s.Cases, syn); i+1 < len(s.Cases) {
 		cs.hi = fl.off(s.Cases[i+1].Case)
 		cs.close = s.Cases[i+1].Case
-	}
-	if _, ok := reparseType(cs.spell.s); !ok {
-		// The case type spells LoGOs-only syntax (an option suffix):
-		// the respell sites emit this text into a plain recheck, so
-		// spell the checked type in its lowered plain form instead.
-		cs.spell = gen(fl.plainTypeSpell(typ))
 	}
 	if e.Tilde {
 		cs.kind = cswTilde
@@ -199,6 +193,18 @@ func (c *cswLower) elemSpell(e *syntax.ConstSwitchCaseElem) otext {
 	// StartPos, not Pos: a qualified type names its selector position
 	// at the dot, and the spell must keep the qualifier.
 	return c.fl.textOf(span{c.fl.off(syntax.StartPos(e.Type)), c.fl.exprEndOf(e.Type)})
+}
+
+// caseSpell answers the Go spelling of one case element: the source
+// spelling, unless it uses LoGOs-only syntax (an option suffix), in
+// which case the checked type in its lowered plain form, because the
+// respell sites emit this text into a plain recheck.
+func (c *cswLower) caseSpell(e *syntax.ConstSwitchCaseElem, typ types2.Type) otext {
+	spell := c.elemSpell(e)
+	if _, ok := reparseType(spell.s); ok {
+		return spell
+	}
+	return gen(c.fl.plainTypeSpell(typ))
 }
 
 func checkedTypeOf(info *types2.Info, e syntax.Expr) types2.Type {
@@ -438,7 +444,7 @@ func (c *cswLower) lowerHostArm(syn *syntax.ConstSwitchCase, elem int) cswHostAr
 	region := fl.adoptRegion(bodyText, syn.Case, fbase, 3, []syntax.Node{fnBody})
 	fnBody.List = c.fc.lowerConstIfList(fnBody.List)
 	cs := cswCase{syn: syn, elem: elem, body: fnBody.List, kind: kind}
-	cs.spell = c.elemSpell(e)
+	cs.spell = c.caseSpell(e, typ)
 	cs.sub = c.info.LogosConstCases[types2.LogosConstCaseKey{Case: syn, Elem: elem}]
 	cs.lo, cs.hi = region.start, region.end
 	cs.close = syn.Case

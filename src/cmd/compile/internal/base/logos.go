@@ -8,6 +8,12 @@ import "flag"
 
 var LogosEject string
 
+// LogosEjectCheck runs only the eject portability verifier, without
+// emitting ejected sources. Plain Go packages in the ejected module
+// get this flag so a fork-only selector fails the export before any
+// output is written, while their compilation is otherwise native.
+var LogosEjectCheck bool
+
 var LogosCgoEject bool
 
 var Logos bool
@@ -46,6 +52,7 @@ func logosRegisterFlags() {
 	flag.BoolVar(&LogosAllocFacts, "logos.allocfacts", false, "record per-function heap allocations and write AllocFree facts")
 	flag.BoolVar(&LogosGoFacts, "logos.gofacts", false, "record per-parameter mutation facts for Go packages")
 	flag.StringVar(&LogosEject, "logos.eject", "", "write ejected Go sources to `directory`")
+	flag.BoolVar(&LogosEjectCheck, "logos.eject_check", false, "verify ejected portability without emitting sources")
 	flag.BoolVar(&LogosCgoEject, "logos.cgoeject", false, "check and eject original cgo sources without emitting an object")
 	flag.StringVar(&LogosMode, "logos.mode", "", "run a logos helper mode (`next`, `context`, or `hints`)")
 	flag.StringVar(&LogosHintsOut, "logos.hintsout", "", "write the logos editor hints of the package to `file`")
