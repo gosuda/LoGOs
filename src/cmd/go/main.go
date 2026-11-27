@@ -124,6 +124,11 @@ func main() {
 
 	cfg.CmdName = args[0] // for error messages
 	if args[0] == "help" {
+		topic := ""
+		if len(args) > 1 {
+			topic = args[1]
+		}
+		cfg.MaybeRelaunchForHelpTopic(topic)
 		counter.Inc("go/subcommand:" + strings.Join(append([]string{"help"}, args[1:]...), "-"))
 		help.Help(os.Stdout, args[1:])
 		return
@@ -184,7 +189,11 @@ func main() {
 			}
 		}
 	}
-
+	// A plain go in a LoGOs module re-executes as logos with the same
+	// arguments: a LoGOs-only subcommand, or a logos.toml beside go.mod.
+	if !cfg.Logos {
+		cfg.MaybeRelaunchForArgs(args)
+	}
 	cmd, used := lookupCmd(args)
 	cfg.CmdName = strings.Join(args[:used], " ")
 	if len(cmd.Commands) > 0 {

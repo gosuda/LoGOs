@@ -20,7 +20,7 @@ logos eject -o out
 grep 'var _ Asserted = \(\*Checked\)\(nil\)' out/main.go
 grep 'switch' out/main.go
 exists out/go.mod
-grep 'loGo/s union: A \| B' out/main.go
+grep 'LoGOs union: A \| B' out/main.go
 cd out
 go build ./...
 go run .

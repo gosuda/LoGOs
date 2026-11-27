@@ -1,7 +1,6 @@
-# A section 13 backend pass applies to Go packages and to loGo/s
-# packages, under logos and under plain go. The fourth combination
-# (a loGo/s package under plain go) cannot occur: plain go never
-# compiles .lgo files.
+# A section 13 backend pass applies to Go packages and to LoGOs
+# packages, under logos and under plain go: plain go re-executes as
+# logos for a LoGOs package, so every combination builds.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env GOARCH=arm64
@@ -10,8 +9,8 @@ cd m
 logos build -o logos_go.exe ./goonly
 go build -o plain_go.exe ./goonly
 logos build -o logos_lgo.exe ./lgoonly
-! go build -o plain_lgo.exe ./lgoonly
-! exists plain_lgo.exe
+go build -o plain_lgo.exe ./lgoonly
+exists plain_lgo.exe
 go tool objdump -s 'main\.loadPair' logos_go.exe
 stdout 'LDP'
 go tool objdump -s 'main\.loadPair' plain_go.exe

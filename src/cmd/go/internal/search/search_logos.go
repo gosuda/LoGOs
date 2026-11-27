@@ -14,6 +14,7 @@ import (
 
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
+	"cmd/go/internal/str"
 )
 
 // logosKeepCgoOnly reports whether a wildcard match must keep a directory
@@ -108,6 +109,26 @@ func logosFileImportsC(dir, name string) bool {
 	}
 	for _, imp := range parsed.Imports {
 		if path, err := strconv.Unquote(imp.Path.Value); err == nil && path == "C" {
+			return true
+		}
+	}
+	return false
+}
+
+// matchDirsInMain reports whether path lies in a main module. Plain go
+// re-executes as logos only for such directories; the standard library
+// and module dependencies never trigger. With no module roots (GOPATH
+// mode) every local directory counts as main.
+func matchDirsInMain(path string, modRoots []string) bool {
+	if len(modRoots) == 0 {
+		return !cfg.UnderGoRoot(path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	for _, mr := range modRoots {
+		if mr != "" && str.HasFilePathPrefix(abs, mr) {
 			return true
 		}
 	}

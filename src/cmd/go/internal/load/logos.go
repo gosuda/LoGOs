@@ -239,7 +239,7 @@ func reportMixedModule(modPath string, g *moduleKinds) {
 		return
 	}
 	carrier.Error = &PackageError{
-		Err: &logosModuleError{err: fmt.Errorf("[correctness::mixed_module] module %s has Go packages (%s) and loGo/s packages (%s)", modPath, strings.Join(goNames, ", "), strings.Join(logosNames, ", "))},
+		Err: &logosModuleError{err: fmt.Errorf("[correctness::mixed_module] module %s has Go packages (%s) and LoGOs packages (%s)", modPath, strings.Join(goNames, ", "), strings.Join(logosNames, ", "))},
 	}
 	carrier.Incomplete = true
 }

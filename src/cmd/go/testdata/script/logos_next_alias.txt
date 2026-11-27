@@ -3,22 +3,22 @@ env GOTOOLCHAIN=local
 
 cd canonical
 ! logos next
-stderr 'module already holds loGo/s file'
+stderr 'module already holds LoGOs file'
 cd ..
 
 cd scroll
 ! logos next
-stderr 'module already holds loGo/s file'
+stderr 'module already holds LoGOs file'
 cd ..
 
 cd lightning
 ! logos next
-stderr 'module already holds loGo/s file'
+stderr 'module already holds LoGOs file'
 cd ..
 
 cd gopher
 ! logos next
-stderr 'module already holds loGo/s file'
+stderr 'module already holds LoGOs file'
 cd ..
 
 cd converted

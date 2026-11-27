@@ -587,6 +587,10 @@ func resolveLocalPackage(ld *Loader, ctx context.Context, dir string, rs *Requir
 			// Any other error indicates that the package “exists” (at least in the
 			// sense that it cannot exist in any other module), but has some other
 			// problem (such as a syntax error).
+			//
+			// A directory that plain go rejects but that holds
+			// LoGOs sources re-executes as logos instead.
+			cfg.MaybeRelaunchForDir(absDir, true, "command names LoGOs sources")
 			return "", err
 		}
 	}

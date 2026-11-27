@@ -412,6 +412,9 @@ func (m *Match) MatchDirs(modRoots []string) {
 				// nor the error. A cgo-only loGo/s package is the exception: its
 				// files sit in IgnoredGoFiles until loading denies it, so keep it.
 				if !logosKeepCgoOnly(p) {
+					// A main-module directory that plain go skips but that
+					// holds LoGOs sources re-executes as logos instead.
+					cfg.MaybeRelaunchForDir(path, matchDirsInMain(path, modRoots), "walk meets LoGOs sources")
 					return nil
 				}
 			}

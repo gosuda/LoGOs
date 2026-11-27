@@ -411,7 +411,7 @@ func (fl *fileLower) cfKnownPackage(path string) *types2.Package {
 // one; a forwarding function keeps its body natively.
 func (fl *fileLower) cfRetireDef(def *cfGenericDef) {
 	fn := def.decl
-	call := "panic(" + strconv.Quote("logos: comptime generic "+fn.Name.Value+" runs only through loGo/s instantiation") + ")"
+	call := "panic(" + strconv.Quote("logos: comptime generic "+fn.Name.Value+" runs only through LoGOs instantiation") + ")"
 	runtime := base.LogosEject != "" && !def.forward && def.obj != nil && def.obj.Exported() && fn.Recv == nil && fl.cfRuntimeBody(fn)
 	if !def.forward {
 		fn.Body.List = fl.reparseStmts(call, fn.Pos())

@@ -237,7 +237,7 @@ func snapshotModule(root *os.Root, moddir string) (*moduleSnapshot, error) {
 			return err
 		}
 		if logosfile.Is(path) {
-			return fmt.Errorf("module already holds loGo/s file %s", rel)
+			return fmt.Errorf("module already holds LoGOs file %s", rel)
 		}
 		if d.Name() == "default.pgo" {
 			return fmt.Errorf("%s: PGO inputs require manual review", rel)

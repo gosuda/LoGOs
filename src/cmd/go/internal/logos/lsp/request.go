@@ -150,7 +150,7 @@ func (p *Proxy) track(id json.RawMessage, pend pending) bool {
 }
 
 func (p *Proxy) declineFormatting(m *message) {
-	reason := m.Method + " is not supported for loGo/s sources: gopls would format the lowered Go text, not the source"
+	reason := m.Method + " is not supported for LoGOs sources: gopls would format the lowered Go text, not the source"
 	p.fail(m.ID, codeRequestFailed, reason)
 }
 

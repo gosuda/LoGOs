@@ -1,23 +1,15 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 
+# In a marked module plain go re-executes as logos: the build applies
+# logos.toml exactly as logos build does, including the cgo policy.
 [cgo] ! logos build -o $WORK/logos$GOEXE ./sub
 [cgo] stderr 'restriction::cgo_usage'
-[cgo] go build -o $WORK/plain$GOEXE ./sub
-[cgo] exec $WORK/plain$GOEXE
-[cgo] stdout '^42$'
-[cgo] go build -a -trimpath -o $WORK/with$GOEXE ./sub
-[cgo] exec $WORK/with$GOEXE
-[cgo] stdout '^42$'
-[cgo] mv logos.toml $WORK/logos.toml.bak
-[cgo] go build -a -trimpath -o $WORK/without$GOEXE ./sub
-[cgo] exec cmp $WORK/with$GOEXE $WORK/without$GOEXE
-[cgo] mv $WORK/logos.toml.bak logos.toml
-[cgo] go build -o $WORK/plain_cpu$GOEXE ./sub
-[cgo] exec go version -m $WORK/plain_cpu$GOEXE
-[cgo] [GOARCH:amd64] stdout 'GOAMD64=v1'
-[cgo] [GOARCH:arm64] stdout 'GOARM64=v8.0'
+[cgo] ! go build -o $WORK/plain$GOEXE ./sub
+[cgo] stderr 'restriction::cgo_usage'
+[cgo] ! exists $WORK/plain$GOEXE
 
+# The target_cpu setting applies to both spellings of the command.
 env GOARCH=arm64
 env CGO_ENABLED=0
 cd arm
@@ -26,7 +18,8 @@ go version -m $WORK/arm_logos
 stdout 'GOARM64=v8.2'
 go build -o $WORK/arm_plain .
 go version -m $WORK/arm_plain
-stdout 'GOARM64=v8.0'
+stdout 'GOARM64=v8.2'
+exec cmp $WORK/arm_logos $WORK/arm_plain
 
 -- go.mod --
 module example.com/plain

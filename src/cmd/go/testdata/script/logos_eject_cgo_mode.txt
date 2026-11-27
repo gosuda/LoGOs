@@ -2,11 +2,11 @@
 env GOTOOLCHAIN=local
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/plain-out plain/main.go
-stdout 'logos.cgoeject requires original loGo/s cgo sources'
+stdout 'logos.cgoeject requires original LoGOs cgo sources'
 ! exists $WORK/plain-out
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/lgo-out lgo/main.lgo
-stdout 'logos.cgoeject requires original loGo/s cgo sources'
+stdout 'logos.cgoeject requires original LoGOs cgo sources'
 ! exists $WORK/lgo-out
 
 ! go tool compile -logos.cgoeject -logos.eject=$WORK/missing-out cgo/main.lgo

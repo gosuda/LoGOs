@@ -19,8 +19,8 @@ stdout '^from-logos$'
 logos test ./...
 stdout '^ok\s+example\.com/g/q'
 cd g
-! go build ./...
-stderr 'no required module provides package example\.com/l/p'
+# Plain go meets the LoGOs import and re-executes as logos.
+go build ./...
 cd ../..
 
 cd std
@@ -31,7 +31,7 @@ cd ..
 
 cd mixedmod
 ! logos build ./...
-stderr '\[correctness::mixed_module\] module example\.com/m has Go packages \(example\.com/m/a\) and loGo/s packages \(example\.com/m/b\)'
+stderr '\[correctness::mixed_module\] module example\.com/m has Go packages \(example\.com/m/a\) and LoGOs packages \(example\.com/m/b\)'
 cd ..
 
 cd ws

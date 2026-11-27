@@ -73,15 +73,15 @@ cd ..
 
 cd alias
 logos build ./plain
-stderr -count=1 'go: warning: \[portability::alias_extension\] main\.📜: loGo/s alias extension file'
+stderr -count=1 'go: warning: \[portability::alias_extension\] main\.📜: LoGOs alias extension file'
 logos build ./ok
 ! stderr .
 logos build ./detached
-stderr -count=1 'go: warning: \[portability::alias_extension\] d\.📜: loGo/s alias extension file'
+stderr -count=1 'go: warning: \[portability::alias_extension\] d\.📜: LoGOs alias extension file'
 
 cp logos-deny.toml logos.toml
 ! logos build ./plain
-stderr -count=1 '^\[portability::alias_extension\] main\.📜: loGo/s alias extension file'
+stderr -count=1 '^\[portability::alias_extension\] main\.📜: LoGOs alias extension file'
 ! stderr 'warning:'
 logos build ./ok
 ! stderr .

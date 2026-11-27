@@ -5,7 +5,7 @@ mkdir $WORK/bin
 
 cd dotted
 logos build -o $WORK/bin/dotted$GOEXE ./cmd
-stderr -count=1 'go: warning: \[portability::alias_extension\] main\.📜: loGo/s alias extension file'
+stderr -count=1 'go: warning: \[portability::alias_extension\] main\.📜: LoGOs alias extension file'
 ! stderr 'error'
 exists $WORK/bin/dotted$GOEXE
 logos build ./lib

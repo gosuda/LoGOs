@@ -1,6 +1,8 @@
 # S9: implicit placement is on by default under logos. A missing
 # logos.toml still enables logosarena; arena = false opts out; plain go
-# never enables it; an explicit negation still loses to the appended entry.
+# in a marked module re-executes and applies logos.toml, while a module
+# without logos.toml keeps plain go; an explicit negation still loses
+# to the appended entry.
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env GOEXPERIMENT=
@@ -23,10 +25,16 @@ logos build -x -o $WORK/off.bin .
 ! stderr 'GOEXPERIMENT=[^ ]*logosarena'
 cd ..
 
-# Plain go never enables it, even with an explicit true key in logos.toml,
-# which plain go does not read.
+# Plain go in a marked module re-executes and applies logos.toml,
+# so arena=true is set.
 cd godb
 go build -x -o $WORK/plain.bin .
+stderr 'GOEXPERIMENT=[^ ]*logosarena'
+cd ..
+
+# A module without logos.toml keeps plain go: no arena experiment.
+cd plain
+go build -x -o $WORK/plain-unmarked.bin .
 ! stderr 'GOEXPERIMENT=[^ ]*logosarena'
 cd ..
 
@@ -97,3 +105,15 @@ package main
 import "fmt"
 
 func main() { fmt.Println("go") }
+
+-- plain/go.mod --
+module example.com/s9plain
+
+go 1.27
+
+-- plain/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("plain") }

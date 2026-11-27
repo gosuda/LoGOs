@@ -32,11 +32,11 @@ import (
 var CmdNext = &base.Command{
 	Run:       runNext,
 	UsageLine: "logos next [--fix | --ai-patch]",
-	Short:     "convert a Go module to a loGo/s module",
+	Short:     "convert a Go module to a LoGOs module",
 	Long: `
-Next previews verified Go-to-loGo/s rewrites in a unified diff without
+Next previews verified Go-to-LoGOs rewrites in a unified diff without
 changing files. Next --fix checks a saved module snapshot with a staged
-loGo/s build and test compilation, then writes a unified patch to standard
+LoGOs build and test compilation, then writes a unified patch to standard
 output. The patch deletes the original .go files, adds the .lgo files, and
 adds new tasks to next_tasks.json. It does not change module files, run
 tests, or fetch modules. Review the patch and apply it from the module root
@@ -500,7 +500,7 @@ func hasLgoFiles(moddir string) bool {
 
 func walkNextFileOK(path string) bool {
 	if logosfile.Is(path) {
-		base.Fatalf("logos next: module already holds loGo/s file %s", path)
+		base.Fatalf("logos next: module already holds LoGOs file %s", path)
 	}
 	if !strings.HasSuffix(path, ".go") {
 		return false

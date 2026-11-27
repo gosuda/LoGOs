@@ -5,7 +5,7 @@ env CGO_ENABLED=0
 # Selecting only one package must not bypass the module's language rule.
 cd mixed
 ! logos list ./g
-stderr '\[correctness::mixed_module\] module example.com/mixed has Go packages \(example.com/mixed/g\) and loGo/s packages \(example.com/mixed/l\)'
+stderr '\[correctness::mixed_module\] module example.com/mixed has Go packages \(example.com/mixed/g\) and LoGOs packages \(example.com/mixed/l\)'
 ! logos list ./l
 stderr '\[correctness::mixed_module\]'
 ! logos build ./g
