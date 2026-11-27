@@ -99,7 +99,11 @@ func (_logos_v Item) MarshalJSONTo(_logos_enc *_logos_jsontext.Encoder) error { 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer root.Close()
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
 	c := supportCopy{
 		src:          root,
 		srcDir:       src,
