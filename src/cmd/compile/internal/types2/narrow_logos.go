@@ -836,7 +836,18 @@ type logosEFState struct {
 	// without recovery die with the path. Sets are stored sorted by
 	// guard name for stable state comparison.
 	mayBroke map[logosEFKey][]logosEFKey
-	cleanups *logosEFCleanup
+	// brokeHere records the guard breaks established on the paths that
+	// reach this state since the nearest enclosing directly invoked
+	// literal began: dropWriting and dropCovered copy each break they
+	// record for mayBroke. Joins union the sets; a path that panics
+	// without recovery dies with its events. inlineFuncLit clears the
+	// set at entry, so the exit set holds exactly the breaks this
+	// invocation established on a normal or recovered exit, separate
+	// from the cumulative mayBroke history an earlier break left.
+	// Exit seeding consults it to tell a repeated break on a returning
+	// path from an inherited break plus a panic-path write.
+	brokeHere map[logosEFKey][]logosEFKey
+	cleanups  *logosEFCleanup
 }
 
 func (s *logosEFState) set(k logosEFKey, e logosEFEntry) *logosEFState {
@@ -845,7 +856,7 @@ func (s *logosEFState) set(k logosEFKey, e logosEFEntry) *logosEFState {
 		m = make(map[logosEFKey]logosEFEntry, 1)
 	}
 	m[k] = e
-	out := &logosEFState{m: m, may: s.may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, cleanups: s.cleanups}
+	out := &logosEFState{m: m, may: s.may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, brokeHere: s.brokeHere, cleanups: s.cleanups}
 	if s.may != nil && s.may[k] {
 		may := maps.Clone(s.may)
 		delete(may, k)
@@ -863,7 +874,7 @@ func (s *logosEFState) setMay(k logosEFKey) *logosEFState {
 		may = make(map[logosEFKey]bool, 1)
 	}
 	may[k] = true
-	return &logosEFState{m: s.m, may: may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, cleanups: s.cleanups}
+	return &logosEFState{m: s.m, may: may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, brokeHere: s.brokeHere, cleanups: s.cleanups}
 }
 
 // setMayErr records the error destination guarding may-marked k. The
@@ -894,7 +905,7 @@ func (p *logosEFPass) setMayErr(st *logosEFState, k logosEFKey, errKey logosEFKe
 		mayBroke = maps.Clone(mayBroke)
 		delete(mayBroke, k)
 	}
-	return &logosEFState{m: st.m, may: st.may, mayErr: mayErr, mayAlt: mayAlt, mayBroke: mayBroke, cleanups: st.cleanups}
+	return &logosEFState{m: st.m, may: st.may, mayErr: mayErr, mayAlt: mayAlt, mayBroke: mayBroke, brokeHere: st.brokeHere, cleanups: st.cleanups}
 }
 
 // setMayDiscarded records an empty pairing for may-marked k: the latest
@@ -917,7 +928,7 @@ func (s *logosEFState) setMayDiscarded(k logosEFKey) *logosEFState {
 		mayBroke = maps.Clone(mayBroke)
 		delete(mayBroke, k)
 	}
-	return &logosEFState{m: s.m, may: s.may, mayErr: mayErr, mayAlt: s.mayAlt, mayBroke: mayBroke, cleanups: s.cleanups}
+	return &logosEFState{m: s.m, may: s.may, mayErr: mayErr, mayAlt: s.mayAlt, mayBroke: mayBroke, brokeHere: s.brokeHere, cleanups: s.cleanups}
 }
 
 // setSeed adds a deferred-capture entry without killing may-reach: seeding
@@ -929,7 +940,7 @@ func (s *logosEFState) setSeed(k logosEFKey, e logosEFEntry) *logosEFState {
 		m = make(map[logosEFKey]logosEFEntry, 1)
 	}
 	m[k] = e
-	return &logosEFState{m: m, may: s.may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, cleanups: s.cleanups}
+	return &logosEFState{m: m, may: s.may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, brokeHere: s.brokeHere, cleanups: s.cleanups}
 }
 
 // dropWriting stops tracking a destination that a write to k can change:
@@ -972,6 +983,13 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 	var errOut map[logosEFKey]logosEFKey
 	brokeOut := s.mayBroke
 	brokeChanged := false
+	// hereOut records the same breaks for the per-invocation set,
+	// including a repeated break of a guard the cumulative set already
+	// holds: every live guard-breaking write records, so a repeated
+	// break on a returning path stays distinguishable from an inherited
+	// break plus a panic-path write.
+	hereOut := s.brokeHere
+	hereChanged := false
 	for v, ek := range s.mayErr {
 		if v.root != k.root && ek.root != k.root {
 			continue
@@ -1015,6 +1033,28 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 			brokeOut = make(map[logosEFKey][]logosEFKey, 1)
 		}
 		brokeOut[v] = merged
+		if !hereChanged {
+			hereOut = maps.Clone(s.brokeHere)
+			hereChanged = true
+		}
+		hereOut = noteBrokeHere(hereOut, v, ek)
+	}
+	// A write that supersedes the result drops any record of guards
+	// broken before it, even when no pairing remains to drive the
+	// removal: the reset value carries no broken guard. Overlap in
+	// either direction supersedes, mirroring the pairing drop above.
+	for v := range s.mayBroke {
+		if _, ok := brokeOut[v]; !ok {
+			continue
+		}
+		if v.root != k.root || (!logosEFPathUnder(v.path, k.path) && !logosEFPathUnder(k.path, v.path)) {
+			continue
+		}
+		if !brokeChanged {
+			brokeOut = maps.Clone(s.mayBroke)
+			brokeChanged = true
+		}
+		delete(brokeOut, v)
 	}
 	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
@@ -1072,9 +1112,14 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 				brokeOut = make(map[logosEFKey][]logosEFKey, 1)
 			}
 			brokeOut[v] = merged
+			if !hereChanged {
+				hereOut = maps.Clone(s.brokeHere)
+				hereChanged = true
+			}
+			hereOut = noteBrokeHere(hereOut, v, broken...)
 		}
 	}
-	if out == nil && mayOut == nil && errOut == nil && altOut == nil && !brokeChanged {
+	if out == nil && mayOut == nil && errOut == nil && altOut == nil && !brokeChanged && !hereChanged {
 		return s
 	}
 	m := s.m
@@ -1100,7 +1145,11 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 			mayBroke = nil
 		}
 	}
-	return &logosEFState{m: m, may: may, mayErr: mayErr, mayAlt: mayAlt, mayBroke: mayBroke, cleanups: s.cleanups}
+	brokeHere := s.brokeHere
+	if hereChanged {
+		brokeHere = hereOut
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErr, mayAlt: mayAlt, mayBroke: mayBroke, brokeHere: brokeHere, cleanups: s.cleanups}
 }
 
 // dropCovered forgets the entries a quiet field write fully overwrites:
@@ -1136,6 +1185,13 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 	var errOut map[logosEFKey]logosEFKey
 	brokeOut := s.mayBroke
 	brokeChanged := false
+	// hereOut records the same breaks for the per-invocation set,
+	// including a repeated break of a guard the cumulative set already
+	// holds: every live guard-breaking write records, so a repeated
+	// break on a returning path stays distinguishable from an inherited
+	// break plus a panic-path write.
+	hereOut := s.brokeHere
+	hereChanged := false
 	for v, ek := range s.mayErr {
 		vHit := v.root == k.root && logosEFPathUnder(v.path, k.path)
 		guardHit := ek != (logosEFKey{}) && ek.root == k.root && (logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path))
@@ -1174,6 +1230,28 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 			brokeOut = make(map[logosEFKey][]logosEFKey, 1)
 		}
 		brokeOut[v] = merged
+		if !hereChanged {
+			hereOut = maps.Clone(s.brokeHere)
+			hereChanged = true
+		}
+		hereOut = noteBrokeHere(hereOut, v, ek)
+	}
+	// A write that covers the result drops any record of guards broken
+	// before it, even when no pairing remains to drive the removal: the
+	// reset value carries no broken guard. Full coverage supersedes,
+	// mirroring the pairing drop above.
+	for v := range s.mayBroke {
+		if _, ok := brokeOut[v]; !ok {
+			continue
+		}
+		if v.root != k.root || !logosEFPathUnder(v.path, k.path) {
+			continue
+		}
+		if !brokeChanged {
+			brokeOut = maps.Clone(s.mayBroke)
+			brokeChanged = true
+		}
+		delete(brokeOut, v)
 	}
 	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
@@ -1229,9 +1307,14 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 				brokeOut = make(map[logosEFKey][]logosEFKey, 1)
 			}
 			brokeOut[v] = merged
+			if !hereChanged {
+				hereOut = maps.Clone(s.brokeHere)
+				hereChanged = true
+			}
+			hereOut = noteBrokeHere(hereOut, v, broken...)
 		}
 	}
-	if out == nil && mayOut == nil && errOut == nil && altOut == nil && !brokeChanged {
+	if out == nil && mayOut == nil && errOut == nil && altOut == nil && !brokeChanged && !hereChanged {
 		return s
 	}
 	m := s.m
@@ -1257,7 +1340,11 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 			mayBroke = nil
 		}
 	}
-	return &logosEFState{m: m, may: may, mayErr: mayErr, mayAlt: mayAlt, mayBroke: mayBroke, cleanups: s.cleanups}
+	brokeHere := s.brokeHere
+	if hereChanged {
+		brokeHere = hereOut
+	}
+	return &logosEFState{m: m, may: may, mayErr: mayErr, mayAlt: mayAlt, mayBroke: mayBroke, brokeHere: brokeHere, cleanups: s.cleanups}
 }
 
 // logosEFPathUnder reports whether path denotes prefix or a destination
@@ -1315,7 +1402,7 @@ func (s *logosEFState) remap(f func(logosEFEntry) logosEFEntry) *logosEFState {
 	if out == nil {
 		return s
 	}
-	return &logosEFState{m: out, may: s.may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, cleanups: s.cleanups}
+	return &logosEFState{m: out, may: s.may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, brokeHere: s.brokeHere, cleanups: s.cleanups}
 }
 
 func (s *logosEFState) prove(errV *Var) *logosEFState {
@@ -1380,7 +1467,7 @@ func (p *logosEFPass) dropMayFor(st *logosEFState, errKey logosEFKey, rewritten 
 			may = nil
 		}
 	}
-	return &logosEFState{m: m, may: may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, cleanups: s.cleanups}
+	return &logosEFState{m: m, may: may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, brokeHere: s.brokeHere, cleanups: s.cleanups}
 }
 
 // futurePairClean reports whether every recorded write of the value k and
@@ -1427,6 +1514,64 @@ func (s *logosEFState) detach(errV *Var) *logosEFState {
 	})
 }
 
+// clearBrokeHere forgets the break events established before the current
+// invocation began. The cumulative mayBroke history stays: only the
+// per-invocation set restarts, so the exit set holds exactly the breaks
+// this invocation established on a normal or recovered exit.
+func (s *logosEFState) clearBrokeHere() *logosEFState {
+	if s == nil || s.brokeHere == nil {
+		return s
+	}
+	return &logosEFState{m: s.m, may: s.may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, cleanups: s.cleanups}
+}
+
+// unionBrokeHere joins break events established on another path reaching
+// the same point, keeping the per-invocation set separate from the
+// cumulative mayBroke history. Keys and guards defined inside the current
+// literal stay local.
+func (s *logosEFState) unionBrokeHere(other *logosEFState, inside map[*Var]bool) *logosEFState {
+	if other == nil || len(other.brokeHere) == 0 {
+		return s
+	}
+	merged := s.brokeHere
+	changed := false
+	for k, gs := range other.brokeHere {
+		if inside[k.root] {
+			continue
+		}
+		var fresh []logosEFKey
+		for _, g := range gs {
+			if inside[g.root] || slices.Contains(merged[k], g) {
+				continue
+			}
+			fresh = append(fresh, g)
+		}
+		if len(fresh) == 0 {
+			continue
+		}
+		union := append([]logosEFKey(nil), merged[k]...)
+		union = append(union, fresh...)
+		slices.SortFunc(union, func(x, y logosEFKey) int {
+			if x.root.name != y.root.name {
+				return strings.Compare(x.root.name, y.root.name)
+			}
+			return strings.Compare(x.path, y.path)
+		})
+		if !changed {
+			merged = maps.Clone(s.brokeHere)
+			changed = true
+		}
+		if merged == nil {
+			merged = make(map[logosEFKey][]logosEFKey, 1)
+		}
+		merged[k] = union
+	}
+	if !changed {
+		return s
+	}
+	return &logosEFState{m: s.m, may: s.may, mayErr: s.mayErr, mayAlt: s.mayAlt, mayBroke: s.mayBroke, brokeHere: merged, cleanups: s.cleanups}
+}
+
 func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 	if st == nil {
 		return nil
@@ -1448,7 +1593,7 @@ func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 	if out == nil {
 		return st
 	}
-	return &logosEFState{m: out, may: st.may, mayErr: st.mayErr, mayAlt: st.mayAlt, mayBroke: st.mayBroke, cleanups: st.cleanups}
+	return &logosEFState{m: out, may: st.may, mayErr: st.mayErr, mayAlt: st.mayAlt, mayBroke: st.mayBroke, brokeHere: st.brokeHere, cleanups: st.cleanups}
 }
 
 // projectInvocationMay seeds ordinary entries for field pairings that
@@ -1480,7 +1625,7 @@ func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *synta
 				// Live guard broken: fall into the paired seeding below.
 				brokeIncoming = true
 			} else if brokeVetoedGuard(before.mayBroke[k], end.mayBroke[k]) ||
-				invocationBrokePossible(before, end, eff, k) {
+				invocationBrokePossible(before, end, k) {
 				// A vetoed possible guard broken on a normal or
 				// recovered exit leaves no single guard a later check
 				// could use. The broken set survives joins by union,
@@ -1538,7 +1683,7 @@ func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *synta
 	if out == nil {
 		return end
 	}
-	return &logosEFState{m: out, may: end.may, mayErr: end.mayErr, mayAlt: end.mayAlt, mayBroke: end.mayBroke, cleanups: end.cleanups}
+	return &logosEFState{m: out, may: end.may, mayErr: end.mayErr, mayAlt: end.mayAlt, mayBroke: end.mayBroke, brokeHere: end.brokeHere, cleanups: end.cleanups}
 }
 
 // invocationWrote reports whether the effects of a directly invoked
@@ -1570,12 +1715,12 @@ func brokeVetoedGuard(before, after []logosEFKey) bool {
 	return false
 }
 
-// invocationBrokePossible reports whether the invocation wrote an error
-// destination that could guard k before the call, and the break survives
-// on a returning path. A guard already broken before the call still counts
-// when this invocation breaks it again: the difference of cumulative
-// broken sets cannot see a repeated break on a previously untouched path.
-// The surviving end break excludes unrecovered panic paths, whose writes
+// invocationBrokePossible reports whether the invocation broke an error
+// destination that could guard k before the call, on a path that reaches
+// a normal or recovered exit. A guard already broken before the call still
+// counts when this invocation breaks it again: the exit's own break set,
+// cleared at entry, holds the repeated break even though the cumulative
+// broken set cannot show it. Writes on paths that panic without recovery
 // die with the path and never enter the set.
 
 // effPaired reports whether the invocation ever paired k with a named
@@ -1584,12 +1729,12 @@ func brokeVetoedGuard(before, after []logosEFKey) bool {
 func effPaired(eff *logosEFEffects, k logosEFKey) bool {
 	return eff != nil && eff.paired[k]
 }
-func invocationBrokePossible(before, end *logosEFState, eff *logosEFEffects, k logosEFKey) bool {
-	if eff == nil || end == nil || before == nil {
+func invocationBrokePossible(before, end *logosEFState, k logosEFKey) bool {
+	if end == nil || before == nil {
 		return false
 	}
 	for _, g := range end.mayBroke[k] {
-		if !eff.writes(g) {
+		if !slices.Contains(end.brokeHere[k], g) {
 			continue
 		}
 		if ek, ok := before.mayErr[k]; ok && ek == g {
@@ -1637,7 +1782,7 @@ func (p *logosEFPass) seedCleanupReads(lit *syntax.FuncLit, st *logosEFState) *l
 	if out == nil {
 		return st
 	}
-	return &logosEFState{m: out, may: st.may, mayErr: st.mayErr, mayAlt: st.mayAlt, mayBroke: st.mayBroke, cleanups: st.cleanups}
+	return &logosEFState{m: out, may: st.may, mayErr: st.mayErr, mayAlt: st.mayAlt, mayBroke: st.mayBroke, brokeHere: st.brokeHere, cleanups: st.cleanups}
 }
 
 // stable reports whether a destination's memory can no longer change
@@ -1752,7 +1897,7 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 			may = nil
 		}
 	}
-	return &logosEFState{m: m, may: may, mayErr: mayErrJoin(a, b), mayAlt: mayAltJoin(a, b), mayBroke: mayBrokeJoin(a, b), cleanups: logosEFCleanupJoin(a.cleanups, b.cleanups)}
+	return &logosEFState{m: m, may: may, mayErr: mayErrJoin(a, b), mayAlt: mayAltJoin(a, b), mayBroke: mayBrokeJoin(a, b), brokeHere: brokeHereJoin(a, b), cleanups: logosEFCleanupJoin(a.cleanups, b.cleanups)}
 }
 
 // mayErrJoin keeps a pairing when every live branch agrees on it, and
@@ -2005,6 +2150,44 @@ func mayBrokeJoin(a, b *logosEFState) map[logosEFKey][]logosEFKey {
 	return out
 }
 
+// brokeHereJoin unions the break events established on either path, so a
+// break on one path survives the join even when the other path skips the
+// write. Events on paths that panic without recovery never reach a join.
+func brokeHereJoin(a, b *logosEFState) map[logosEFKey][]logosEFKey {
+	if len(a.brokeHere) == 0 && len(b.brokeHere) == 0 {
+		return nil
+	}
+	var out map[logosEFKey][]logosEFKey
+	add := func(k logosEFKey, gs []logosEFKey) {
+		merged := append([]logosEFKey(nil), out[k]...)
+		for _, g := range gs {
+			if !slices.Contains(merged, g) {
+				merged = append(merged, g)
+			}
+		}
+		if len(merged) == 0 {
+			return
+		}
+		slices.SortFunc(merged, func(x, y logosEFKey) int {
+			if x.root.name != y.root.name {
+				return strings.Compare(x.root.name, y.root.name)
+			}
+			return strings.Compare(x.path, y.path)
+		})
+		if out == nil {
+			out = make(map[logosEFKey][]logosEFKey)
+		}
+		out[k] = merged
+	}
+	for k, gs := range a.brokeHere {
+		add(k, gs)
+	}
+	for k, gs := range b.brokeHere {
+		add(k, gs)
+	}
+	return out
+}
+
 // unchecked reports whether k may hold a value no proof covers: a
 // may-reach mark or an unproven entry.
 func (s *logosEFState) unchecked(k logosEFKey) bool {
@@ -2019,7 +2202,7 @@ func logosEFSame(a, b *logosEFState) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return maps.Equal(a.m, b.m) && maps.Equal(a.may, b.may) && maps.Equal(a.mayErr, b.mayErr) && logosEFAltSame(a.mayAlt, b.mayAlt) && logosEFAltSame(a.mayBroke, b.mayBroke) && logosEFCleanupSame(a.cleanups, b.cleanups)
+	return maps.Equal(a.m, b.m) && maps.Equal(a.may, b.may) && maps.Equal(a.mayErr, b.mayErr) && logosEFAltSame(a.mayAlt, b.mayAlt) && logosEFAltSame(a.mayBroke, b.mayBroke) && logosEFAltSame(a.brokeHere, b.brokeHere) && logosEFCleanupSame(a.cleanups, b.cleanups)
 }
 
 // logosEFAltSame reports whether two vetoed-guard sets hold the same
@@ -2035,6 +2218,30 @@ func logosEFAltSame(a, b map[logosEFKey][]logosEFKey) bool {
 		}
 	}
 	return true
+}
+
+// noteBrokeHere unions guards broken on a live path into the
+// per-invocation break set, keeping it separate from the cumulative
+// mayBroke history. The caller clones the destination before the first
+// addition. Sets stay sorted for stable state comparison.
+func noteBrokeHere(dst map[logosEFKey][]logosEFKey, v logosEFKey, gs ...logosEFKey) map[logosEFKey][]logosEFKey {
+	merged := append([]logosEFKey(nil), dst[v]...)
+	for _, g := range gs {
+		if !slices.Contains(merged, g) {
+			merged = append(merged, g)
+		}
+	}
+	slices.SortFunc(merged, func(x, y logosEFKey) int {
+		if x.root.name != y.root.name {
+			return strings.Compare(x.root.name, y.root.name)
+		}
+		return strings.Compare(x.path, y.path)
+	})
+	if dst == nil {
+		dst = make(map[logosEFKey][]logosEFKey, 1)
+	}
+	dst[v] = merged
+	return dst
 }
 
 type logosEFFrame struct {
@@ -3396,17 +3603,17 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 		if _, ok := st.mayErr[k]; ok {
 			mayErr := maps.Clone(st.mayErr)
 			delete(mayErr, k)
-			st = &logosEFState{m: st.m, may: st.may, mayErr: mayErr, mayAlt: st.mayAlt, mayBroke: st.mayBroke, cleanups: st.cleanups}
+			st = &logosEFState{m: st.m, may: st.may, mayErr: mayErr, mayAlt: st.mayAlt, mayBroke: st.mayBroke, brokeHere: st.brokeHere, cleanups: st.cleanups}
 		}
 		if _, ok := st.mayAlt[k]; ok {
 			mayAlt := maps.Clone(st.mayAlt)
 			delete(mayAlt, k)
-			st = &logosEFState{m: st.m, may: st.may, mayErr: st.mayErr, mayAlt: mayAlt, mayBroke: st.mayBroke, cleanups: st.cleanups}
+			st = &logosEFState{m: st.m, may: st.may, mayErr: st.mayErr, mayAlt: mayAlt, mayBroke: st.mayBroke, brokeHere: st.brokeHere, cleanups: st.cleanups}
 		}
 		if _, ok := st.mayBroke[k]; ok {
 			mayBroke := maps.Clone(st.mayBroke)
 			delete(mayBroke, k)
-			st = &logosEFState{m: st.m, may: st.may, mayErr: st.mayErr, mayAlt: st.mayAlt, mayBroke: mayBroke, cleanups: st.cleanups}
+			st = &logosEFState{m: st.m, may: st.may, mayErr: st.mayErr, mayAlt: st.mayAlt, mayBroke: mayBroke, brokeHere: st.brokeHere, cleanups: st.cleanups}
 		}
 		p.noteCreated(k, errV.name)
 	}
@@ -3681,7 +3888,7 @@ func (p *logosEFPass) carveAfter(rest []syntax.Stmt, st *logosEFState) (*logosEF
 	if st == nil || (len(st.m) == 0 && len(st.may) == 0) {
 		return nil, false
 	}
-	ks := &logosEFState{m: maps.Clone(st.m), may: maps.Clone(st.may), mayErr: maps.Clone(st.mayErr), mayAlt: maps.Clone(st.mayAlt), mayBroke: maps.Clone(st.mayBroke), cleanups: st.cleanups}
+	ks := &logosEFState{m: maps.Clone(st.m), may: maps.Clone(st.may), mayErr: maps.Clone(st.mayErr), mayAlt: maps.Clone(st.mayAlt), mayBroke: maps.Clone(st.mayBroke), brokeHere: maps.Clone(st.brokeHere), cleanups: st.cleanups}
 	i := 0
 	for i < len(rest) {
 		var cont bool
@@ -5103,7 +5310,7 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 		e.err = nil
 		m := maps.Clone(st.m)
 		m[k] = e
-		return &logosEFState{m: m, may: st.may, mayErr: st.mayErr, mayAlt: st.mayAlt, mayBroke: st.mayBroke, cleanups: st.cleanups}
+		return &logosEFState{m: m, may: st.may, mayErr: st.mayErr, mayAlt: st.mayAlt, mayBroke: st.mayBroke, brokeHere: st.brokeHere, cleanups: st.cleanups}
 	}
 	syntax.Inspect(lit, func(n syntax.Node) bool {
 		switch n := n.(type) {
@@ -5228,7 +5435,15 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 	saved := p.eff
 	eff := &logosEFEffects{inline: true, inside: inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
 	p.eff = eff
-	end := p.run(lit.Body, st.withoutLocals(inside))
+	entry := st.withoutLocals(inside)
+	if entry != nil {
+		// Breaks the invocation establishes on its own returning paths
+		// start from an empty set: the incoming cumulative history stays
+		// in mayBroke, so a repeated break is distinguishable from an
+		// inherited break plus a panic-path write.
+		entry = entry.clearBrokeHere()
+	}
+	end := p.run(lit.Body, entry)
 	p.eff = saved
 	if end == nil {
 		// A panic the literal recovers lets the call return: keep the
@@ -5390,10 +5605,42 @@ func (s *logosEFState) withoutLocals(inside map[*Var]bool) *logosEFState {
 			}
 		}
 	}
-	if !changedM && !changedMay && !changedMayErr && !changedAlt && !changedBroke {
+	brokeHere := s.brokeHere
+	changedHere := false
+	for k, gs := range s.brokeHere {
+		if inside[k.root] {
+			if !changedHere {
+				brokeHere = maps.Clone(brokeHere)
+				changedHere = true
+			}
+			delete(brokeHere, k)
+			continue
+		}
+		var kept []logosEFKey
+		narrowed := false
+		for _, g := range gs {
+			if inside[g.root] {
+				narrowed = true
+				continue
+			}
+			kept = append(kept, g)
+		}
+		if narrowed {
+			if !changedHere {
+				brokeHere = maps.Clone(brokeHere)
+				changedHere = true
+			}
+			if len(kept) == 0 {
+				delete(brokeHere, k)
+			} else {
+				brokeHere[k] = kept
+			}
+		}
+	}
+	if !changedM && !changedMay && !changedMayErr && !changedAlt && !changedBroke && !changedHere {
 		return s
 	}
-	return &logosEFState{m: m, may: may, mayErr: mayErr, mayAlt: mayAlt, mayBroke: mayBroke, cleanups: s.cleanups}
+	return &logosEFState{m: m, may: may, mayErr: mayErr, mayAlt: mayAlt, mayBroke: mayBroke, brokeHere: brokeHere, cleanups: s.cleanups}
 }
 
 // litCanRecover reports whether running lit can return after a panic: a
@@ -5817,6 +6064,14 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 			st = st.setMay(k)
 		}
 	}
+	// Guard breaks the literal establishes on its own paths join the
+	// outer flow with its may-reach marks: a synchronously running
+	// callback breaks the guard on a returning path of the enclosing
+	// invocation. Keys defined inside the literal stay local, and a
+	// callback that panics without recovery leaves no exit behind.
+	if end != nil && len(end.brokeHere) != 0 {
+		st = st.unionBrokeHere(end, inside)
+	}
 	return st.literalPairings(before, end, eff)
 }
 
@@ -5974,7 +6229,7 @@ func (s *logosEFState) literalPairings(before, end *logosEFState, eff *logosEFEf
 			}
 		}
 	}
-	return &logosEFState{m: s.m, may: s.may, mayErr: out, mayAlt: mayAlt, mayBroke: mayBroke, cleanups: s.cleanups}
+	return &logosEFState{m: s.m, may: s.may, mayErr: out, mayAlt: mayAlt, mayBroke: mayBroke, brokeHere: s.brokeHere, cleanups: s.cleanups}
 }
 
 // logosEFParentVisitor records the direct parent of every node it walks.
