@@ -311,13 +311,28 @@ func (fl *fileLower) ejectCtMethodSites(methods map[*syntax.Name]string, parents
 		if !ok || sel.Sel != name {
 			continue
 		}
-		node := syntax.Node(sel)
+		target := syntax.Node(sel)
 		var targs syntax.Expr
-		if idx, ok := parents[node].(*syntax.IndexExpr); ok && idx.X == node {
-			targs, node = idx.Index, idx
+		cur := syntax.Node(sel)
+		for {
+			p, ok := parents[cur]
+			if !ok {
+				break
+			}
+			if par, ok := p.(*syntax.ParenExpr); ok {
+				cur = par
+				continue
+			}
+			if idx, ok := p.(*syntax.IndexExpr); ok && syntax.Unparen(idx.X) == target {
+				targs = idx.Index
+				target = idx
+				cur = idx
+				continue
+			}
+			break
 		}
-		call, ok := parents[node].(*syntax.CallExpr)
-		if !ok || syntax.Unparen(call.Fun) != node {
+		call, ok := parents[cur].(*syntax.CallExpr)
+		if !ok || syntax.Unparen(call.Fun) != target {
 			continue
 		}
 		selection, ok := info.Selections[sel]
@@ -331,7 +346,7 @@ func (fl *fileLower) ejectCtMethodSites(methods map[*syntax.Name]string, parents
 		if ctInstByID(info, id) == nil {
 			continue
 		}
-		sites = append(sites, &ctMethodSite{call: call, sel: sel, targs: targs, id: id, start: fl.off(syntax.StartPos(call)), end: ctCallArgsEnd(ctx, cfExactEnd(ctx, node)), methodExpr: methodExpr})
+		sites = append(sites, &ctMethodSite{call: call, sel: sel, targs: targs, id: id, start: fl.off(syntax.StartPos(call)), end: ctCallArgsEnd(ctx, cfExactEnd(ctx, call.Fun)), methodExpr: methodExpr})
 	}
 	if len(sites) == 0 {
 		return
