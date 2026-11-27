@@ -148,6 +148,10 @@ func matchPackages(ld *Loader, ctx context.Context, m *search.Match, tags map[st
 							addPkg(pkgName)
 						} else if keepMain && search.LogosKeepCgoOnlyDir(dir) {
 							addPkg(pkgName)
+						} else if keepMain {
+							// A main-module directory that plain go skips but
+							// that holds LoGOs sources re-executes as logos.
+							cfg.MaybeRelaunchForDir(dir, true, "walk meets LoGOs sources")
 						}
 					})
 				}

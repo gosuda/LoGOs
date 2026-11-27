@@ -184,7 +184,11 @@ func main() {
 			}
 		}
 	}
-
+	// A plain go in a LoGOs module re-executes as logos with the same
+	// arguments: a LoGOs-only subcommand, or a logos.toml beside go.mod.
+	if !cfg.Logos {
+		cfg.MaybeRelaunchForArgs(args)
+	}
 	cmd, used := lookupCmd(args)
 	cfg.CmdName = strings.Join(args[:used], " ")
 	if len(cmd.Commands) > 0 {

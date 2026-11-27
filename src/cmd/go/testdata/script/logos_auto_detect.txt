@@ -1,0 +1,183 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# Trigger: LoGOs sources with no module marker. Plain go meets
+# main.lgo and re-executes as logos.
+cd nomark
+go run .
+stdout '^auto-detect$'
+go build -o $WORK/nomark$GOEXE .
+exec $WORK/nomark$GOEXE
+stdout '^auto-detect$'
+go list all
+stdout 'example\.com/nomark'
+go build -o $WORK/nomarkx$GOEXE .
+exec $WORK/nomarkx$GOEXE
+stdout '^auto-detect$'
+cd ..
+
+# Trigger: a ./... walk meets the LoGOs directory, which plain go
+# would skip silently.
+cd nomark
+go list ./...
+stdout 'example\.com/nomark'
+cd ..
+
+# Trigger: the module marker. logos.toml beside go.mod re-executes
+# before any package loads, so the .lgo test runs under go test.
+# The marker fires before the builder starts: one WORK line proves
+# the re-execution happened exactly once.
+cd marked
+go build -x -o $WORK/markedx$GOEXE .
+stderr -count=1 '(?m)^WORK='
+exec $WORK/markedx$GOEXE
+stdout '^marked$'
+go test ./...
+stdout '^ok\s+example\.com/marked/sub'
+cd ..
+
+# Trigger: a LoGOs-only subcommand.
+cd marked
+go lint ./...
+! stderr .
+! stdout .
+cd ..
+
+# Trigger: a Go package importing a LoGOs package of its workspace.
+# Each module keeps one kind, so the logos build succeeds.
+cd ws/g
+go build ./...
+go run .
+stdout '^from-logos$'
+cd ../..
+
+# Excluded commands keep upstream text inside a LoGOs module.
+cd marked
+go version
+stdout '^go version go'
+go env GOROOT
+cp stdout $WORK/go-goroot.txt
+logos env GOROOT
+cp stdout $WORK/logos-goroot.txt
+cmp $WORK/go-goroot.txt $WORK/logos-goroot.txt
+cd ..
+
+# A pure Go module is untouched.
+cd pure
+go run .
+stdout '^pure-go$'
+go version
+stdout '^go version go'
+go env GOROOT
+! stderr .
+cd ..
+
+# The standard library still builds inside a LoGOs module.
+cd marked
+go build fmt
+go list fmt
+stdout '^fmt$'
+cd ..
+
+-- nomark/go.mod --
+module example.com/nomark
+
+go 1.27
+
+-- nomark/main.lgo --
+package main
+
+import "fmt"
+
+func hello() string {
+	return "auto-detect"
+}
+
+func main() {
+	fmt.Println(hello())
+}
+
+-- marked/go.mod --
+module example.com/marked
+
+go 1.27
+
+-- marked/logos.toml --
+[project]
+
+-- marked/main.lgo --
+package main
+
+import "fmt"
+
+func hello() string {
+	return "marked"
+}
+
+func main() {
+	fmt.Println(hello())
+}
+
+-- marked/sub/sub.lgo --
+package sub
+
+func Hello() string {
+	return "marked sub"
+}
+
+-- marked/sub/sub_test.lgo --
+package sub
+
+import "testing"
+
+func TestHello(t *testing.T) {
+	if got := Hello(); got != "marked sub" {
+		t.Fatalf("Hello() = %q", got)
+	}
+}
+
+-- ws/go.work --
+go 1.27
+
+use (
+	./g
+	./l
+)
+
+-- ws/g/go.mod --
+module example.com/g
+
+go 1.27
+
+-- ws/g/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/l/lib"
+)
+
+func main() { fmt.Println(lib.Msg()) }
+
+-- ws/l/go.mod --
+module example.com/l
+
+go 1.27
+
+-- ws/l/lib/lib.lgo --
+package lib
+
+func Msg() string { return "from-logos" }
+
+-- pure/go.mod --
+module example.com/pure
+
+go 1.27
+
+-- pure/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("pure-go") }

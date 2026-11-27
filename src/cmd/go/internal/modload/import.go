@@ -779,6 +779,12 @@ func dirInModule(path, mpath, mdir string, isLocal bool) (dir string, haveGoFile
 		return fsys.IsGoDir(dir)
 	})
 
+	// A local directory that plain go rejects but that holds LoGOs
+	// sources re-executes as logos before the missing-package error.
+	if err == nil && !haveGoFiles && isLocal {
+		cfg.MaybeRelaunchForDir(dir, true, "import resolves to LoGOs sources")
+	}
+
 	return dir, haveGoFiles, err
 }
 
