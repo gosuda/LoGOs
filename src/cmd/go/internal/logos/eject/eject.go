@@ -2800,14 +2800,11 @@ func absReplaceTarget(absBase, newPath string) string {
 }
 
 // outsideModule reports whether an absolute target lies outside the
-// module root. A target on another drive is outside by construction
-// and is decided without filepath.Rel, which fails across drives, so
-// an outside target can never abort eject. Inside targets return
-// false and are rebased at the ejected copy by the caller.
+// module root. filepath.Rel fails across drives, so a target on another
+// drive is outside, and it compares drive letters without case, so
+// c: and C: are one drive. Inside targets return false and are rebased
+// at the ejected copy by the caller.
 func outsideModule(absOrig, absTarget string) bool {
-	if filepath.VolumeName(absTarget) != filepath.VolumeName(absOrig) {
-		return true
-	}
 	rel, err := filepath.Rel(absOrig, absTarget)
 	return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
