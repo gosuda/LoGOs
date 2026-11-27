@@ -80,6 +80,12 @@ func (fc *funcLower) nextErr() string {
 	return spelling
 }
 
+// nextFun mints the callee-capture temporary for one call. The _logos_f
+// spelling marks lowering-generated method value captures: the eject
+// extended-CONNECT rewrite trusts only assignments with this left-hand
+// side, so a same-named user method value is never rewritten into the
+// guard. User code cannot take this spelling
+// ([correctness::reserved_identifier]).
 func (fc *funcLower) nextFun() string {
 	spelling := fmt.Sprintf("_logos_f%d", fc.funSeq)
 	fc.funSeq++
