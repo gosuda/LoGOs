@@ -1013,6 +1013,18 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 				}
 				delete(brokeOut, v)
 			}
+			if _, ok := hereOut[v]; ok {
+				if !hereChanged {
+					hereOut = maps.Clone(s.brokeHere)
+					hereChanged = true
+				}
+				delete(hereOut, v)
+			}
+			continue
+		}
+		// A checked result carries no live pairing to break: overwriting
+		// its guard records nothing.
+		if !s.may[v] {
 			continue
 		}
 		merged := append([]logosEFKey(nil), brokeOut[v]...)
@@ -1055,6 +1067,13 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 			brokeChanged = true
 		}
 		delete(brokeOut, v)
+		if _, ok := hereOut[v]; ok {
+			if !hereChanged {
+				hereOut = maps.Clone(s.brokeHere)
+				hereChanged = true
+			}
+			delete(hereOut, v)
+		}
 	}
 	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
@@ -1089,9 +1108,16 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 				}
 				delete(brokeOut, v)
 			}
+			if _, ok := hereOut[v]; ok {
+				if !hereChanged {
+					hereOut = maps.Clone(s.brokeHere)
+					hereChanged = true
+				}
+				delete(hereOut, v)
+			}
 			continue
 		}
-		if len(broken) != 0 {
+		if len(broken) != 0 && s.may[v] {
 			merged := append([]logosEFKey(nil), brokeOut[v]...)
 			for _, g := range broken {
 				if !slices.Contains(merged, g) {
@@ -1210,6 +1236,16 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 				}
 				delete(brokeOut, v)
 			}
+			if _, ok := hereOut[v]; ok {
+				if !hereChanged {
+					hereOut = maps.Clone(s.brokeHere)
+					hereChanged = true
+				}
+				delete(hereOut, v)
+			}
+			continue
+		}
+		if !s.may[v] {
 			continue
 		}
 		merged := append([]logosEFKey(nil), brokeOut[v]...)
@@ -1252,6 +1288,13 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 			brokeChanged = true
 		}
 		delete(brokeOut, v)
+		if _, ok := hereOut[v]; ok {
+			if !hereChanged {
+				hereOut = maps.Clone(s.brokeHere)
+				hereChanged = true
+			}
+			delete(hereOut, v)
+		}
 	}
 	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
@@ -1284,9 +1327,16 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 				}
 				delete(brokeOut, v)
 			}
+			if _, ok := hereOut[v]; ok {
+				if !hereChanged {
+					hereOut = maps.Clone(s.brokeHere)
+					hereChanged = true
+				}
+				delete(hereOut, v)
+			}
 			continue
 		}
-		if len(broken) != 0 {
+		if len(broken) != 0 && s.may[v] {
 			merged := append([]logosEFKey(nil), brokeOut[v]...)
 			for _, g := range broken {
 				if !slices.Contains(merged, g) {

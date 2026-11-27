@@ -348,3 +348,48 @@ func probeFwdPopulated() func() (int, error) {
 	return cb
 }
 
+// A safe read with an early check plus a saved callback stays silent: the
+// guard overwrite after the check records no break.
+func probeSafeChecked() {
+	h := heldField{}
+	var refresh func()
+	h.stats, h.err = fetchHeld()
+	if h.err != nil {
+		return
+	}
+	func() {
+		h.err = nil
+		refresh = func() { h.stats, _ = fetchHeld() }
+	}()
+	use(h.stats)
+	_ = refresh
+}
+
+// A safe read with a plain result reset between the overwrite and the save
+// stays silent: the reset clears the break.
+func probeSafeReset() {
+	h := heldField{}
+	var refresh func()
+	h.stats, h.err = fetchHeld()
+	func() {
+		h.err = nil
+		h.stats = 0
+		refresh = func() { h.stats, _ = fetchHeld() }
+	}()
+	use(h.stats)
+	_ = refresh
+}
+
+// Control: a guard break with the unchecked result surviving still fails.
+func probeStaleGuardControl() {
+	h := heldField{}
+	var refresh func()
+	h.stats, h.err = fetchHeld()
+	func() {
+		h.err = nil
+		refresh = func() { h.stats, _ = fetchHeld() }
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+	_ = refresh
+}
+
