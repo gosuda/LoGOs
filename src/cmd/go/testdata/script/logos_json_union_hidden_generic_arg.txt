@@ -1,0 +1,52 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# An exported generic instantiation with an unexported type argument is not
+# spellable by a different holder package: the checker must reject the
+# pointer union member just as the generated decoder does, instead of
+# accepting the exported origin while ignoring its arguments. The union is
+# defined in lib where the argument is same-package, so lib builds; the
+# importer in main cannot name the argument, so main must fail.
+cd bad
+! logos run .
+stderr 'points to an unexported type'
+
+-- bad/go.mod --
+module example.com/unionhiddengenericarg
+
+go 1.27
+-- bad/lib/lib.lgo --
+package lib
+
+type hidden struct {
+	X int64 `json:"x"`
+}
+
+type Box[T any] struct {
+	V T `json:"v"`
+}
+
+func (b *Box[T]) UnmarshalJSON(data []byte) error { return nil }
+
+type Other struct {
+	Y string `json:"y"`
+}
+
+func (o *Other) UnmarshalJSON(data []byte) error { return nil }
+
+type U interface {
+	*Box[hidden] | *Other
+}
+-- bad/main.lgo --
+package main
+
+import "example.com/unionhiddengenericarg/lib"
+
+type H struct {
+	Item lib.U `json:"item"`
+}
+
+func main() {
+	var h H
+	_ = h
+}

@@ -3485,10 +3485,12 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 			if st == nil {
 				return false
 			}
-			// Drain scope cleanups before function cleanups, in the same
-			// order as lowering exits scopes before returning.
-			st = p.finishCleanups(st, func(call logosEFDeferredCall) bool { return call.scope != nil })
-			st = p.finishCleanups(st, func(call logosEFDeferredCall) bool { return call.scope == nil })
+			// Exit cleanups run only when the call fails, so check them on
+			// a separate failure-edge state: their writes must not reach
+			// the success continuation the try returns below. Drain scope
+			// cleanups before function cleanups, in the same order as
+			// lowering exits scopes before returning.
+			p.finishCleanups(p.finishCleanups(st, func(call logosEFDeferredCall) bool { return call.scope != nil }), func(call logosEFDeferredCall) bool { return call.scope == nil })
 			return false
 		case *syntax.CoalesceExpr:
 			// The fallback runs only when the option is absent: join the
@@ -4292,6 +4294,12 @@ func (p *logosEFPass) labeled(s *syntax.LabeledStmt, st *logosEFState) *logosEFS
 
 func (p *logosEFPass) exprStmt(s *syntax.ExprStmt, st *logosEFState) *logosEFState {
 	st = p.expr(s.X, st)
+	if st == nil {
+		// Argument evaluation with no normal continuation (for example a
+		// panic argument that never returns) never reaches a call here:
+		// there is no panic to record and no state to drain.
+		return nil
+	}
 	call, ok := syntax.Unparen(s.X).(*syntax.CallExpr)
 	if !ok {
 		return st
@@ -5425,7 +5433,7 @@ func (p *logosEFPass) litCanRecover(lit *syntax.FuncLit) bool {
 			// Wrapped calls never recover: keep looking for a plain one.
 		} else if inner == nil {
 			hit = true
-		} else if inner.Body != nil && bodyHasDirectRecover(p, inner.Body) && !p.bodyAlwaysPanics(inner.Body) {
+		} else if inner.Body != nil && cleanupRecoversOnAllPaths(p, inner.Body) && !p.bodyAlwaysPanics(inner.Body) {
 			hit = true
 		}
 		return true
@@ -5441,13 +5449,13 @@ func (p *logosEFPass) litCanRecover(lit *syntax.FuncLit) bool {
 func (p *logosEFPass) panicCanRecover(pst *logosEFState, lit *syntax.FuncLit) bool {
 	for node := pst.cleanups; node != nil; node = node.next {
 		if node.call.lit != nil {
-			if node.call.lit.Body != nil && bodyHasDirectRecover(p, node.call.lit.Body) && !p.bodyAlwaysPanics(node.call.lit.Body) {
+			if node.call.lit.Body != nil && cleanupRecoversOnAllPaths(p, node.call.lit.Body) && !p.bodyAlwaysPanics(node.call.lit.Body) {
 				return true
 			}
 			continue
 		}
 		for _, call := range node.choice {
-			if call.lit != nil && call.lit.Body != nil && bodyHasDirectRecover(p, call.lit.Body) && !p.bodyAlwaysPanics(call.lit.Body) {
+			if call.lit != nil && call.lit.Body != nil && cleanupRecoversOnAllPaths(p, call.lit.Body) && !p.bodyAlwaysPanics(call.lit.Body) {
 				return true
 			}
 		}
@@ -5540,14 +5548,177 @@ func (p *logosEFPass) bodyAlwaysPanics(body *syntax.BlockStmt) bool {
 	return false
 }
 
-// bodyHasDirectRecover reports whether body calls the recover builtin
-// outside any nested literal: such a call runs as part of the body, so a
-// body running as a deferred call observes a panic. Calls inside a nested
+// cleanupRecoversOnAllPaths reports whether every path through body that
+// completes normally executes a reached recover call. A recover under a
+// condition, after a return, or inside an unexecuted branch leaves a
+// normal path without one and does not count. Calls inside a nested
 // literal do not count unless that literal is itself deferred, which the
 // caller checks separately.
-func bodyHasDirectRecover(p *logosEFPass, body *syntax.BlockStmt) bool {
+func cleanupRecoversOnAllPaths(p *logosEFPass, body *syntax.BlockStmt) bool {
+	if body == nil {
+		return false
+	}
+	cont, rec, ok := cleanupSeqRecovers(p, body.List, false)
+	return ok && (!cont || rec)
+}
+
+func cleanupSeqRecovers(p *logosEFPass, list []syntax.Stmt, recovered bool) (cont, out, ok bool) {
+	out = recovered
+	for _, s := range list {
+		c, r, o := cleanupStmtRecovers(p, s, out)
+		if !o {
+			return false, false, false
+		}
+		if !c {
+			return false, false, true
+		}
+		out = r
+	}
+	return true, out, true
+}
+
+func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, out, ok bool) {
+	switch s := s.(type) {
+	case *syntax.EmptyStmt:
+		return true, recovered, true
+	case *syntax.LabeledStmt:
+		return cleanupStmtRecovers(p, s.Stmt, recovered)
+	case *syntax.BlockStmt:
+		if s == nil {
+			return true, recovered, true
+		}
+		return cleanupSeqRecovers(p, s.List, recovered)
+	case *syntax.BranchStmt:
+		return false, recovered, recovered
+	case *syntax.ReturnStmt:
+		rec := recovered || cleanupExprRecovers(p, s.Results)
+		return false, rec, rec
+	case *syntax.ExprStmt:
+		if call, isCall := syntax.Unparen(s.X).(*syntax.CallExpr); isCall {
+			if name, isName := syntax.Unparen(call.Fun).(*syntax.Name); isName {
+				if builtin, isBuiltin := p.check.Uses[name].(*Builtin); isBuiltin && builtin.Name() == "panic" {
+					return false, recovered, true
+				}
+			}
+		}
+		return true, recovered || cleanupExprRecovers(p, s), true
+	case *syntax.IfStmt:
+		rec := recovered || cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Cond)
+		ct, _, ot := cleanupElseRecovers(p, s.Then, rec)
+		ce, _, oe := cleanupElseRecovers(p, s.Else, rec)
+		if !ot || !oe {
+			return false, false, false
+		}
+		return ct || ce, rec, true
+	case *syntax.ForStmt:
+		rec := recovered || cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Cond)
+		return true, rec, rec
+	case *syntax.SwitchStmt:
+		rec := recovered || cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Tag)
+		return cleanupSwitchRecovers(p, s.Body, rec)
+	case *syntax.SelectStmt:
+		var bodies [][]syntax.Stmt
+		hasDefault := false
+		for _, c := range s.Body {
+			if c.Comm == nil {
+				hasDefault = true
+			}
+			bodies = append(bodies, c.Body)
+		}
+		if !cleanupClausesRecover(p, bodies, recovered) {
+			return false, false, false
+		}
+		if !hasDefault && !recovered {
+			return false, false, false
+		}
+		return true, recovered, true
+	case *syntax.ConstIfStmt:
+		rec := recovered || cleanupExprRecovers(p, s.Cond)
+		ct, _, ot := cleanupElseRecovers(p, s.Then, rec)
+		ce, _, oe := cleanupElseRecovers(p, s.Else, rec)
+		if !ot || !oe {
+			return false, false, false
+		}
+		return ct || ce, rec, true
+	case *syntax.ConstSwitchStmt:
+		rec := recovered || cleanupExprRecovers(p, s.Targ)
+		var bodies [][]syntax.Stmt
+		hasDefault := false
+		for _, c := range s.Cases {
+			if c.Type == nil {
+				hasDefault = true
+			}
+			bodies = append(bodies, c.Body)
+		}
+		if !cleanupClausesRecover(p, bodies, rec) {
+			return false, false, false
+		}
+		if !hasDefault && !rec {
+			return false, false, false
+		}
+		return true, rec, true
+	case *syntax.ConstForStmt:
+		rec := recovered || cleanupExprRecovers(p, s.Range)
+		return true, rec, rec
+	case *syntax.GroupStmt:
+		rec := recovered || cleanupExprRecovers(p, s.Ctx) || cleanupExprRecovers(p, s.Limit)
+		return true, rec, true
+	case *syntax.GroupChild, *syntax.CallStmt, *syntax.ScopeDeferStmt, *syntax.ErrdeferStmt:
+		return true, recovered, true
+	case *syntax.SendStmt, *syntax.AssignStmt, *syntax.DeclStmt:
+		return true, recovered || cleanupExprRecovers(p, s), true
+	default:
+		return true, recovered, recovered
+	}
+}
+
+func cleanupElseRecovers(p *logosEFPass, e syntax.Stmt, recovered bool) (cont, out, ok bool) {
+	if e == nil {
+		return true, recovered, recovered
+	}
+	if b, isBlock := e.(*syntax.BlockStmt); isBlock {
+		if b == nil {
+			return true, recovered, true
+		}
+		return cleanupSeqRecovers(p, b.List, recovered)
+	}
+	return cleanupStmtRecovers(p, e, recovered)
+}
+
+func cleanupSwitchRecovers(p *logosEFPass, clauses []*syntax.CaseClause, recovered bool) (cont, out, ok bool) {
+	var bodies [][]syntax.Stmt
+	hasDefault := false
+	for _, c := range clauses {
+		if c.Cases == nil {
+			hasDefault = true
+		}
+		bodies = append(bodies, c.Body)
+	}
+	if !cleanupClausesRecover(p, bodies, recovered) {
+		return false, false, false
+	}
+	if !hasDefault && !recovered {
+		return false, false, false
+	}
+	return true, recovered, true
+}
+
+func cleanupClausesRecover(p *logosEFPass, bodies [][]syntax.Stmt, recovered bool) bool {
+	for _, body := range bodies {
+		cc, rc, oc := cleanupSeqRecovers(p, body, recovered)
+		if !oc || (cc && !rc) {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanupExprRecovers(p *logosEFPass, e syntax.Node) bool {
+	if e == nil {
+		return false
+	}
 	hit := false
-	syntax.Inspect(body, func(n syntax.Node) bool {
+	syntax.Inspect(e, func(n syntax.Node) bool {
 		if hit {
 			return false
 		}
@@ -5555,9 +5726,9 @@ func bodyHasDirectRecover(p *logosEFPass, body *syntax.BlockStmt) bool {
 		case *syntax.FuncLit, *syntax.LambdaExpr:
 			return false
 		}
-		if c, ok := n.(*syntax.CallExpr); ok {
-			if f, ok := syntax.Unparen(c.Fun).(*syntax.Name); ok {
-				if b, ok := p.check.Uses[f].(*Builtin); ok && b.Name() == "recover" {
+		if c, isCall := n.(*syntax.CallExpr); isCall {
+			if f, isName := syntax.Unparen(c.Fun).(*syntax.Name); isName {
+				if b, isBuiltin := p.check.Uses[f].(*Builtin); isBuiltin && b.Name() == "recover" {
 					hit = true
 					return false
 				}

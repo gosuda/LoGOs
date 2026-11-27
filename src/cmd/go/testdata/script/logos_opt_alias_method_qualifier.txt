@@ -1,0 +1,37 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A qualified method called through an imported alias keeps its restored
+# optional return: the alias rebuild retargets the generic instance to the
+# new origin once every shell is filled.
+cd good
+logos run .
+stdout '^alias-method ok true$'
+
+-- good/go.mod --
+module example.com/optaliasmethod
+
+go 1.27
+-- good/lib/lib.lgo --
+package lib
+
+type Box[T any] struct {
+	V T
+}
+
+func (b Box[T]) Find() int? { return nil }
+
+type API = struct{ Value Box[int] }
+-- good/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/optaliasmethod/lib"
+)
+
+func main() {
+	var a lib.API
+	fmt.Println("alias-method ok", a.Value.Find() == nil)
+}

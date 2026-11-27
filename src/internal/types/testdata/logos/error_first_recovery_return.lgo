@@ -1,0 +1,22 @@
+package p
+
+func fetchWR() (int, error) { return 1, nil }
+func useWR(n int) {}
+
+// A recovery return alongside a separate normal exit: when stop is true the
+// literal recovers and returns without resetting n, so the later read must
+// still report.
+func recoveryReturnWR(stop bool) error {
+	n, err := fetchWR()
+	_ = err
+	func() {
+		if stop {
+			defer func() { _ = recover() }()
+			defer func() { panic("stop") }()
+			return
+		}
+		n = 0
+	}()
+	useWR(n /* ERROR "[correctness::result_before_error_check]" */)
+	return nil
+}

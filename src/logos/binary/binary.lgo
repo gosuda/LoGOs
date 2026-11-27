@@ -46,8 +46,11 @@
 // such as struct{} decodes without a store, matching the original's
 // recursive walk. Structs with unexported fields from another package
 // likewise take the original path: comptime cannot see the rest, so no
-// partial layout stands in for them. Blank (_) fields take the original
-// path with the same skip semantics.
+// partial layout stands in for them. A foreign struct with only
+// zero-width visible fields, such as an exported struct{} beside a
+// hidden uint32, likewise keeps every byte through the original
+// encoder. Blank (_) fields take the original path with the same skip
+// semantics.
 //
 // Mapping from the original (data any) to the twin: ReadInto and
 // Decode take *T where the original takes a pointer or slice operand,
