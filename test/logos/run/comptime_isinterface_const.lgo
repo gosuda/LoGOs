@@ -1,0 +1,41 @@
+// run
+
+package main
+
+import "comptime"
+
+type described344 interface{ String() string }
+
+type greeter344 struct{ who string }
+
+func (g greeter344) String() string { return "hi " + g.who }
+
+func kindOfConst344[T any]() string {
+	const if comptime.IsInterface[const T]() {
+		return "interface"
+	}
+	return "concrete"
+}
+
+func needsMethod344[T any](v T) string {
+	const if comptime.IsInterface[const T]() {
+		return v.String()
+	}
+	return "concrete"
+}
+
+func main() {
+	if kindOfConst344[int]() != "concrete" {
+		panic("IsInterface[const int] was not concrete")
+	}
+	if kindOfConst344[described344]() != "interface" {
+		panic("IsInterface[const described344] was not interface")
+	}
+	if needsMethod344(7) != "concrete" {
+		panic("concrete instantiation missed the concrete arm")
+	}
+	var d described344 = greeter344{who: "world"}
+	if needsMethod344(d) != "hi world" {
+		panic("interface instantiation missed the interface arm")
+	}
+}
