@@ -229,8 +229,69 @@ func ejectedSelected(expr constraint.Expr) bool {
 // boolean identities: logosejected is set, logosconc is unset because the
 // support copy has no monitored file. It returns nil for a
 // constantly-true residual and reports a constantly-false one via
-// excluded.
+// excluded. When folding would change the Go version the build line
+// implies, it keeps the original structure with version-neutral mode
+// tags instead, so the emitted file selects the same files under the
+// same language version (a folded go1.N tag would pin the file to that
+// version's semantics, such as shared loop variables before go1.22).
 func foldEjectedGuard(expr constraint.Expr) (guard constraint.Expr, excluded bool) {
+	guard, excluded = foldEjectedModeTags(expr)
+	if excluded {
+		return nil, true
+	}
+	if constraint.GoVersion(guard) != constraint.GoVersion(expr) {
+		guard = neutralizeEjectedGuard(expr)
+	}
+	return guard, false
+}
+
+// neutralizeEjectedGuard keeps the original expression structure but
+// replaces ejected-mode tags with version-neutral equivalents holding
+// the same truth value with logosejected set and logosconc unset:
+// logosejected and !logosconc become !ignore (always true), !logosejected
+// and logosconc become ignore (always false). Neither spelling names a
+// Go version, so constraint.GoVersion reports the same version as for
+// the original expression while plain-Go builds select the same files
+// as the folded residual.
+func neutralizeEjectedGuard(expr constraint.Expr) constraint.Expr {
+	modeLiteral := func(tag string, negated bool) (constraint.Expr, bool) {
+		switch tag {
+		case "logosejected":
+			if negated {
+				return &constraint.TagExpr{Tag: "ignore"}, true
+			}
+			return &constraint.NotExpr{X: &constraint.TagExpr{Tag: "ignore"}}, true
+		case "logosconc":
+			if negated {
+				return &constraint.NotExpr{X: &constraint.TagExpr{Tag: "ignore"}}, true
+			}
+			return &constraint.TagExpr{Tag: "ignore"}, true
+		}
+		return nil, false
+	}
+	switch e := expr.(type) {
+	case *constraint.TagExpr:
+		if neutral, ok := modeLiteral(e.Tag, false); ok {
+			return neutral
+		}
+		return e
+	case *constraint.NotExpr:
+		if tag, ok := e.X.(*constraint.TagExpr); ok {
+			if neutral, ok := modeLiteral(tag.Tag, true); ok {
+				return neutral
+			}
+		}
+		return &constraint.NotExpr{X: neutralizeEjectedGuard(e.X)}
+	case *constraint.AndExpr:
+		return &constraint.AndExpr{X: neutralizeEjectedGuard(e.X), Y: neutralizeEjectedGuard(e.Y)}
+	case *constraint.OrExpr:
+		return &constraint.OrExpr{X: neutralizeEjectedGuard(e.X), Y: neutralizeEjectedGuard(e.Y)}
+	default:
+		return expr
+	}
+}
+
+func foldEjectedModeTags(expr constraint.Expr) (guard constraint.Expr, excluded bool) {
 	switch e := expr.(type) {
 	case *constraint.TagExpr:
 		switch e.Tag {
@@ -242,7 +303,7 @@ func foldEjectedGuard(expr constraint.Expr) (guard constraint.Expr, excluded boo
 			return e, false
 		}
 	case *constraint.NotExpr:
-		g, ex := foldEjectedGuard(e.X)
+		g, ex := foldEjectedModeTags(e.X)
 		if ex {
 			return nil, false
 		}
@@ -254,11 +315,11 @@ func foldEjectedGuard(expr constraint.Expr) (guard constraint.Expr, excluded boo
 		}
 		return &constraint.NotExpr{X: g}, false
 	case *constraint.AndExpr:
-		gx, exx := foldEjectedGuard(e.X)
+		gx, exx := foldEjectedModeTags(e.X)
 		if exx {
 			return nil, true
 		}
-		gy, exy := foldEjectedGuard(e.Y)
+		gy, exy := foldEjectedModeTags(e.Y)
 		if exy {
 			return nil, true
 		}
@@ -273,11 +334,11 @@ func foldEjectedGuard(expr constraint.Expr) (guard constraint.Expr, excluded boo
 		}
 		return &constraint.AndExpr{X: gx, Y: gy}, false
 	case *constraint.OrExpr:
-		gx, exx := foldEjectedGuard(e.X)
+		gx, exx := foldEjectedModeTags(e.X)
 		if !exx && gx == nil {
 			return nil, false
 		}
-		gy, exy := foldEjectedGuard(e.Y)
+		gy, exy := foldEjectedModeTags(e.Y)
 		if !exy && gy == nil {
 			return nil, false
 		}

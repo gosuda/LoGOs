@@ -66,6 +66,14 @@ func TestFoldEjectedGuardSpecializes(t *testing.T) {
 		{"//go:build !logosconc", "", false},
 		{"//go:build logosconc", "", true},
 		{"//go:build !ejecttestjsonoff", "!ejecttestjsonoff", false},
+		// A folded release tag would pin the file to that Go version's
+		// semantics, so the residual keeps the original structure with
+		// version-neutral mode tags instead.
+		{"//go:build !logosejected || go1.21", "ignore || go1.21", false},
+		{"//go:build !logosconc || go1.21", "", false},
+		// The original already implies this version, so the folded tag
+		// stays: no structure is needed to preserve it.
+		{"//go:build logosejected && go1.21", "go1.21", false},
 	}
 	for _, tc := range cases {
 		guard, excluded := foldEjectedGuard(parseEjectedGuard(t, tc.line))
@@ -79,6 +87,39 @@ func TestFoldEjectedGuardSpecializes(t *testing.T) {
 		}
 		if got != tc.residual {
 			t.Errorf("foldEjectedGuard(%q) = %q, want %q", tc.line, got, tc.residual)
+		}
+	}
+}
+
+// The residual must imply the same Go version as the original guard: a
+// folded release tag would pin the emitted file to older language
+// semantics while the original left the package default in force.
+func TestFoldEjectedGuardPreservesGoVersion(t *testing.T) {
+	lines := []string{
+		"//go:build !logosejected || !windows",
+		"//go:build logosejected",
+		"//go:build windows",
+		"//go:build logosejected && windows",
+		"//go:build !logosconc",
+		"//go:build !ejecttestjsonoff",
+		"//go:build !logosejected || go1.21",
+		"//go:build !logosconc || go1.21",
+		"//go:build logosejected && go1.21",
+		"//go:build logosejected || go1.21",
+		"//go:build (!logosejected || windows) && go1.24",
+	}
+	for _, line := range lines {
+		expr := parseEjectedGuard(t, line)
+		guard, excluded := foldEjectedGuard(expr)
+		if excluded {
+			continue
+		}
+		var got string
+		if guard != nil {
+			got = constraint.GoVersion(guard)
+		}
+		if want := constraint.GoVersion(expr); got != want {
+			t.Errorf("foldEjectedGuard(%q) implies Go version %q, want %q (residual %v)", line, got, want, guard)
 		}
 	}
 }
