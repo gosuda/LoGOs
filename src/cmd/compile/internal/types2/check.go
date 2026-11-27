@@ -196,6 +196,7 @@ type Checker struct {
 	logosCtTParamDecl   bool                 // logos comptime instantiation: true while any generic declaration is being checked.
 	logosTypeOfDeferred map[syntax.Expr]bool // logos comptime instantiation: TypeOf calls whose argument is still a type parameter.
 	logosCtSubst        map[*TypeParam]Type  // logos comptime instantiation: substitution for the running analysis.
+	logosCtFuncDecl     *syntax.FuncDecl     // logos comptime instantiation: cloned declaration of the running instance check, for Error liveness.
 	logosCtAbstract     map[Object]Type
 	logosCtPos          []syntax.Pos       // logos comptime instantiation: call site of the current exact body check.
 	logosCtNotes        []syntax.Pos       // logos comptime instantiation: parent positions for instantiated-here notes; visit pushes parent, analyze pushes instance site.

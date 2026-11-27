@@ -646,7 +646,7 @@ func (fl *fileLower) reduceComptimeInstance(rec *types2.LogosCtInst) (*syntax.Fu
 	name := nameOf(rec.Decl.Name.Pos(), rec.Sym)
 	fn := types2.NewFunc(name.Pos(), rec.Pkg, rec.Sym, rec.Sig)
 	info.Defs[name] = fn
-	r := ctReducer{fl: fl, owner: rec.Pkg, info: info, binders: make(map[types2.Object]types2.Type, len(rec.Decl.TParamList))}
+	r := ctReducer{fl: fl, owner: rec.Pkg, info: info, binders: make(map[types2.Object]types2.Type, len(rec.Decl.TParamList)), decl: rec.Decl}
 	for i, param := range rec.Decl.TParamList {
 		if binder := fn.Scope().Lookup(param.Name.Value); binder != nil && i < len(rec.Targs) {
 			r.binders[binder] = rec.Targs[i]
@@ -676,6 +676,7 @@ type ctReducer struct {
 	binders   map[types2.Object]types2.Type
 	nextLabel int
 	err       error
+	decl      *syntax.FuncDecl
 }
 
 type ctFrame struct {
@@ -787,10 +788,17 @@ func (r *ctReducer) clone(n syntax.Node, f *ctFrame) syntax.Node {
 				f.keepCalls = make(map[*syntax.CallExpr]bool)
 			}
 			f.keepCalls[call] = true
+		} else if call, ok := syntax.Unparen(n.Call).(*syntax.CallExpr); ok && cfComptimeCall(call, f.info) == "Error" && f.info.LogosCtSilentError[call] {
+			// A deferred silenced Error never runs: the selected case
+			// terminates, so the defer never registers. Replace it like
+			// a plain silenced Error, keeping message uses alive.
+			out = r.silentErrorStmt(n.Pos(), call, f)
 		}
 	case *syntax.ExprStmt:
 		if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && f.info.LogosTagGet[call].Value != nil {
 			out = assignOf(n.Pos(), []syntax.Expr{nameOf(n.Pos(), "_")}, []syntax.Expr{r.clone(call, f).(syntax.Expr)})
+		} else if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && cfComptimeCall(call, f.info) == "Error" && f.info.LogosCtSilentError[call] {
+			out = r.silentErrorStmt(n.Pos(), call, f)
 		}
 	}
 	if out == nil {
@@ -1001,6 +1009,9 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 		switch cfComptimeCall(e, f.info) {
 		case "Error":
 			if len(e.ArgList) == 1 {
+				if f.info.LogosCtSilentError[e] {
+					return nil
+				}
 				if msg, ok := cfComptimeErrorMsg(f.info, e.ArgList[0]); ok {
 					r.invalid(e, "[comptime::error] "+msg)
 				} else {
@@ -1018,6 +1029,54 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 	}
 	return nil
 }
+
+// silentErrorStmt replaces a comptime.Error call the instance check silenced
+// with blank uses of the outer local variables its message mentions. The
+// prepared check still needs those uses, but the dead message must not retain
+// private package dependencies in an instance ejected into another package.
+// Variables declared inside the message belong to the discarded expression.
+func (r *ctReducer) silentErrorStmt(pos syntax.Pos, call *syntax.CallExpr, f *ctFrame) syntax.Node {
+	if len(call.ArgList) != 1 {
+		return at(&syntax.EmptyStmt{}, pos)
+	}
+	msg := call.ArgList[0]
+	declared := make(map[types2.Object]bool)
+	syntax.Inspect(msg, func(n syntax.Node) bool {
+		if obj := f.info.Implicits[n]; obj != nil {
+			declared[obj] = true
+		}
+		if name, ok := n.(*syntax.Name); ok {
+			if obj := f.info.Defs[name]; obj != nil {
+				declared[obj] = true
+			}
+		}
+		return true
+	})
+	var lhs, rhs []syntax.Expr
+	seen := make(map[*types2.Var]bool)
+	syntax.Inspect(msg, func(n syntax.Node) bool {
+		name, ok := n.(*syntax.Name)
+		if !ok {
+			return true
+		}
+		obj, ok := f.info.Uses[name].(*types2.Var)
+		if !ok || obj.IsField() || declared[obj] || seen[obj] {
+			return true
+		}
+		if pkg := obj.Pkg(); pkg != nil && obj.Parent() == pkg.Scope() {
+			return true
+		}
+		seen[obj] = true
+		lhs = append(lhs, nameOf(name.Pos(), "_"))
+		rhs = append(rhs, r.clone(name, f).(syntax.Expr))
+		return true
+	})
+	if len(rhs) == 0 {
+		return at(&syntax.EmptyStmt{}, pos)
+	}
+	return assignOf(pos, lhs, rhs)
+}
+
 func (f *ctFrame) caseType(c *syntax.ConstSwitchCase, elem int) types2.Type {
 	if elem < 0 || elem >= len(c.Elems) {
 		return nil
