@@ -120,7 +120,7 @@ Module rules:
 
 - A module holds only `.lgo` packages or only `.go` packages; a package holds one kind.
 - A `.lgo` package can import a Go package, and a `.go` package can import a LoGOs package under `logos`.
-- Plain `go` ignores `.lgo` files while it loads packages. Invoked as `go`, the binary re-executes as `logos` for a LoGOs-only subcommand, for a `logos.toml` beside `go.mod`, and for main-module directories that hold LoGOs sources and no `.go` files; `go version`, `go env`, `go bug`, and `go telemetry` keep the upstream text; `go help` keeps the upstream text except with a LoGOs-only subcommand as its topic, which re-executes as `logos` to describe it; and `go fmt` formats `.go` files and ignores `.lgo` files without re-executing.
+- Plain `go` ignores `.lgo` files while it loads packages. Invoked as `go`, the binary re-executes as `logos` for a LoGOs-only subcommand, for a `logos.toml` beside `go.mod`, for a directory the command names or an import that resolves to LoGOs sources and no `.go` files in the main modules or in a dependency, and for a walk that meets such a directory in the main modules; `go version`, `go env`, `go bug`, and `go telemetry` keep the upstream text; `go help` keeps the upstream text except with a LoGOs-only subcommand as its topic, which re-executes as `logos` to describe it; and `go fmt` formats `.go` files and ignores `.lgo` files without re-executing. The standard library never triggers a re-execution.
 
 ### Eject to standard Go
 
