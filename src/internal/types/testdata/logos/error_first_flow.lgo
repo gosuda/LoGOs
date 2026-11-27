@@ -1136,3 +1136,22 @@ func cleanupSavedCallbackCapturedFails() {
 	}()
 	callback()
 }
+
+// A named-function defer runs at exit under the cleanup check: an unchecked
+// store read there fails like an invoked-literal defer.
+func namedDeferStoreUncheckedFails() {
+	h := heldField{}
+	defer func() {
+		h.stats, h.err = fetchHeld()
+		use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	}()
+}
+
+// A named-function defer checks whole-value reads the same way.
+func namedDeferWholeRootUncheckedFails() {
+	var n int
+	defer func() {
+		n, _ = fetch()
+		use(n /* ERROR "[correctness::result_before_error_check]" */)
+	}()
+}

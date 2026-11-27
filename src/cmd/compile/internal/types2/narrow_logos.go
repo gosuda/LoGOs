@@ -4020,7 +4020,12 @@ func (p *logosEFPass) deferredFunBody(outer *logosEFEffects, lit *syntax.FuncLit
 	d := &logosEFEffects{inside: inside, assigned: make(map[logosEFKey]bool), created: make(map[logosEFKey]string), may: make(map[logosEFKey]logosEFKey)}
 	d.lit = lit
 	p.eff = d
+	// Every deferred body runs at exit under the cleanup check, whether
+	// a named function or an invoked literal registered it. Escaping
+	// bodies analyzed inside keep ordinary mode through later.
+	p.inCleanup++
 	st = p.later(lit, lit.Body, st)
+	p.inCleanup--
 	p.eff = outer
 	if outer == nil {
 		return st
