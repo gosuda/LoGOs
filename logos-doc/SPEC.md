@@ -69,9 +69,10 @@ A Go declaration that a `.lgo` file imports MUST be a platform declaration per S
 See Sec 0.3 for the Go-facing signatures that a Go importer sees.
 A workspace root `logos build ./...` MUST build every Go module and every LoGOs module of the workspace [T-0.1][R-U2].
 The `logos` command alone MUST select the `.lgo` language. This covers file recognition, LoGOs syntax, LoGOs type rules, and LoGOs lints [T-0.1][A-LGOSEL].
-Plain `go` MUST ignore `.lgo` files [T-0.1][A-LGOSEL].
-Plain `go` MUST report the upstream `no Go files` result for a LoGOs-only package [T-0.1][A-LGOSEL].
-A plain `go` build of a Go package that imports a LoGOs package, including `go build ./...` of its module, MUST fail with a load error that names the imported package, because plain `go` ignores `.lgo` files [T-0.1][A-LGOSEL].
+When the binary is invoked as `go`, it MUST re-execute as `logos` with the same arguments, the same environment, and the same working directory, exactly once, before it loads any package, in each of these cases [T-0.1][A-LGOSEL]:
+the first non-flag argument is `lint`, `eject`, `context`, `next`, `conc`, or `lsp`; the module that contains the working directory has a `logos.toml` next to its `go.mod`, or, when a `go.work` is in effect, any workspace module has one; a directory of a main module that the command named on the command line, or an import inside the main modules, resolves to a directory that holds LoGOs source files and no `.go` files; a `./...`-style pattern walk meets such a directory.
+`go version`, `go env`, `go help`, `go bug`, and `go telemetry` MUST keep the upstream text in every module and MUST NOT re-execute. The standard library and every directory outside the main modules MUST NOT re-execute [T-0.1][A-LGOSEL].
+Plain `go` MUST ignore `.lgo` files while it loads packages [T-0.1][A-LGOSEL].
 Packages from `golang.org/x` and other third-party Go modules MUST count as Go packages that `.lgo` code MAY import [A-XMOD][R-U2].
 A LoGOs package MUST NOT hold a generated `.go` file except cgo outputs [A-CODEGEN].
 A generator MAY write `.go` files into a Go package that a LoGOs package imports [A-CODEGEN][R-U2].
