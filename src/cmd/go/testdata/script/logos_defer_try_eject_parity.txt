@@ -117,6 +117,47 @@ func reassignStruct() (err error) {
 	return nil
 }
 
+func savePair(v int, n int) error {
+	fmt.Println("pair", v, n)
+	return nil
+}
+
+func take(ch chan int) int {
+	select {
+	case v, ok := <-ch:
+		if !ok {
+			return -1
+		}
+		return v
+	default:
+		return -1
+	}
+}
+
+// A receive keeps its position before a later argument call in both
+// twins: take drains the closed channel only when the deferred receive
+// has not already taken its value.
+func recvBeforeCall() (err error) {
+	ch := make(chan int, 1)
+	ch <- 5
+	close(ch)
+//logos:allow(correctness::unbounded_channel_op)
+	defer savePair(<-ch, take(ch))?
+	return nil
+}
+
+func gAny[T any](v T, n int) error {
+	fmt.Println("generic", v, n)
+	return nil
+}
+
+// A literal passed to an inferred generic parameter is not interface
+// boxed: its fields are read after the later argument call in both twins.
+func genericArg() (err error) {
+	defer gAny(Stamp{epoch, epoch}, advance())?
+	return nil
+}
+
  var seen any = "unset"
 
 func probe() error {
@@ -171,6 +212,16 @@ func main() {
 	} else {
 		fmt.Println("reassign-struct ok")
 	}
+	if err := recvBeforeCall(); err != nil {
+		fmt.Println("recv err:", err)
+	} else {
+		fmt.Println("recv ok")
+	}
+	if err := genericArg(); err != nil {
+		fmt.Println("generic err:", err)
+	} else {
+		fmt.Println("generic ok")
+	}
 	recoverProbe()
 }
 
@@ -184,4 +235,8 @@ installed 1
 reassign ok
 saved {1 1} 0
 reassign-struct ok
+pair 5 -1
+recv ok
+generic {2 2} 0
+generic ok
 recover in f: <nil> outer: boom
