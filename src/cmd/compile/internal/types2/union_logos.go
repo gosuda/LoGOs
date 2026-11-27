@@ -614,17 +614,96 @@ func logosNameAccessible(obj *TypeName, pkg *Package) bool {
 
 // logosSpellableInPkg reports whether the holder package can spell t. An
 // alias counts by its own accessible name, a defined type by its exported
-// or same-package name. Anything else keeps the conservative answer true
-// so only a clearly unspellable element is ever rejected.
+// or same-package name, and both require every type argument to be
+// spellable, mirroring spellableType in the decoder generator. Composite
+// types are walked so an unexported name nested in an argument is still
+// rejected. Anything else keeps the conservative answer true so only a
+// clearly unspellable element is ever rejected.
 func logosSpellableInPkg(t Type, pkg *Package) bool {
+	seen := make(map[Type]bool)
+	return logosSpellableWalk(t, pkg, seen)
+}
+
+func logosSpellableWalk(t Type, pkg *Package, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return true
+	}
+	seen[t] = true
 	switch t := t.(type) {
+	case *Basic, *TypeParam:
+		return true
 	case *Alias:
-		return logosNameAccessible(t.Obj(), pkg)
+		if !logosNameAccessible(t.Obj(), pkg) {
+			return false
+		}
+		if args := t.TypeArgs(); args != nil {
+			for i := range args.Len() {
+				if !logosSpellableWalk(args.At(i), pkg, seen) {
+					return false
+				}
+			}
+		}
+		return true
 	case *Named:
-		return logosNameAccessible(t.Obj(), pkg)
+		if !logosNameAccessible(t.Obj(), pkg) {
+			return false
+		}
+		if args := t.TypeArgs(); args != nil {
+			for i := range args.Len() {
+				if !logosSpellableWalk(args.At(i), pkg, seen) {
+					return false
+				}
+			}
+		}
+		return true
+	case *Pointer:
+		return logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Slice:
+		return logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Array:
+		return logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Map:
+		return logosSpellableWalk(t.Key(), pkg, seen) && logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Chan:
+		return logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Signature:
+		return logosSpellableTuple(t.Params(), pkg, seen) && logosSpellableTuple(t.Results(), pkg, seen)
+	case *Tuple:
+		return logosSpellableTuple(t, pkg, seen)
+	case *Interface:
+		for i := range t.NumMethods() {
+			if !logosSpellableWalk(t.Method(i).Type(), pkg, seen) {
+				return false
+			}
+		}
+		for i := range t.NumEmbeddeds() {
+			if !logosSpellableWalk(t.EmbeddedType(i), pkg, seen) {
+				return false
+			}
+		}
+		return true
+	case *Struct:
+		for i := range t.NumFields() {
+			if !logosSpellableWalk(t.Field(i).Type(), pkg, seen) {
+				return false
+			}
+		}
+		return true
 	default:
 		return true
 	}
+}
+
+func logosSpellableTuple(t *Tuple, pkg *Package, seen map[Type]bool) bool {
+	if t == nil {
+		return true
+	}
+	for i := range t.Len() {
+		if !logosSpellableWalk(t.At(i).Type(), pkg, seen) {
+			return false
+		}
+	}
+	return true
 }
 
 // logosUnionPointerAllocSpellable reports whether the trial allocation for
