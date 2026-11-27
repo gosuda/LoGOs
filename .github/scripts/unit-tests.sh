@@ -17,3 +17,6 @@ $t go test -count=1 -race logos/... cmd/go/internal/logos/lsp/...
 $t go test -count=1 -short runtime/metrics
 GOEXPERIMENT=logosarena $t go test -count=1 -short -race runtime -run '^TestLogos(Arena|Region|GCScan)'
 GOEXPERIMENT=logosarena,nogreenteagc $t go test -count=1 -short runtime -run '^TestLogos(Arena|Region|GCScan)'
+# The ejected opt-in guard compiles only under the logosejected tag, so the
+# untagged run never executes it: run the ejected variant explicitly.
+$t go test -count=1 -short -tags logosejected logos/net/http
