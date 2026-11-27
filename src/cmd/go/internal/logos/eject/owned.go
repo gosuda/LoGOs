@@ -671,7 +671,27 @@ func ownedFileCondition(name string, f *ast.File) (constraint.Expr, error) {
 }
 
 func ownedHeaderExpr(f *ast.File) (constraint.Expr, error) {
-	var modern, legacy constraint.Expr
+	modern, legacy, err := ownedHeaderExprs(f)
+	if err != nil {
+		return nil, err
+	}
+	if modern != nil {
+		return modern, nil
+	}
+	return legacy, nil
+}
+
+// ownedModernHeaderExpr reports the file's //go:build constraint, or nil
+// when the header holds only legacy // +build lines. The compiler reads
+// the file's language version from modern lines alone, so a nil result
+// means the file builds with the package default no matter which release
+// tags its legacy guard names.
+func ownedModernHeaderExpr(f *ast.File) (constraint.Expr, error) {
+	modern, _, err := ownedHeaderExprs(f)
+	return modern, err
+}
+
+func ownedHeaderExprs(f *ast.File) (modern, legacy constraint.Expr, err error) {
 	for _, cg := range f.Comments {
 		if cg.Pos() > f.Pos() {
 			break
@@ -681,13 +701,13 @@ func ownedHeaderExpr(f *ast.File) (constraint.Expr, error) {
 			case constraint.IsGoBuild(c.Text):
 				expr, err := constraint.Parse(c.Text)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				modern = expr
 			case constraint.IsPlusBuild(c.Text):
 				expr, err := constraint.Parse(c.Text)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				if legacy == nil {
 					legacy = expr
@@ -697,10 +717,7 @@ func ownedHeaderExpr(f *ast.File) (constraint.Expr, error) {
 			}
 		}
 	}
-	if modern != nil {
-		return modern, nil
-	}
-	return legacy, nil
+	return modern, legacy, nil
 }
 
 func ownedFilenameTags(name string) []string {
