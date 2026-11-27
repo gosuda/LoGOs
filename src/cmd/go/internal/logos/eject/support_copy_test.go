@@ -574,3 +574,55 @@ func TestSupportCopyRefusesUnresolvedMethodCall(t *testing.T) {
 		t.Errorf("copyPackageGo = %v, want an ambiguous extended-CONNECT refusal", err)
 	}
 }
+
+// A same-named parameter in a sibling file is scoped to its function and
+// cannot be selected cross-file, so it never blocks the export: the
+// genuine server call still delegates to the guard.
+func TestSupportCopyIgnoresSiblingParameter(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestparam")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"setup.go":  "package ejecttestparam\n\nfunc setup(EnableHTTP2ExtendedConnect bool) {}\n",
+		"server.go": "package ejecttestparam\n\nimport \"net/http\"\n\nfunc Enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestparam", dst: "rt/logos/ejecttestparam"}
+	if _, _, err := c.copyPackageGo(p, "server.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestparam", "server.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("fork-only call survives support copy:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation:\n%s", got)
+	}
+}

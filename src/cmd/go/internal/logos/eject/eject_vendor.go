@@ -1278,6 +1278,19 @@ func selectsEjectedMode(data []byte) bool {
 	return false
 }
 
+// h2DeclaresExtendedConnectFunc reports whether f declares the extended
+// CONNECT method name as a package-level function or method. Parameters
+// and results are scoped to their function and cannot be selected from
+// another file, so only a declaration counts for the cross-file check.
+func h2DeclaresExtendedConnectFunc(f *ast.File) bool {
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == h2extendedConnectMethod {
+			return true
+		}
+	}
+	return false
+}
+
 // packageDeclaresExtendedConnect reports whether any handwritten Go file
 // of the support source package other than name declares the extended
 // CONNECT method name. Lowered files carry the compiler's own ambiguity
@@ -1303,7 +1316,7 @@ func (c *supportCopy) packageDeclaresExtendedConnect(p supportSourcePackage, nam
 		if err != nil {
 			continue
 		}
-		if h2DefinesExtendedConnect(f) {
+		if h2DeclaresExtendedConnectFunc(f) {
 			return true
 		}
 	}
