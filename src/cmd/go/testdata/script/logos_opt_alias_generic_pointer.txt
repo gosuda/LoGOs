@@ -5,7 +5,7 @@ env GOTOOLCHAIN=local
 # pointer type imports cleanly.
 cd good
 logos run .
-stdout '^alias-import ok$'
+stdout '^alias-import ok true$'
 
 -- good/go.mod --
 module example.com/optaliasimp
