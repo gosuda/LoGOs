@@ -2452,26 +2452,15 @@ func ejectSupportRoots(plan *ejectPlan) []string {
 	seeds = append(seeds, plan.testRoots...)
 	seen := map[string]bool{load.LogosRTPkg: true}
 	roots := []string{load.LogosRTPkg}
-	needHTTP := false
 	for _, p := range load.PackageList(seeds) {
 		if p == nil {
 			continue
-		}
-		for _, imp := range p.Imports {
-			if imp == "net/http" || imp == "logos/net/http" {
-				needHTTP = true
-				break
-			}
 		}
 		if !strings.HasPrefix(p.ImportPath, "logos/") || seen[p.ImportPath] {
 			continue
 		}
 		seen[p.ImportPath] = true
 		roots = append(roots, p.ImportPath)
-	}
-	if needHTTP && !seen["logos/net/http"] {
-		seen["logos/net/http"] = true
-		roots = append(roots, "logos/net/http")
 	}
 	// Variant inventories retain package identities but not dependency edges.
 	for path := range plan.provenance {
