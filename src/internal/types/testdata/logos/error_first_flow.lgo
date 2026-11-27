@@ -1092,3 +1092,47 @@ func escapingCallbackNamedStoreFails() {
 	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
 	_ = save
 }
+
+// A callback a cleanup saves for later runs outside the cleanup: its own
+// locals stay silent under the ordinary read rule.
+func cleanupSavedCallbackOwnLocalStaysSilent() {
+	callback := func() {}
+	func() {
+		scope defer func() {
+			callback = func() {
+				n, _ := fetch()
+				use(n)
+			}
+		}()
+	}()
+	callback()
+}
+
+// A goroutine a cleanup launches runs outside the cleanup: its own locals
+// stay silent under the ordinary read rule.
+func cleanupGoroutineOwnLocalStaysSilent() {
+	func() {
+		defer func() {
+			go /* ERROR "concurrency::unsupervised_goroutine" */ func() {
+				n, _ := fetch()
+				use(n)
+			}()
+		}()
+	}()
+}
+
+// A callback saved by a cleanup still observes captured stores: reading a
+// value the cleanup stored without a check fails.
+func cleanupSavedCallbackCapturedFails() {
+	h := heldField{}
+	callback := func() {}
+	func() {
+		h.stats, h.err = fetchHeld()
+		scope defer func() {
+			callback = func() {
+				use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+			}
+		}()
+	}()
+	callback()
+}

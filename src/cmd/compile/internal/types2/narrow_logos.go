@@ -5451,7 +5451,20 @@ func (p *logosEFPass) later(lit syntax.Node, body *syntax.BlockStmt, st *logosEF
 			in = p.capture(cs)
 		}
 	}
+	// An escaping or concurrent body runs outside the cleanup that
+	// registers it: analyze it in ordinary mode so its own locals stay
+	// silent, while captures keep their seeded checks. A deferred body
+	// runs at exit under the cleanup, so it keeps the mode.
+	suspended := false
+	savedCleanup := p.inCleanup
+	if savedCleanup > 0 && (saved == nil || saved.lit != lit) {
+		p.inCleanup = 0
+		suspended = true
+	}
 	end := p.run(body, p.lateCaptures(in, lit, inside))
+	if suspended {
+		p.inCleanup = savedCleanup
+	}
 	p.eff = saved
 	if end != nil && eff.deferred != nil {
 		end = end.afterDeferred(eff.deferred)
