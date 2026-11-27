@@ -22,7 +22,7 @@ func TestSupportCopyDoesNotDependOnToolchainBuildTags(t *testing.T) {
 	src := filepath.Join(testenv.GOROOT(t), "src")
 	for _, pkg := range []string{"rt", "sync"} {
 		dst := t.TempDir()
-		if err := copyEjectedSupport(src, "", dst, []string{"logos/" + pkg}); err != nil {
+		if _, err := copyEjectedSupport(src, "", dst, []string{"logos/" + pkg}); err != nil {
 			t.Fatalf("logos/%s: %v", pkg, err)
 		}
 		rel, _ := supportRelPath("logos/" + pkg)

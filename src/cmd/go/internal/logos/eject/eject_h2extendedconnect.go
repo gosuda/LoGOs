@@ -31,15 +31,19 @@ const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 // h2ExtendedConnectEdits rewrites direct EnableHTTP2ExtendedConnect calls to
 // a call into the ejected support module, which fails fast unless the stock
 // process-global GODEBUG=http2xconnect=1 was in effect at process startup.
-// It fires only in files importing net/http; the method name is
-// fork-specific, so a user type with the same zero-argument method name in
-// such a file would also be rewritten (no such type exists in the wild).
+// It fires only in files importing net/http. A method value with the same
+// name is rewritten only when it is marked lowering output: generic
+// lowering binds every callee capture through a reserved _logos_f
+// temporary (rewrite.go nextFun), which user code cannot declare
+// ([correctness::reserved_identifier]), so only a marked assignment is
+// trusted and a same-named user method value is left alone.
 // A call whose receiver needs another rewrite (a compiler-temporary
 // _logos_site name) is left alone. The receiver passes as a call argument,
 // so go and defer statements wrapping the call evaluate it in the calling
 // goroutine at the call site, exactly like the native method call. When the
-// file already imports the support package, the rewrite uses that binding;
-// otherwise the support import is added under an alias. The gofmt pass
+// file already imports the support package and no other file binding
+// shadows its name, the rewrite uses that binding; otherwise it adds the
+// import under a fresh file-wide alias. The gofmt pass
 // normalizes layout.
 //
 // Widening: the fork enables extended CONNECT per server, while stock Go
@@ -81,27 +85,22 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 	if h2DefinesExtendedConnect(f) {
 		return nil, false
 	}
-	used := h2UsedNames(f)
-	for name := range extraUsed {
-		used[name] = true
-	}
-	local := supportLocal
-	if local == "" {
-		// extraUsed holds package-level names from sibling files in the
-		// ejected package: an import alias must not match a name declared
-		// at package level in another file of the same package.
-		local = h2FreshName(used, "ejectedhttp")
-	}
+	local, needImport := h2SupportLocal(f, supportPath, supportLocal, extraUsed)
 	var edits []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
 		if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
 			// Group lowering binds the opt-in as a method value before
-			// spawning its child. The verifier exempts the source call
-			// by type, so a file that reaches the rewrite can only hold
-			// this shape as lowering output: a same-named user method
-			// value never passes verification. Rebind it through the
+			// spawning its child. Only a marked assignment is trusted:
+			// the left-hand side must be a lowering-generated callee
+			// temporary, so a same-named user method value in another
+			// file keeps its own binding and is never rewritten into
+			// the guard. Rebind the marked capture through the
 			// deferred guard so the receiver still evaluates exactly
 			// once, eagerly, and the spawned child runs the same check.
+			lhsIdent, ok := as.Lhs[0].(*ast.Ident)
+			if !ok || !h2IsLoweredCalleeTemp(lhsIdent.Name) {
+				return true
+			}
 			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
 			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
 				return true
@@ -144,56 +143,94 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 	if len(edits) == 0 {
 		return nil, false
 	}
-	if supportLocal == "" {
-		imp := h2SupportImport
-		if local != "ejectedhttp" {
-			imp = local + " " + strconv.Quote(supportPath)
-		}
-		edits = append(edits, h2ImportEdit(fset, f, []string{imp}))
+	if needImport {
+		edits = append(edits, h2ImportEdit(fset, f, []string{h2SupportImportFor(local)}))
 	}
 	return edits, true
 }
 
-// h2UsedNames collects local import names and all identifiers in f so
-// generated bindings cannot collide with an alias, a local variable, or
-// an existing import, generally for any file shape.
-func h2UsedNames(f *ast.File) map[string]bool {
-	used := make(map[string]bool)
+// h2SupportImportFor renders the support import with the chosen local
+// name. The default alias keeps the historical spelling; a fresh alias
+// from h2SupportLocal carries the same path.
+func h2SupportImportFor(local string) string {
+	if local == "ejectedhttp" {
+		return h2SupportImport
+	}
+	return local + " " + strconv.Quote(rtModulePath+"/logos/net/http")
+}
+
+// h2SupportLocal picks the qualifier for generated support calls. An
+// existing support import binding is reused only where no other file
+// binding shadows it: a local, parameter, or same-file declaration with
+// the same name would capture the generated call. Otherwise a binding
+// with a fresh file-wide name is used. The second result reports whether
+// the import still needs adding.
+func h2SupportLocal(f *ast.File, supportPath, supportLocal string, extraUsed map[string]bool) (string, bool) {
+	bound := map[string]bool{}
+	// extraUsed holds package-level names from sibling files in the
+	// ejected package; a fresh alias avoids those too.
+	for name := range extraUsed {
+		bound[name] = true
+	}
 	for _, imp := range f.Imports {
-		if imp.Name != nil {
-			used[imp.Name.Name] = true
-			continue
-		}
-		path, err := strconv.Unquote(imp.Path.Value)
+		p, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
 			continue
 		}
-		if i := strings.LastIndex(path, "/"); i >= 0 {
-			used[path[i+1:]] = true
-		} else {
-			used[path] = true
+		if p == "logos/net/http" || p == supportPath {
+			continue
+		}
+		if imp.Name != nil {
+			if imp.Name.Name != "_" && imp.Name.Name != "." {
+				bound[imp.Name.Name] = true
+			}
+		} else if i := strings.LastIndex(p, "/"); i >= 0 {
+			bound[p[i+1:]] = true
 		}
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
-		if id, ok := n.(*ast.Ident); ok {
-			used[id.Name] = true
+		switch x := n.(type) {
+		case *ast.FuncDecl:
+			if x.Recv == nil {
+				bound[x.Name.Name] = true
+			}
+		case *ast.TypeSpec:
+			bound[x.Name.Name] = true
+		case *ast.ValueSpec:
+			for _, name := range x.Names {
+				bound[name.Name] = true
+			}
+		case *ast.Field:
+			for _, name := range x.Names {
+				bound[name.Name] = true
+			}
+		case *ast.AssignStmt:
+			if x.Tok == token.DEFINE {
+				for _, lhs := range x.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok {
+						bound[id.Name] = true
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			if x.Tok == token.DEFINE {
+				for _, e := range []ast.Expr{x.Key, x.Value} {
+					if id, ok := e.(*ast.Ident); ok {
+						bound[id.Name] = true
+					}
+				}
+			}
 		}
 		return true
 	})
-	return used
-}
-
-// h2FreshName returns base or the first base+N unused in used.
-func h2FreshName(used map[string]bool, base string) string {
-	if !used[base] {
-		return base
+	if supportLocal != "" && !bound[supportLocal] {
+		return supportLocal, false
 	}
-	for i := 2; ; i++ {
-		cand := base + strconv.Itoa(i)
-		if !used[cand] {
-			return cand
-		}
+	local := "ejectedhttp"
+	for i := 2; bound[local]; i++ {
+		local = "ejectedhttp" + strconv.Itoa(i)
 	}
+	return local, true
 }
 
 // h2DefinesExtendedConnect reports whether f declares the method name
@@ -264,6 +301,17 @@ func h2HasSiteIdent(n ast.Node) bool {
 		return true
 	})
 	return found
+}
+
+// h2IsLoweredCalleeTemp reports whether name is a lowering-generated callee
+// temporary (_logos_f with a numeric suffix, from rewrite.go nextFun).
+// Generic lowering binds every group and defer callee capture through one
+// of these reserved temporaries, which user code cannot declare, so the
+// name marks exactly the assignments lowering created. The eject method
+// value rewrite trusts only marked assignments.
+func h2IsLoweredCalleeTemp(name string) bool {
+	rest, ok := strings.CutPrefix(name, "_logos_f")
+	return ok && rest != "" && strings.Trim(rest, "0123456789") == ""
 }
 
 // h2ImportEdit appends a fresh import declaration holding the missing paths

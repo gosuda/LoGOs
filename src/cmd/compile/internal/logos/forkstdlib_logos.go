@@ -71,11 +71,16 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 		base.Errorf("%s: [portability::fork_stdlib_api] logos eject: %s.%s has no upstream spelling (absent from the Go 1.27 API files); ejected output must build with upstream Go (SPEC T-0.3)", name.Pos(), p.Path(), obj.Name())
 	}
 	verify := func(info *types2.Info, roots []syntax.Node) {
-		mapped := mappedEjectStdlibCalls(info, roots)
+		mapped, ambiguous := mappedEjectStdlibCalls(info, roots)
 		for name, obj := range info.Uses {
-			if !mapped[name] {
-				check(name, obj)
+			if mapped[name] {
+				continue
 			}
+			if reason, ok := ambiguous[name]; ok {
+				base.Errorf("%s: [portability::fork_stdlib_api] logos eject: ambiguous EnableHTTP2ExtendedConnect call (%s); eject rewrites the name by spelling, so only (*net/http.Server) and logos/net/http calls are safe to eject (SPEC T-0.3)", name.Pos(), reason)
+				continue
+			}
+			check(name, obj)
 		}
 	}
 	if !preparedOnly {
@@ -101,11 +106,29 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 }
 
 // mappedEjectStdlibCalls identifies exact call sites with an existing
-// upstream rewrite. The exemption belongs to the selector occurrence,
+// upstream rewrite, and ambiguous same-named calls the text rewrite would
+// match by spelling. The exemption belongs to the selector occurrence,
 // never the method name: escaping method values and method expressions
-// still have no upstream spelling.
-func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.Name]bool {
+// still have no upstream spelling. A zero-argument call the exemption does
+// not cover is ambiguous with the stdlib opt-in: eject cannot tell it
+// apart from the genuine call, so it is reported for refusal instead of
+// passing the wrong behavior through.
+func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) (map[*syntax.Name]bool, map[*syntax.Name]string) {
 	var mapped map[*syntax.Name]bool
+	var ambiguous map[*syntax.Name]string
+	markMapped := func(sel *syntax.Name) {
+		if mapped == nil {
+			mapped = make(map[*syntax.Name]bool)
+		}
+		mapped[sel] = true
+	}
+	markAmbiguous := func(selector *syntax.SelectorExpr) {
+		if ambiguous == nil {
+			ambiguous = make(map[*syntax.Name]string)
+		}
+		ambiguous[selector.Sel] = h2CallDescription(info, selector)
+	}
+	var definesName bool
 	inspect := func(node syntax.Node) bool {
 		call, ok := node.(*syntax.CallExpr)
 		if !ok || len(call.ArgList) != 0 {
@@ -115,23 +138,47 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		if !ok || selector.Sel.Value != "EnableHTTP2ExtendedConnect" {
 			return true
 		}
+		// Eject skips files that declare the method name by spelling,
+		// so none of their calls is exempt: fail closed on every one.
+		if definesName {
+			markAmbiguous(selector)
+			return true
+		}
 		selection := info.Selections[selector]
-		if selection == nil || selection.Kind() != types2.MethodVal {
+		if selection == nil {
+			// A package-qualified call names no method. Only the
+			// logos/net/http helper is safe to eject; anything else
+			// with this name would take the stdlib guard by spelling.
+			if fn, ok := info.ObjectOf(selector.Sel).(*types2.Func); ok && fn.Pkg() != nil && isH2HelperPackage(fn.Pkg().Path()) {
+				markMapped(selector.Sel)
+				return true
+			}
+			markAmbiguous(selector)
+			return true
+		}
+		if selection.Kind() != types2.MethodVal {
+			markAmbiguous(selector)
 			return true
 		}
 		// Decide from the method object, not the receiver type: a call
 		// through an embedded *http.Server records the outer struct as
 		// selection.Recv, but the method object is still the Server method
 		// the textual eject rewrite accepts. Embedding paths stay allowed.
+		// Any other method object with this name is ambiguous with the
+		// stdlib opt-in, so refuse it instead of rewriting the wrong
+		// behavior by spelling.
 		fn, ok := selection.Obj().(*types2.Func)
-		if !ok || fn.Name() != "EnableHTTP2ExtendedConnect" {
+		if !ok || fn.Name() != h2extendedConnectMethod {
+			markAmbiguous(selector)
 			return true
 		}
 		if fn.Pkg() == nil || fn.Pkg().Path() != "net/http" {
+			markAmbiguous(selector)
 			return true
 		}
 		sig, ok := fn.Type().(*types2.Signature)
 		if !ok || sig.Recv() == nil {
+			markAmbiguous(selector)
 			return true
 		}
 		recv := types2.Unalias(sig.Recv().Type())
@@ -140,6 +187,7 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		}
 		named, ok := recv.(*types2.Named)
 		if !ok || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "net/http" || named.Obj().Name() != "Server" {
+			markAmbiguous(selector)
 			return true
 		}
 		// The text rewrite declines receivers containing generated site
@@ -175,12 +223,10 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 			return !hasSite
 		})
 		if hasSite {
+			markAmbiguous(selector)
 			return true
 		}
-		if mapped == nil {
-			mapped = make(map[*syntax.Name]bool)
-		}
-		mapped[selector.Sel] = true
+		markMapped(selector.Sel)
 		return true
 	}
 	for _, root := range roots {
@@ -189,16 +235,46 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 				continue
 			}
 			// Eject skips files that declare the method name by
-			// spelling, so verification must not exempt their calls
-			// by type: the rewrite will leave every one of them
-			// behind for upstream Go to reject.
-			if h2DefinedInFile(f) {
-				continue
-			}
+			// spelling, so none of their calls is exempt: the
+			// rewrite leaves every one of them behind, and a
+			// genuine stdlib call there has no upstream spelling
+			// either. Record the declaration and fail closed.
+			definesName = h2DefinedInFile(f)
+		} else {
+			definesName = false
 		}
 		syntax.Inspect(root, inspect)
 	}
-	return mapped
+	return mapped, ambiguous
+}
+
+// h2CallDescription names what a same-named call actually resolves to, so
+// the ambiguity diagnostic says which declaration the rewrite would steal.
+func h2CallDescription(info *types2.Info, selector *syntax.SelectorExpr) string {
+	if selection := info.Selections[selector]; selection != nil {
+		if recv := selection.Recv(); recv != nil {
+			return "method on " + recv.String()
+		}
+		if obj := selection.Obj(); obj != nil {
+			if pkg := obj.Pkg(); pkg != nil {
+				return "member " + pkg.Path() + "." + obj.Name()
+			}
+			return "member " + obj.Name()
+		}
+	}
+	if obj := info.ObjectOf(selector.Sel); obj != nil {
+		if pkg := obj.Pkg(); pkg != nil {
+			return "function " + pkg.Path() + "." + obj.Name()
+		}
+		return "function " + obj.Name()
+	}
+	return "unresolved call"
+}
+
+// isH2HelperPackage reports whether path is the logos/net/http package that
+// owns the ejected spelling's source helper.
+func isH2HelperPackage(path string) bool {
+	return path == "logos/net/http" || strings.HasSuffix(path, "/logos/net/http")
 }
 
 // h2extendedConnectMethod mirrors eject.h2extendedConnectMethod: the two
