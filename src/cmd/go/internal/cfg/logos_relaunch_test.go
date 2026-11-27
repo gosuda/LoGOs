@@ -157,3 +157,37 @@ func TestMainModuleMarkedByLogosWorkspace(t *testing.T) {
 		}
 	})
 }
+
+func TestRelaunchAllowed(t *testing.T) {
+	cases := map[string]struct {
+		args []string
+		want bool
+	}{
+		"test binary flags": {
+			args: []string{"go.test", "-test.v", "-test.run=X"},
+			want: false,
+		},
+		"command with trailing test flag": {
+			args: []string{"go.test", "test", "./...", "-test.v"},
+			want: true,
+		},
+		"run command": {
+			args: []string{"go.test", "run", "."},
+			want: true,
+		},
+		"no arguments": {
+			args: []string{"go.test"},
+			want: true,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			old := os.Args
+			os.Args = tc.args
+			defer func() { os.Args = old }()
+			if got := relaunchAllowed(); got != tc.want {
+				t.Errorf("relaunchAllowed() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

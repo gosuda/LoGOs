@@ -223,6 +223,9 @@ func logosExecutable() (exe, argv0 string) {
 // script-test driver, whose arguments come from the script) has none.
 func relaunchAllowed() bool {
 	for _, a := range os.Args[1:] {
+		if len(a) == 0 || a[0] != '-' {
+			break
+		}
 		if strings.HasPrefix(a, "-test.") {
 			return false
 		}

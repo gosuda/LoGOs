@@ -34,6 +34,9 @@ exec $WORK/markedx$GOEXE
 stdout '^marked$'
 go test ./...
 stdout '^ok\s+example\.com/marked/sub'
+go test ./... -test.v
+stdout '=== RUN   TestHello'
+stdout '--- PASS: TestHello'
 cd ..
 
 # Trigger: a LoGOs-only subcommand.
