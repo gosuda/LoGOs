@@ -170,6 +170,150 @@ func TestSetGoReplaceKeepsOtherVersions(t *testing.T) {
 	}
 }
 
+// A wildcard and a pinned replace of one module survive rebasing side by
+// side: the wildcard edit must not match the pinned directive (the
+// vendored AddReplace treats an empty old version as a match for every
+// version of the path) and must keep the pin on its own target.
+func TestRebaseWildcardKeepsPinnedReplace(t *testing.T) {
+	orig := t.TempDir()
+	dst := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(orig, "fallback"),
+		filepath.Join(orig, "pinned"),
+	} {
+		if err := os.MkdirAll(dir, 0777); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/nested\n\ngo 1.27\n"), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := writeGoMod(t, orig, "module example.com/app\n\ngo 1.27\n\n"+
+		"replace example.com/lib => ./fallback\n"+
+		"replace example.com/lib v1.0.0 => ./pinned\n")
+	f := parseGoModFile(path)
+	rebaseLocalReplaces(f, orig, dst, map[string]string{})
+	wild := liveLibReplace(f, "")
+	if wild == nil {
+		t.Fatal("wildcard replace lost")
+	}
+	if want := "./" + toSlashRel(t, dst, filepath.Join(orig, "fallback")); wild.New.Path != want {
+		t.Errorf("wildcard target = %q, want %q", wild.New.Path, want)
+	}
+	pin := liveLibReplace(f, "v1.0.0")
+	if pin == nil {
+		t.Fatal("pinned replace lost")
+	}
+	if want := "./" + toSlashRel(t, dst, filepath.Join(orig, "pinned")); pin.New.Path != want {
+		t.Errorf("pinned target = %q, want %q", pin.New.Path, want)
+	}
+	formatted := modfile.Format(f.Syntax)
+	if _, err := modfile.Parse(path, formatted, nil); err != nil {
+		t.Fatalf("reparsing rewritten go.mod: %v\n%s", err, formatted)
+	}
+}
+
+// Rebasing a wildcard keeps a versioned replacement target intact: a pin
+// of the form `old vX => other vY` still names its target version after
+// the wildcard moves, or the exported module fails go.mod parsing.
+func TestSetGoReplaceWildcardKeepsTargetVersions(t *testing.T) {
+	dir := t.TempDir()
+	path := writeGoMod(t, dir, "module example.com/app\n\ngo 1.27\n\n"+
+		"replace example.com/lib => ./fallback\n"+
+		"replace example.com/lib v2.0.0+incompatible => example.com/other v2.1.0+incompatible\n")
+	f := parseGoModFile(path)
+	setGoReplace(f, "example.com/lib", "", "./fallback-new")
+	wild := liveLibReplace(f, "")
+	if wild == nil {
+		t.Fatal("wildcard replace lost")
+	}
+	if wild.New.Path != "./fallback-new" {
+		t.Errorf("wildcard target = %q, want ./fallback-new", wild.New.Path)
+	}
+	pin := liveLibReplace(f, "v2.0.0+incompatible")
+	if pin == nil {
+		t.Fatal("pinned replace lost")
+	}
+	if pin.New.Path != "example.com/other" || pin.New.Version != "v2.1.0+incompatible" {
+		t.Errorf("pinned target = %q %q, want example.com/other v2.1.0+incompatible", pin.New.Path, pin.New.Version)
+	}
+	formatted := modfile.Format(f.Syntax)
+	if _, err := modfile.Parse(path, formatted, nil); err != nil {
+		t.Fatalf("reparsing rewritten go.mod: %v\n%s", err, formatted)
+	}
+}
+
+// Rebasing a dependency's absolute wildcard replace into the ejected
+// tree keeps a versioned pin of the same module intact: the pin still
+// names its target version, or the exported module fails go.mod parsing
+// because a replacement without a version must name a local directory.
+func TestRebaseDepWildcardKeepsVersionedPin(t *testing.T) {
+	root := t.TempDir()
+	mainDir := filepath.Join(root, "main")
+	depDir := filepath.Join(root, "dep")
+	outDir := filepath.Join(root, "out")
+	nested := filepath.Join(mainDir, "nested")
+	outNested := filepath.Join(outDir, "nested")
+	for _, dir := range []string{nested, outNested, depDir} {
+		if err := os.MkdirAll(dir, 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := writeGoMod(t, depDir, "module example.com/deptestdep\n\ngo 1.27\n\n"+
+		"replace example.com/lib => "+strconv.Quote(nested)+"\n"+
+		"replace example.com/lib v2.0.0+incompatible => example.com/other v2.1.0+incompatible\n")
+	g := parseGoModFile(path)
+	plan := &ejectPlan{main: &ejectModule{dir: mainDir}}
+	rebaseDepReplacesOnMain(g, map[string]string{}, plan, depDir, outDir)
+	wild := liveLibReplace(g, "")
+	if wild == nil {
+		t.Fatal("wildcard replace lost")
+	}
+	if want := "./" + toSlashRel(t, depDir, outNested); wild.New.Path != want {
+		t.Errorf("wildcard target = %q, want %q", wild.New.Path, want)
+	}
+	pin := liveLibReplace(g, "v2.0.0+incompatible")
+	if pin == nil {
+		t.Fatal("pinned replace lost")
+	}
+	if pin.New.Path != "example.com/other" || pin.New.Version != "v2.1.0+incompatible" {
+		t.Errorf("pinned target = %q %q, want example.com/other v2.1.0+incompatible", pin.New.Path, pin.New.Version)
+	}
+	formatted := modfile.Format(g.Syntax)
+	if _, err := modfile.Parse(path, formatted, nil); err != nil {
+		t.Fatalf("reparsing rewritten go.mod: %v\n%s", err, formatted)
+	}
+}
+
+// liveLibReplace returns the surviving replace directive for one version
+// of example.com/lib, skipping the zeroed ghosts the vendored DropReplace
+// leaves in f.Replace until formatting drops their marked lines. Every
+// fixture below replaces one module, so the old path is fixed.
+func liveLibReplace(f *modfile.File, oldVers string) *modfile.Replace {
+	for _, r := range f.Replace {
+		if r.Old.Path == "" {
+			continue
+		}
+		if r.Old.Path == "example.com/lib" && r.Old.Version == oldVers {
+			return r
+		}
+	}
+	return nil
+}
+
+// writeGoMod writes dir/go.mod, creating dir first.
+func writeGoMod(t *testing.T, dir, text string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "go.mod")
+	if err := os.WriteFile(path, []byte(text), 0666); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func quoteModPath(path string) string {
 	return strconv.Quote(path)
 }

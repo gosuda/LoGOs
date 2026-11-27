@@ -2820,7 +2820,12 @@ func outsideModule(absOrig, absTarget string) bool {
 // rebased at the ejected copy, so the export never points at the
 // source checkout. Outside targets never reach the filepath.Rel calls
 // below that abort eject, since outsideModule decides them first.
-
+//
+// The directives are snapshotted by value first: every rebasing edit
+// drops and re-adds lines, and the vendored AddReplace matches an empty
+// old version against every remaining directive of the path, so editing
+// through the live pointers would read entries a previous edit already
+// rewrote or zeroed.
 func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[string]string) {
 	absOrig, err := filepath.Abs(origDir)
 	if err != nil {
@@ -2830,19 +2835,24 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 	if err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
-	for _, r := range slices.Clone(f.Replace) {
-		if _, ok := ejected[r.Old.Path]; ok {
+	type directive struct{ oldPath, oldVers, newPath, newVers string }
+	snapshot := make([]directive, 0, len(f.Replace))
+	for _, r := range f.Replace {
+		snapshot = append(snapshot, directive{r.Old.Path, r.Old.Version, r.New.Path, r.New.Version})
+	}
+	for _, d := range snapshot {
+		if _, ok := ejected[d.oldPath]; ok {
 			continue
 		}
-		if r.New.Version != "" || r.New.Path == "" {
+		if d.newVers != "" || d.newPath == "" {
 			continue
 		}
 		// Absolute targets outside the module stay untouched; absolute
 		// targets inside are rebased at the ejected copy below.
-		if filepath.IsAbs(filepath.FromSlash(r.New.Path)) && outsideModule(absOrig, filepath.FromSlash(r.New.Path)) {
+		if filepath.IsAbs(filepath.FromSlash(d.newPath)) && outsideModule(absOrig, filepath.FromSlash(d.newPath)) {
 			continue
 		}
-		target := absReplaceTarget(absOrig, r.New.Path)
+		target := absReplaceTarget(absOrig, d.newPath)
 		if relOrig, err := filepath.Rel(absOrig, target); err == nil && relOrig != ".." && !strings.HasPrefix(relOrig, ".."+string(filepath.Separator)) {
 			dstTarget := filepath.Join(absDst, relOrig)
 			if fi, err := os.Stat(dstTarget); err == nil && fi.IsDir() {
@@ -2854,17 +2864,17 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 			base.Fatalf("logos eject: %v", err)
 		}
 		newPath := "./" + filepath.ToSlash(rel)
-		if newPath == r.New.Path {
+		if newPath == d.newPath {
 			continue
 		}
-		// Copy the identity first: DropReplace zeroes the entry in
-		// place through the shared pointer.
-		oldPath, oldVers := r.Old.Path, r.Old.Version
-		if err := f.DropReplace(oldPath, oldVers); err != nil {
-			base.Fatalf("logos eject: %v", err)
-		}
-		if err := f.AddReplace(oldPath, oldVers, newPath, ""); err != nil {
-			base.Fatalf("logos eject: %v", err)
+		// Route through the version-aware editors: a raw AddReplace
+		// with an empty old version matches every remaining directive
+		// of the path and would rewrite or delete the pinned
+		// exact-version lines beside the wildcard.
+		if d.oldVers == "" {
+			setGoReplaceWildcard(f, d.oldPath, newPath)
+		} else {
+			setGoReplaceExact(f, d.oldPath, d.oldVers, newPath)
 		}
 	}
 }
@@ -3009,13 +3019,18 @@ func setGoReplace(f *modfile.File, oldPath, oldVers, newPath string) {
 }
 
 // setGoReplaceWildcard points the wildcard replace of oldPath at newPath
-// and leaves every exact-version replace of oldPath on its own target.
+// and leaves every exact-version replace of oldPath on its own target,
+// preserving both fields of each replacement target. The vendored
+// AddReplace matches an empty version against every existing version of
+// the path, so a wildcard edit saves the exact-version directives, drops
+// every directive of the path, and adds them all back instead of calling
+// through.
 func setGoReplaceWildcard(f *modfile.File, oldPath, newPath string) {
-	type exact struct{ vers, target string }
+	type exact struct{ vers, target, targetVers string }
 	var keep []exact
 	for _, r := range slices.Clone(f.Replace) {
 		if r.Old.Path == oldPath && r.Old.Version != "" {
-			keep = append(keep, exact{r.Old.Version, r.New.Path})
+			keep = append(keep, exact{r.Old.Version, r.New.Path, r.New.Version})
 		}
 	}
 	if len(keep) == 0 {
@@ -3034,7 +3049,7 @@ func setGoReplaceWildcard(f *modfile.File, oldPath, newPath string) {
 		base.Fatalf("logos eject: %v", err)
 	}
 	for _, e := range keep {
-		if err := f.AddReplace(oldPath, e.vers, e.target, ""); err != nil {
+		if err := f.AddReplace(oldPath, e.vers, e.target, e.targetVers); err != nil {
 			base.Fatalf("logos eject: %v", err)
 		}
 	}
