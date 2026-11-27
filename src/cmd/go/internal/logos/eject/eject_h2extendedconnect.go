@@ -361,32 +361,32 @@ func h2DefinesExtendedConnect(f *ast.File) bool {
 	return found
 }
 
-// h2OverlapOffset returns the start offset of the first h2 edit that
-// overlaps an edit outside the h2 set, if any. The import-insertion edit
-// is zero-width, so it overlaps only when strictly inside another edit
-// (for example a whole-line comptime removal spanning the last import
-// declaration); boundary-touching inserts apply cleanly in offset order.
+// h2Overlaps reports whether any h2 edit overlaps an edit outside the h2
+// set. The import-insertion edit is zero-width, so it overlaps only when
+// strictly inside another edit (for example a whole-line comptime removal
+// spanning the last import declaration); boundary-touching inserts apply
+// cleanly in offset order.
 // Call spans avoid the other rewrites by construction (see h2HasSiteIdent
 // and the import-only span of ejectedImportEdits), but they are checked
 // the same way so a future overlap fails safe.
-func h2OverlapOffset(others, h2edits []textEdit) (int, bool) {
+func h2Overlaps(others, h2edits []textEdit) bool {
 	for _, h := range h2edits {
 		if h.start == h.end {
 			for _, o := range others {
 				if o.start < h.start && h.start < o.end {
-					return h.start, true
+					return true
 				}
 			}
 			continue
 		}
 		for _, o := range others {
 			if h.start < o.end && o.start < h.end {
-				return h.start, true
+				return true
 			}
 		}
 	}
 
-	return 0, false
+	return false
 }
 
 // h2HasSiteIdent reports whether the receiver subtree holds a

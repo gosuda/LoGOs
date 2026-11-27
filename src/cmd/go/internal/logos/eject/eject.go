@@ -2204,7 +2204,7 @@ func remapEjectedFile(data []byte, siteNS string, extraUsed map[string]bool) ([]
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
 	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, extraUsed)
 	uses = uses || h2uses
-	if _, overlap := h2OverlapOffset(edits, h2edits); overlap {
+	if h2Overlaps(edits, h2edits) {
 		// The caller owns failure policy: compiled output fails loudly,
 		// while an uncompiled data fixture keeps its original bytes.
 		return nil, false, false
