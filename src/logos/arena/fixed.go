@@ -223,6 +223,25 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 	if at > len(st.buf) || want > len(st.buf)-at {
 		panic(fixedExhausted(want, len(st.buf)-st.used))
 	}
+	// The result must not overwrite a retained prefix: when s overlaps
+	// the free interval, the slot at the cursor can land inside s and
+	// the copy below would rewrite bytes the caller still holds. The
+	// slot is its own prefix only when it starts exactly at s, which
+	// the copy preserves. Any other overlap moves the slot to the
+	// first aligned address at or past the end of s; when the result no
+	// longer fits there, that is exhaustion, reported before writing
+	// or advancing the cursor.
+	if len(s) > 0 {
+		slot := base + uintptr(at)
+		ss := uintptr(unsafe.Pointer(&s[0]))
+		se := ss + uintptr(len(s))*uintptr(size)
+		if slot != ss && slot < se && ss < slot+uintptr(want) {
+			at = int(fixedAlignUpAddr(se, uintptr(align)) - base)
+			if at > len(st.buf) || want > len(st.buf)-at {
+				panic(fixedExhausted(want, len(st.buf)-st.used))
+			}
+		}
+	}
 	// Preserve v when it aliases the fresh segment: the s copy below
 	// would otherwise overwrite v before it is copied. Each copy is
 	// memmove, so only the second source needs a temporary.
@@ -235,20 +254,6 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 			tmp := make([]T, len(v))
 			copy(tmp, v)
 			v = tmp
-		}
-	}
-	// The result must not overwrite a retained prefix: when s overlaps
-	// the free interval, the slot at the cursor can land inside s and
-	// the copy below would rewrite bytes the caller still holds. The
-	// slot is its own prefix only when it starts exactly at s, which
-	// the copy preserves; any other overlap reports exhaustion before
-	// writing or advancing the cursor.
-	if len(s) > 0 {
-		slot := base + uintptr(at)
-		ss := uintptr(unsafe.Pointer(&s[0]))
-		se := ss + uintptr(len(s))*uintptr(size)
-		if slot != ss && slot < se && ss < slot+uintptr(want) {
-			panic(fixedExhausted(want, len(st.buf)-st.used))
 		}
 	}
 	st.used = at + want

@@ -539,3 +539,24 @@ func TestFixedAppendSpareRetainsFreeFailsLoud(t *testing.T) {
 		t.Errorf("FixedUsed = %d, want 2: the failed append must not advance the cursor", used)
 	}
 }
+
+func TestFixedAppendCrossingInputSlidesPastInput(t *testing.T) {
+	buf := make([]byte, 16)
+	for i := range buf[:4] {
+		buf[i] = byte(i + 1)
+	}
+	r := arena.OpenFixed(buf[2:])
+	got := arena.Append(r, buf[:4:4], 9)
+	if want := []byte{1, 2, 3, 4, 9}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if !slices.Equal(buf[:4], []byte{1, 2, 3, 4}) {
+		t.Fatalf("input changed to %v: the copy must leave the input untouched", buf[:4])
+	}
+	if &got[0] != &buf[4] {
+		t.Errorf("result starts at %p, want &buf[4]: the slot must skip the input range", &got[0])
+	}
+	if used := arena.FixedUsed(r); used != 7 {
+		t.Errorf("FixedUsed = %d, want 7", used)
+	}
+}
