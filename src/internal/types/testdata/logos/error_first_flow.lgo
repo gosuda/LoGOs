@@ -777,3 +777,14 @@ func deferredParentSeesDiscardedStore(cond bool) {
 		o.in.stats, err = fetchHeld()
 	}
 }
+
+// A cleanup that does nothing leaves no entries behind: a caller read
+// of an unchanged field result stays silent.
+func cleanupNoopLeavesNothing() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {}()
+	}()
+	use(h.stats)
+}
