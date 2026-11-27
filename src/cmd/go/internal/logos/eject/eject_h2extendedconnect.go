@@ -7,6 +7,7 @@ package eject
 import (
 	"go/ast"
 	"go/token"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -41,6 +42,18 @@ const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 // shadows its name, the rewrite uses that binding; otherwise it adds the
 // import under a fresh file-wide alias. The gofmt pass
 // normalizes layout.
+//
+// A saved value of the public logos/net/http helper is not a capture: its
+// receiver names the support package itself, so the rewrite leaves it
+// alone. Rewriting it would pass a package as the server and change the
+// signature from func(*Server) error to func(). The logos/net/http import
+// still remaps to the ejected support copy, so the saved value keeps
+// working.
+//
+// A capture whose receiver holds another opt-in call composes the inner
+// guard into the capture's replacement, so the receiver still evaluates
+// once and both guards run. Emitting both edits would overlap and stop the
+// export.
 //
 // Widening: the fork enables extended CONNECT per server, while stock Go
 // offers only the process-global GODEBUG=http2xconnect=1, so after eject
@@ -82,23 +95,28 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 		return nil, false
 	}
 	local, needImport := h2SupportLocal(f, supportPath, supportLocal)
-	var edits []textEdit
+	var assigns []h2assignSite
+	var calls []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
 		if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
 			// Group lowering binds the opt-in as a method value before
-			// spawning its child. Only a marked assignment is trusted:
-			// the left-hand side must be a lowering-generated callee
-			// temporary, so a same-named user method value in another
-			// file keeps its own binding and is never rewritten into
-			// the guard. Rebind the marked capture through the
-			// deferred guard so the receiver still evaluates exactly
-			// once, eagerly, and the spawned child runs the same check.
-			lhsIdent, ok := as.Lhs[0].(*ast.Ident)
-			if !ok || !h2IsLoweredCalleeTemp(lhsIdent.Name) {
-				return true
-			}
+			// spawning its child. The verifier exempts the source call
+			// by type, so a file that reaches the rewrite can only hold
+			// this shape as lowering output, except for a saved value
+			// of the public logos/net/http helper (handled below): a
+			// same-named user method value never passes verification.
+			// Rebind it through the deferred guard so the receiver
+			// still evaluates exactly once, eagerly, and the spawned
+			// child runs the same check.
 			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
 			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && supportLocal != "" && id.Name == supportLocal {
+				return true
+			}
+			lhsIdent, ok := as.Lhs[0].(*ast.Ident)
+			if !ok || !h2IsLoweredCalleeTemp(lhsIdent.Name) {
 				return true
 			}
 			recvStart := fset.Position(sel.X.Pos()).Offset
@@ -109,10 +127,11 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 				lhsStart < 0 || lhsEnd < lhsStart || lhsEnd > len(data) {
 				return true
 			}
-			receiver := string(data[recvStart:recvEnd])
-			lhs := string(data[lhsStart:lhsEnd])
-			repl := lhs + " " + as.Tok.String() + " " + local + ".RequireExtendedConnectFunc(" + strconv.Quote(receiver) + ", " + receiver + ")"
-			edits = append(edits, textEdit{lhsStart, fset.Position(as.End()).Offset, repl})
+			assigns = append(assigns, h2assignSite{
+				start: lhsStart, end: fset.Position(as.End()).Offset,
+				recvStart: recvStart, recvEnd: recvEnd,
+				lhs: string(data[lhsStart:lhsEnd]), tok: as.Tok.String(),
+			})
 			return true
 		}
 		call, ok := n.(*ast.CallExpr)
@@ -133,9 +152,59 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 		}
 		receiver := string(data[recvStart:recvEnd])
 		repl := local + ".RequireExtendedConnect(" + strconv.Quote(receiver) + ", " + receiver + ")"
-		edits = append(edits, textEdit{start, end, repl})
+		calls = append(calls, textEdit{start, end, repl})
 		return true
 	})
+	// A capture whose receiver holds another opt-in call takes the inner
+	// guard into its own replacement: the composed receiver still
+	// evaluates once, eagerly, and both guards run. The name argument
+	// keeps the receiver as written; only the value carries the composed
+	// form. An inner overlap that cannot be composed (which no lowering
+	// shape produces) leaves the capture alone while the inner guards
+	// still apply, so the export names the fork-only value instead of
+	// stopping.
+	used := make([]bool, len(calls))
+	var edits []textEdit
+	for _, a := range assigns {
+		var inner []int
+		for i := range calls {
+			if !used[i] && calls[i].start >= a.recvStart && calls[i].end <= a.recvEnd {
+				inner = append(inner, i)
+			}
+		}
+		slices.SortFunc(inner, func(x, y int) int { return calls[x].start - calls[y].start })
+		composable := true
+		for j := 1; j < len(inner); j++ {
+			if calls[inner[j]].start < calls[inner[j-1]].end {
+				composable = false
+				break
+			}
+		}
+		if !composable {
+			continue
+		}
+		name := string(data[a.recvStart:a.recvEnd])
+		receiver := name
+		if len(inner) > 0 {
+			var b strings.Builder
+			prev := a.recvStart
+			for _, i := range inner {
+				b.WriteString(string(data[prev:calls[i].start]))
+				b.WriteString(calls[i].text)
+				prev = calls[i].end
+				used[i] = true
+			}
+			b.WriteString(string(data[prev:a.recvEnd]))
+			receiver = b.String()
+		}
+		repl := a.lhs + " " + a.tok + " " + local + ".RequireExtendedConnectFunc(" + strconv.Quote(name) + ", " + receiver + ")"
+		edits = append(edits, textEdit{a.start, a.end, repl})
+	}
+	for i, c := range calls {
+		if !used[i] {
+			edits = append(edits, c)
+		}
+	}
 	if len(edits) == 0 {
 		return nil, false
 	}
@@ -222,6 +291,14 @@ func h2SupportLocal(f *ast.File, supportPath, supportLocal string) (string, bool
 		local = "ejectedhttp" + strconv.Itoa(i)
 	}
 	return local, true
+}
+
+// h2assignSite is a lowered method-value capture of the opt-in:
+// _fN := <receiver>.EnableHTTP2ExtendedConnect.
+type h2assignSite struct {
+	start, end         int
+	recvStart, recvEnd int
+	lhs, tok           string
 }
 
 // h2DefinesExtendedConnect reports whether f declares the method name

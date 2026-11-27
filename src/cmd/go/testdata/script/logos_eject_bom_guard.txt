@@ -8,7 +8,10 @@ env CGO_ENABLED=0
 # drops the guard line with its BOM and emits the residual once, so the
 # exported module builds with plain Go. The BOM is added by a helper
 # because the script archive cannot show it; the helper backdates the
-# file like mkgoroot so the package index treats it as settled.
+# file like mkgoroot so the package index treats it as settled. The
+# fixture guard selects on every platform so the first run reaches the
+# export on Windows too, where a platform guard would exclude the only
+# source before the script starts.
 go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
 go run addbom.go $WORK/fakegoroot/src/logos/ejecttestbom/item.lgo
 env GOROOT=$WORK/fakegoroot
@@ -19,8 +22,7 @@ logos run .
 stdout '^bom$'
 
 logos eject -o out
-exists out/_logos_deps/rt/logos/ejecttestbom/item.go
-grep '^//go:build !windows$' out/_logos_deps/rt/logos/ejecttestbom/item.go
+grep '^//go:build !ignore$' out/_logos_deps/rt/logos/ejecttestbom/item.go
 ! grep 'logosejected' out/_logos_deps/rt/logos/ejecttestbom/item.go
 
 env GOROOT=$TESTGO_GOROOT
@@ -127,7 +129,7 @@ func main() {
 }
 
 -- dep/ejecttestbom/item.lgo --
-//go:build !windows
+//go:build !ignore
 
 package ejecttestbom
 
