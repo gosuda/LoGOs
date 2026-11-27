@@ -203,7 +203,13 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 		se := start + uintptr(len(s))*uintptr(size)
 		we := se + uintptr(len(v))*uintptr(size)
 		if start >= base && se >= front && we <= base+uintptr(len(st.buf)) {
-			out := append(s, v...)
+			// The bounds above prove the whole result fits, but the
+			// built-in append checks the capacity of s, not the buffer:
+			// a capacity-clipped subslice would heap-allocate while the
+			// cursor still advances. Extend explicitly and copy only the
+			// appended elements, mirroring the cursor-adjacent path.
+			out := unsafe.Slice(&s[0], len(s)+len(v))
+			copy(out[len(s):], v)
 			st.used = int(we - base)
 			return out[:len(out):len(out)]
 		}

@@ -469,6 +469,25 @@ func TestFixedAppendOffsetSubslice(t *testing.T) {
 	}
 }
 
+func TestFixedAppendOffsetSubsliceCapClipped(t *testing.T) {
+	buf := []byte{1, 2, 3, 0}
+	r := arena.OpenFixed(buf)
+	s := buf[1:3:3]
+	got := arena.Append(r, s, 9)
+	if want := []byte{2, 3, 9}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if &got[0] != &buf[1] {
+		t.Errorf("clipped append left the backing buffer: the byte must land in the caller's buffer")
+	}
+	if buf[3] != 9 {
+		t.Errorf("buf[3] = %d, want 9: the extension must be written in place", buf[3])
+	}
+	if used := arena.FixedUsed(r); used != 4 {
+		t.Errorf("FixedUsed = %d, want 4", used)
+	}
+}
+
 func TestFixedAppendOffsetSubsliceAcrossCursor(t *testing.T) {
 	buf := []byte{1, 2, 3, 0, 0, 0, 0, 0}
 	r := arena.OpenFixed(buf)
