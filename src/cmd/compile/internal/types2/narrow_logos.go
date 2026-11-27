@@ -4478,6 +4478,9 @@ func (p *logosEFPass) lateCaptures(st *logosEFState, lit syntax.Node, inside map
 					hadMay2 := st.may != nil && st.may[k2]
 					if e, ok := p.seedEntry(k2, lit); ok {
 						st = st.set(k2, e)
+						if hadMay2 {
+							st = unprove(st, k2)
+						}
 					} else if hadMay2 {
 						st = unprove(st, k2)
 					}

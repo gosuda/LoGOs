@@ -748,3 +748,32 @@ func invokedLitBreaksGuard() {
 	}()
 	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
 }
+
+type deferInner struct {
+	stats int
+}
+
+type deferOuter struct {
+	in  deferInner
+	err error
+}
+
+func useDeferInner(v deferInner) {}
+
+// A deferred read of a parent struct still observes an earlier
+// discarded-error store: the nested field keeps its may mark, so the
+// whole-struct read fails even when a later store pairs it with a
+// checked error.
+func deferredParentSeesDiscardedStore(cond bool) {
+	var err error
+	o := deferOuter{}
+	o.in.stats, _ = fetchHeld()
+	defer func() {
+		if err == nil {
+			useDeferInner(o.in /* ERROR "[correctness::result_before_error_check]" */)
+		}
+	}()
+	if cond {
+		o.in.stats, err = fetchHeld()
+	}
+}
