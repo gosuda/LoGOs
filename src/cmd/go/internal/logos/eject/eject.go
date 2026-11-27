@@ -836,7 +836,7 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string)
 	}
 	rewriteMainGoMod(out, plan)
 	for _, m := range plan.deps {
-		rewriteDepGoMod(plan, m, ejected)
+		rewriteDepGoMod(plan, m, ejected, out)
 	}
 	if usedRT {
 		for _, m := range plan.deps {
@@ -1496,11 +1496,27 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 			used = true
 		}
 		// The compiler writes one edit-map sidecar per ejected file
-		// into staging; carry it to the output so the map can be
-		// checked against the sources. A file without a sidecar
-		// (plain Go, or an older staging layout) ejects unchanged.
+		// into staging; carry it to the output. The map partitions
+		// the staging bytes before import rewriting, JSONv2
+		// splitting and gofmt, not the final bytes beside it, so
+		// pairing it with the final file through editmap.Check is
+		// unsupported; the map pins shared source spans and
+		// generated marks as the eject scripts check them. A file
+		// without a sidecar (plain Go, or an older staging layout)
+		// ejects unchanged. A source file already sitting at the
+		// sidecar path is a collision: eject stops instead of
+		// silently embedding map JSON under the asset's name.
 		if editRaw, editErr := os.ReadFile(filepath.Join(dest.staging, filepath.FromSlash(p.ImportPath), stem+".go"+editmap.Suffix)); editErr == nil {
-			if writeErr := os.WriteFile(filepath.Join(dest.dstRoot, rel, stem+".go"+editmap.Suffix), editRaw, 0666); writeErr != nil {
+			sidecar := filepath.Join(dest.dstRoot, rel, stem+".go"+editmap.Suffix)
+			if old, statErr := os.ReadFile(sidecar); statErr == nil {
+				// Variant merges emit the same package twice with
+				// identical sidecar bytes; rewriting them is a no-op.
+				// Anything else at this path is a source asset the
+				// map must not clobber, so eject stops instead.
+				if !bytes.Equal(old, editRaw) {
+					base.Fatalf("logos eject: edit map %s collides with a source file of the same name; rename the source file", sidecar)
+				}
+			} else if writeErr := os.WriteFile(sidecar, editRaw, 0666); writeErr != nil {
 				base.Fatalf("logos eject: %s", writeErr)
 			}
 		}
@@ -2760,10 +2776,10 @@ func localReplaceDirs(modDir string) map[string]bool {
 	}
 	dirs := map[string]bool{}
 	for _, r := range f.Replace {
-		if r.New.Version != "" || r.New.Path == "" || filepath.IsAbs(r.New.Path) {
+		if r.New.Version != "" || r.New.Path == "" {
 			continue
 		}
-		target := filepath.Join(absMod, filepath.FromSlash(r.New.Path))
+		target := absReplaceTarget(absMod, r.New.Path)
 		if rel, err := filepath.Rel(absMod, target); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			dirs[filepath.Clean(rel)] = true
 		}
@@ -2771,13 +2787,42 @@ func localReplaceDirs(modDir string) map[string]bool {
 	return dirs
 }
 
-// rebaseLocalReplaces points each module-relative replace of f at the
-// ejected copy. Every directive is edited independently by its exact old
-// path and version, so two versions of one module keep two replace lines
-// and a wildcard replace stays a wildcard replace. Absolute filesystem
-// targets stay untouched: they lie outside the module, and rebasing them
-// as relative paths would break the export once it moves (filepath.Rel
-// even fails across Windows drives).
+// absReplaceTarget resolves a local replacement target against the module
+// that declares it. Absolute targets stand; relative targets join the
+// declaring module directory. Callers then rebase inside-module targets
+// at the ejected copy, so the export never points at the source checkout.
+func absReplaceTarget(absBase, newPath string) string {
+	absTarget := filepath.FromSlash(newPath)
+	if !filepath.IsAbs(absTarget) {
+		absTarget = filepath.Join(absBase, absTarget)
+	}
+	return absTarget
+}
+
+// outsideModule reports whether an absolute target lies outside the
+// module root. filepath.Rel fails across drives, so a target on another
+// drive is outside, and it compares drive letters without case, so
+// c: and C: are one drive. Inside targets return false and are rebased
+// at the ejected copy by the caller.
+func outsideModule(absOrig, absTarget string) bool {
+	rel, err := filepath.Rel(absOrig, absTarget)
+	return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// rebaseLocalReplaces points each local replace of f at the ejected
+// copy. Every directive is edited independently by its exact old path
+// and version, so two versions of one module keep two replace lines and
+// a wildcard replace stays a wildcard replace. An absolute target
+// outside the module stays untouched; an absolute target inside is
+// rebased at the ejected copy, so the export never points at the
+// source checkout. Outside targets never reach the filepath.Rel calls
+// below that abort eject, since outsideModule decides them first.
+//
+// The directives are snapshotted by value first: every rebasing edit
+// drops and re-adds lines, and the vendored AddReplace matches an empty
+// old version against every remaining directive of the path, so editing
+// through the live pointers would read entries a previous edit already
+// rewrote or zeroed.
 func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[string]string) {
 	absOrig, err := filepath.Abs(origDir)
 	if err != nil {
@@ -2787,14 +2832,24 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 	if err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
-	for _, r := range slices.Clone(f.Replace) {
-		if _, ok := ejected[r.Old.Path]; ok {
+	type directive struct{ oldPath, oldVers, newPath, newVers string }
+	snapshot := make([]directive, 0, len(f.Replace))
+	for _, r := range f.Replace {
+		snapshot = append(snapshot, directive{r.Old.Path, r.Old.Version, r.New.Path, r.New.Version})
+	}
+	for _, d := range snapshot {
+		if _, ok := ejected[d.oldPath]; ok {
 			continue
 		}
-		if r.New.Version != "" || r.New.Path == "" || filepath.IsAbs(r.New.Path) {
+		if d.newVers != "" || d.newPath == "" {
 			continue
 		}
-		target := filepath.Join(absOrig, filepath.FromSlash(r.New.Path))
+		// Absolute targets outside the module stay untouched; absolute
+		// targets inside are rebased at the ejected copy below.
+		if filepath.IsAbs(filepath.FromSlash(d.newPath)) && outsideModule(absOrig, filepath.FromSlash(d.newPath)) {
+			continue
+		}
+		target := absReplaceTarget(absOrig, d.newPath)
 		if relOrig, err := filepath.Rel(absOrig, target); err == nil && relOrig != ".." && !strings.HasPrefix(relOrig, ".."+string(filepath.Separator)) {
 			dstTarget := filepath.Join(absDst, relOrig)
 			if fi, err := os.Stat(dstTarget); err == nil && fi.IsDir() {
@@ -2806,17 +2861,17 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 			base.Fatalf("logos eject: %v", err)
 		}
 		newPath := "./" + filepath.ToSlash(rel)
-		if newPath == r.New.Path {
+		if newPath == d.newPath {
 			continue
 		}
-		// Copy the identity first: DropReplace zeroes the entry in
-		// place through the shared pointer.
-		oldPath, oldVers := r.Old.Path, r.Old.Version
-		if err := f.DropReplace(oldPath, oldVers); err != nil {
-			base.Fatalf("logos eject: %v", err)
-		}
-		if err := f.AddReplace(oldPath, oldVers, newPath, ""); err != nil {
-			base.Fatalf("logos eject: %v", err)
+		// Route through the version-aware editors: a raw AddReplace
+		// with an empty old version matches every remaining directive
+		// of the path and would rewrite or delete the pinned
+		// exact-version lines beside the wildcard.
+		if d.oldVers == "" {
+			setGoReplaceWildcard(f, d.oldPath, newPath)
+		} else {
+			setGoReplaceExact(f, d.oldPath, d.oldVers, newPath)
 		}
 	}
 }
@@ -2843,7 +2898,7 @@ func relEjectTarget(from, to string) string {
 // rewriteDepGoMod points one ejected dependency go.mod at every other
 // ejected dependency module, and repoints its own replaces of ejected
 // modules at the ejected copies.
-func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string) {
+func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string, out string) {
 	dst := ejected[m.path]
 	f := parseGoModFile(filepath.Join(dst, "go.mod"))
 	for _, other := range plan.deps {
@@ -2864,7 +2919,57 @@ func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string)
 		setGoReplace(f, o[0], o[1], relEjectTarget(dst, ejected[o[0]]))
 	}
 	rebaseLocalReplaces(f, m.dir, dst, ejected)
+	rebaseDepReplacesOnMain(f, ejected, plan, dst, out)
 	writeGoModFile(filepath.Join(dst, "go.mod"), f)
+}
+
+// rebaseDepReplacesOnMain repoints a dependency replace that names a
+// directory outside the dependency module at the ejected copy when the
+// target is a kept nested module of the main module. Absolute targets
+// resolve directly; relative targets resolve against the ejected
+// dependency. The shared rebasing resolves such targets against the
+// source tree, which the exported module must not reference; the eject
+// copies those nested modules to the same main-relative path under out.
+// A target already inside the ejected tree or outside the main module
+// is left alone.
+func rebaseDepReplacesOnMain(f *modfile.File, ejected map[string]string, plan *ejectPlan, dst, out string) {
+	absDst, err := filepath.Abs(dst)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	absMain, err := filepath.Abs(plan.main.dir)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	absOut, err := filepath.Abs(out)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	for _, r := range slices.Clone(f.Replace) {
+		if _, ok := ejected[r.Old.Path]; ok {
+			continue
+		}
+		if r.New.Version != "" || r.New.Path == "" {
+			continue
+		}
+		absTarget := absReplaceTarget(absDst, r.New.Path)
+		if rel, err := filepath.Rel(absOut, absTarget); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		relMain, err := filepath.Rel(absMain, absTarget)
+		if err != nil || relMain == ".." || strings.HasPrefix(relMain, ".."+string(filepath.Separator)) {
+			continue
+		}
+		cand := filepath.Join(absOut, relMain)
+		if fi, err := os.Stat(cand); err != nil || !fi.IsDir() {
+			continue
+		}
+		rel, err := filepath.Rel(absDst, cand)
+		if err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+		setGoReplace(f, r.Old.Path, r.Old.Version, "./"+filepath.ToSlash(rel))
+	}
 }
 
 // ensureGoRequire adds a require line unless one already names path.
@@ -2911,13 +3016,18 @@ func setGoReplace(f *modfile.File, oldPath, oldVers, newPath string) {
 }
 
 // setGoReplaceWildcard points the wildcard replace of oldPath at newPath
-// and leaves every exact-version replace of oldPath on its own target.
+// and leaves every exact-version replace of oldPath on its own target,
+// preserving both fields of each replacement target. The vendored
+// AddReplace matches an empty version against every existing version of
+// the path, so a wildcard edit saves the exact-version directives, drops
+// every directive of the path, and adds them all back instead of calling
+// through.
 func setGoReplaceWildcard(f *modfile.File, oldPath, newPath string) {
-	type exact struct{ vers, target string }
+	type exact struct{ vers, target, targetVers string }
 	var keep []exact
 	for _, r := range slices.Clone(f.Replace) {
 		if r.Old.Path == oldPath && r.Old.Version != "" {
-			keep = append(keep, exact{r.Old.Version, r.New.Path})
+			keep = append(keep, exact{r.Old.Version, r.New.Path, r.New.Version})
 		}
 	}
 	if len(keep) == 0 {
@@ -2936,7 +3046,7 @@ func setGoReplaceWildcard(f *modfile.File, oldPath, newPath string) {
 		base.Fatalf("logos eject: %v", err)
 	}
 	for _, e := range keep {
-		if err := f.AddReplace(oldPath, e.vers, e.target, ""); err != nil {
+		if err := f.AddReplace(oldPath, e.vers, e.target, e.targetVers); err != nil {
 			base.Fatalf("logos eject: %v", err)
 		}
 	}

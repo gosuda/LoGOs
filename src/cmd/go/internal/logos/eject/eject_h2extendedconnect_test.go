@@ -710,3 +710,150 @@ func shadowed() {
 		t.Errorf("direct call not on the fresh alias:\n%s", got)
 	}
 }
+
+func TestH2ExtendedConnectScopesCalleeTempsPerBinding(t *testing.T) {
+	// Lowering restarts its callee-temporary numbering in every
+	// function, so two functions can bind one spelling to different
+	// values. The rewrite attributes each use to its own binding: the
+	// zero-argument server capture rebinds even though an unrelated
+	// one-argument call shares its spelling in another function.
+	const in = `package main
+
+import "net/http"
+
+func serve(srv *http.Server) {
+	_logos_f0 := srv.EnableHTTP2ExtendedConnect
+	go _logos_f0()
+}
+
+func other(work func(int)) {
+	_logos_f0 := work
+	go _logos_f0(1)
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if !strings.Contains(got, `_logos_f0 := ejectedhttp.RequireExtendedConnectFunc("srv", srv)`) {
+		t.Errorf("server capture not rebound when another function shares its spelling:\n%s", got)
+	}
+	if strings.Contains(got, "_logos_f0 := srv.EnableHTTP2ExtendedConnect") {
+		t.Errorf("fork-only method value left in the export:\n%s", got)
+	}
+	if !strings.Contains(got, "_logos_f0 := work") {
+		t.Errorf("unrelated binding lost:\n%s", got)
+	}
+	if !strings.Contains(got, "_logos_f0(1)") {
+		t.Errorf("unrelated call site lost:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectSkipsDotBlankBindings(t *testing.T) {
+	const in = `package main
+
+import (
+	"net/http"
+	_ "os"
+	. "strings"
+)
+
+func enable(s *http.Server) {
+	_ = TrimSpace("x")
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no delegation call with the receiver as argument:\n%s", got)
+	}
+	if strings.Contains(got, "..") || strings.Contains(got, "_.") {
+		t.Errorf("dot or blank binding used as qualifier:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectIgnoresShadowableAny(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+type any = string
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("no delegation call with the receiver as argument:\n%s", got)
+	}
+	if strings.Contains(got, " any)") {
+		t.Errorf("emitted code uses shadowable any:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectPanicReceiver(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func enable(panic *http.Server) {
+	panic.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if strings.Contains(got, "func(panic ") {
+		t.Errorf("parameter shadows builtin panic:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("panic", panic)`) {
+		t.Errorf("receiver not passed verbatim to the delegation:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectReservesSiblingNames(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	extra := map[string]bool{"ejectedhttp": true}
+	out, _, ok := remapEjectedFile([]byte(in), "", extra)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("direct call survives:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("support import does not avoid the sibling name:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("delegation does not use the reserved alias:\n%s", got)
+	}
+}

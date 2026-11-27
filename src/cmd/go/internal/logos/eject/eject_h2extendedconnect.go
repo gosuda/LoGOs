@@ -106,25 +106,12 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 		return nil, false
 	}
 	local, needImport := h2SupportLocal(f, supportPath, supportLocal, extraUsed)
-	// useArgs records, for each marked callee temporary, the argument
-	// counts at its call sites. The verifier already refused every
-	// same-named user method, so a marked capture holds either the
-	// zero-argument server method or the one-argument helper value:
-	// arity at the uses tells which one, even when the receiver
-	// spells a shadowed import alias.
-	useArgs := map[string][]int{}
-	ast.Inspect(f, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		id, ok := call.Fun.(*ast.Ident)
-		if !ok || !h2IsLoweredCalleeTemp(id.Name) {
-			return true
-		}
-		useArgs[id.Name] = append(useArgs[id.Name], len(call.Args))
-		return true
-	})
+	// Uses are attributed by lexical scope: lowering restarts its
+	// callee-temporary numbering in every function body, literal and
+	// chain frame, so one spelling can name several bindings in one
+	// file and only the innermost enclosing declaration tells which
+	// binding a call site uses.
+	captureUses := h2CaptureUses(f)
 	var assigns []h2assignSite
 	var calls []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -155,7 +142,11 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 			if !ok || !h2IsLoweredCalleeTemp(lhsIdent.Name) {
 				return true
 			}
-			if args, ok := useArgs[lhsIdent.Name]; !ok || !h2AllZeroArgs(args) {
+			// Only the call sites bound to this assignment count: an
+			// unrelated binding elsewhere in the file may share the
+			// spelling, and its arguments must not spare a server
+			// capture (or condemn a helper capture).
+			if args, ok := captureUses[as]; !ok || !h2AllZeroArgs(args) {
 				return true
 			}
 			recvStart := fset.Position(sel.X.Pos()).Offset
@@ -455,6 +446,83 @@ func h2AllZeroArgs(args []int) bool {
 		}
 	}
 	return true
+}
+
+// h2CaptureUses attributes each lowered callee-temporary call site to the
+// assignment that binds it. The verifier already refused every same-named
+// user method, so a marked capture the rewrite trusts holds either the
+// zero-argument server method or the one-argument helper value: the
+// argument counts at its own uses tell which one, even when the receiver
+// spells a shadowed import alias. The walk tracks one visible binding per
+// temporary per scope; a use resolves to the innermost enclosing
+// declaration, so an unrelated binding that reuses the spelling in
+// another function or literal cannot lend its arguments here. A use with
+// no visible binding records nothing: lowering always uses the temporary
+// it binds, so an orphan use is not a shape the rewrite trusts.
+func h2CaptureUses(f *ast.File) map[*ast.AssignStmt][]int {
+	uses := map[*ast.AssignStmt][]int{}
+	var scopes []map[string]*ast.AssignStmt
+	resolve := func(name string) (*ast.AssignStmt, bool) {
+		for i := len(scopes) - 1; i >= 0; i-- {
+			if as, ok := scopes[i][name]; ok {
+				return as, true
+			}
+		}
+		return nil, false
+	}
+	// Walk calls the visitor with nil after every node's children, so
+	// each visit pushes a marker telling the matching nil visit whether
+	// a scope ends there.
+	var endsScope []bool
+	ast.Inspect(f, func(n ast.Node) bool {
+		if n == nil {
+			if endsScope[len(endsScope)-1] {
+				scopes = scopes[:len(scopes)-1]
+			}
+			endsScope = endsScope[:len(endsScope)-1]
+			return true
+		}
+		scope := false
+		switch n.(type) {
+		case *ast.File, *ast.BlockStmt, *ast.CaseClause, *ast.CommClause,
+			*ast.IfStmt, *ast.ForStmt, *ast.RangeStmt,
+			*ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt:
+			scopes = append(scopes, map[string]*ast.AssignStmt{})
+			scope = true
+		}
+		endsScope = append(endsScope, scope)
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			// Any declared temporary shadows the outer spelling from
+			// here on, even in a multi-target assignment the capture
+			// matcher itself skips.
+			for _, lhs := range n.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok && h2IsLoweredCalleeTemp(id.Name) && (n.Tok == token.DEFINE || n.Tok == token.ASSIGN) {
+					scopes[len(scopes)-1][id.Name] = n
+				}
+			}
+		case *ast.GenDecl:
+			if n.Tok == token.VAR {
+				for _, spec := range n.Specs {
+					if vs, ok := spec.(*ast.ValueSpec); ok {
+						for _, name := range vs.Names {
+							if h2IsLoweredCalleeTemp(name.Name) {
+								scopes[len(scopes)-1][name.Name] = nil
+							}
+						}
+					}
+				}
+			}
+		case *ast.CallExpr:
+			if id, ok := n.Fun.(*ast.Ident); ok && h2IsLoweredCalleeTemp(id.Name) {
+				if as, ok := resolve(id.Name); ok && as != nil {
+					uses[as] = append(uses[as], len(n.Args))
+				}
+			}
+		}
+		return true
+	})
+	return uses
 }
 
 // h2ImportEdit appends a fresh import declaration holding the missing paths

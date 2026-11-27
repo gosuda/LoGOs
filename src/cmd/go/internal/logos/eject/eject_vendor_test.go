@@ -74,10 +74,10 @@ func TestFoldEjectedGuardSpecializes(t *testing.T) {
 		{"//go:build !ejecttestjsonoff", "!ejecttestjsonoff", false},
 		// A folded release tag would pin the file to that Go version's
 		// semantics, so a versionless file keeps the folded residual and
-		// drops the implied version with an always-false disjunct, while
-		// a versioned file keeps the original structure with
-		// version-neutral mode tags instead.
-		{"//go:build !logosejected || go1.21", "go1.21 || ignore", false},
+		// drops the implied version with a never-selected disjunct (no tag
+		// set satisfies it, not even -tags ignore), while a versioned file
+		// keeps the original structure with version-neutral mode tags instead.
+		{"//go:build !logosejected || go1.21", "go1.21 || (ignore && !ignore)", false},
 		{"//go:build !logosconc || go1.21", "", false},
 		// The original already implies this version, so the folded tag
 		// stays: no structure is needed to preserve it.
@@ -155,7 +155,7 @@ func TestNeutralizeEjectedGuardCollapsesNegation(t *testing.T) {
 // A legacy-only guard never set the file's language version: the compiler
 // reads per-file versions from //go:build lines alone. A residual that
 // names a release tag must therefore stay versionless, keeping the
-// selection with a version-neutral, always-false disjunct instead of
+// selection with a version-neutral, never-selected disjunct instead of
 // restoring the lower version the legacy selection expression implies.
 func TestFoldEjectedGuardLegacyGuardStaysVersionless(t *testing.T) {
 	cases := []struct {
@@ -163,11 +163,11 @@ func TestFoldEjectedGuardLegacyGuardStaysVersionless(t *testing.T) {
 		residual string
 		excluded bool
 	}{
-		{"// +build !logosejected,go1.21 go1.27", "go1.27 || ignore", false},
+		{"// +build !logosejected,go1.21 go1.27", "go1.27 || (ignore && !ignore)", false},
 		{"// +build logosejected", "", false},
 		{"// +build !logosejected", "", true},
 		{"// +build !logosconc", "", false},
-		{"//go:build !(!logosconc) || go1.21", "go1.21 || ignore", false},
+		{"//go:build !(!logosconc) || go1.21", "go1.21 || (ignore && !ignore)", false},
 	}
 	for _, tc := range cases {
 		expr := parseEjectedGuard(t, tc.line)
@@ -209,5 +209,26 @@ func TestRewriteEjectedGuardDropsBOMGuard(t *testing.T) {
 	}
 	if _, err := parser.ParseFile(token.NewFileSet(), "", out, parser.PackageClauseOnly); err != nil {
 		t.Errorf("rewrote BOM header to unparsable Go: %v\n%s", err, out)
+	}
+}
+
+// An explicitly enabled ignore tag must not newly select a versionless
+// file: the version-neutral disjunct stays unsatisfiable under every tag
+// set while the residual still selects its platform.
+func TestFoldEjectedGuardIgnoreTagNotSelectable(t *testing.T) {
+	const line = "//go:build linux && go1.21"
+	expr := parseEjectedGuard(t, line)
+	guard, excluded := foldEjectedGuard(expr, "")
+	if excluded {
+		t.Fatalf("foldEjectedGuard(%q) excluded = true, want false", line)
+	}
+	if guard == nil {
+		t.Fatalf("foldEjectedGuard(%q) = nil, want a residual guard", line)
+	}
+	if guard.Eval(func(tag string) bool { return tag == "ignore" }) {
+		t.Errorf("versionless residual %q selects with -tags ignore", guard.String())
+	}
+	if !guard.Eval(func(tag string) bool { return tag == "linux" || tag == "go1.21" }) {
+		t.Errorf("versionless residual %q drops its platform selection", guard.String())
 	}
 }
