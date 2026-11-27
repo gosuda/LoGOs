@@ -1297,7 +1297,7 @@ func (p *logosEFPass) dropMayFor(st *logosEFState, errKey logosEFKey, rewritten 
 			if rewritten != nil && rewritten.writes(k) {
 				continue
 			}
-		} else if s.mayErr[k] != (logosEFKey{}) || (rewritten != nil && rewritten.writes(k)) || !p.futurePairClean(k, errKey) {
+		} else if len(s.mayAlt[k]) != 0 || s.mayErr[k] != (logosEFKey{}) || (rewritten != nil && rewritten.writes(k)) || !p.futurePairClean(k, errKey) {
 			continue
 		}
 		if mout == nil {
@@ -1597,16 +1597,22 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 	for v := range a.m {
 		if _, ok := b.m[v]; !ok && b.may[v] {
 			e := m[v]
+			bGuard, bHas := b.mayErr[v]
 			if !a.unchecked(v) {
-				if ek, ok := b.mayErr[v]; ok && ek != (logosEFKey{}) {
-					e.errKey = ek
+				// The checked side contributes only a safe value, so
+				// the merged guard comes from the still-unchecked
+				// input, and the message names that guard.
+				if bHas && bGuard != (logosEFKey{}) {
+					e.errKey = bGuard
+					e.name = bGuard.displayName()
 				} else {
 					e.errKey = logosEFKey{}
 				}
-			} else if e.proven && e.errKey == (logosEFKey{}) {
-				if ek, ok := b.mayErr[v]; ok && ek != (logosEFKey{}) {
-					e.errKey = ek
-				}
+			} else if e.errKey == (logosEFKey{}) || !bHas || e.errKey != bGuard {
+				// Unchecked on both sides: no single guard proves the
+				// joined read when the other input uses a different
+				// guard or none.
+				e.errKey = logosEFKey{}
 			}
 			e.err, e.proven = nil, false
 			m[v] = e
@@ -1616,16 +1622,16 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 		ea, ok := m[v]
 		if !ok {
 			if a.may[v] {
+				aGuard, aHas := a.mayErr[v]
 				if !b.unchecked(v) {
-					if ek, ok := a.mayErr[v]; ok && ek != (logosEFKey{}) {
-						eb.errKey = ek
+					if aHas && aGuard != (logosEFKey{}) {
+						eb.errKey = aGuard
+						eb.name = aGuard.displayName()
 					} else {
 						eb.errKey = logosEFKey{}
 					}
-				} else if eb.proven && eb.errKey == (logosEFKey{}) {
-					if ek, ok := a.mayErr[v]; ok && ek != (logosEFKey{}) {
-						eb.errKey = ek
-					}
+				} else if eb.errKey == (logosEFKey{}) || !aHas || eb.errKey != aGuard {
+					eb.errKey = logosEFKey{}
 				}
 				eb.err, eb.proven = nil, false
 			}

@@ -836,6 +836,7 @@ type heldSplit struct {
 	stats int
 	errA  error
 	errB  error
+	errC  error
 }
 
 // Branches that pair one result with different errors leave no single
@@ -923,7 +924,7 @@ func joinStaleGuardCheckStaysUnproven(cond bool) {
 		h.stats, h.errB = fetchHeld()
 	}
 	if h.errA == nil {
-		use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+		use(h.stats /* ERROR "read of h.stats before h.errB is checked" */)
 	}
 }
 
@@ -1190,4 +1191,26 @@ func cleanupForwardComputedFails() {
 			use(stats)
 		}()
 	}()
+}
+
+// A check of one unchecked arm's guard cannot prove a value a third arm
+// pairs elsewhere: the joined read keeps failing.
+func joinThreeArmCheckFirstLiveGuardStaysUnproven(c int) {
+	h := heldSplit{}
+	switch c {
+	case 1:
+		func() {
+			h.stats, h.errA = fetchHeld()
+		}()
+		if h.errA != nil {
+			return
+		}
+	case 2:
+		h.stats, h.errB = fetchHeld()
+	default:
+		h.stats, h.errC = fetchHeld()
+	}
+	if h.errB == nil {
+		use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	}
 }
