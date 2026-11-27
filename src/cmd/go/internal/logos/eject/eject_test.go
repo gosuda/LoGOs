@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -346,7 +347,7 @@ func TestRebaseAbsoluteReplaceTargets(t *testing.T) {
 		}
 	}
 	absTarget := filepath.Join(mainDir, "testonly")
-	mainMod := "module example.com/ejectabs\n\ngo 1.27\n\nrequire example.com/testonly v0.0.0\n\nreplace example.com/testonly => " + absTarget + "\n"
+	mainMod := "module example.com/ejectabs\n\ngo 1.27\n\nrequire example.com/testonly v0.0.0\n\nreplace example.com/testonly => " + strconv.Quote(absTarget) + "\n"
 	if err := os.WriteFile(filepath.Join(mainDir, "go.mod"), []byte(mainMod), 0666); err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +355,7 @@ func TestRebaseAbsoluteReplaceTargets(t *testing.T) {
 	if err := os.MkdirAll(depDir, 0777); err != nil {
 		t.Fatal(err)
 	}
-	depMod := "module example.com/deptestdep\n\ngo 1.27\n\nrequire example.com/testonly v0.0.0\n\nreplace example.com/testonly => " + absTarget + "\n"
+	depMod := "module example.com/deptestdep\n\ngo 1.27\n\nrequire example.com/testonly v0.0.0\n\nreplace example.com/testonly => " + strconv.Quote(absTarget) + "\n"
 	if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte(depMod), 0666); err != nil {
 		t.Fatal(err)
 	}

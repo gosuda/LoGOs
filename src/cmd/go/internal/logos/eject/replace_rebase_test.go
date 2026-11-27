@@ -7,7 +7,7 @@ package eject
 import (
 	"os"
 	"path/filepath"
-	"strings"
+	"strconv"
 	"testing"
 
 	"golang.org/x/mod/modfile"
@@ -154,10 +154,7 @@ func TestSetGoReplaceKeepsOtherVersions(t *testing.T) {
 }
 
 func quoteModPath(path string) string {
-	if strings.ContainsAny(path, " \t\"") {
-		return `"` + path + `"`
-	}
-	return path
+	return strconv.Quote(path)
 }
 
 func toSlashRel(t *testing.T, base, target string) string {
