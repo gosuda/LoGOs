@@ -49,14 +49,55 @@ stdout '^trace receiver stays native$'
 stderr 'fork_stdlib_api'
 cd ..
 
+# A grouped opt-in whose receiver holds another opt-in ejects as one
+# composed guard: emitting the capture edit and the inner call edit would
+# overlap and stop the export.
+cd nested
+logos run .
+stdout '^nested ready$'
+logos eject -o out
+grep 'RequireExtendedConnectFunc' out/main.go
+grep 'RequireExtendedConnect\("backup", backup\)' out/main.go
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^nested ready$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ../..
+
+# Saving the public logos/net/http helper as a value is not a lowered
+# server method value: the rewrite leaves it alone, the import still
+# remaps to the ejected support copy, and both binaries run it.
+cd helper
+logos run .
+stdout '^helper ready$'
+logos eject -o out
+! grep 'RequireExtendedConnectFunc' out/main.go
+grep 'logohttp.EnableHTTP2ExtendedConnect' out/main.go
+grep 'logohttp "github.com/gosuda/loGos/rt/net/http"' out/main.go
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^helper ready$'
+env GODEBUG=
+! exec go run .
+stderr 'needs GODEBUG=http2xconnect=1'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ../..
+
 # A module whose only net/http import and extended-CONNECT call live in
 # a non-host variant still needs the helper package in the output: the
 # variant inventory carries no import edges, so the seed-based roots miss
 # logos/net/http and the support bundle is selected from the imports the
-# rewrite actually emitted instead.
+# rewrite actually emitted instead. The native run prints the host
+# variant's message, so each host asserts its own.
 cd variant
-logos run .
-stdout '^other ready$'
+[!GOOS:windows] logos run .
+[!GOOS:windows] stdout '^other ready$'
+[GOOS:windows] logos run .
+[GOOS:windows] stdout '^windows ready$'
 logos eject -o out
 grep 'RequireExtendedConnect' out/server_windows.go
 grep 'ejectedhttp "github.com/gosuda/loGos/rt/net/http"' out/server_windows.go
@@ -188,3 +229,72 @@ package main
 import "fmt"
 
 func main() { fmt.Println("other ready") }
+
+-- nested/go.mod --
+module example.com/h2nested
+
+go 1.27
+
+-- nested/main.lgo --
+
+// Command nesteddemo covers a grouped opt-in whose receiver holds another
+// opt-in: eject composes the inner guard into the capture instead of
+// emitting overlapping edits that stop the export.
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+)
+
+var backup = &http.Server{Addr: "127.0.0.1:0"}
+
+func makeServer(init func()) *http.Server {
+	init()
+	return &http.Server{Addr: "127.0.0.1:0"}
+}
+
+func run() error {
+	go group (context.Background()) {
+		go makeServer(func() { backup.EnableHTTP2ExtendedConnect() }).EnableHTTP2ExtendedConnect()
+	}
+	fmt.Println("nested ready")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- helper/go.mod --
+module example.com/h2helper
+
+go 1.27
+
+-- helper/main.lgo --
+
+// Command helperdemo saves the public logos/net/http helper as a value:
+// eject must not mistake it for a lowered server method value.
+package main
+
+import (
+	"fmt"
+	"net/http"
+	logohttp "logos/net/http"
+)
+
+func run() {
+	enable := logohttp.EnableHTTP2ExtendedConnect
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	if err := enable(srv); err != nil {
+		panic(err)
+	}
+	fmt.Println("helper ready")
+}
+
+func main() {
+	run()
+}
