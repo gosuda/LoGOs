@@ -1347,10 +1347,17 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 	// A may-only input vetoes a proof the other branch holds: the merged
 	// value may come from a path that never checked it, so a carried
 	// entry stays unproven and keeps no error variable a later check
-	// could misuse.
+	// could misuse. When the vetoed entry was proven and carries no
+	// guard of its own, it takes the may-only path's field guard, so a
+	// later check of that guard proves the joined read.
 	for v := range a.m {
 		if _, ok := b.m[v]; !ok && b.may[v] {
 			e := m[v]
+			if e.proven && e.errKey == (logosEFKey{}) {
+				if ek, ok := b.mayErr[v]; ok && ek != (logosEFKey{}) {
+					e.errKey = ek
+				}
+			}
 			e.err, e.proven = nil, false
 			m[v] = e
 		}
@@ -1359,6 +1366,11 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 		ea, ok := m[v]
 		if !ok {
 			if a.may[v] {
+				if eb.proven && eb.errKey == (logosEFKey{}) {
+					if ek, ok := a.mayErr[v]; ok && ek != (logosEFKey{}) {
+						eb.errKey = ek
+					}
+				}
 				eb.err, eb.proven = nil, false
 			}
 			m[v] = eb

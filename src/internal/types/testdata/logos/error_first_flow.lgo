@@ -788,3 +788,46 @@ func cleanupNoopLeavesNothing() {
 	}()
 	use(h.stats)
 }
+
+// A checked plain arm does not mask a field arm: checking the field
+// guard afterwards proves the joined read.
+func joinFieldCheckProvesAfterJoin(cond bool) {
+	h := heldField{}
+	var err error
+	func() {
+		if cond {
+			h.stats, err = fetchHeld()
+			if err != nil {
+				panic("boom")
+			}
+		} else {
+			h.stats, h.err = fetchHeld()
+		}
+	}()
+	if h.err != nil {
+		return
+	}
+	use(h.stats)
+	_ = err
+}
+
+// Same, with the arms swapped.
+func joinFieldCheckProvesAfterJoinSwapped(cond bool) {
+	h := heldField{}
+	var err error
+	func() {
+		if cond {
+			h.stats, h.err = fetchHeld()
+		} else {
+			h.stats, err = fetchHeld()
+			if err != nil {
+				panic("boom")
+			}
+		}
+	}()
+	if h.err != nil {
+		return
+	}
+	use(h.stats)
+	_ = err
+}
