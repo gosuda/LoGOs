@@ -1,0 +1,50 @@
+# Known concrete types must not ask the runtime for type identity. The
+# ejected generic instances contain no dynamic identity helper calls.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos run .
+stdout '^static identity compiled out$'
+logos eject -o out
+! grep 'DynamicTypeDifference' out/main.go
+cd out
+exists $UPROOT1272/bin/go$GOEXE
+exec $UPROOT1272/bin/go$GOEXE version
+stdout '^go version go1\.27\.2 '
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+stdout '^static identity compiled out$'
+
+-- m/go.mod --
+module example.com/staticidentity
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+	"logos/expect"
+)
+
+type reporter struct{}
+
+func (r *reporter) Helper() {}
+func (r *reporter) Errorf(format string, args ...any) { panic(fmt.Sprintf(format, args...)) }
+
+type record struct {
+	Name string
+	Count int
+}
+
+func main() {
+	r := &reporter{}
+	v := record{Name: "same", Count: 7}
+	p := &v
+	expect.Equal(r, v, v)
+	expect.Equal(r, 7, 7)
+	expect.Equal(r, p, p)
+	fmt.Println("static identity compiled out")
+}

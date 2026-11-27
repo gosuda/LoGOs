@@ -1,0 +1,26 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Item struct {
+	Name string
+}
+
+func c[T any](v T) int {
+	comptime.Error("boom")
+	return 0
+}
+
+func b[T any](v T) int {
+	_ = v
+	return c[T](v) // ERROR "boom(?s:.*)instantiated here chain_notes_three.lgo:26(?s:.*)instantiated here chain_notes_three.lgo:26(?s:.*)instantiated here chain_notes_three.lgo:18"
+}
+
+func a[T any](v T) int {
+	_ = v
+	return b[T](v)
+}
+
+var _ = a[Item](Item{})

@@ -361,10 +361,22 @@ func (fl *fileLower) emitImportedConstMap(s importedMapSpec, pos syntax.Pos) (*c
 		entries[i] = constMapKey{hash: rec.Hashes[i], canon: rec.Canons[i]}
 	}
 	var builderBody, materialized string
+	var thinOwnerQual, thinExportBase string
+	thin := false
 	if s.owner != nil {
 		materialized = s.owner.Name()
 		if qual, ok := fl.constMapImportQual(s.owner.Pkg()); ok {
 			materialized = qual + "." + materialized
+			if token.IsExported(s.owner.Name()) {
+				ejectQual := fl.ensureEjectImport(s.owner.Pkg().Path(), pos)
+				if ejectQual == "" {
+					ejectQual = qual
+				}
+				materialized = ejectQual + "." + s.owner.Name()
+				thinOwnerQual = ejectQual
+				thinExportBase = s.owner.Name()
+				thin = true
+			}
 		}
 	} else {
 		pairs := make([]string, len(rec.Keys))
@@ -373,20 +385,27 @@ func (fl *fileLower) emitImportedConstMap(s importedMapSpec, pos syntax.Pos) (*c
 		}
 		builderBody = mapT + "{" + strings.Join(pairs, ", ") + "}"
 	}
-	text := finalizeConstMapEmission(pos, constMapEmission{
-		name:        s.name,
-		kT:          kT,
-		vT:          vT,
-		mapT:        mapT,
-		keyTexts:    keys,
-		valTexts:    vals,
-		builderBody: builderBody,
-		hashExpr:    fl.constKeyHashText(mt.Key(), "_logos_k", pos),
-		order:       rec.Order,
-		bearing:     rec.Bearing,
-	}, entries)
-	if materialized != "" {
+	var text string
+	if thin {
+		text = fmt.Sprintf("func %s_lookup(_logos_k %s) (%s, bool) { return %s.LogosCM_%s_lookup(_logos_k) }\n", s.name, kT, vT, thinOwnerQual, thinExportBase)
+		text += fmt.Sprintf("func %s_all(_logos_yield func(%s, %s) bool) { %s.LogosCM_%s_all(_logos_yield) }\n", s.name, kT, vT, thinOwnerQual, thinExportBase)
 		text += fmt.Sprintf("func %s_map() %s { return %s }\n", s.name, mapT, materialized)
+	} else {
+		text = finalizeConstMapEmission(pos, constMapEmission{
+			name:        s.name,
+			kT:          kT,
+			vT:          vT,
+			mapT:        mapT,
+			keyTexts:    keys,
+			valTexts:    vals,
+			builderBody: builderBody,
+			hashExpr:    fl.constKeyHashText(mt.Key(), "_logos_k", pos),
+			order:       rec.Order,
+			bearing:     rec.Bearing,
+		}, entries)
+		if materialized != "" {
+			text += fmt.Sprintf("func %s_map() %s { return %s }\n", s.name, mapT, materialized)
+		}
 	}
 	g := &constMapGen{name: s.name, nkeys: len(rec.Keys), bearing: rec.Bearing}
 	if s.owner != nil && fl.pkg.info.LogosCtImportConstMap != nil {
@@ -401,8 +420,10 @@ func (fl *fileLower) emitImportedConstMap(s importedMapSpec, pos syntax.Pos) (*c
 			decls := parseConstMapDecls(text, pos)
 			fl.markConstMapTables(decls, g)
 			fl.constDecls = append(fl.constDecls, decls...)
-			fl.needRT = true
-		} else {
+			if !thin {
+				fl.needRT = true
+			}
+		} else if !thin {
 			fl.needRTText = true
 			if fl.genImps != nil {
 				for path, alias := range fl.genImps.qual {
@@ -687,6 +708,13 @@ func (fl *fileLower) lowerConstMapSpec(cd *syntax.ConstDecl, g *constMapGen) {
 	if name := cd.NameList[0].Value; token.IsExported(name) && fl.pkg.tpkg.Scope().Lookup(name) == g.obj {
 		text += fmt.Sprintf("\nvar %s %s = %s()\n", name, parts.mapT, g.mapName())
 		fl.recordConstMapFact(g, parts)
+		elem := constMapElem(g.obj.Type())
+		if mt, ok := elem.Underlying().(*types2.Map); ok {
+			kT := fl.mustSpell(mt.Key(), cd.Pos())
+			vT := fl.mustSpell(mt.Elem(), cd.Pos())
+			text += fmt.Sprintf("\nfunc LogosCM_%s_lookup(_logos_k %s) (%s, bool) { return %s(_logos_k) }\n", name, kT, vT, g.lookupName())
+			text += fmt.Sprintf("func LogosCM_%s_all(_logos_yield func(%s, %s) bool) { %s(_logos_yield) }\n", name, kT, vT, g.allName())
+		}
 	}
 	decls := parseConstMapDecls(text, cd.Pos())
 	fl.markConstMapTables(decls, g)

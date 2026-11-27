@@ -1,0 +1,21 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Item struct {
+	Name string
+}
+
+func Leaf[T any](v T) int {
+	comptime.Error("boom")
+	return 0
+}
+
+func mid[T any](v T) int {
+	_ = v
+	return Leaf[T](v) // ERROR "boom(?s:.*)instantiated here chain_notes.lgo:21:[0-9]+(?s:.*)instantiated here chain_notes.lgo:18:[0-9]+"
+}
+
+var _ = mid[Item](Item{})

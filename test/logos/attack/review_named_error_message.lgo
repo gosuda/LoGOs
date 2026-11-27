@@ -14,5 +14,5 @@ func requireStruct[T any]() {
 
 func main() {
 	requireStruct[struct{}]()
-	requireStruct[int]() // ERROR "\[comptime::error\] review named message: a struct is required$"
+	requireStruct[int]() // ERROR "\[comptime::error\] review named message: a struct is required(?s:.*)instantiated here .*:[0-9]+"
 }

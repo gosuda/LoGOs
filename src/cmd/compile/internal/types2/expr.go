@@ -1367,6 +1367,7 @@ func (check *Checker) typeAssertion(e syntax.Expr, x *operand, T Type, typeSwitc
 	check.logosRecordAssertTarget(e, x, T) // logos T-201 hook: generic assertion effects.
 	var cause string
 	if check.assertableTo(x.typ(), T, &cause) {
+		check.logosCtDeferInterfaceFormation(x.Pos(), x.typ(), T)
 		return // success
 	}
 

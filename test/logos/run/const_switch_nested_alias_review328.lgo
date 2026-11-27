@@ -1,0 +1,25 @@
+// run
+
+package main
+
+import "fmt"
+
+func classify[T, U any]() int {
+	n := 0
+	const switch T {
+	case bool, float64:
+		type Tag = U
+		const switch Tag {
+		case ~int, ~string:
+			n++
+		}
+	}
+	return n
+}
+
+func main() {
+	fmt.Println(classify[bool, int]())
+	fmt.Println(classify[float64, string]())
+	fmt.Println(classify[int, int]())
+	fmt.Println(classify[bool, bool]())
+}

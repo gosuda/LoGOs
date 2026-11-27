@@ -16,7 +16,7 @@ func ChooseB[T any]() string {
 	_ = comptime.SizeOf[int]()
 	const switch T {
 	case [N]int:
-		RejectB[T]()
+		RejectB[T]() // ERROR "\[comptime::error\] unsupported(?s:.*)instantiated here comptime_error_dead_bound_case.lgo:27:[0-9]+(?s:.*)instantiated here comptime_error_dead_bound_case.lgo:19:[0-9]+"
 		return "reject"
 	case int:
 		return "int"
@@ -24,4 +24,4 @@ func ChooseB[T any]() string {
 	return "other"
 }
 
-var _ = ChooseB[[2]int]() // ERROR "\[comptime::error\] unsupported"
+var _ = ChooseB[[2]int]()

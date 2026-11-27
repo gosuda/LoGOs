@@ -112,24 +112,36 @@ def test_benchmark_uses_event_base_after_the_branch_moves(tmp_path: Path) -> Non
     ] * 6
 
 
-def test_benchmark_fetches_missing_base_in_shallow_checkout(tmp_path: Path) -> None:
-    # The CI checkout is shallow and may lack the event base; the driver
-    # must retrieve a missing commit via fetch, not rely on a full clone.
+@pytest.mark.parametrize("extra", (0, 1))
+def test_benchmark_fetches_missing_base_in_shallow_checkout(
+    tmp_path: Path, extra: int
+) -> None:
     upstream, root = tmp_path / "upstream", tmp_path / "candidate"
     upstream.mkdir()
     git(upstream, "init", "-q", "-b", "main")
     write(upstream / "src/make.bash", "#!/bin/bash\nexit 0\n", executable=True)
     base = commit(upstream, "event base")
     write(upstream / "later.txt", "base branch moved\n")
-    moved = commit(upstream, "new base tip")
-    # --no-local forces a real shallow clone: plain --depth=1 from a
-    # local path copies the full object store, so the base would still
-    # be present and the missing-base fetch would go untested.
+    commit(upstream, "new base tip")
+    for i in range(extra):
+        write(upstream / f"again{i}.txt", "moved again\n")
+        commit(upstream, f"move again {i}")
+    # Mirror the shallow benchmark checkout in CI: only the tip is present,
+    # so the driver must fetch the base commit it does not have. A plain
+    # local path ignores --depth, so clone over file:// to keep the
+    # fixture genuinely shallow.
     subprocess.run(
-        ("git", "clone", "-q", "--depth=1", "--no-local", str(upstream), str(root)),
+        ("git", "clone", "-q", "--depth", "1", f"file://{upstream}", str(root)),
         check=True,
     )
-    assert base not in git(root, "rev-list", "HEAD"), "fixture must lack base"
+    missing = subprocess.run(
+        ("git", "cat-file", "-t", base),
+        check=False,
+        cwd=root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    assert missing.returncode != 0, "shallow fixture already holds the base commit"
     driver = copy_driver(root, "bench-autovec.sh")
     write(
         root / "test/logos/bench/autovec_measure.sh",
@@ -163,7 +175,10 @@ def test_benchmark_fetches_missing_base_in_shallow_checkout(tmp_path: Path) -> N
     )
     assert result.returncode == 0, result.stdout + result.stderr
     checked_out = git(tmp_path / "runner/autovec-base", "rev-parse", "HEAD")
-    assert checked_out == base, (checked_out, base, moved)
+    assert checked_out == base, (checked_out, base)
+    assert (tmp_path / "runner/autovec-base/src/make.bash").exists()
+    assert not (tmp_path / "runner/autovec-base/later.txt").exists()
+    assert (root / "later.txt").read_text() == "base branch moved\n"
     assert (tmp_path / "runner/measured-shas").read_text().splitlines() == [
         f"{base} {candidate}"
     ] * 6

@@ -93,7 +93,9 @@ func (w walker) walkLogos(n Node) {
 	case *ConstSwitchStmt:
 		w.node(n.Targ)
 		for _, c := range n.Cases {
-			w.node(c.Type)
+			for i := range c.Elems {
+				w.node(c.Elems[i].Type)
+			}
 			w.stmtList(c.Body)
 		}
 	}

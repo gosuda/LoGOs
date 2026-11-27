@@ -36,28 +36,18 @@
 // straight-line field walk. Anything else (slices, pointers,
 // platform integers, strings, maps, unlisted arrays) takes the
 // dynamic original path, so behavior and error kinds match
-// encoding/binary exactly. A struct with no visible fixed-size fields
-// takes the dynamic original path, so a struct whose fields are all
-// hidden still encodes every byte. Decoding into a struct with a
+// encoding/binary exactly. A struct with any unexported field, or with
+// no visible fixed-size fields, takes the dynamic original path, so a
+// struct whose fields are all hidden, or that hides fields from another
+// package, still encodes every byte, and an empty visible layout never
+// stands in for a partial projection. Decoding into a struct with a
 // nonzero-width unexported field panics, as with the original, except
 // for unexported fields that need no assignment: a zero-width field
 // such as struct{} decodes without a store, matching the original's
-// recursive walk.
-// A struct from another package that mixes exported and unexported
-// fixed-size fields is truncated: Size counts only the exported
-// fields, Write/Encode/Append emit only those bytes, and Decode reads
-// only those fields, so later fields decode from the wrong bytes. A
-// struct whose fields are all hidden still takes the original path
-// (see above); only the mixed shape truncates. The twin cannot reject
-// this shape: comptime has no predicate that reports hidden fields
-// (the const-if condition set is fixed), and the const-for walk skips
-// foreign unexported fields by design, so no per-field check can
-// observe them. A loud rejection needs a language change (a predicate
-// such as comptime.HasUnexported[T]) that sends every
-// possibly-incomplete layout down the original path; until then the
-// truncation pinned by TestTwinForeignMixedTruncation is the
-// documented behavior. Structs with blank (_) fields do not compile:
-// Go cannot select a blank field, so no projection can name it.
+// recursive walk. Structs with unexported fields from another package
+// likewise take the original path: comptime cannot see the rest, so no
+// partial layout stands in for them. Blank (_) fields take the original
+// path with the same skip semantics.
 //
 // Mapping from the original (data any) to the twin: ReadInto and
 // Decode take *T where the original takes a pointer or slice operand,

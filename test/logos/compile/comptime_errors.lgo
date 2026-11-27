@@ -50,7 +50,7 @@ type Box[T any] struct {
 	v T
 }
 
-func (b *Box[T]) Dump() []string { // ERROR "comptime::generic_method"
+func (b *Box[T]) Dump() []string {
 	var out []string
 	const for _, f := range comptime.Fields[T]() {
 		out = append(out, f.Name)

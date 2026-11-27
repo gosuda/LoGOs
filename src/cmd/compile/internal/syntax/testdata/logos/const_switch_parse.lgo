@@ -9,7 +9,7 @@ func constSwitchDefaultArm[T any](v T) {
 	const switch T {
 	case int:
 		return
-	default: // ERROR unexpected keyword default, expected case or }
+	default:
 		return
 	}
 }
@@ -17,7 +17,7 @@ func constSwitchDefaultArm[T any](v T) {
 func constSwitchTypeList[T any](v T) {
 	_ = v
 	const switch T {
-	case int, string: // ERROR const switch case takes a single type, not a list
+	case int, string:
 		return
 	}
 }

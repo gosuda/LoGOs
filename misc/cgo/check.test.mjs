@@ -102,6 +102,13 @@ test("recomputes statistics from the raw samples", () => {
   input.results[0].summary = { time_wall_clock: { median: 1000 } };
   assert.equal(timing(input).median, 2);
 });
+test("assessment keeps per-phase measurement details", () => {
+  const row = assessRow(name, iterations, phases());
+  for (const phase of ["baseline", "candidate", "integration"]) {
+    assert.equal(row.statistics[phase].goBenchmarks.length, 10);
+    assert.ok(row.statistics[phase].median > 0);
+  }
+});
 
 test("a passing package with no required tests is not coverage", () => {
   assert.throws(() => goResults(events({ Action: "pass", Package: "runtime" }),

@@ -198,7 +198,10 @@ type Checker struct {
 	logosCtSubst        map[*TypeParam]Type  // logos comptime instantiation: substitution for the running analysis.
 	logosCtFuncDecl     *syntax.FuncDecl     // logos comptime instantiation: cloned declaration of the running instance check, for Error liveness.
 	logosCtAbstract     map[Object]Type
-	logosCtPos          []syntax.Pos // logos comptime instantiation: call site of the current exact body check.
+	logosCtPos          []syntax.Pos       // logos comptime instantiation: call site of the current exact body check.
+	logosCtNotes        []syntax.Pos       // logos comptime instantiation: parent positions for instantiated-here notes; visit pushes parent, analyze pushes instance site.
+	logosCtChain        []int              // logos comptime instantiation: body-node frame per active instance; const-for iterations accrue to the top frame.
+	logosCtIfaceSites   []logosCtIfaceSite // logos comptime instantiation: interface formations to recheck in drain when generics are known.
 	logosCtLocalDefs    map[*syntax.Name]*TypeName
 	logosTypeOfFact     map[syntax.Expr]Type     // logos comptime instantiation: concrete types of comptime.TypeOf calls.
 	methods             map[*TypeName][]*Func    // maps package scope type names to associated non-blank (non-interface) methods

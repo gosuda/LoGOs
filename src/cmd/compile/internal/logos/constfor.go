@@ -81,6 +81,15 @@ type cfHost struct {
 	sep     string
 	tail    string
 	retired bool
+	// A finished host may be consumed after finalization. Keep its composed
+	// text because composing it consumes nested host splices exactly once.
+	textSet bool
+	text    otext
+	// compose builds a host's finished text at finalization. When nil the
+	// host composes as head, regions, sep, tail. A custom composer lets a
+	// lowered construct arrange its region texts itself. Region composition
+	// resolves nested hosts before their bytes are consumed.
+	compose func(h *cfHost) otext
 }
 
 type cfFuncCtx struct {
@@ -765,7 +774,9 @@ func cfMapPositions(root syntax.Node, fn func(syntax.Pos) syntax.Pos) {
 			for _, c := range s.Cases {
 				c.Case = fn(c.Case)
 				c.Colon = fn(c.Colon)
-				c.TildePos = fn(c.TildePos)
+				for i := range c.Elems {
+					c.Elems[i].TildePos = fn(c.Elems[i].TildePos)
+				}
 			}
 		}
 		v := reflect.ValueOf(n).Elem()
@@ -788,27 +799,25 @@ func cfMapPositions(root syntax.Node, fn func(syntax.Pos) syntax.Pos) {
 	})
 }
 
-// composeHost returns the finished text of a host: its head, each
-// region's text with the region's edits applied followed by sep, and its
-// tail. The region bytes live in the working buffer with their origin
-// mapping, so the composed text keeps the origin of every copied byte.
+// composeHost returns the finished text of a host. Finalization and an
+// enclosing move use the same composer, including a custom dispatch skeleton.
+// Composing consumes nested host splices, so its immutable result is cached.
 func (fl *fileLower) composeHost(h *cfHost) otext {
-	parts := []otext{gen(h.head)}
-	for _, r := range h.regions {
-		adj := make([]splice, len(r.splices))
-		for i, sp := range r.splices {
-			adj[i] = sp
-			adj[i].start -= r.start
-			adj[i].end -= r.start
-		}
-		out, err := applyChunks(fl.srcMap.sliceO(r.start, r.end), adj)
-		if err != nil {
-			base.Fatalf("logos: overlapping edits at %s", r.owner.String())
-		}
-		parts = append(parts, out, gen(h.sep))
+	if h.textSet {
+		return h.text
 	}
-	parts = append(parts, gen(h.tail))
-	return cat(parts...)
+	if h.compose != nil {
+		h.text = h.compose(h)
+	} else {
+		parts := []otext{gen(h.head)}
+		for _, r := range h.regions {
+			parts = append(parts, fl.composeRegionNow(r), gen(h.sep))
+		}
+		parts = append(parts, gen(h.tail))
+		h.text = cat(parts...)
+	}
+	h.textSet = true
+	return h.text
 }
 
 // retireHost composes the text of h for the enclosing span that
@@ -1516,7 +1525,7 @@ func (c *cfLeaf) subCall(n *syntax.CallExpr) bool {
 	}
 	if name := cfComptimeCall(n, c.run.info); name != "" {
 		switch name {
-		case "SizeOf", "AlignOf", "HasPointers":
+		case "SizeOf", "AlignOf", "HasPointers", "HasUnexported":
 			if v, ok := typeConst(c.run.info, n); ok {
 				s, e := cfCallSpan(ctx, n)
 				c.add(s, e, keepComments(ctx.buf.b, s, e, v.String()))

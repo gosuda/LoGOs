@@ -22,9 +22,9 @@ import (
 // Ejected builds compile with stock Go, which has no per-server opt-in and
 // offers only the process-global GODEBUG=http2xconnect=1. The ejected form
 // keeps the call site compiling and requires that setting in the process
-// environment, failing fast otherwise, so ejected servers keep the behavior
-// instead of silently serving without it. Run ejected binaries and their
-// tests with GODEBUG=http2xconnect=1 in the environment.
+// startup environment, failing fast otherwise, so ejected servers keep the
+// behavior instead of silently serving without it. Run ejected binaries and
+// their tests with GODEBUG=http2xconnect=1 in the environment.
 //
 // Extended CONNECT over HTTP/3 stays unbuilt: the H3 server in this package
 // answers it with 501 and never passes it to the router.
@@ -32,12 +32,11 @@ func EnableHTTP2ExtendedConnect(s *stdhttp.Server) error {
 	return h2extendedConnectEnable(s)
 }
 
-// godebugHas reports whether key's last GODEBUG setting equals value.
-// Shared by both variants so the parsing stays identical.
-func godebugHas(key, value string) bool {
+// godebugHasOn reports whether key's last setting in env equals value.
+func godebugHasOn(env, key, value string) bool {
 	seen := false
 	matched := false
-	for _, setting := range strings.Split(os.Getenv("GODEBUG"), ",") {
+	for _, setting := range strings.Split(env, ",") {
 		name, val, _ := strings.Cut(setting, "=")
 		if name != key {
 			continue
@@ -46,4 +45,10 @@ func godebugHas(key, value string) bool {
 		matched = val == value
 	}
 	return seen && matched
+}
+
+// godebugHas reports whether key's last GODEBUG setting equals value.
+// Shared by both variants so the parsing stays identical.
+func godebugHas(key, value string) bool {
+	return godebugHasOn(os.Getenv("GODEBUG"), key, value)
 }

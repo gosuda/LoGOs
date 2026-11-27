@@ -5,8 +5,6 @@
 package noder
 
 import (
-	"flag"
-
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/types2"
 )
@@ -18,18 +16,5 @@ func logosConfigureComptime(conf *types2.Config, info *types2.Info) {
 	policy := logosLintPolicy()
 	conf.LogosCTFEMaxSteps = policy.Thresholds.MaxCTFESteps
 	info.LogosCTFEMaxSteps = conf.LogosCTFEMaxSteps
-	if !logosComptimeNodesExplicit() {
-		base.LogosComptimeNodes = policy.Thresholds.MaxComptimeASTNodes
-	}
 	conf.LogosComptimeNodeLimit = base.LogosComptimeNodes
-}
-
-func logosComptimeNodesExplicit() bool {
-	explicit := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "logos.comptime_nodes" {
-			explicit = true
-		}
-	})
-	return explicit
 }

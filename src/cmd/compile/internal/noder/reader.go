@@ -54,6 +54,7 @@ type pkgReader struct {
 	logosCtGraph       map[string][]string
 	logosCtMapFuncs    map[index]bool
 	logosCtConstMaps   index
+	logosCtMethods     map[logosCtMethodOrigin]index
 
 	// offset for rewriting the given (absolute!) index into the output,
 	// but bitwise inverted so we can detect if we're missing the entry
@@ -759,10 +760,11 @@ func (r *reader) readLogosCtObjects() {
 	for range r.Len() {
 		r.p.addLogosCtMapFunc(r.Reloc(pkgbits.SectionObj))
 	}
-	if r.Data.Len() != 0 {
+	if r.Bool() {
 		r.p.logosCtConstMaps = r.Reloc(pkgbits.SectionMeta)
-		assert(r.p.logosCtConstMaps != 0 && r.Data.Len() == 0)
 	}
+	r.readLogosCtMethods()
+	assert(r.Data.Len() == 0)
 }
 
 func (r *reader) readLogosCtGraph() {
@@ -771,6 +773,21 @@ func (r *reader) readLogosCtGraph() {
 		for range n {
 			id := r.String()
 			r.p.logosCtGraph[id] = r.Strings()
+		}
+	}
+}
+
+// readLogosCtMethods reads the trailing aux table of comptime generic
+// methods: receiver path and named type plus method name per entry,
+// each with the method's object index for lazy template parsing.
+func (r *reader) readLogosCtMethods() {
+	if n := r.Len(); n != 0 {
+		if r.p.logosCtMethods == nil {
+			r.p.logosCtMethods = make(map[logosCtMethodOrigin]index, n)
+		}
+		for range n {
+			key := logosCtMethodOrigin{recvPath: r.String(), recvName: r.String(), name: r.String()}
+			r.p.logosCtMethods[key] = r.Reloc(pkgbits.SectionObj)
 		}
 	}
 }
@@ -3810,6 +3827,7 @@ func (r *reader) pkgInit(self *types.Pkg, target *ir.Package) {
 		}
 	}
 	r.readLogosCtGraph()
+	r.readLogosCtMethods()
 	cgoPragmas := make([][]string, r.Len())
 	for i := range cgoPragmas {
 		cgoPragmas[i] = r.Strings()

@@ -27,7 +27,6 @@ max_nesting_depth = 3
 max_cognitive_complexity = 15
 max_function_lines = 60
 max_function_params = 4
-max_comptime_ast_nodes = 4096
 max_ctfe_steps = 100000
 
 -- main.lgo --
