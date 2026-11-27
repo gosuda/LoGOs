@@ -13,7 +13,18 @@ import (
 	"testing"
 )
 
+// setEjectedGodebug pins the startup GODEBUG snapshot for one test and
+// restores it after, so each test starts from a known snapshot no matter
+// what environment the test process started with.
+func setEjectedGodebug(t *testing.T, env string) {
+	t.Helper()
+	old := ejectedStartupGodebug
+	ejectedStartupGodebug = env
+	t.Cleanup(func() { ejectedStartupGodebug = old })
+}
+
 func TestRequireExtendedConnectFailsClosed(t *testing.T) {
+	setEjectedGodebug(t, "")
 	defer func() {
 		r := recover()
 		if r == nil {
@@ -27,6 +38,7 @@ func TestRequireExtendedConnectFailsClosed(t *testing.T) {
 }
 
 func TestRequireExtendedConnectIgnoresLateSetenv(t *testing.T) {
+	setEjectedGodebug(t, "")
 	// Planted fault: the ejected opt-in reads GODEBUG at call time, so a
 	// value set in main after HTTP/2 already sampled the flag reports
 	// success while the server never advertises extended CONNECT.
@@ -50,10 +62,10 @@ func TestH2ExtendedConnectEjectedNeedsGodebug(t *testing.T) {
 		{name: "other key", env: "http2debug=1", want: errHTTP2ExtendedConnectNeedsGodebug},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("GODEBUG", tc.env)
+			setEjectedGodebug(t, tc.env)
 			got := EnableHTTP2ExtendedConnect(&stdhttp.Server{Addr: "127.0.0.1:0"})
 			if !errors.Is(got, tc.want) {
-				t.Fatalf("EnableHTTP2ExtendedConnect with GODEBUG=%q = %v, want %v", tc.env, got, tc.want)
+				t.Fatalf("EnableHTTP2ExtendedConnect with startup GODEBUG=%q = %v, want %v", tc.env, got, tc.want)
 			}
 		})
 	}
