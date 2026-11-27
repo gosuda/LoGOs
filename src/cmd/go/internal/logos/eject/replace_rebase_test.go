@@ -117,6 +117,23 @@ func TestRebaseLocalReplacesKeepsVersionTargets(t *testing.T) {
 	}
 }
 
+// outsideModule decides the absolute-target skip before any rewrite:
+// inside targets rebase at the ejected copy, the module root itself
+// is not outside, and any other directory stays untouched.
+func TestOutsideModuleDecision(t *testing.T) {
+	orig := t.TempDir()
+	if outsideModule(orig, filepath.Join(orig, "sub")) {
+		t.Errorf("inside target reported outside: %q", filepath.Join(orig, "sub"))
+	}
+	if outsideModule(orig, orig) {
+		t.Errorf("module root reported outside: %q", orig)
+	}
+	outside := filepath.Join(t.TempDir(), "other")
+	if !outsideModule(orig, outside) {
+		t.Errorf("outside target reported inside: %q", outside)
+	}
+}
+
 // Repointing one version of a module leaves the other versions and the
 // wildcard replace alone.
 func TestSetGoReplaceKeepsOtherVersions(t *testing.T) {

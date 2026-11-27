@@ -2765,13 +2765,27 @@ func absReplaceTarget(absBase, newPath string) string {
 	return absTarget
 }
 
-// rebaseLocalReplaces points each module-relative replace of f at the
-// ejected copy. Every directive is edited independently by its exact old
-// path and version, so two versions of one module keep two replace lines
-// and a wildcard replace stays a wildcard replace. Absolute filesystem
-// targets stay untouched: they lie outside the module, and rebasing them
-// as relative paths would break the export once it moves (filepath.Rel
-// even fails across Windows drives).
+// outsideModule reports whether an absolute target lies outside the
+// module root. A target on another drive is outside by construction
+// and is decided without filepath.Rel, which fails across drives, so
+// an outside target can never abort eject. Inside targets return
+// false and are rebased at the ejected copy by the caller.
+func outsideModule(absOrig, absTarget string) bool {
+	if filepath.VolumeName(absTarget) != filepath.VolumeName(absOrig) {
+		return true
+	}
+	rel, err := filepath.Rel(absOrig, absTarget)
+	return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// rebaseLocalReplaces points each local replace of f at the ejected
+// copy. Every directive is edited independently by its exact old path
+// and version, so two versions of one module keep two replace lines and
+// a wildcard replace stays a wildcard replace. An absolute target
+// outside the module stays untouched; an absolute target inside is
+// rebased at the ejected copy, so the export never points at the
+// source checkout. Outside targets never reach the filepath.Rel calls
+// below that abort eject, since outsideModule decides them first.
 
 func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[string]string) {
 	absOrig, err := filepath.Abs(origDir)
@@ -2791,10 +2805,8 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 		}
 		// Absolute targets outside the module stay untouched; absolute
 		// targets inside are rebased at the ejected copy below.
-		if filepath.IsAbs(filepath.FromSlash(r.New.Path)) {
-			if rel, err := filepath.Rel(absOrig, filepath.FromSlash(r.New.Path)); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-				continue
-			}
+		if filepath.IsAbs(filepath.FromSlash(r.New.Path)) && outsideModule(absOrig, filepath.FromSlash(r.New.Path)) {
+			continue
 		}
 		target := absReplaceTarget(absOrig, r.New.Path)
 		if relOrig, err := filepath.Rel(absOrig, target); err == nil && relOrig != ".." && !strings.HasPrefix(relOrig, ".."+string(filepath.Separator)) {
