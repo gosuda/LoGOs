@@ -2446,7 +2446,7 @@ func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) map[
 // directory holding no LoGOs sources, so the support copy can carry it
 // without lowering from compiler staging.
 func ejectedPureGoPackage(src, ref string) bool {
-	entries, err := os.ReadDir(filepath.Join(src, filepath.FromSlash(ref)))
+	entries, err := fsys.ReadDir(filepath.Join(src, filepath.FromSlash(ref)))
 	if err != nil {
 		return false
 	}

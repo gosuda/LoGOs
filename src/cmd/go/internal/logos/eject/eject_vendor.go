@@ -556,6 +556,11 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	if lowered {
 		edits = append(edits, siteIdentEdits(fset, f, siteNamespace(logosStem(name)))...)
 	}
+	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f)
+	if _, overlap := h2OverlapOffset(edits, h2edits); overlap {
+		return nil, false, fmt.Errorf("overlapping extended-CONNECT rewrite")
+	}
+	edits = append(edits, h2edits...)
 	embeds := false
 	for _, imp := range f.Imports {
 		importPath, err := strconv.Unquote(imp.Path.Value)
@@ -572,6 +577,11 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		}
 		start := fset.Position(imp.Path.Pos()).Offset
 		edits = append(edits, textEdit{start, start + len(imp.Path.Value), strconv.Quote(target)})
+	}
+	if h2uses {
+		if _, err := c.supportImport("logos/net/http"); err != nil {
+			return nil, false, err
+		}
 	}
 	fixed, ok := applyTextEdits(data, edits)
 	if !ok {
