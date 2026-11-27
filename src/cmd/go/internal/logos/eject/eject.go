@@ -822,7 +822,7 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string)
 	}
 	rewriteMainGoMod(out, plan)
 	for _, m := range plan.deps {
-		rewriteDepGoMod(plan, m, ejected)
+		rewriteDepGoMod(plan, m, ejected, out)
 	}
 	if usedRT {
 		for _, m := range plan.deps {
@@ -2731,7 +2731,7 @@ func relEjectTarget(from, to string) string {
 // rewriteDepGoMod points one ejected dependency go.mod at every other
 // ejected dependency module, and repoints its own replaces of ejected
 // modules at the ejected copies.
-func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string) {
+func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string, out string) {
 	dst := ejected[m.path]
 	f := parseGoModFile(filepath.Join(dst, "go.mod"))
 	for _, other := range plan.deps {
@@ -2752,7 +2752,55 @@ func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string)
 		setGoReplace(f, o[0], o[1], relEjectTarget(dst, ejected[o[0]]))
 	}
 	rebaseLocalReplaces(f, m.dir, dst, ejected)
+	rebaseDepReplacesOnMain(f, ejected, plan, dst, out)
 	writeGoModFile(filepath.Join(dst, "go.mod"), f)
+}
+
+// rebaseDepReplacesOnMain repoints a dependency replace that names a
+// directory outside the dependency module at the ejected copy when the
+// target is a kept nested module of the main module. The shared
+// rebasing resolves such targets against the source tree, which the
+// exported module must not reference; the eject copies those nested
+// modules to the same main-relative path under out. A target already
+// inside the ejected tree or outside the main module is left alone.
+func rebaseDepReplacesOnMain(f *modfile.File, ejected map[string]string, plan *ejectPlan, dst, out string) {
+	absDst, err := filepath.Abs(dst)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	absMain, err := filepath.Abs(plan.main.dir)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	absOut, err := filepath.Abs(out)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	for _, r := range slices.Clone(f.Replace) {
+		if _, ok := ejected[r.Old.Path]; ok {
+			continue
+		}
+		if r.New.Version != "" || r.New.Path == "" || filepath.IsAbs(r.New.Path) {
+			continue
+		}
+		absTarget := filepath.Join(absDst, filepath.FromSlash(r.New.Path))
+		if rel, err := filepath.Rel(absOut, absTarget); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		relMain, err := filepath.Rel(absMain, absTarget)
+		if err != nil || relMain == ".." || strings.HasPrefix(relMain, ".."+string(filepath.Separator)) {
+			continue
+		}
+		cand := filepath.Join(absOut, relMain)
+		if fi, err := os.Stat(cand); err != nil || !fi.IsDir() {
+			continue
+		}
+		rel, err := filepath.Rel(absDst, cand)
+		if err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+		setGoReplace(f, r.Old.Path, r.Old.Version, "./"+filepath.ToSlash(rel))
+	}
 }
 
 // ensureGoRequire adds a require line unless one already names path.

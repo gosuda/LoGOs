@@ -25,6 +25,13 @@ grep '^//go:build engines' out/p/engines_test.go
 cd out
 go build ./...
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+# The exported tests run too, including the dependency test that
+# imports the newly resolved test-only package.
+go test ./...
+exec env -u GOROOT $UPROOT1272/bin/go test ./...
+cd _logos_deps/example.com/deptestdep@v0.0.0
+go test ./...
+exec env -u GOROOT $UPROOT1272/bin/go test ./...
 -- repro/go.mod --
 module example.com/ejectdeptest
 
@@ -116,9 +123,9 @@ import (
 	"example.com/deptestonly/t"
 )
 
-func TestName(t *testing.T) {
+func TestName(tt *testing.T) {
 	if got := d.Name(); got != t.Greet() {
-		t.Fatalf("Name() = %q, want %q", got, t.Greet())
+		tt.Fatalf("Name() = %q, want %q", got, t.Greet())
 	}
 }
 
