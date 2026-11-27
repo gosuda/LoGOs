@@ -489,3 +489,88 @@ func TestSupportCopyReservesOverlaySiblingAlias(t *testing.T) {
 		t.Errorf("delegation does not use the reserved alias:\n%s", got)
 	}
 }
+
+// A same-named method on an imported user type is not the fork opt-in:
+// the support copy rewrites only calls whose receiver resolves to
+// (*net/http.Server), so the user call stays untouched while the genuine
+// call in the same file still delegates to the guard.
+func TestSupportCopyKeepsUserMethodCall(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestusercall")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	const source = "package ejecttestusercall\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nfunc Enable(s *http.Server, m *meter.Meter) {\n\ts.EnableHTTP2ExtendedConnect()\n\tm.EnableHTTP2ExtendedConnect()\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "user.go"), []byte(source), 0666); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestusercall", dst: "rt/logos/ejecttestusercall"}
+	if _, _, err := c.copyPackageGo(p, "user.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestusercall", "user.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("genuine server call was not rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, "m.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("user method call was rewritten by spelling:\n%s", got)
+	}
+}
+
+// A receiver the support copy cannot resolve is refused instead of
+// rewritten: a call result may return a user type with the same method
+// name, and eject cannot tell it from the fork method.
+func TestSupportCopyRefusesUnresolvedMethodCall(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestunknownrecv")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	const source = "package ejecttestunknownrecv\n\nimport \"net/http\"\n\nfunc Enable() {\n\tnewServer().EnableHTTP2ExtendedConnect()\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "user.go"), []byte(source), 0666); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestunknownrecv", dst: "rt/logos/ejecttestunknownrecv"}
+	_, _, err = c.copyPackageGo(p, "user.go", map[string]bool{})
+	if err == nil || !strings.Contains(err.Error(), "ambiguous extended-CONNECT") {
+		t.Errorf("copyPackageGo = %v, want an ambiguous extended-CONNECT refusal", err)
+	}
+}

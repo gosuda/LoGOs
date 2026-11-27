@@ -602,6 +602,13 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		h2reserved = c.supportReservedNames(p, filepath.Join(c.staging, filepath.FromSlash(p.src)))
 	}
 	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, h2reserved)
+	if len(h2edits) > 0 && !lowered {
+		kept, keepUses, err := c.filterH2EditsToGenuine(p, name, fset, data, f, h2edits, h2uses)
+		if err != nil {
+			return nil, false, err
+		}
+		h2edits, h2uses = kept, keepUses
+	}
 	if h2Overlaps(edits, h2edits) {
 		return nil, false, fmt.Errorf("overlapping extended-CONNECT rewrite")
 	}
@@ -687,6 +694,499 @@ func (c *supportCopy) supportReservedNames(p supportSourcePackage, stagingDir st
 		used[name] = true
 	}
 	return used
+}
+
+// h2SupportReceiver records what the support copy can prove about one
+// handwritten extended-CONNECT receiver from visible declarations alone.
+// Lowered files carry the compiler's own verification, so only
+// handwritten sources need this check: the text rewrite cannot resolve
+// selector identity.
+type h2SupportReceiver int
+
+const (
+	h2ReceiverUnknown h2SupportReceiver = iota
+	h2ReceiverHTTP
+	h2ReceiverUser
+)
+
+// h2CallSite is one handwritten extended-CONNECT candidate: a zero-arg
+// call or a marked method-value capture of the fork method name, with
+// the source span the rewrite would replace.
+type h2CallSite struct {
+	recv       ast.Expr
+	start, end int
+	text       string
+}
+
+// h2Scope maps visible value names to their declared type expressions. A
+// nil expression means the name is declared but its type cannot be read
+// from the declaration.
+type h2Scope struct {
+	parent *h2Scope
+	types  map[string]ast.Expr
+}
+
+func (s *h2Scope) lookup(name string) (ast.Expr, bool) {
+	for sc := s; sc != nil; sc = sc.parent {
+		if typ, ok := sc.types[name]; ok {
+			return typ, true
+		}
+	}
+	return nil, false
+}
+
+// h2ScopeAddValue records one value declaration: an explicit type wins,
+// otherwise a &T{} or T{} shape lends its type, and anything else marks
+// the name declared but unprovable.
+func h2ScopeAddValue(scope *h2Scope, names []*ast.Ident, typ ast.Expr, values []ast.Expr) {
+	for _, name := range names {
+		if name.Name == "_" {
+			continue
+		}
+		if typ != nil {
+			scope.types[name.Name] = typ
+			continue
+		}
+		if len(names) == 1 && len(values) == 1 {
+			if inferred, ok := h2InferredType(values[0]); ok {
+				scope.types[name.Name] = inferred
+				continue
+			}
+		}
+		scope.types[name.Name] = nil
+	}
+}
+
+// h2InferredType reads the type of &T{} and T{} composite shapes. Any
+// other right-hand side, including new(T) under a shadowed new, proves
+// nothing.
+func h2InferredType(rhs ast.Expr) (ast.Expr, bool) {
+	switch r := rhs.(type) {
+	case *ast.CompositeLit:
+		return r.Type, true
+	case *ast.UnaryExpr:
+		if r.Op == token.AND {
+			if lit, ok := r.X.(*ast.CompositeLit); ok {
+				return lit.Type, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// h2IsHTTPServerType reports whether typ names (*net/http.Server) through
+// the file's own binding of the net/http import.
+func h2IsHTTPServerType(typ ast.Expr, httpLocal string, dotHTTP bool) bool {
+	switch t := typ.(type) {
+	case *ast.StarExpr:
+		return h2IsHTTPServerType(t.X, httpLocal, dotHTTP)
+	case *ast.ParenExpr:
+		return h2IsHTTPServerType(t.X, httpLocal, dotHTTP)
+	case *ast.SelectorExpr:
+		id, ok := t.X.(*ast.Ident)
+		return ok && id.Name == httpLocal && t.Sel.Name == "Server"
+	case *ast.Ident:
+		return dotHTTP && t.Name == "Server"
+	}
+	return false
+}
+
+// h2AddGenDecl records the value declarations of one declaration.
+func h2AddGenDecl(scope *h2Scope, decl ast.Decl) {
+	gd, ok := decl.(*ast.GenDecl)
+	if !ok || (gd.Tok != token.VAR && gd.Tok != token.CONST) {
+		return
+	}
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		h2ScopeAddValue(scope, vs.Names, vs.Type, vs.Values)
+	}
+}
+
+// h2HTTPBinding returns the local name bound to net/http in one file,
+// reporting a dot import separately.
+func h2HTTPBinding(f *ast.File) (local string, dot bool) {
+	for _, imp := range f.Imports {
+		path, err := strconv.Unquote(imp.Path.Value)
+		if err != nil || path != "net/http" {
+			continue
+		}
+		if imp.Name != nil {
+			if imp.Name.Name == "." {
+				return "", true
+			}
+			if imp.Name.Name != "_" && imp.Name.Name != "" {
+				return imp.Name.Name, false
+			}
+			continue
+		}
+		return "http", false
+	}
+	return "", false
+}
+
+// siblingValueScope returns the package-level value declarations of the
+// sibling Go files of one support package, read through the effective
+// filesystem so overlay replacements govern exactly as they govern the
+// copy. Test files are out: the copy never emits them.
+func (c *supportCopy) siblingValueScope(p supportSourcePackage, name string) (*h2Scope, map[string]ast.Expr) {
+	scope := &h2Scope{types: map[string]ast.Expr{}}
+	aliases := map[string]ast.Expr{}
+	entries, err := c.readDir(p)
+	if err != nil {
+		return scope, aliases
+	}
+	for _, entry := range entries {
+		other := entry.Name()
+		if entry.IsDir() || other == name || !strings.HasSuffix(other, ".go") || strings.HasSuffix(other, "_test.go") {
+			continue
+		}
+		data, err := c.readOriginal(p, other)
+		if err != nil {
+			continue
+		}
+		f, err := parser.ParseFile(token.NewFileSet(), other, data, 0)
+		if err != nil {
+			continue
+		}
+		for _, decl := range f.Decls {
+			h2AddGenDecl(scope, decl)
+			h2AddAlias(aliases, decl)
+		}
+	}
+	return scope, aliases
+}
+
+// h2AddAlias records one type alias declaration.
+func h2AddAlias(aliases map[string]ast.Expr, decl ast.Decl) {
+	gd, ok := decl.(*ast.GenDecl)
+	if !ok || gd.Tok != token.TYPE {
+		return
+	}
+	for _, spec := range gd.Specs {
+		ts, ok := spec.(*ast.TypeSpec)
+		if !ok || ts.Assign == token.NoPos {
+			continue
+		}
+		aliases[ts.Name.Name] = ts.Type
+	}
+}
+
+// h2EmbedsHTTPServer reports whether the named type declares an embedded
+// *net/http.Server field, so a value of that type carries the fork
+// method exactly as the type-checked exemption allows.
+func h2EmbedsHTTPServer(f *ast.File, aliases map[string]ast.Expr, httpLocal string, dotHTTP bool, name string, seen map[string]bool) bool {
+	if seen[name] {
+		return false
+	}
+	seen[name] = true
+	for _, decl := range f.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			ts, ok := spec.(*ast.TypeSpec)
+			if !ok || ts.Name.Name != name {
+				continue
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				return false
+			}
+			for _, field := range st.Fields.List {
+				if len(field.Names) != 0 {
+					continue
+				}
+				typ := field.Type
+				if star, ok := typ.(*ast.StarExpr); ok {
+					typ = star.X
+				}
+				if h2IsHTTPServerType(typ, httpLocal, dotHTTP) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	if target, ok := aliases[name]; ok {
+		if id, ok := target.(*ast.Ident); ok {
+			return h2EmbedsHTTPServer(f, aliases, httpLocal, dotHTTP, id.Name, seen)
+		}
+	}
+	return false
+}
+
+// filterH2EditsToGenuine keeps only h2 edits whose selector resolves to
+// the net/http method: a receiver the visible declarations prove is
+// (*net/http.Server), directly or through an embedded field declared in
+// the same file. A call on a proven user type stays untouched, and a
+// receiver no declaration proves is refused instead of rewritten, so
+// eject cannot steal a user method by spelling.
+func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string, fset *token.FileSet, data []byte, f *ast.File, h2edits []textEdit, h2uses bool) ([]textEdit, bool, error) {
+	httpLocal, dotHTTP := h2HTTPBinding(f)
+	sibScope, sibAliases := c.siblingValueScope(p, name)
+	pkgScope := &h2Scope{parent: sibScope, types: map[string]ast.Expr{}}
+	aliases := map[string]ast.Expr{}
+	for _, imp := range f.Imports {
+		if imp.Name != nil && imp.Name.Name != "_" && imp.Name.Name != "." && imp.Name.Name != "" {
+			pkgScope.types[imp.Name.Name] = nil
+		}
+	}
+	for _, decl := range f.Decls {
+		h2AddGenDecl(pkgScope, decl)
+		h2AddAlias(aliases, decl)
+	}
+	for alias, target := range sibAliases {
+		aliases[alias] = target
+	}
+	fnScopes := map[*ast.FuncDecl]*h2Scope{}
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		scope := &h2Scope{parent: pkgScope, types: map[string]ast.Expr{}}
+		if fn.Type != nil {
+			if fn.Type.Params != nil {
+				for _, field := range fn.Type.Params.List {
+					h2ScopeAddValue(scope, field.Names, field.Type, nil)
+				}
+			}
+			if fn.Type.Results != nil {
+				for _, field := range fn.Type.Results.List {
+					h2ScopeAddValue(scope, field.Names, field.Type, nil)
+				}
+			}
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			switch s := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.DeclStmt:
+				h2AddGenDecl(scope, s.Decl)
+			case *ast.AssignStmt:
+				if s.Tok == token.DEFINE {
+					if len(s.Lhs) == 1 && len(s.Rhs) == 1 {
+						if id, ok := s.Lhs[0].(*ast.Ident); ok {
+							h2ScopeAddValue(scope, []*ast.Ident{id}, nil, s.Rhs)
+						}
+					} else {
+						for _, lhs := range s.Lhs {
+							if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
+								scope.types[id.Name] = nil
+							}
+						}
+					}
+				}
+			case *ast.RangeStmt:
+				for _, e := range []ast.Expr{s.Key, s.Value} {
+					if id, ok := e.(*ast.Ident); ok && id.Name != "_" {
+						scope.types[id.Name] = nil
+					}
+				}
+			}
+			return true
+		})
+		fnScopes[fn] = scope
+	}
+	type litShadow struct {
+		start, end int
+		bound      map[string]bool
+	}
+	var shadows []litShadow
+	ast.Inspect(f, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if !ok {
+			return true
+		}
+		bound := map[string]bool{}
+		if lit.Type != nil {
+			if lit.Type.Params != nil {
+				for _, field := range lit.Type.Params.List {
+					for _, id := range field.Names {
+						bound[id.Name] = true
+					}
+				}
+			}
+			if lit.Type.Results != nil {
+				for _, field := range lit.Type.Results.List {
+					for _, id := range field.Names {
+						bound[id.Name] = true
+					}
+				}
+			}
+		}
+		ast.Inspect(lit.Body, func(m ast.Node) bool {
+			switch s := m.(type) {
+			case *ast.AssignStmt:
+				if s.Tok == token.DEFINE {
+					for _, lhs := range s.Lhs {
+						if id, ok := lhs.(*ast.Ident); ok {
+							bound[id.Name] = true
+						}
+					}
+				}
+			case *ast.RangeStmt:
+				for _, e := range []ast.Expr{s.Key, s.Value} {
+					if id, ok := e.(*ast.Ident); ok {
+						bound[id.Name] = true
+					}
+				}
+			case *ast.ValueSpec:
+				for _, id := range s.Names {
+					bound[id.Name] = true
+				}
+			}
+			return true
+		})
+		shadows = append(shadows, litShadow{
+			start: fset.Position(lit.Body.Pos()).Offset,
+			end:   fset.Position(lit.Body.End()).Offset,
+			bound: bound,
+		})
+		return true
+	})
+	span := func(n ast.Node) (int, int, bool) {
+		start := fset.Position(n.Pos()).Offset
+		end := fset.Position(n.End()).Offset
+		if start < 0 || end < start || end > len(data) {
+			return 0, 0, false
+		}
+		return start, end, true
+	}
+	var sites []h2CallSite
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.CallExpr:
+			sel, ok := x.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != h2extendedConnectMethod || len(x.Args) != 0 || h2HasSiteIdent(sel.X) {
+				return true
+			}
+			start, end, ok := span(x)
+			if !ok {
+				return true
+			}
+			sites = append(sites, h2CallSite{recv: sel.X, start: start, end: end, text: string(data[start:end])})
+		case *ast.AssignStmt:
+			if len(x.Lhs) != 1 || len(x.Rhs) != 1 {
+				return true
+			}
+			sel, ok := x.Rhs[0].(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
+				return true
+			}
+			lhs, ok := x.Lhs[0].(*ast.Ident)
+			if !ok || !h2IsLoweredCalleeTemp(lhs.Name) {
+				return true
+			}
+			start, end, ok := span(x)
+			if !ok {
+				return true
+			}
+			sites = append(sites, h2CallSite{recv: sel.X, start: start, end: end, text: string(data[start:end])})
+		}
+		return true
+	})
+	enclosing := func(offset int) *h2Scope {
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			start, end, ok := span(fn.Body)
+			if !ok {
+				continue
+			}
+			if start <= offset && offset <= end {
+				return fnScopes[fn]
+			}
+		}
+		return pkgScope
+	}
+	resolve := func(typ ast.Expr) ast.Expr {
+		seen := map[string]bool{}
+		for {
+			id, ok := typ.(*ast.Ident)
+			if !ok {
+				return typ
+			}
+			target, ok := aliases[id.Name]
+			if !ok || seen[id.Name] {
+				return typ
+			}
+			seen[id.Name] = true
+			typ = target
+		}
+	}
+	classify := func(site h2CallSite) h2SupportReceiver {
+		recv := site.recv
+		for {
+			par, ok := recv.(*ast.ParenExpr)
+			if !ok {
+				break
+			}
+			recv = par.X
+		}
+		id, ok := recv.(*ast.Ident)
+		if !ok {
+			return h2ReceiverUnknown
+		}
+		for _, sh := range shadows {
+			if sh.start <= site.start && site.end <= sh.end && sh.bound[id.Name] {
+				return h2ReceiverUnknown
+			}
+		}
+		typ, declared := enclosing(site.start).lookup(id.Name)
+		if !declared || typ == nil {
+			return h2ReceiverUnknown
+		}
+		typ = resolve(typ)
+		if h2IsHTTPServerType(typ, httpLocal, dotHTTP) {
+			return h2ReceiverHTTP
+		}
+		if name, ok := typ.(*ast.Ident); ok && h2EmbedsHTTPServer(f, aliases, httpLocal, dotHTTP, name.Name, map[string]bool{}) {
+			return h2ReceiverHTTP
+		}
+		return h2ReceiverUser
+	}
+	var user []h2CallSite
+	for _, site := range sites {
+		switch classify(site) {
+		case h2ReceiverUnknown:
+			return nil, false, fmt.Errorf("ambiguous extended-CONNECT opt-in in %s: cannot prove the receiver of %s is (*net/http.Server), so eject cannot tell the fork method from the user method", p.src, site.text)
+		case h2ReceiverUser:
+			user = append(user, site)
+		}
+	}
+	if len(user) == 0 {
+		return h2edits, h2uses, nil
+	}
+	var kept []textEdit
+	nonEmpty := false
+	for _, edit := range h2edits {
+		drop := false
+		for _, u := range user {
+			if edit.start <= u.start && edit.end >= u.end {
+				drop = true
+				break
+			}
+		}
+		if drop {
+			continue
+		}
+		kept = append(kept, edit)
+		if edit.start != edit.end {
+			nonEmpty = true
+		}
+	}
+	if !nonEmpty {
+		return nil, false, nil
+	}
+	return kept, h2uses, nil
 }
 
 // modeDependentSupportLowering reports whether a toolchain support package
