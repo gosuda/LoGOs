@@ -2924,10 +2924,6 @@ func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string,
 }
 
 // rebaseDepReplacesOnMain repoints a dependency replace that names a
-// directory outside the dependency module at the ejected copy when the
-// target is a kept nested module of the main module. Absolute targets
-// resolve directly; relative targets resolve against the ejected
-// dependency. The shared rebasing resolves such targets against the
 // source tree, which the exported module must not reference; the eject
 // copies those nested modules to the same main-relative path under out.
 // A target already inside the ejected tree or outside the main module
@@ -2945,14 +2941,24 @@ func rebaseDepReplacesOnMain(f *modfile.File, ejected map[string]string, plan *e
 	if err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
-	for _, r := range slices.Clone(f.Replace) {
-		if _, ok := ejected[r.Old.Path]; ok {
+	// The directives are snapshotted by value first: every rebasing edit
+	// drops and re-adds lines, and the vendored AddReplace matches an
+	// empty old version against every remaining directive of the path,
+	// so editing through the live pointers would read entries a previous
+	// edit already rewrote or zeroed.
+	type depDirective struct{ oldPath, oldVers, newPath, newVers string }
+	snapshot := make([]depDirective, 0, len(f.Replace))
+	for _, r := range f.Replace {
+		snapshot = append(snapshot, depDirective{r.Old.Path, r.Old.Version, r.New.Path, r.New.Version})
+	}
+	for _, d := range snapshot {
+		if _, ok := ejected[d.oldPath]; ok {
 			continue
 		}
-		if r.New.Version != "" || r.New.Path == "" {
+		if d.newVers != "" || d.newPath == "" {
 			continue
 		}
-		absTarget := absReplaceTarget(absDst, r.New.Path)
+		absTarget := absReplaceTarget(absDst, d.newPath)
 		if rel, err := filepath.Rel(absOut, absTarget); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
 		}
@@ -2968,7 +2974,7 @@ func rebaseDepReplacesOnMain(f *modfile.File, ejected map[string]string, plan *e
 		if err != nil {
 			base.Fatalf("logos eject: %v", err)
 		}
-		setGoReplace(f, r.Old.Path, r.Old.Version, "./"+filepath.ToSlash(rel))
+		setGoReplace(f, d.oldPath, d.oldVers, "./"+filepath.ToSlash(rel))
 	}
 }
 

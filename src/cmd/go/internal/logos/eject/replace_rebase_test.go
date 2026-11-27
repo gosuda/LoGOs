@@ -335,3 +335,48 @@ func mustRead(t *testing.T, path string) []byte {
 	}
 	return data
 }
+
+// A wildcard replace followed by two exact-version pins of one module,
+// all with local targets needing relocation, rebases every directive:
+// the wildcard edit drops and re-adds the file's replace lines, so the
+// pass must snapshot directives by value instead of editing through the
+// live pointers a previous edit already rewrote.
+func TestRebaseDepWildcardFollowedByTwoLocalPins(t *testing.T) {
+	root := t.TempDir()
+	mainDir := filepath.Join(root, "main")
+	depDir := filepath.Join(root, "dep")
+	outDir := filepath.Join(root, "out")
+	for _, dir := range []string{"fallback", "pinned1", "pinned2"} {
+		for _, base := range []string{mainDir, outDir} {
+			if err := os.MkdirAll(filepath.Join(base, dir), 0777); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeGoMod(t, filepath.Join(outDir, dir), "module example.com/"+dir+"\n\ngo 1.27\n")
+	}
+	path := writeGoMod(t, depDir, "module example.com/deptestdep\n\ngo 1.27\n\n"+
+		"replace example.com/lib => "+strconv.Quote(filepath.Join(mainDir, "fallback"))+"\n"+
+		"replace example.com/lib v1.0.0 => "+strconv.Quote(filepath.Join(mainDir, "pinned1"))+"\n"+
+		"replace example.com/lib v1.1.0 => "+strconv.Quote(filepath.Join(mainDir, "pinned2"))+"\n")
+	g := parseGoModFile(path)
+	plan := &ejectPlan{main: &ejectModule{dir: mainDir}}
+	rebaseDepReplacesOnMain(g, map[string]string{}, plan, depDir, outDir)
+	for _, tc := range []struct{ vers, dir string }{
+		{"", "fallback"},
+		{"v1.0.0", "pinned1"},
+		{"v1.1.0", "pinned2"},
+	} {
+		got := liveLibReplace(g, tc.vers)
+		if got == nil {
+			t.Fatalf("replace for version %q lost", tc.vers)
+		}
+		want := "./" + toSlashRel(t, depDir, filepath.Join(outDir, tc.dir))
+		if got.New.Path != want || got.New.Version != "" {
+			t.Errorf("replace for version %q = %q %q, want %q with no version", tc.vers, got.New.Path, got.New.Version, want)
+		}
+	}
+	formatted := modfile.Format(g.Syntax)
+	if _, err := modfile.Parse(path, formatted, nil); err != nil {
+		t.Fatalf("reparsing rewritten go.mod: %v\n%s", err, formatted)
+	}
+}
