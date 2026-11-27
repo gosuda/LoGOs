@@ -485,3 +485,20 @@ func TestResolveEmptyAuthority(t *testing.T) {
 		t.Errorf("round trip %q = %q", round, u.String())
 	}
 }
+
+func TestRenderBareAuthorityEmptyPath(t *testing.T) {
+	u := uri.URI{Scheme: "file", HasAuthority: true}
+	if got := u.String(); got != "file:///" {
+		t.Fatalf("String = %q, want %q", got, "file:///")
+	}
+	if v := mustParse(t, "file:///"); v.String() != u.String() {
+		t.Fatalf("round trip = %q, want %q", v.String(), u.String())
+	}
+	q := uri.URI{Scheme: "file", HasAuthority: true, Query: uri.Raw("q"), HasQuery: true}
+	if got := q.String(); got != "file:///?q" {
+		t.Fatalf("String = %q, want %q", got, "file:///?q")
+	}
+	if r := mustParse(t, q.String()); r.String() != q.String() {
+		t.Fatalf("round trip = %q, want %q", r.String(), q.String())
+	}
+}

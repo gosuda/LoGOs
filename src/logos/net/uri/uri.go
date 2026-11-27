@@ -148,6 +148,12 @@ func (u URI) AppendString(dst []byte) []byte {
 			dst = append(dst, ':')
 			dst = appendPort(dst, u.Port)
 		}
+		// A bare authority with an empty path would render as "scheme://",
+		// which the parser rejects: an empty authority needs its slash.
+		// The slash keeps the empty authority and the rendering reparses.
+		if u.Path.Text == "" && u.HasAuthority && !u.HasHost && !u.HasUser && !u.HasPassword && !u.HasPort {
+			dst = append(dst, '/')
+		}
 	}
 	dst = appendComponent(dst, u.Path, isPathChar)
 	if u.HasQuery {
