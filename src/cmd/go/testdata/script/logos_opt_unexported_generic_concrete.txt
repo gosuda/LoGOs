@@ -1,0 +1,38 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A concrete option field of an unexported generic type keeps its option
+# through an exported use: the importer sees X.N as int?, not int.
+cd good
+logos run .
+stdout '^nil-check ok$'
+
+-- good/go.mod --
+module example.com/optconcrete
+
+go 1.27
+-- good/lib/lib.lgo --
+package lib
+
+type box[T any] struct {
+	V T
+	N int?
+}
+
+var X box[int] = box[int]{V: 1, N: 2}
+-- good/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/optconcrete/lib"
+)
+
+func main() {
+	if lib.X.N == nil {
+		fmt.Println("nil-check unexpected")
+		return
+	}
+	fmt.Println("nil-check ok")
+}
