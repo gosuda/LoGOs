@@ -707,7 +707,15 @@ func (g *overlayGraph) route(t types2.Type, steps []string, q qualKind) {
 			// belongs to the referring object and is rebuilt per use when
 			// the overlay wraps that object; recording it under the origin
 			// would share it across every instantiation.
-			return
+			//
+			// A path that selects only concrete positions is identical in
+			// every instantiation, so it still belongs to the origin: an
+			// unexported generic type reached only through an exported use
+			// keeps its concrete option fields. A path that reaches a type
+			// parameter stays per-use as above.
+			if !collectConcreteOnly(n, steps) {
+				return
+			}
 		}
 		name := n.Origin().Obj().Name()
 		p := qualPath{path: joinPath(steps), qual: q}
@@ -2084,6 +2092,14 @@ func substType(sub *typeSubst, t types2.Type) types2.Type {
 		}
 		origin := n.Origin()
 		if nn, ok := sub.named[origin]; ok {
+			if nn.Underlying() == nil {
+				// The shell is allocated but not yet filled (aliases
+				// rebuild before declarations): expanding an instance of
+				// it would inspect a missing right-hand side. Keep the
+				// original instance; later substitutions retarget it once
+				// the shell is filled.
+				return t
+			}
 			origin = nn
 		}
 		inst, err := types2.Instantiate(nil, origin, targs, false)
@@ -2596,6 +2612,26 @@ func sigTupleAt(sig *types2.Signature, head string) (types2.Type, bool) {
 		return nil, false
 	}
 	return tup.At(index).Type(), true
+}
+
+// collectConcreteOnly reports whether steps select only concrete positions
+// of the instantiation n: no selected position is or passes through one of
+// the origin's type parameters. A concrete-only path is identical in every
+// instantiation, so the origin fact restores it for all of them.
+func collectConcreteOnly(n *types2.Named, steps []string) bool {
+	origin := n.Origin()
+	if origin == nil {
+		return false
+	}
+	idx := typeParamIndex(origin)
+	if idx == nil {
+		return false
+	}
+	hits := make(map[int][][]string)
+	if !collectArgHits(origin.Underlying(), n.Underlying(), steps, idx, hits) {
+		return false
+	}
+	return len(hits) == 0
 }
 
 // collectArgHits walks an origin-space type and its actual instantiation in
