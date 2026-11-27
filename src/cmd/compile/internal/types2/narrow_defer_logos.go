@@ -145,7 +145,7 @@ func (p *logosEFPass) dropCleanupSeeds(before, seeded, out *logosEFState) *logos
 	if mout == nil {
 		return out
 	}
-	return &logosEFState{m: mout, may: out.may, mayErr: out.mayErr, mayAlt: out.mayAlt, cleanups: out.cleanups}
+	return &logosEFState{m: mout, may: out.may, mayErr: out.mayErr, mayAlt: out.mayAlt, mayBroke: out.mayBroke, cleanups: out.cleanups}
 }
 
 // finishCleanups consumes only calls whose boundary is being crossed.
