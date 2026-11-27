@@ -882,6 +882,22 @@ func (p *logosEFPass) setMayErr(st *logosEFState, k logosEFKey, errKey logosEFKe
 	return &logosEFState{m: st.m, may: st.may, mayErr: mayErr, mayAlt: mayAlt, cleanups: st.cleanups}
 }
 
+// setMayDiscarded records an empty pairing for may-marked k: the latest
+// store discarded its error, so the live value has no guard. Unlike a
+// named re-pairing, it keeps prior vetoed possibilities: the value may
+// still be an older guarded one.
+func (s *logosEFState) setMayDiscarded(k logosEFKey) *logosEFState {
+	if e, ok := s.mayErr[k]; ok && e == (logosEFKey{}) {
+		return s
+	}
+	mayErr := maps.Clone(s.mayErr)
+	if mayErr == nil {
+		mayErr = make(map[logosEFKey]logosEFKey, 1)
+	}
+	mayErr[k] = logosEFKey{}
+	return &logosEFState{m: s.m, may: s.may, mayErr: mayErr, mayAlt: s.mayAlt, cleanups: s.cleanups}
+}
+
 // setSeed adds a deferred-capture entry without killing may-reach: seeding
 // is analysis, not a store, so an untracked value that reaches the literal
 // stays marked for the unprove check that follows.
@@ -1294,7 +1310,7 @@ func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *synta
 			ekIn, ok := before.mayErr[k]
 			if ok && ekIn != (logosEFKey{}) && invocationWrote(eff, ekIn) {
 				// Live guard broken: fall into the paired seeding below.
-			} else if invocationBrokeAny(eff, before.mayAlt[k]) {
+			} else if brokeVetoedGuard(before.mayAlt[k], end.mayAlt[k]) {
 				// A vetoed possible guard the invocation broke leaves
 				// no single guard a later check could use.
 				brokeAlt = true
@@ -1316,17 +1332,15 @@ func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *synta
 			out[k] = logosEFEntry{name: name, pos: lit.Pos()}
 			continue
 		}
-		paired := false
-		for _, ek := range p.storeErrKey[k] {
-			if ek != (logosEFKey{}) {
-				paired = true
-				break
-			}
-		}
-		if !paired {
+		// The live pairing decides: a latest store that discarded its
+		// error stays silent for ordinary reads, so the invocation
+		// projects nothing for it. A broken or vetoed pairing (no live
+		// pairing) seeds an entry no check can discharge. A live
+		// pairing seeds an entry the guard check discharges.
+		ek, ok := end.mayErr[k]
+		if ok && ek == (logosEFKey{}) {
 			continue
 		}
-		ek := end.mayErr[k]
 		name := "its error"
 		if ek != (logosEFKey{}) {
 			name = ek.displayName()
@@ -1361,11 +1375,14 @@ func invocationWrote(eff *logosEFEffects, k logosEFKey) bool {
 	return eff.deferred != nil && eff.deferred.writes(k)
 }
 
-// invocationBrokeAny reports whether the invocation effects broke any
-// of the vetoed possible guards: a write overlapping a possible guard.
-func invocationBrokeAny(eff *logosEFEffects, gs []logosEFKey) bool {
-	for _, g := range gs {
-		if invocationWrote(eff, g) {
+// brokeVetoedGuard reports whether the invocation dropped a vetoed
+// possible guard that was live before it: a guard in before that no
+// normal or recovered exit still carries. Writes on paths that panic
+// without recovery die with the path, so they cannot break a guard
+// the caller still holds.
+func brokeVetoedGuard(before, after []logosEFKey) bool {
+	for _, g := range before {
+		if !slices.Contains(after, g) {
 			return true
 		}
 	}
@@ -1452,14 +1469,20 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 	}
 	// A may-only input vetoes a proof the other branch holds: the merged
 	// value may come from a path that never checked it, so a carried
-	// entry stays unproven and keeps no error variable a later check
-	// could misuse. When the vetoed entry was proven and carries no
-	// guard of its own, it takes the may-only path's field guard, so a
-	// later check of that guard proves the joined read.
+	// entry stays unproven. A checked branch contributes only a safe
+	// value, so the merged guard comes from the still-unchecked input:
+	// a later check of that guard proves the joined read, while a check
+	// of the checked branch's stale guard proves nothing.
 	for v := range a.m {
 		if _, ok := b.m[v]; !ok && b.may[v] {
 			e := m[v]
-			if e.proven && e.errKey == (logosEFKey{}) {
+			if !a.unchecked(v) {
+				if ek, ok := b.mayErr[v]; ok && ek != (logosEFKey{}) {
+					e.errKey = ek
+				} else {
+					e.errKey = logosEFKey{}
+				}
+			} else if e.proven && e.errKey == (logosEFKey{}) {
 				if ek, ok := b.mayErr[v]; ok && ek != (logosEFKey{}) {
 					e.errKey = ek
 				}
@@ -1472,7 +1495,13 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 		ea, ok := m[v]
 		if !ok {
 			if a.may[v] {
-				if eb.proven && eb.errKey == (logosEFKey{}) {
+				if !b.unchecked(v) {
+					if ek, ok := a.mayErr[v]; ok && ek != (logosEFKey{}) {
+						eb.errKey = ek
+					} else {
+						eb.errKey = logosEFKey{}
+					}
+				} else if eb.proven && eb.errKey == (logosEFKey{}) {
 					if ek, ok := a.mayErr[v]; ok && ek != (logosEFKey{}) {
 						eb.errKey = ek
 					}
@@ -1507,13 +1536,13 @@ func logosEFJoin(a, b *logosEFState) *logosEFState {
 	return &logosEFState{m: m, may: may, mayErr: mayErrJoin(a, b), mayAlt: mayAltJoin(a, b), cleanups: logosEFCleanupJoin(a.cleanups, b.cleanups)}
 }
 
-// mayErrJoin keeps a pairing when both branches agree on it, and keeps
-// one branch's pairing when the other branch holds nothing unchecked for
-// the result: a branch with no may mark, no unproven entry, and no
-// pairing for the key contributes only a safe value, so it cannot
-// invalidate the pairing. A branch with an unpaired or differently
-// paired unchecked value still vetoes it, so a check on one branch never
-// proves a value the other branch paired elsewhere.
+// mayErrJoin keeps a pairing when every live branch agrees on it, and
+// keeps one branch's pairing when the other branch holds nothing
+// unchecked for the result: a branch with no may mark, no unproven
+// entry, and no pairing for the key contributes only a safe value, so
+// it cannot invalidate the pairing. A branch with an unpaired or
+// differently paired unchecked value still vetoes it, so a check on
+// one branch never proves a value the other branch paired elsewhere.
 func mayErrJoin(a, b *logosEFState) map[logosEFKey]logosEFKey {
 	if len(a.mayErr) == 0 && len(b.mayErr) == 0 {
 		return nil
@@ -1531,7 +1560,16 @@ func mayErrJoin(a, b *logosEFState) map[logosEFKey]logosEFKey {
 		case ok && eb == ea:
 			keep(k, ea)
 		case ok:
-			// Disagreeing pairings veto each other.
+			// Disagreeing pairings veto each other, unless only one
+			// side still holds an unchecked result: the checked side
+			// is safe, so the live side's guard governs alone.
+			la, lb := a.unchecked(k), b.unchecked(k)
+			switch {
+			case la && !lb:
+				keep(k, ea)
+			case lb && !la:
+				keep(k, eb)
+			}
 		default:
 			if !b.unchecked(k) {
 				keep(k, ea)
@@ -1549,6 +1587,10 @@ func mayErrJoin(a, b *logosEFState) map[logosEFKey]logosEFKey {
 	return out
 }
 
+// liveGuard returns the guard s still enforces for an unchecked k: a
+// pairing counts only while its input still holds an unchecked result
+// under it. A checked input contributes only a safe value, so its
+// guard can neither prove nor block a later read.
 // mayAltJoin keeps the possible guards a mayErrJoin veto hides: when
 // branches pair one result with different errors, or one branch pairs
 // it while the other holds it unchecked without a pairing, no single
@@ -1560,8 +1602,57 @@ func mayAltJoin(a, b *logosEFState) map[logosEFKey][]logosEFKey {
 	if len(a.mayErr) == 0 && len(b.mayErr) == 0 && len(a.mayAlt) == 0 && len(b.mayAlt) == 0 {
 		return nil
 	}
+	liveGuard := func(s *logosEFState, k logosEFKey) (logosEFKey, bool) {
+		if s == nil || !s.unchecked(k) {
+			return logosEFKey{}, false
+		}
+		ek, ok := s.mayErr[k]
+		if !ok || ek == (logosEFKey{}) {
+			return logosEFKey{}, false
+		}
+		return ek, true
+	}
+	// keptSingles holds the keys whose live inputs agree on one guard:
+	// mayErrJoin keeps that pairing, so no veto set survives for them.
+	// The condition mirrors mayErrJoin exactly: agreement, sole-live
+	// input with a named guard, or an unchecked-free other branch.
+	keptSingles := make(map[logosEFKey]bool)
+	for k, ea := range a.mayErr {
+		eb, ok := b.mayErr[k]
+		if !ok {
+			if !b.unchecked(k) {
+				keptSingles[k] = true
+			}
+			continue
+		}
+		if eb != ea {
+			au, bu := a.unchecked(k), b.unchecked(k)
+			if au && !bu && ea != (logosEFKey{}) {
+				keptSingles[k] = true
+			}
+			if bu && !au && eb != (logosEFKey{}) {
+				keptSingles[k] = true
+			}
+			continue
+		}
+		keptSingles[k] = true
+	}
+	for k := range b.mayErr {
+		if _, ok := a.mayErr[k]; ok {
+			continue
+		}
+		if !a.unchecked(k) {
+			keptSingles[k] = true
+		}
+	}
 	var out map[logosEFKey][]logosEFKey
 	add := func(k logosEFKey, gs ...logosEFKey) {
+		if keptSingles[k] {
+			if out != nil {
+				delete(out, k)
+			}
+			return
+		}
 		have := make(map[logosEFKey]bool)
 		var union []logosEFKey
 		push := func(g logosEFKey) {
@@ -1606,22 +1697,30 @@ func mayAltJoin(a, b *logosEFState) map[logosEFKey][]logosEFKey {
 		case ok && eb == ea:
 			add(k)
 		case ok:
-			// Disagreeing pairings veto each other: both stay possible.
-			add(k, ea, eb)
+			// Disagreeing pairings veto each other, but only live
+			// inputs contribute possible guards: a checked branch
+			// holds a safe value, so its guard stays out of the set.
+			if g, ok := liveGuard(a, k); ok {
+				add(k, g)
+			}
+			if g, ok := liveGuard(b, k); ok {
+				add(k, g)
+			}
+			add(k)
 		default:
-			if b.unchecked(k) {
-				add(k, ea)
+			if g, ok := liveGuard(a, k); ok && b.unchecked(k) {
+				add(k, g)
 			} else {
 				add(k)
 			}
 		}
 	}
-	for k, eb := range b.mayErr {
+	for k := range b.mayErr {
 		if _, ok := a.mayErr[k]; ok {
 			continue
 		}
-		if a.unchecked(k) {
-			add(k, eb)
+		if g, ok := liveGuard(b, k); ok && a.unchecked(k) {
+			add(k, g)
 		} else {
 			add(k)
 		}
@@ -1746,28 +1845,32 @@ func (k logosEFKey) overlaps(w logosEFKey) bool {
 }
 
 type logosEFPass struct {
-	check         *Checker
-	body          *syntax.BlockStmt
-	seen          map[syntax.Pos]bool
-	spines        map[syntax.Pos]bool
-	ctx           *logosEFCtx
-	eff           *logosEFEffects
-	assigns       map[logosEFKey][]syntax.Expr
-	addr          map[*Var]bool
-	initialized   map[*Var]bool
-	declared      map[*Var]bool
-	tracked       map[logosEFKey]string
-	storeErr      map[logosEFKey][]*Var
-	storeErrKey   map[logosEFKey][]logosEFKey
-	sliced        map[logosEFKey]bool
-	storePos      map[logosEFKey][]syntax.Pos
-	inLoop        map[logosEFKey]bool
-	loopFresh     map[*syntax.ForStmt]map[*Var]bool
-	loopMaybe     map[*syntax.ForStmt]map[*Var]bool
-	loopTuple     map[*syntax.ForStmt]map[logosEFKey]bool
-	reenter       map[*syntax.ForStmt]bool
-	runsOnce      map[*syntax.ForStmt]bool
-	loopDepth     int
+	check       *Checker
+	body        *syntax.BlockStmt
+	seen        map[syntax.Pos]bool
+	spines      map[syntax.Pos]bool
+	ctx         *logosEFCtx
+	eff         *logosEFEffects
+	assigns     map[logosEFKey][]syntax.Expr
+	addr        map[*Var]bool
+	initialized map[*Var]bool
+	declared    map[*Var]bool
+	tracked     map[logosEFKey]string
+	storeErr    map[logosEFKey][]*Var
+	storeErrKey map[logosEFKey][]logosEFKey
+	sliced      map[logosEFKey]bool
+	storePos    map[logosEFKey][]syntax.Pos
+	inLoop      map[logosEFKey]bool
+	loopFresh   map[*syntax.ForStmt]map[*Var]bool
+	loopMaybe   map[*syntax.ForStmt]map[*Var]bool
+	loopTuple   map[*syntax.ForStmt]map[logosEFKey]bool
+	reenter     map[*syntax.ForStmt]bool
+	runsOnce    map[*syntax.ForStmt]bool
+	loopDepth   int
+	// inCleanup counts the cleanup bodies under analysis: reads inside
+	// a deferred cleanup must check the stores the cleanup itself
+	// makes, while ordinary reads of the same values stay silent.
+	inCleanup     int
 	carve         map[syntax.Node]*logosEFState
 	litLoops      map[syntax.Node]map[*syntax.ForStmt]bool
 	trackedByRoot map[*Var][]logosEFKey
@@ -2410,6 +2513,20 @@ func logosEFCands(st *logosEFState, v *Var) []logosEFCand {
 	return cands
 }
 
+// mayGuardName names the guard a cleanup read must check for a may-marked
+// k: the live pairing when the latest store named one, else the tracked
+// error name, else a generic error. It mirrors the entry names
+// seedCleanupReads materializes for the same marks.
+func (p *logosEFPass) mayGuardName(st *logosEFState, k logosEFKey) string {
+	if ek := st.mayErr[k]; ek != (logosEFKey{}) {
+		return ek.displayName()
+	}
+	if n, ok := p.tracked[k]; ok {
+		return n
+	}
+	return "its error"
+}
+
 // logosEFDestPos reports the source position of the destination naming k.
 func (p *logosEFPass) logosEFDestPos(lhs []syntax.Expr, k logosEFKey) syntax.Pos {
 	for _, e := range lhs {
@@ -2434,6 +2551,15 @@ func (p *logosEFPass) read(n *syntax.Name, st *logosEFState) {
 		p.check.errorf(n, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, k.displayName(), e.name, k.displayName(), e.name)
 		return
 	}
+	if p.inCleanup > 0 && st.may[k] {
+		if p.seen[n.Pos()] {
+			return
+		}
+		p.seen[n.Pos()] = true
+		name := p.mayGuardName(st, k)
+		p.check.errorf(n, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, k.displayName(), name, k.displayName(), name)
+		return
+	}
 	// A whole-value read loads every result stored inside the value, so it
 	// fails while any nested destination is still unproven. A name that is
 	// the root of a selector or index spine is not a whole-value read; the
@@ -2442,6 +2568,20 @@ func (p *logosEFPass) read(n *syntax.Name, st *logosEFState) {
 		return
 	}
 	cands := logosEFCands(st, v)
+	if len(cands) == 0 && p.inCleanup > 0 {
+		for key := range st.may {
+			if key.root != v || key.path == "" {
+				continue
+			}
+			cands = append(cands, logosEFCand{key: key, ent: logosEFEntry{name: p.mayGuardName(st, key)}})
+		}
+		slices.SortFunc(cands, func(a, b logosEFCand) int {
+			if a.key.path != b.key.path {
+				return strings.Compare(a.key.path, b.key.path)
+			}
+			return strings.Compare(a.key.root.name, b.key.root.name)
+		})
+	}
 	if len(cands) == 0 {
 		return
 	}
@@ -2805,6 +2945,19 @@ func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
 		p.check.errorf(at, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, k.displayName(), e.name, k.displayName(), e.name)
 		return
 	}
+	// A cleanup read observes the stored value, so a may-reach mark the
+	// cleanup body itself left behind fails here even though ordinary
+	// reads stay silent for it. A guard check first discharges the mark
+	// through dropMayFor.
+	if p.inCleanup > 0 && st.may[k] {
+		if p.seen[pos] {
+			return
+		}
+		p.seen[pos] = true
+		name := p.mayGuardName(st, k)
+		p.check.errorf(at, IncompatibleAssign, "%s read of %s before %s is checked (read %s only after %s is checked)", logosResultBeforeErr, k.displayName(), name, k.displayName(), name)
+		return
+	}
 	// A segment below an outer spine is not a standalone read: the outer
 	// check names the entry, so this check stays silent for it.
 	if p.spines[x.Pos()] {
@@ -2816,6 +2969,20 @@ func (p *logosEFPass) readDest(x syntax.Expr, st *logosEFState) {
 			continue
 		}
 		cands = append(cands, c)
+	}
+	if len(cands) == 0 && p.inCleanup > 0 {
+		for key := range st.may {
+			if key.root != k.root || key == k || !logosEFPathUnder(key.path, k.path) {
+				continue
+			}
+			cands = append(cands, logosEFCand{key: key, ent: logosEFEntry{name: p.mayGuardName(st, key)}})
+		}
+		slices.SortFunc(cands, func(a, b logosEFCand) int {
+			if a.key.path != b.key.path {
+				return strings.Compare(a.key.path, b.key.path)
+			}
+			return strings.Compare(a.key.root.name, b.key.root.name)
+		})
 	}
 	if len(cands) == 0 {
 		return
@@ -2920,6 +3087,11 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 			// Reset any entry a previous pairing left behind first, so
 			// a later check proves only the latest call. The reset runs
 			// before the marks because set drops may-reach on overwrite.
+			// A discarded error records an empty pairing: the live value
+			// has no guard, so an invocation exit projects nothing for
+			// it while a broken pairing still seeds an entry no check
+			// can discharge. The empty pairing keeps prior vetoes: the
+			// value may still be an older guarded one.
 			if _, ok := st.m[k]; ok {
 				e2 := st.m[k]
 				e2.err, e2.proven, e2.errKey = nil, false, logosEFKey{}
@@ -2930,6 +3102,8 @@ func (p *logosEFPass) track(lhs []syntax.Expr, rhs syntax.Expr, st *logosEFState
 			if dk, ok := p.destKey(lhs[len(lhs)-1]); ok {
 				st = p.setMayErr(st, k, dk)
 				ek = dk
+			} else {
+				st = st.setMayDiscarded(k)
 			}
 			p.noteMay(k, ek)
 		}
@@ -5246,12 +5420,32 @@ func (s *logosEFState) literalPairings(before, end *logosEFState, eff *logosEFEf
 		}
 		keep(k, ek)
 	}
-	if maps.Equal(out, s.mayErr) {
+	if maps.Equal(out, s.mayErr) && len(s.mayAlt) == 0 {
 		return s
 	}
-	// Vetoed possible guards do not cross a deferred boundary; see
-	// afterDeferred.
-	return &logosEFState{m: s.m, may: s.may, mayErr: out, mayAlt: nil, cleanups: s.cleanups}
+	// Vetoed possible guards survive where no kept pairing governs the
+	// result: an unrelated closure that pairs another result must not
+	// let a later literal overwrite a forgotten guard silently.
+	mayAlt := s.mayAlt
+	if len(out) != 0 && len(mayAlt) != 0 {
+		kept := false
+		for k := range out {
+			if _, ok := mayAlt[k]; ok {
+				kept = true
+				break
+			}
+		}
+		if kept {
+			mayAlt = maps.Clone(mayAlt)
+			for k := range out {
+				delete(mayAlt, k)
+			}
+			if len(mayAlt) == 0 {
+				mayAlt = nil
+			}
+		}
+	}
+	return &logosEFState{m: s.m, may: s.may, mayErr: out, mayAlt: mayAlt, cleanups: s.cleanups}
 }
 
 func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFState {
