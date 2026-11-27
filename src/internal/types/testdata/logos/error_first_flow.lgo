@@ -1041,3 +1041,54 @@ func joinUnrelatedClosureKeepsVeto(cond bool) {
 	}()
 	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
 }
+
+// A literal that clears one possible guard on one returning branch breaks
+// the pairing: the caller read fails even though the other branch keeps it.
+func joinConditionalGuardOverwriteFails(cond bool, reset bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	func() {
+		if reset {
+			h.errA = nil
+		}
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+}
+
+// A callback that only discards the error leaves ordinary reads silent:
+// the result still holds its initial value before the callback runs.
+func callbackDiscardBeforeCallStaysSilent() {
+	h := heldField{}
+	var refresh func()
+	func() {
+		refresh = func() { h.stats, _ = fetchHeld() }
+	}()
+	use(h.stats)
+	refresh()
+}
+
+// A nested callback that only discards the error leaves the outer read silent.
+func nestedCallbackDiscardStaysSilent() {
+	var n int
+	func() {
+		save := func() { n, _ = fetch() }
+		save()
+	}()
+	use(n)
+}
+
+// A callback that stores the result with a live guard keeps the check: the
+// invocation exit projects the pairing the callback may establish.
+func escapingCallbackNamedStoreFails() {
+	h := heldField{}
+	var save func()
+	func() {
+		save = func() { h.stats, h.err = fetchHeld() }
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	_ = save
+}
