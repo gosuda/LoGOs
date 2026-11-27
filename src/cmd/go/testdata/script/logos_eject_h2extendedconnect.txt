@@ -54,7 +54,7 @@ cd ..
 # variant inventory carries no import edges, so the seed-based roots miss
 # logos/net/http and the support bundle is selected from the imports the
 # rewrite actually emitted instead.
-cd ../variant
+cd variant
 logos run .
 stdout '^other ready$'
 logos eject -o out

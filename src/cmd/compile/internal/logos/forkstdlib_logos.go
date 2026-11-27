@@ -133,9 +133,17 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		// The text rewrite declines receivers containing generated site
 		// names because their independent edits would overlap the call.
 		// Keep exactly that boundary here instead of approving output
-		// which the later rewrite cannot materialize.
+		// which the later rewrite cannot materialize. Before lowering the
+		// site names do not exist yet: a `?` in the receiver (for example
+		// inside an inline callback) lowers into a TraceErr carrying a
+		// fresh site temporary inside the receiver span, so the rewrite
+		// will decline it there. Refuse that shape here too.
 		hasSite := false
 		syntax.Inspect(selector.X, func(node syntax.Node) bool {
+			if _, ok := node.(*syntax.TryExpr); ok {
+				hasSite = true
+				return false
+			}
 			if name, ok := node.(*syntax.Name); ok {
 				rest, site := strings.CutPrefix(name.Value, "_logos_site")
 				hasSite = hasSite || site && rest != "" && strings.Trim(rest, "0123456789") == ""
