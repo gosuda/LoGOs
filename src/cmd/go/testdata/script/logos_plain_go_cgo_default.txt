@@ -2,9 +2,17 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 
 [cgo] env CGO_ENABLED=1
-[cgo] go build -o $WORK/plain$GOEXE ./sub
+# In a marked module plain go re-executes and denies cgo, like logos.
+[cgo] ! go build -o $WORK/plain$GOEXE ./sub
+[cgo] stderr '\[restriction::cgo_usage\]'
 [cgo] ! logos build -o $WORK/logos$GOEXE ./sub
 [cgo] stderr '\[restriction::cgo_usage\]'
+
+# A module without logos.toml keeps plain go: cgo builds.
+cd plain
+[cgo] env CGO_ENABLED=1
+[cgo] go build -o $WORK/plain-unmarked$GOEXE ./sub
+cd ..
 
 # Unset observes the upstream default (1 where cgo is available).
 env CGO_ENABLED=
@@ -24,6 +32,21 @@ cgo = "forbid"
 package marker
 
 -- sub/main.go --
+package main
+
+/*
+int answer() { return 42; }
+*/
+import "C"
+
+func main() { _ = C.answer() }
+
+-- plain/go.mod --
+module example.com/plaincgo-unmarked
+
+go 1.27
+
+-- plain/sub/main.go --
 package main
 
 /*

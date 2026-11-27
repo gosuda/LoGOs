@@ -21,20 +21,33 @@ stderr 'main\.go:[0-9]+:[0-9]+: inlining call to sync\.\(\*Once\)\.Do'
 exec $WORK/bin/logos-safe$GOEXE
 stderr '^inline-once-ok$'
 
-# A real dependency callback that opens a socket must remain denied.
-go build -O=2 -o $WORK/bin/plain-callback$GOEXE ./cmd/callback
+# A real dependency callback that opens a socket must remain denied,
+# including under plain go in a marked module, which re-executes.
+! go build -O=2 -o $WORK/bin/plain-callback$GOEXE ./cmd/callback
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/inlinecapdep/callback'' reaches ''syscall\.Socket'''
 ! logos build -gcflags=example.com/inlinecapdep/callback=-m -o $WORK/bin/logos-callback$GOEXE ./cmd/callback
 stderr 'callback\.go:[0-9]+:[0-9]+: inlining call to sync\.\(\*Once\)\.Do'
 stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/inlinecapdep/callback'' reaches ''syscall\.Socket'''
 stderr 'example\.com/inlinecapdep/callback\.openSocket\(\)'
 
 # A dependency's own sink call remains its responsibility after its entire
-# wrapper is inlined into the first-party main function.
-go build -O=2 -o $WORK/bin/plain-direct$GOEXE ./cmd/direct
+# wrapper is inlined into the first-party main function, including under
+# plain go in a marked module, which re-executes.
+! go build -O=2 -o $WORK/bin/plain-direct$GOEXE ./cmd/direct
+stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/inlinecapdep/direct'' reaches ''syscall\.Socket'''
 ! logos build -gcflags=example.com/inlinecaphost/cmd/direct=-m -o $WORK/bin/logos-direct$GOEXE ./cmd/direct
 stderr 'main\.go:[0-9]+:[0-9]+: inlining call to direct\.Open'
 stderr 'ERROR \[capabilities::unauthorized_net\]: Transitive dependency ''example\.com/inlinecapdep/direct'' reaches ''syscall\.Socket'''
 stderr 'example\.com/inlinecapdep/direct\.Open\(\)'
+
+# A module without logos.toml keeps plain go: no capabilities audit.
+cd ..
+cd plain
+go build -O=2 -o $WORK/bin/plain-unmarked-callback$GOEXE ./cmd/callback
+! stderr 'capabilities::'
+go build -O=2 -o $WORK/bin/plain-unmarked-direct$GOEXE ./cmd/direct
+! stderr 'capabilities::'
+cd ../main
 
 -- main/go.mod --
 module example.com/inlinecaphost
@@ -141,3 +154,26 @@ package direct
 import "syscall"
 
 func Open() { _, _ = syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, 0) }
+
+-- plain/go.mod --
+module example.com/inlinecapplain
+
+go 1.27
+
+require example.com/inlinecapdep v0.0.0
+
+replace example.com/inlinecapdep => ../dep
+
+-- plain/cmd/callback/main.go --
+package main
+
+import "example.com/inlinecapdep/callback"
+
+func main() { callback.Open() }
+
+-- plain/cmd/direct/main.go --
+package main
+
+import "example.com/inlinecapdep/direct"
+
+func main() { direct.Open() }

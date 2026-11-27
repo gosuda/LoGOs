@@ -7,11 +7,11 @@ env CGO_ENABLED=1
 env GOEXPERIMENT=
 cd m
 
-# Like xxhash's upstream TestMain, the test builds its plugin with plain go.
-# Plugin identity requires matching optimization and experiment settings.
-# Pin the logos host to O1 and explicitly share the arena experiment with the
-# plain-go child. Unconfigured mixed-driver failures remain separate evidence.
-go test -count=1 -run '^TestChildPlugin$' .
+# The test builds its plugin with plain go, which re-executes as logos in
+# a marked module. Plugin identity requires matching optimization and
+# experiment settings, so the host and the child share -O=1 and the same
+# GOEXPERIMENT. Unconfigured mixed-driver failures remain separate evidence.
+go test -O=1 -count=1 -run '^TestChildPlugin$' .
 env GOEXPERIMENT=logosarena
 logos test -O=1 -count=1 -run '^TestChildPlugin$' .
 
@@ -45,7 +45,7 @@ import (
 
 func TestChildPlugin(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "child.so")
-	out, err := exec.Command("go", "build", "-buildmode=plugin", "-o", path, "./plugin").CombinedOutput()
+	out, err := exec.Command("go", "build", "-O=1", "-buildmode=plugin", "-o", path, "./plugin").CombinedOutput()
 	if err != nil {
 		t.Fatalf("build child plugin: %v\n%s", err, out)
 	}
