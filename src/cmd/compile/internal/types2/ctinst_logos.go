@@ -447,6 +447,12 @@ func (check *Checker) logosCtDeferInterfaceFormation(pos syntax.Pos, V, T Type) 
 	check.logosCtIfaceSites = append(check.logosCtIfaceSites, logosCtIfaceSite{pos: pos, v: V, t: T})
 }
 
+// logosCtDeferConversion records the conversion of x to T for drain-time
+// interface rejection before x takes the target type.
+func (check *Checker) logosCtDeferConversion(x *operand, T Type) {
+	check.logosCtDeferInterfaceFormation(x.Pos(), x.typ(), T)
+}
+
 // logosCtRejectInterfaceFormation rejects a conversion of a value whose
 // type provides a comptime generic method required by the target
 // interface: the call would dispatch to the retired generic body. Only
