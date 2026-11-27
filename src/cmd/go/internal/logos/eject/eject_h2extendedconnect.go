@@ -5,8 +5,12 @@
 package eject
 
 import (
+	"bytes"
 	"go/ast"
+	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,7 +66,12 @@ const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 // process without it fails fast at the first call instead of serving
 // without the feature. Last-wins GODEBUG parsing lives in the shared
 // support helper, so the emitted code carries no parsing of its own.
-func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]textEdit, bool) {
+//
+// extraUsed holds package-level names from sibling files in the ejected
+// package; the chosen qualifier avoids those too, because no identifier
+// may be declared in both the file and package block. A nil map keeps
+// the file-local decision for generated sources with no package context.
+func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extraUsed map[string]bool) ([]textEdit, bool) {
 	supportPath := rtModulePath + "/logos/net/http"
 	hasNetHTTP := false
 	supportLocal := ""
@@ -94,7 +103,7 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 	if h2DefinesExtendedConnect(f) {
 		return nil, false
 	}
-	local, needImport := h2SupportLocal(f, supportPath, supportLocal)
+	local, needImport := h2SupportLocal(f, supportPath, supportLocal, extraUsed)
 	var assigns []h2assignSite
 	var calls []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -227,11 +236,22 @@ func h2SupportImportFor(local string) string {
 // h2SupportLocal picks the qualifier for generated support calls. An
 // existing support import binding is reused only where no other file
 // binding shadows it: a local, parameter, or same-file declaration with
-// the same name would capture the generated call. Otherwise a binding
-// with a fresh file-wide name is used. The second result reports whether
+// the same name would capture the generated call. A fresh alias avoids
+// the file bindings and the package-level names in extraUsed. It also
+// avoids every identifier the file mentions: an unaliased import's
+// package name can differ from its path basename, and the file's own
+// uses are the only signal for that binding. The existing-import reuse
+// decision stays before that scan so references to the support import
+// itself do not count as shadowing. The second result reports whether
 // the import still needs adding.
-func h2SupportLocal(f *ast.File, supportPath, supportLocal string) (string, bool) {
+func h2SupportLocal(f *ast.File, supportPath, supportLocal string, extraUsed map[string]bool) (string, bool) {
 	bound := map[string]bool{}
+	// extraUsed holds package-level names from sibling files in the
+	// ejected package; the support import of this file must not reuse
+	// one of those either.
+	for name := range extraUsed {
+		bound[name] = true
+	}
 	for _, imp := range f.Imports {
 		p, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
@@ -286,6 +306,18 @@ func h2SupportLocal(f *ast.File, supportPath, supportLocal string) (string, bool
 	if supportLocal != "" && !bound[supportLocal] {
 		return supportLocal, false
 	}
+	// Reserve every identifier the file mentions before choosing a
+	// fresh alias. The import scan above only knows an unaliased
+	// import by its path basename, while Go binds it by its package
+	// clause name; a use such as ejectedhttp.Probe is the only
+	// file-local trace of that binding, and reusing it would emit a
+	// duplicate file-scope binding.
+	ast.Inspect(f, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok {
+			bound[id.Name] = true
+		}
+		return true
+	})
 	local := "ejectedhttp"
 	for i := 2; bound[local]; i++ {
 		local = "ejectedhttp" + strconv.Itoa(i)
@@ -403,4 +435,76 @@ func h2ImportEdit(fset *token.FileSet, f *ast.File, missing []string) textEdit {
 	}
 	b.WriteString(")\n")
 	return textEdit{end, end, b.String()}
+}
+
+// h2PackageReserved collects top-level declared names from every Go
+// file that will land in one ejected package directory: lowered
+// staging files plus the plain Go sources copied verbatim. A generated
+// import alias in any file of the package must avoid all of them,
+// because no identifier may be declared in both the file and package
+// block. Over-reservation is safe: it only lengthens a fresh alias.
+// Non-regular entries are skipped unread, as in copyModuleTree: parsing
+// a .go-named pipe would block waiting for a writer the loader ignores.
+// Files that fail to parse are skipped; their names stay reserved
+// through the importing file's own identifiers.
+func h2PackageReserved(dirs ...string) map[string]bool {
+	used := map[string]bool{}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if !e.Type().IsRegular() || !strings.HasSuffix(name, ".go") {
+				continue
+			}
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+			if err != nil {
+				continue
+			}
+			for _, decl := range f.Decls {
+				switch d := decl.(type) {
+				case *ast.FuncDecl:
+					used[d.Name.Name] = true
+				case *ast.GenDecl:
+					for _, spec := range d.Specs {
+						switch s := spec.(type) {
+						case *ast.TypeSpec:
+							used[s.Name.Name] = true
+						case *ast.ValueSpec:
+							for _, id := range s.Names {
+								used[id.Name] = true
+							}
+						}
+					}
+				}
+			}
+			for _, imp := range f.Imports {
+				if imp.Name != nil {
+					used[imp.Name.Name] = true
+				}
+			}
+		}
+	}
+	return used
+}
+
+// h2PackageReservedFor returns the package-wide reserved names for the
+// h2 rewrite of one package, or nil when no emitted file in the package
+// can carry an h2 call. The gate is a substring scan of the staging
+// files: only a file mentioning the method name can produce h2 edits,
+// and only h2 edits add fresh imports.
+func h2PackageReservedFor(names []string, stagingPkgDir, srcDir string) map[string]bool {
+	for _, name := range names {
+		raw, err := os.ReadFile(filepath.Join(stagingPkgDir, logosStem(name)+".go"))
+		if err != nil {
+			continue
+		}
+		if bytes.Contains(raw, []byte(h2extendedConnectMethod)) {
+			return h2PackageReserved(stagingPkgDir, srcDir)
+		}
+	}
+	return nil
 }

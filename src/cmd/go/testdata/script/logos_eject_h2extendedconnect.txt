@@ -93,6 +93,77 @@ stdout '^nested ready$'
 stderr 'fork_stdlib_api'
 cd ..
 
+# A same-named user method that takes arguments is refused when grouped:
+# lowering binds its callee through a marked temporary the rewrite
+# trusts by spelling, so the check fails closed instead of emitting a
+# guard call the extra argument cannot satisfy.
+cd withargs
+logos run .
+stdout '^withargs ready$'
+! logos eject -o out
+stderr 'fork_stdlib_api'
+! exists out
+cd ..
+
+# A sibling file declaring the fresh alias at package level does not
+# break the export: the support import alias avoids every package-level
+# name in the ejected package, and upstream Go builds the result.
+cd sibling
+logos run .
+stdout '^sibling ready$'
+logos eject -o out
+grep 'ejectedhttp2.RequireExtendedConnect' out/server.go
+grep 'ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"' out/server.go
+cd out
+go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^sibling ready$'
+cd ../..
+
+# A plain Go file binding the fork-only method value is refused before
+# writing: the rewrite leaves method values intact, so without the typed
+# check the fork-only binding would reach upstream Go, which rejects it.
+cd gofile
+logos build ./...
+! logos eject -o out
+stderr 'fork_stdlib_api'
+! exists out
+cd ..
+
+# A plain Go file binding a same-named user method value still ejects:
+# the typed check tells it apart from the fork-only method.
+cd gouser
+logos build ./...
+logos eject -o out
+cd out
+go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^gouser ready: 1$'
+cd ../..
+
+# The ejected server really speaks extended CONNECT on the wire: with
+# the process-global setting in effect, the native and the
+# upstream-built binaries both advertise
+# SETTINGS_ENABLE_CONNECT_PROTOCOL, so the handshake pins what the
+# ejected guard predicts.
+cd h2wire
+logos run .
+stdout '^extended connect advertised$'
+logos eject -o out
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^extended connect advertised$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^extended connect advertised$'
+env GODEBUG=
+cd ../..
+
 # Saving the public logos/net/http helper as a value is not a lowered
 # server method value: the rewrite leaves it alone, the import still
 # remaps to the ejected support copy, and both binaries run it.
@@ -394,4 +465,277 @@ func run() {
 
 func main() {
 	run()
+}
+
+-- sibling/go.mod --
+module example.com/h2sibling
+
+go 1.27
+
+-- sibling/server.lgo --
+
+// Command siblingdemo calls the opt-in beside a sibling file that
+// declares the fresh alias at package level.
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func run() error {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	srv.EnableHTTP2ExtendedConnect()
+	fmt.Println("sibling ready")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- sibling/config.lgo --
+package main
+
+// ejectedhttp is a package-level name in a sibling file: the eject
+// rewrite must not take it as the support import alias.
+var ejectedhttp = 1
+-- gofile/go.mod --
+module example.com/h2gofile
+
+go 1.27
+
+-- gofile/main.go --
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func configure(s *http.Server) func() {
+	enable := s.EnableHTTP2ExtendedConnect
+	return enable
+}
+
+func main() {
+	s := &http.Server{Addr: "127.0.0.1:0"}
+	configure(s)()
+	fmt.Println("gofile ready")
+}
+
+-- gouser/go.mod --
+module example.com/h2gouser
+
+go 1.27
+
+-- gouser/meter.go --
+package main
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. Its method value must survive ejection.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- gouser/main.go --
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	m := &Meter{}
+	f := m.EnableHTTP2ExtendedConnect
+	f()
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+	fmt.Println("gouser ready:", m.Hits)
+}
+
+-- withargs/go.mod --
+module example.com/h2withargs
+
+go 1.27
+
+-- withargs/meter.lgo --
+package main
+
+// Meter carries a same-named method that takes an argument, so no call
+// of it can be the zero-argument stdlib opt-in.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect(level int) { m.Hits += level }
+
+-- withargs/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+)
+
+func run() error {
+	m := &Meter{}
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+	go group (context.Background()) {
+		go m.EnableHTTP2ExtendedConnect(1)
+	}
+	fmt.Println("withargs ready")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- h2wire/go.mod --
+module example.com/h2wire
+
+go 1.27
+
+-- h2wire/main.lgo --
+
+// Command h2wiredemo serves with the opt-in and checks on the wire that
+// the server advertises SETTINGS_ENABLE_CONNECT_PROTOCOL. The client
+// parses the SETTINGS frame by hand so the fixture needs only the
+// standard library.
+package main
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io"
+	"math/big"
+	"net"
+	"net/http"
+	"time"
+)
+
+func serveQuiet(srv *http.Server, ln net.Listener) {
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		panic(err)
+	}
+}
+
+func closeConn(conn *tls.Conn, err error) error {
+	if cerr := conn.Close(); cerr != nil {
+		return cerr
+	}
+	return err
+}
+
+
+func clientPreface() []byte {
+	out := []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+	return append(out, 0, 0, 0, 4, 0, 0, 0, 0, 0)
+}
+
+func settingsHasExtendedConnect(conn *tls.Conn) (bool, error) {
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return false, err
+	}
+	var hdr [9]byte
+	for {
+		if _, err := io.ReadFull(conn, hdr[:]); err != nil {
+			return false, err
+		}
+		length := int(hdr[0])<<16 | int(hdr[1])<<8 | int(hdr[2])
+		typ := hdr[3]
+		payload := make([]byte, length)
+		if _, err := io.ReadFull(conn, payload); err != nil {
+			return false, err
+		}
+		if typ != 4 {
+			continue
+		}
+		for i := 0; i+6 <= len(payload); i += 6 {
+			id := int(payload[i])<<8 | int(payload[i+1])
+			if id == 8 {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+}
+
+func handshake(addr string) error {
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"h2"}})
+	if err != nil {
+		return err
+	}
+	if proto := conn.ConnectionState().NegotiatedProtocol; proto != "h2" {
+		return closeConn(conn, fmt.Errorf("h2wire: negotiated %q, want h2", proto))
+	}
+	if _, err := conn.Write(clientPreface()); err != nil {
+		return closeConn(conn, err)
+	}
+	found, serr := settingsHasExtendedConnect(conn)
+	cerr := conn.Close()
+	if serr != nil {
+		return serr
+	}
+	if cerr != nil {
+		return cerr
+	}
+	if !found {
+		return fmt.Errorf("h2wire: SETTINGS without ENABLE_CONNECT_PROTOCOL")
+	}
+	fmt.Println("extended connect advertised")
+	return nil
+}
+
+func handshakeAndClose(addr string, srv *http.Server) error {
+	herr := handshake(addr)
+	if cerr := srv.Close(); cerr != nil && herr == nil {
+		return cerr
+	}
+	return herr
+}
+
+func run() error {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	tmpl.DNSNames = []string{"localhost"}
+	tmpl.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{
+		Addr:      "127.0.0.1:0",
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}, NextProtos: []string{"h2"}},
+		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+	}
+	srv.EnableHTTP2ExtendedConnect()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", srv.TLSConfig)
+	if err != nil {
+		return err
+	}
+	go group (context.Background()) {
+		go serveQuiet(srv, ln)
+		return handshakeAndClose(ln.Addr().String(), srv)
+	}
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
 }
