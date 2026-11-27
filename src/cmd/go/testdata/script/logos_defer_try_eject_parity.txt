@@ -150,14 +150,15 @@ func gAny[T any](v T, n int) error {
 	fmt.Println("generic", v, n)
 	return nil
 }
-
 // A literal passed to an inferred generic parameter is not interface
 // boxed: its fields are read after the later argument call in both twins.
+// The reset keeps this oracle sharp: an early capture would print {1 1}
+// while the correct late read prints {2 2}.
 func genericArg() (err error) {
+	epoch = 1
 	defer gAny(Stamp{epoch, epoch}, advance())?
 	return nil
 }
-
  var seen any = "unset"
 
 func probe() error {
