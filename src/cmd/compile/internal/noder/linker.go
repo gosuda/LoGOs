@@ -10,7 +10,6 @@ import (
 	"io"
 	"maps"
 	"slices"
-	"strings"
 
 	"cmd/compile/internal/base"
 	"cmd/compile/internal/ir"
@@ -160,22 +159,6 @@ func (l *linker) relocLogosCtTargets(pr *pkgReader) {
 	if pr == localPkgReader && pr.logosCtConstMaps != 0 {
 		l.logosCtConstMaps = l.relocIdx(pr, pkgbits.SectionMeta, pr.logosCtConstMaps)
 	}
-	if pr == localPkgReader && len(pr.logosCtMethods) != 0 {
-		if l.logosCtMethods == nil {
-			l.logosCtMethods = make(map[logosCtMethodOrigin]index, len(pr.logosCtMethods))
-		}
-		for _, key := range slices.SortedFunc(maps.Keys(pr.logosCtMethods), func(a, b logosCtMethodOrigin) int {
-			if c := strings.Compare(a.recvPath, b.recvPath); c != 0 {
-				return c
-			}
-			if c := strings.Compare(a.recvName, b.recvName); c != 0 {
-				return c
-			}
-			return strings.Compare(a.name, b.name)
-		}) {
-			l.logosCtMethods[key] = l.relocIdx(pr, pkgbits.SectionObj, pr.logosCtMethods[key])
-		}
-	}
 }
 
 func (l *linker) writeLogosCtTargets(w *pkgbits.Encoder) {
@@ -207,21 +190,6 @@ func (l *linker) writeLogosCtTargets(w *pkgbits.Encoder) {
 		w.Bool(l.logosCtConstMaps != 0)
 		if l.logosCtConstMaps != 0 {
 			w.Reloc(pkgbits.SectionMeta, l.logosCtConstMaps)
-		}
-		w.Len(len(l.logosCtMethods))
-		for _, key := range slices.SortedFunc(maps.Keys(l.logosCtMethods), func(a, b logosCtMethodOrigin) int {
-			if c := strings.Compare(a.recvPath, b.recvPath); c != 0 {
-				return c
-			}
-			if c := strings.Compare(a.recvName, b.recvName); c != 0 {
-				return c
-			}
-			return strings.Compare(a.name, b.name)
-		}) {
-			w.String(key.recvPath)
-			w.String(key.recvName)
-			w.String(key.name)
-			w.Reloc(pkgbits.SectionObj, l.logosCtMethods[key])
 		}
 	}
 }

@@ -330,6 +330,7 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 		for _, edge := range logosCtEdges(rec.Info, rec.Decl.Body, nil) {
 			w.bind(edge, pos)
 		}
+		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
 		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 		return id
 	}
@@ -441,16 +442,15 @@ type logosCtIfaceSite struct {
 // logosCtDeferInterfaceFormation records pos/V/T for drain-time
 // interface rejection instead of checking immediately.
 func (check *Checker) logosCtDeferInterfaceFormation(pos syntax.Pos, V, T Type) {
-	if !isValid(V) || !isValid(T) {
+	if !check.conf.Logos || !isValid(V) || !isValid(T) {
 		return
 	}
+	if _, ok := Unalias(T).(*Interface); !ok {
+		if _, ok2 := Unalias(T).Underlying().(*Interface); !ok2 {
+			return
+		}
+	}
 	check.logosCtIfaceSites = append(check.logosCtIfaceSites, logosCtIfaceSite{pos: pos, v: V, t: T})
-}
-
-// logosCtDeferConversion records the conversion of x to T for drain-time
-// interface rejection before x takes the target type.
-func (check *Checker) logosCtDeferConversion(x *operand, T Type) {
-	check.logosCtDeferInterfaceFormation(x.Pos(), x.typ(), T)
 }
 
 // logosCtRejectInterfaceFormation rejects a conversion of a value whose
@@ -463,8 +463,11 @@ func (check *Checker) logosCtRejectInterfaceFormation(pos syntax.Pos, V, T Type)
 	if !isValid(V) || !isValid(T) {
 		return
 	}
-	named, ok := Unalias(V).(*Named)
-	if !ok || logosContainsTypeParam(Unalias(V), nil) {
+	base := Unalias(V)
+	if ptr, ok := base.(*Pointer); ok {
+		base = Unalias(ptr.Elem())
+	}
+	if _, ok := base.(*Named); !ok || logosContainsTypeParam(Unalias(V), nil) {
 		return
 	}
 	iface, ok := Unalias(T).(*Interface)
@@ -478,7 +481,7 @@ func (check *Checker) logosCtRejectInterfaceFormation(pos syntax.Pos, V, T Type)
 	}
 	for i := 0; i < iface.NumMethods(); i++ {
 		m := iface.Method(i)
-		obj, _, _ := lookupFieldOrMethod(named, false, check.pkg, m.Name(), false)
+		obj, _, _ := lookupFieldOrMethod(V, false, check.pkg, m.Name(), false)
 		fn, ok := obj.(*Func)
 		if !ok || !check.logosCtIsMethodGeneric(fn.Origin()) {
 			continue
@@ -521,6 +524,11 @@ func logosCtEdges(info *Info, root syntax.Node, generics map[*syntax.FuncDecl]bo
 				recvTyp := info.TypeOf(syntax.Unparen(sel.X))
 				if !isValid(recvTyp) {
 					return true
+				}
+				if s, ok := info.Selections[sel]; ok {
+					if prom, _, ok := LogosCtPromotedRecv(recvTyp, s, fn.Origin()); ok && isValid(prom) {
+						recvTyp = prom
+					}
 				}
 				var methodTargs []Type
 				if nparams := fn.Signature().TypeParams().Len(); nparams != 0 {
@@ -613,8 +621,6 @@ func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []T
 	defer func() {
 		check.logosCtSubst, check.pkg, check.version = savedSubst, savedPkg, savedVersion
 		check.logosCtPos = check.logosCtPos[:len(check.logosCtPos)-1]
-		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
-		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
 	}()
 	decl = syntax.CloneLogosCtSyntax(decl)
 	if origin.Signature().Recv() != nil {
@@ -622,6 +628,7 @@ func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []T
 	}
 	sig, facts := check.logosCtInstanceBody(origin, origin.Signature(), targs, decl, generic.Scope)
 	if failed {
+		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
 		return nil
 	}
 	return &LogosCtInst{
@@ -794,7 +801,10 @@ func logosCtLabel(targs []Type) string {
 // LogosCtKey is the stable identity of an instance of a package-level
 // function or method. For a method, targs start with the concrete
 // receiver type followed by the method type arguments. It returns an
-// empty key if the arguments are not concrete.
+// empty key if the arguments are not concrete. Methods carry the
+// declaring receiver identity separately from the ordered type
+// arguments, so a function and a same-named method with matching type
+// lists never share an identity.
 func LogosCtKey(origin *Func, targs []Type) string {
 	want := origin.Signature().TypeParams().Len()
 	if origin.Signature().Recv() != nil {
@@ -809,7 +819,24 @@ func LogosCtKey(origin *Func, targs []Type) string {
 		}
 	}
 	var key logosCtTypeKey
-	key.name(origin)
+	if origin.Signature().Recv() != nil {
+		key.WriteByte('m')
+		if named := logosCtNamedRecv(origin.Signature().Recv().Type()); named != nil && named.Obj() != nil {
+			pkgPath := ""
+			if pkg := named.Obj().Pkg(); pkg != nil {
+				pkgPath = pkg.Path()
+			}
+			key.text(pkgPath)
+			key.text(named.Obj().Name())
+		} else {
+			key.text("")
+			key.text("")
+		}
+		key.text(origin.Name())
+	} else {
+		key.WriteByte('f')
+		key.name(origin)
+	}
 	key.list(targs)
 	return key.String()
 }
@@ -835,7 +862,7 @@ func logosCtMethodSplit(origin *Func, targs []Type) (rtparams []*TypeParam, rtar
 	if cnamed == nil || cnamed.Obj() != rnamed.Obj() {
 		return nil, nil, false
 	}
-	rtparams = rnamed.TypeParams().list()
+	rtparams = origin.Signature().RecvTypeParams().list()
 	rtargs = cnamed.TypeArgs().list()
 	if len(rtparams) != len(rtargs) {
 		return nil, nil, false
@@ -852,6 +879,94 @@ func logosCtNamedRecv(t Type) *Named {
 	}
 	named, _ := t.(*Named)
 	return named
+}
+
+// LogosCtPromotedRecv resolves a promoted comptime method call to the
+// concrete embedded receiver type. recv is the type of the selector's X,
+// s is its checked selection, and origin is the method's generic origin.
+// It returns the embedded field type and its field-index path (excluding
+// the trailing method index), or false when the call is not a promoted
+// method of origin.
+func LogosCtPromotedRecv(recv Type, s *Selection, origin *Func) (Type, []int, bool) {
+	if s == nil || !isValid(recv) {
+		return nil, nil, false
+	}
+	idx := s.Index()
+	if len(idx) < 2 {
+		return nil, nil, false
+	}
+	cur := recv
+	for _, fi := range idx[:len(idx)-1] {
+		curUn := Unalias(cur)
+		if ptr, ok := curUn.(*Pointer); ok {
+			curUn = Unalias(ptr.Elem())
+		}
+		if named, ok := curUn.(*Named); ok {
+			curUn = named.Underlying()
+		}
+		st, ok := curUn.(*Struct)
+		if !ok {
+			return nil, nil, false
+		}
+		if fi < 0 || fi >= st.NumFields() {
+			return nil, nil, false
+		}
+		cur = st.Field(fi).Type()
+	}
+	if _, _, ok := logosCtMethodSplit(origin, []Type{cur}); !ok {
+		return nil, nil, false
+	}
+	path := append([]int(nil), idx[:len(idx)-1]...)
+	return cur, path, true
+}
+
+// LogosCtNormalizedRecv returns the declared receiver type of origin
+// with its receiver type arguments replaced by the concrete arguments
+// of recvTyp, preserving the declared pointer indirection. A
+// pointer-receiver method called on an addressable value (and the
+// symmetric value-receiver call through a pointer) therefore shares one
+// instance keyed by the declared receiver, and ctMethodRecvAdjust adds
+// the & or * at the call site.
+func LogosCtNormalizedRecv(pos syntax.Pos, origin *Func, recvTyp Type) Type {
+	if recv := origin.Signature().Recv(); recv == nil || !isValid(recvTyp) {
+		return recvTyp
+	} else {
+		declRecv := recv.Type()
+		if !isValid(declRecv) {
+			return recvTyp
+		}
+		declNamed := logosCtNamedRecv(declRecv)
+		concNamed := logosCtNamedRecv(recvTyp)
+		if declNamed == nil || concNamed == nil || declNamed.Obj() != concNamed.Obj() {
+			return recvTyp
+		}
+		declArgs := declNamed.TypeArgs().list()
+		concArgs := concNamed.TypeArgs().list()
+		if len(declArgs) != len(concArgs) {
+			return recvTyp
+		}
+		var tparams []*TypeParam
+		var args []Type
+		for i, d := range declArgs {
+			tp, ok := d.(*TypeParam)
+			if !ok {
+				if !Identical(d, concArgs[i]) {
+					return recvTyp
+				}
+				continue
+			}
+			tparams = append(tparams, tp)
+			args = append(args, concArgs[i])
+		}
+		if len(tparams) == 0 {
+			return declRecv
+		}
+		smap := makeSubstMap(tparams, args)
+		if concrete := (*Checker)(nil).subst(pos, declRecv, smap, nil, NewContext()); isValid(concrete) {
+			return concrete
+		}
+		return recvTyp
+	}
 }
 
 // logosCtMethodDecl rewrites a cloned generic method declaration as a
@@ -1093,7 +1208,13 @@ func (check *Checker) logosCtCheckBody(origin *Func, sig *Signature, targs []Typ
 		if recvName == "" {
 			recvName = "_"
 		}
-		recvVar := NewVar(fdecl.Pos(), origin.Pkg(), recvName, targs[0])
+		recvType := targs[0]
+		if declRecv := origin.Signature().Recv().Type(); isValid(declRecv) {
+			if concrete := check.subst(fdecl.Pos(), declRecv, smap, nil, check.context()); isValid(concrete) {
+				recvType = concrete
+			}
+		}
+		recvVar := NewVar(fdecl.Pos(), origin.Pkg(), recvName, recvType)
 		recvParams := make([]*Var, 0, bodySig.params.Len()+1)
 		recvParams = append(recvParams, recvVar)
 		for i := range bodySig.params.Len() {

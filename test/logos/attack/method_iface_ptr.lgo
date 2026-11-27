@@ -1,0 +1,24 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Box[T any] struct {
+	Items []T
+}
+
+func (b *Box[T]) Count() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+type Counter interface {
+	Count() int
+}
+
+var _ Counter = &Box[int]{} // ERROR "comptime::method_value"

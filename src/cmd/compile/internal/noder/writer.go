@@ -151,18 +151,6 @@ func logosCtMethodKeyOf(fn *types2.Func) (logosCtMethodOrigin, bool) {
 	return logosCtMethodOrigin{recvPath: named.Obj().Pkg().Path(), recvName: named.Obj().Name(), name: fn.Name()}, true
 }
 
-// logosCtMethodEntry pairs an exported method key with its origin.
-type logosCtMethodEntry struct {
-	key logosCtMethodOrigin
-	fn  *types2.Func
-}
-
-// logosCtMethodTable lists the comptime generic methods this package
-// exports templates for, in deterministic order.
-func (pw *pkgWriter) logosCtMethodTable() []logosCtMethodEntry {
-	return nil
-}
-
 // The normal dynamic instance form cannot contain this subdictionary index.
 const logosCtStaticInstance = 1<<31 - 1
 
@@ -3319,14 +3307,6 @@ func (w *writer) pkgInit(noders []*noder) {
 	for _, key := range slices.Sorted(maps.Keys(graph)) {
 		w.String(key)
 		w.Strings(graph[key])
-	}
-	methods := w.p.logosCtMethodTable()
-	w.Len(len(methods))
-	for _, m := range methods {
-		w.String(m.key.recvPath)
-		w.String(m.key.recvName)
-		w.String(m.key.name)
-		w.Reloc(pkgbits.SectionObj, w.p.objIdx(m.fn))
 	}
 	w.Len(len(w.p.cgoPragmas))
 	for _, cgoPragma := range w.p.cgoPragmas {
