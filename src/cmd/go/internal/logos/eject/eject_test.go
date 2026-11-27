@@ -241,7 +241,7 @@ func TestSupportRelPathMapping(t *testing.T) {
 		"logos/io":              "logos/io",
 		"logos/log":             "logos/log",
 		"logos/strconv":         "logos/strconv",
-		"logos/net/uri":         "logos/net/uri",
+		"logos/net/http":        "net/http",
 		"logos/encoding/base64": "logos/encoding/base64",
 	}
 	for path, want := range cases {

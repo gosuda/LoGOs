@@ -2276,7 +2276,11 @@ func supportRelPath(path string) (string, bool) {
 	if sub, ok := strings.CutPrefix(rest, "rt/"); ok {
 		return sub, true
 	}
-	for _, fixed := range []string{"arena", "sync"} {
+	// arena and sync keep their short support paths, and so does net/http:
+	// the h2 extended-connect rewrite imports it as rt/net/http, the
+	// support tree scan looks for that path, and every other package
+	// keeps its logos/ prefix to preserve its identity.
+	for _, fixed := range []string{"arena", "sync", "net/http"} {
 		if rest == fixed || strings.HasPrefix(rest, fixed+"/") {
 			return rest, true
 		}
