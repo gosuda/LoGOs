@@ -393,3 +393,24 @@ func probeStaleGuardControl() {
 	_ = refresh
 }
 
+// The panic-only overwrite with deferred recovery returns: the recovered
+// path carries the break, so the caller read fails.
+func probeRecoveredBreakSplit(cond bool, reset bool, stop bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if reset {
+		h.errA = nil
+	}
+	func() {
+		defer func() { _ = recover() }()
+		if stop {
+			h.errA = nil
+			panic("stop")
+		}
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
+}
