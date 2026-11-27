@@ -39,7 +39,7 @@ const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 // without the feature. Last-wins GODEBUG parsing lives in the shared
 // support helper, so the emitted code carries no parsing of its own.
 func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]textEdit, bool) {
-	supportPath := rtModulePath + "/net/http"
+	supportPath := rtModulePath + "/logos/net/http"
 	hasNetHTTP := false
 	haveSupport := false
 	for _, imp := range f.Imports {

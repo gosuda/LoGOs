@@ -873,8 +873,17 @@ func supportCandidates(imp string) []string {
 	if !ok || suffix == "" || strings.HasPrefix(suffix, "internal/") {
 		return nil
 	}
+	cands := []string{"logos/" + suffix, "logos/rt/" + suffix}
+	// A default-mapped package (logos/<rest> outside rt/, arena and sync)
+	// forward-maps to rtModulePath + "/logos/<rest>", so the suffix itself
+	// is the GOROOT package that round-trips. Without it the h2 rewrite's
+	// support import resolves only to a nonexistent logos/rt/... package
+	// and nothing is materialized.
+	if strings.HasPrefix(suffix, "logos/") {
+		cands = append(cands, suffix)
+	}
 	var out []string
-	for _, cand := range []string{"logos/" + suffix, "logos/rt/" + suffix} {
+	for _, cand := range cands {
 		rel, ok := supportRelPath(cand)
 		if !ok {
 			continue

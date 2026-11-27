@@ -37,7 +37,7 @@ func enable(s *http.Server) {
 	if strings.Contains(got, "strings.Contains(os.Getenv") {
 		t.Errorf("inline GODEBUG parsing survives:\n%s", got)
 	}
-	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/net/http"`) {
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
 		t.Errorf("missing aliased support import:\n%s", got)
 	}
 }
@@ -124,7 +124,7 @@ func enable(s *http.Server) {
 	if strings.Count(got, `"os"`) != 1 || strings.Count(got, `"strings"`) != 1 {
 		t.Errorf("existing imports disturbed:\n%s", got)
 	}
-	if strings.Count(got, `ejectedhttp "github.com/gosuda/loGos/rt/net/http"`) != 1 {
+	if strings.Count(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) != 1 {
 		t.Errorf("support import missing or duplicated:\n%s", got)
 	}
 }
@@ -134,7 +134,7 @@ func TestH2ExtendedConnectReusesExistingSupportImport(t *testing.T) {
 
 import (
 	"net/http"
-	ejectedhttp "github.com/gosuda/loGos/rt/net/http"
+	ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 )
 
 func enable(s *http.Server) {
@@ -146,7 +146,7 @@ func enable(s *http.Server) {
 		t.Fatal("remapEjectedFile failed")
 	}
 	got := string(out)
-	if strings.Count(got, `"github.com/gosuda/loGos/rt/net/http"`) != 1 {
+	if strings.Count(got, `"github.com/gosuda/loGos/rt/logos/net/http"`) != 1 {
 		t.Errorf("support import duplicated:\n%s", got)
 	}
 }

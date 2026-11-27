@@ -16,7 +16,7 @@ logos eject -o out
 exists out/main.go
 ! grep 'EnableHTTP2ExtendedConnect' out/main.go
 grep 'RequireExtendedConnect' out/main.go
-grep 'http2xconnect=1' out/_logos_deps/rt/net/http/h2extendedconnect_ejected.go
+grep 'http2xconnect=1' out/_logos_deps/rt/logos/net/http/h2extendedconnect_ejected.go
 cd out
 go build ./...
 env GODEBUG=http2xconnect=1
