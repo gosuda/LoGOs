@@ -44,11 +44,16 @@
 // such as struct{} decodes without a store, matching the original's
 // recursive walk.
 // A struct from another package that mixes exported and unexported
-// fixed-size fields is truncated: Size counts only the exported
-// fields, Write/Encode/Append emit only those bytes, and Decode reads
-// only those fields, so later fields decode from the wrong bytes. A
-// struct whose fields are all hidden still takes the original path
-// (see above); only the mixed shape truncates. The twin cannot reject
+// fixed-size fields with a nonzero visible width is truncated: Size
+// counts only the exported fields, Write/Encode/Append emit only those
+// bytes, and Decode reads only those fields, so later fields decode
+// from the wrong bytes. On a stream a truncated ReadInto consumes only
+// the truncated width, so the next record starts inside the previous
+// one. A struct whose visible fields total zero bytes still takes the
+// original path (see above): a foreign struct with only zero-width
+// visible fields, such as an exported struct{} beside a hidden uint32,
+// keeps every byte through the original encoder. Only the mixed shape
+// with a nonzero visible width truncates. The twin cannot reject
 // this shape: comptime has no predicate that reports hidden fields
 // (the const-if condition set is fixed), and the const-for walk skips
 // foreign unexported fields by design, so no per-field check can
