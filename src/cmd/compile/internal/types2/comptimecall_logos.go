@@ -82,7 +82,8 @@ func (check *Checker) logosComptimeValueUse(e *syntax.SelectorExpr, obj Object) 
 
 // logosTypeKind answers IsStruct and IsInterface in a const-if condition.
 // A concrete X gives an untyped boolean constant. A type parameter X,
-// and the field type of a const for over one, give a boolean value that is not a
+// even under transparent const-view or read-only wrappers, and the field
+// type of a const for over one, give a boolean value that is not a
 // constant: the answer is per instantiation, so the condition is
 // deferred to the copies. It reports false for any other call shape,
 // which the normal check then rejects.
@@ -117,7 +118,7 @@ func (check *Checker) logosTypeKind(x *operand, call *syntax.CallExpr, name stri
 	switch {
 	case !isValid(targ):
 		x.invalidate()
-	case isTypeParam(targ) || check.logosGenericFieldType(targs[0]):
+	case isTypeParam(logosTypeKindBase(targ)) || check.logosGenericFieldType(targs[0]):
 		x.mode_ = value
 		x.typ_ = Typ[Bool]
 		if check.logosPred.calls == nil {
@@ -141,13 +142,40 @@ func (check *Checker) logosTypeKind(x *operand, call *syntax.CallExpr, name stri
 	return true
 }
 
-// Read-only wrappers change access, not the interface value's dynamic type.
+// logosTypeKindBase strips the transparent wrappers a type-kind predicate
+// sees through — const views, read-only descendants, and options — to the
+// type that decides whether the verdict waits for an instantiation. A type
+// parameter under those wrappers still defers, so the verdict follows the
+// instantiated type argument instead of folding against its constraint.
+func logosTypeKindBase(t Type) Type {
+	for {
+		switch u := Unalias(t).(type) {
+		case *ConstView:
+			t = u.Elem
+		case *ReadonlyDescendants:
+			t = u.Elem
+		case *Option:
+			t = u.Elem
+		default:
+			return t
+		}
+	}
+}
+
+// Read-only wrappers change access, not the interface value's dynamic type. An
+// option the lowering keeps bare erases to its payload, so the predicate
+// answers for the payload; a wrapped option is a struct, not an interface.
 func logosInterfaceType(t Type) bool {
 	for {
 		switch u := Unalias(t).Underlying().(type) {
 		case *ConstView:
 			t = u.Elem
 		case *ReadonlyDescendants:
+			t = u.Elem
+		case *Option:
+			if !LogosOptionIsBare(u.Elem) {
+				return false
+			}
 			t = u.Elem
 		case *Interface:
 			return true
