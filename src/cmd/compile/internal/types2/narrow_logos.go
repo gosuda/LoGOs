@@ -3479,6 +3479,12 @@ func (p *logosEFPass) labeled(s *syntax.LabeledStmt, st *logosEFState) *logosEFS
 
 func (p *logosEFPass) exprStmt(s *syntax.ExprStmt, st *logosEFState) *logosEFState {
 	st = p.expr(s.X, st)
+	if st == nil {
+		// Argument evaluation with no normal continuation (for example a
+		// panic argument that never returns) never reaches a call here:
+		// there is no panic to record and no state to drain.
+		return nil
+	}
 	call, ok := syntax.Unparen(s.X).(*syntax.CallExpr)
 	if !ok {
 		return st
