@@ -60,7 +60,7 @@ var CmdEject = &base.Command{
 	Long: `
 Eject writes a complete pure-Go copy of the main module to DIR:
 every .lgo file becomes a .go file with comments kept, every
-ejected loGo/s dependency module lands under DIR/_logos_deps, and
+ejected LoGOs dependency module lands under DIR/_logos_deps, and
 the support sources become the shared module
 github.com/gosuda/loGos/rt under DIR/_logos_deps/rt.
 
