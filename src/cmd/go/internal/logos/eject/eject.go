@@ -830,9 +830,9 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string)
 	var rtDir string
 	if usedRT {
 		rtDir = filepath.Join(out, "_logos_deps", "rt")
-		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan, staging)
+		decided := writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan, staging)
 		addSupportRequire(filepath.Join(out, "go.mod"), "./_logos_deps/rt")
-		materializeGorootLogos(plan, staging, out, rtDir)
+		materializeGorootLogos(plan, staging, out, rtDir, decided)
 	}
 	rewriteMainGoMod(out, plan)
 	for _, m := range plan.deps {
@@ -942,8 +942,10 @@ func ejectedSupportRefs(root string) []string {
 // compiler staging (built as plan roots, or staged by variant helpers);
 // pure-Go packages are copied from GOROOT. A referenced package with no
 // lowered output is a loud failure, never a dangling import. The support
-// module ships no tests, so test files stay out on both paths.
-func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
+// module ships no tests, so test files stay out on both paths. Stems the
+// support copy already decided stay out: the copy specializes ejected
+// guards, so a second write would restore files the copy excluded.
+func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string, decided map[string]map[string]bool) {
 	done := map[string]bool{}
 	queue := ejectedSupportRefs(out)
 	for len(queue) > 0 {
@@ -995,6 +997,9 @@ func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
 		taken := ejectOutputStems(rec.Dir, names)
 		for _, name := range names {
 			stem := logosStem(name)
+			if decided[rel][stem] {
+				continue
+			}
 			raw, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(path), stem+".go"))
 			if err != nil {
 				base.Fatalf("logos eject: missing ejected output for %s: the ejected tree references it but no build lowered it", filepath.Join(rec.Dir, name))
@@ -2394,7 +2399,7 @@ func applyTextEdits(data []byte, edits []textEdit) ([]byte, bool) {
 // writeSupportModule writes the shared, self-contained support module.
 // Staging carries the lowered toolchain outputs the copy reads for
 // LoGOs sources; overlay insertions and deletions resolve through it.
-func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) {
+func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) map[string]map[string]bool {
 	src := filepath.Join(cfg.GOROOT, "src")
 	dst := filepath.Join(out, "_logos_deps", "rt")
 	roots := ejectSupportRoots(plan)
@@ -2409,13 +2414,15 @@ func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) {
 		roots = append(roots, ref)
 	}
 	slices.Sort(roots)
-	if err := copyEjectedSupport(src, staging, dst, roots); err != nil {
+	decided, err := copyEjectedSupport(src, staging, dst, roots)
+	if err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 	copyJSONScanSupport(filepath.Join(src, "internal", "jsonscan"), filepath.Join(dst, "internal", "jsonscan"))
 	if err := os.WriteFile(filepath.Join(dst, "go.mod"), []byte("module "+rtModulePath+"\n\ngo "+goVer+"\n"), 0666); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
+	return decided
 }
 
 // ejectedPureGoPackage reports whether ref names a GOROOT package
@@ -2445,26 +2452,15 @@ func ejectSupportRoots(plan *ejectPlan) []string {
 	seeds = append(seeds, plan.testRoots...)
 	seen := map[string]bool{load.LogosRTPkg: true}
 	roots := []string{load.LogosRTPkg}
-	needHTTP := false
 	for _, p := range load.PackageList(seeds) {
 		if p == nil {
 			continue
-		}
-		for _, imp := range p.Imports {
-			if imp == "net/http" || imp == "logos/net/http" {
-				needHTTP = true
-				break
-			}
 		}
 		if !strings.HasPrefix(p.ImportPath, "logos/") || seen[p.ImportPath] {
 			continue
 		}
 		seen[p.ImportPath] = true
 		roots = append(roots, p.ImportPath)
-	}
-	if needHTTP && !seen["logos/net/http"] {
-		seen["logos/net/http"] = true
-		roots = append(roots, "logos/net/http")
 	}
 	// Variant inventories retain package identities but not dependency edges.
 	for path := range plan.provenance {
