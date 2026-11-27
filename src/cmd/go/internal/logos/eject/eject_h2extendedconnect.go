@@ -34,8 +34,9 @@ const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 // _logos_site name) is left alone. The receiver passes as a call argument,
 // so go and defer statements wrapping the call evaluate it in the calling
 // goroutine at the call site, exactly like the native method call. When the
-// file already imports the support package, the rewrite uses that binding;
-// otherwise the support import is added under an alias. The gofmt pass
+// file already imports the support package and no other file binding
+// shadows its name, the rewrite uses that binding; otherwise it adds the
+// import under a fresh file-wide alias. The gofmt pass
 // normalizes layout.
 //
 // Widening: the fork enables extended CONNECT per server, while stock Go
@@ -77,10 +78,7 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 	if h2DefinesExtendedConnect(f) {
 		return nil, false
 	}
-	local := supportLocal
-	if local == "" {
-		local = "ejectedhttp"
-	}
+	local, needImport := h2SupportLocal(f, supportPath, supportLocal)
 	var edits []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
 		if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
@@ -133,10 +131,89 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 	if len(edits) == 0 {
 		return nil, false
 	}
-	if supportLocal == "" {
-		edits = append(edits, h2ImportEdit(fset, f, []string{h2SupportImport}))
+	if needImport {
+		edits = append(edits, h2ImportEdit(fset, f, []string{h2SupportImportFor(local)}))
 	}
 	return edits, true
+}
+
+// h2SupportImportFor renders the support import with the chosen local
+// name. The default alias keeps the historical spelling; a fresh alias
+// from h2SupportLocal carries the same path.
+func h2SupportImportFor(local string) string {
+	if local == "ejectedhttp" {
+		return h2SupportImport
+	}
+	return local + " " + strconv.Quote(rtModulePath+"/logos/net/http")
+}
+
+// h2SupportLocal picks the qualifier for generated support calls. An
+// existing support import binding is reused only where no other file
+// binding shadows it: a local, parameter, or same-file declaration with
+// the same name would capture the generated call. Otherwise a binding
+// with a fresh file-wide name is used. The second result reports whether
+// the import still needs adding.
+func h2SupportLocal(f *ast.File, supportPath, supportLocal string) (string, bool) {
+	bound := map[string]bool{}
+	for _, imp := range f.Imports {
+		p, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		if p == "logos/net/http" || p == supportPath {
+			continue
+		}
+		if imp.Name != nil {
+			if imp.Name.Name != "_" && imp.Name.Name != "." {
+				bound[imp.Name.Name] = true
+			}
+		} else if i := strings.LastIndex(p, "/"); i >= 0 {
+			bound[p[i+1:]] = true
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.FuncDecl:
+			if x.Recv == nil {
+				bound[x.Name.Name] = true
+			}
+		case *ast.TypeSpec:
+			bound[x.Name.Name] = true
+		case *ast.ValueSpec:
+			for _, name := range x.Names {
+				bound[name.Name] = true
+			}
+		case *ast.Field:
+			for _, name := range x.Names {
+				bound[name.Name] = true
+			}
+		case *ast.AssignStmt:
+			if x.Tok == token.DEFINE {
+				for _, lhs := range x.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok {
+						bound[id.Name] = true
+					}
+				}
+			}
+		case *ast.RangeStmt:
+			if x.Tok == token.DEFINE {
+				for _, e := range []ast.Expr{x.Key, x.Value} {
+					if id, ok := e.(*ast.Ident); ok {
+						bound[id.Name] = true
+					}
+				}
+			}
+		}
+		return true
+	})
+	if supportLocal != "" && !bound[supportLocal] {
+		return supportLocal, false
+	}
+	local := "ejectedhttp"
+	for i := 2; bound[local]; i++ {
+		local = "ejectedhttp" + strconv.Itoa(i)
+	}
+	return local, true
 }
 
 // h2DefinesExtendedConnect reports whether f declares the method name

@@ -339,3 +339,68 @@ func TestH2ExtendedConnectSkipsTempReceivers(t *testing.T) {
 		}
 	}
 }
+
+func TestH2ExtendedConnectAvoidsShadowedSupportBinding(t *testing.T) {
+	const in = `package main
+
+import (
+	"net/http"
+	logoshttp "logos/net/http"
+)
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+
+func shadowed(srv *http.Server) {
+	logoshttp := "shadow"
+	_ = logoshttp
+	srv.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "")
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "logoshttp.RequireExtendedConnect") {
+		t.Errorf("shadowed binding reused:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
+		t.Errorf("unshadowed call not on the fresh alias:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("srv", srv)`) {
+		t.Errorf("shadowed call not on the fresh alias:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("fresh support import missing:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectAvoidsPackageLevelCollision(t *testing.T) {
+	const in = `package main
+
+import "net/http"
+
+var ejectedhttp = 1
+
+func enable(s *http.Server) {
+	_ = ejectedhttp
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "")
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, `ejectedhttp.RequireExtendedConnect`) {
+		t.Errorf("colliding package-level name reused:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("call not on the fresh alias:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("fresh support import missing:\n%s", got)
+	}
+}
