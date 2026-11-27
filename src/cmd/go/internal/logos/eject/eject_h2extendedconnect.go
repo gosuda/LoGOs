@@ -18,6 +18,12 @@ import (
 // line may set (the key is unregistered, so the build rejects it).
 const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 
+// h2SupportImport is the local name and path the rewrite uses for the
+// ejected support module. The support package owns the os, strings and
+// GODEBUG parsing privately, so rewritten call sites stay correct when
+// the file aliases os or strings or declares those names itself.
+const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`
+
 // h2ExtendedConnectEdits rewrites direct EnableHTTP2ExtendedConnect calls to
 // a call into the ejected support module, which fails fast unless the stock
 // process-global GODEBUG=http2xconnect=1 was in effect at process startup.
@@ -27,8 +33,9 @@ const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 // A call whose receiver needs another rewrite (a compiler-temporary
 // _logos_site name) is left alone. The receiver passes as a call argument,
 // so go and defer statements wrapping the call evaluate it in the calling
-// goroutine at the call site, exactly like the native method call. The
-// support import is added under an alias when missing; the gofmt pass
+// goroutine at the call site, exactly like the native method call. When the
+// file already imports the support package, the rewrite uses that binding;
+// otherwise the support import is added under an alias. The gofmt pass
 // normalizes layout.
 //
 // Widening: the fork enables extended CONNECT per server, while stock Go
@@ -41,7 +48,7 @@ const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]textEdit, bool) {
 	supportPath := rtModulePath + "/logos/net/http"
 	hasNetHTTP := false
-	haveSupport := false
+	supportLocal := ""
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
 		if err != nil {
@@ -50,8 +57,14 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 		switch path {
 		case "net/http":
 			hasNetHTTP = true
-		case supportPath:
-			haveSupport = true
+		case "logos/net/http", supportPath:
+			// A blank or dot import binds no usable call prefix; fall
+			// through to the fresh ejectedhttp import below.
+			if imp.Name == nil {
+				supportLocal = "http"
+			} else if imp.Name.Name != "_" && imp.Name.Name != "." {
+				supportLocal = imp.Name.Name
+			}
 		}
 	}
 	if !hasNetHTTP {
@@ -64,8 +77,38 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 	if h2DefinesExtendedConnect(f) {
 		return nil, false
 	}
+	local := supportLocal
+	if local == "" {
+		local = "ejectedhttp"
+	}
 	var edits []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
+		if as, ok := n.(*ast.AssignStmt); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
+			// Group lowering binds the opt-in as a method value before
+			// spawning its child. The verifier exempts the source call
+			// by type, so a file that reaches the rewrite can only hold
+			// this shape as lowering output: a same-named user method
+			// value never passes verification. Rebind it through the
+			// deferred guard so the receiver still evaluates exactly
+			// once, eagerly, and the spawned child runs the same check.
+			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
+				return true
+			}
+			recvStart := fset.Position(sel.X.Pos()).Offset
+			recvEnd := fset.Position(sel.X.End()).Offset
+			lhsStart := fset.Position(as.Lhs[0].Pos()).Offset
+			lhsEnd := fset.Position(as.Lhs[0].End()).Offset
+			if recvStart < 0 || recvEnd < recvStart || recvEnd > len(data) ||
+				lhsStart < 0 || lhsEnd < lhsStart || lhsEnd > len(data) {
+				return true
+			}
+			receiver := string(data[recvStart:recvEnd])
+			lhs := string(data[lhsStart:lhsEnd])
+			repl := lhs + " " + as.Tok.String() + " " + local + ".RequireExtendedConnectFunc(" + strconv.Quote(receiver) + ", " + receiver + ")"
+			edits = append(edits, textEdit{lhsStart, fset.Position(as.End()).Offset, repl})
+			return true
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) != 0 {
 			return true
@@ -83,99 +126,17 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) ([]te
 			return true
 		}
 		receiver := string(data[recvStart:recvEnd])
-		repl := "ejectedhttp.RequireExtendedConnect(" + strconv.Quote(receiver) + ", " + receiver + ")"
+		repl := local + ".RequireExtendedConnect(" + strconv.Quote(receiver) + ", " + receiver + ")"
 		edits = append(edits, textEdit{start, end, repl})
 		return true
 	})
 	if len(edits) == 0 {
 		return nil, false
 	}
-	if !haveSupport {
-		edits = append(edits, h2ImportEdit(fset, f, []string{`ejectedhttp "` + supportPath + `"`}))
+	if supportLocal == "" {
+		edits = append(edits, h2ImportEdit(fset, f, []string{h2SupportImport}))
 	}
 	return edits, true
-}
-
-// h2ImportLocal returns the file-local name bound to path, or false when
-// the file does not import it.
-func h2ImportLocal(f *ast.File, path string) (string, bool) {
-	for _, imp := range f.Imports {
-		p, err := strconv.Unquote(imp.Path.Value)
-		if err != nil || p != path {
-			continue
-		}
-		if imp.Name != nil {
-			return imp.Name.Name, true
-		}
-		if i := strings.LastIndex(p, "/"); i >= 0 {
-			return p[i+1:], true
-		}
-		return p, true
-	}
-	return "", false
-}
-
-// h2RecvParam picks the closure parameter name: a simple identifier
-// receiver reuses itself (keeping _ = s), otherwise a fresh name that
-// cannot collide with the helper imports.
-func h2RecvParam(used map[string]bool, osName, stringsName, receiver string) string {
-	trimmed := strings.TrimSpace(receiver)
-	if trimmed != "" && trimmed[0] != '*' {
-		ok := true
-		for i := range len(trimmed) {
-			c := trimmed[i]
-			if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || i > 0 && c >= '0' && c <= '9') {
-				ok = false
-				break
-			}
-		}
-		if ok && trimmed != "_" && trimmed != osName && trimmed != stringsName && !used[trimmed+"_"] {
-			return trimmed
-		}
-	}
-	return h2FreshName(used, "logosH2Recv")
-}
-
-// h2UsedNames collects local import names and all identifiers in f so
-// generated bindings cannot collide with an alias, a local variable, or
-// an existing import, generally for any file shape.
-func h2UsedNames(f *ast.File) map[string]bool {
-	used := make(map[string]bool)
-	for _, imp := range f.Imports {
-		if imp.Name != nil {
-			used[imp.Name.Name] = true
-			continue
-		}
-		path, err := strconv.Unquote(imp.Path.Value)
-		if err != nil {
-			continue
-		}
-		if i := strings.LastIndex(path, "/"); i >= 0 {
-			used[path[i+1:]] = true
-		} else {
-			used[path] = true
-		}
-	}
-	ast.Inspect(f, func(n ast.Node) bool {
-		if id, ok := n.(*ast.Ident); ok {
-			used[id.Name] = true
-		}
-		return true
-	})
-	return used
-}
-
-// h2FreshName returns base or the first base+N unused in used.
-func h2FreshName(used map[string]bool, base string) string {
-	if !used[base] {
-		return base
-	}
-	for i := 2; ; i++ {
-		cand := base + strconv.Itoa(i)
-		if !used[cand] {
-			return cand
-		}
-	}
 }
 
 // h2DefinesExtendedConnect reports whether f declares the method name

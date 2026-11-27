@@ -34,6 +34,15 @@ func RequireExtendedConnect(server string, recv any) {
 	}
 }
 
+// RequireExtendedConnectFunc is the eject spelling of a method value over
+// (*net/http.Server).EnableHTTP2ExtendedConnect, which group lowering binds
+// before spawning its child. The receiver passes once as an argument, so it
+// keeps its single eager evaluation; the returned closure runs the same
+// guard when the spawned child calls it.
+func RequireExtendedConnectFunc(name string, recv any) func() {
+	return func() { RequireExtendedConnect(name, recv) }
+}
+
 func h2extendedConnectEnable(s *stdhttp.Server) error {
 	_ = s
 	if !godebugHasOn(ejectedStartupGodebug, "http2xconnect", "1") {
