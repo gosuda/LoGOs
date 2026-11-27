@@ -7,8 +7,11 @@ package eject
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestH2ExtendedConnectEmitsSupportDelegation(t *testing.T) {
@@ -20,7 +23,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, uses, ok := remapEjectedFile([]byte(in), "")
+	out, uses, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -51,7 +54,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -82,7 +85,7 @@ func enable(s *http.Server) {
 	defer s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -106,7 +109,7 @@ func enable(s *http.Server) {
 	go s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -132,7 +135,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, uses, ok := remapEjectedFile([]byte(in), "")
+	out, uses, ok := remapEjectedFile([]byte(in), "", nil)
 	if ok || uses || out != nil {
 		t.Fatalf("overlapping edit reported partial success: ok=%v uses=%v output=%q", ok, uses, out)
 	}
@@ -145,7 +148,7 @@ func enable(s *http.Server) {
 	if err := os.WriteFile(src, []byte(in), 0666); err != nil {
 		t.Fatal(err)
 	}
-	uses, err := copyDataFile(src, dst)
+	uses, err := copyDataFile(src, dst, map[string]map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +174,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -204,7 +207,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -230,7 +233,7 @@ func spawn(recv *http.Server) {
 	go _logos_f0()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -259,7 +262,7 @@ func spawn(s *http.Server, m *Meter) {
 
 type Meter struct{ hits int }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -284,7 +287,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -306,7 +309,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(aliased), "")
+	out, _, ok := remapEjectedFile([]byte(aliased), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -322,7 +325,7 @@ func enable(s *http.Server) {
 		"package main\n\nimport (\n\t\"net/http\"\n\t_ \"logos/net/http\"\n)\n\nfunc enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n",
 		"package main\n\nimport (\n\t\"net/http\"\n\t. \"logos/net/http\"\n)\n\nfunc enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n",
 	} {
-		out, _, ok := remapEjectedFile([]byte(src), "")
+		out, _, ok := remapEjectedFile([]byte(src), "", nil)
 		if !ok {
 			t.Fatal("remapEjectedFile failed")
 		}
@@ -345,7 +348,7 @@ func enable(s *thing) {
 
 type thing struct{}
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -359,7 +362,7 @@ func TestH2ExtendedConnectSkipsTempReceivers(t *testing.T) {
 		"package main\n\nimport \"net/http\"\n\nfunc enable() {\n\t_logos_site0.EnableHTTP2ExtendedConnect()\n}\n",
 		"package main\n\nimport \"net/http\"\n\nfunc enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect(x)\n}\n",
 	} {
-		out, _, ok := remapEjectedFile([]byte(src), "")
+		out, _, ok := remapEjectedFile([]byte(src), "", nil)
 		if !ok {
 			t.Fatal("remapEjectedFile failed")
 		}
@@ -387,7 +390,7 @@ func shadowed(srv *http.Server) {
 	srv.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -418,7 +421,7 @@ func enable(s *http.Server) {
 	s.EnableHTTP2ExtendedConnect()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -452,7 +455,7 @@ func spawn(srv *http.Server) {
 	go _logos_f0()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed")
 	}
@@ -475,7 +478,7 @@ func spawn(backup *http.Server, make func(func()) *http.Server) {
 	go _logos_f0()
 }
 `
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if !ok {
 		t.Fatal("remapEjectedFile failed: nested capture and inner call overlap")
 	}
@@ -490,5 +493,138 @@ func spawn(backup *http.Server, make func(func()) *http.Server) {
 	}
 	if !strings.Contains(got, "ejectedhttp.RequireExtendedConnectFunc(") {
 		t.Errorf("capture not rebound through the deferred guard:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectAvoidsSiblingPackageNames(t *testing.T) {
+	// A sibling file declaring ejectedhttp at package level forbids
+	// that alias in the rewritten file: Go rejects an import name
+	// that is also a package-block declaration, even across files.
+	dir := t.TempDir()
+	sibling := "package main\n\nvar ejectedhttp = 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.go"), []byte(sibling), 0666); err != nil {
+		t.Fatal(err)
+	}
+	main := `package main
+
+import "net/http"
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(main), 0666); err != nil {
+		t.Fatal(err)
+	}
+	// The rewritten file never mentions the sibling name itself: only
+	// the directory scan reserves it.
+	reserved := h2PackageReserved(dir)
+	if !reserved["ejectedhttp"] {
+		t.Fatalf("sibling package-level name missing: %v", reserved)
+	}
+	out, _, ok := remapEjectedFile([]byte(main), "", reserved)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "ejectedhttp.RequireExtendedConnect") && !strings.Contains(got, "ejectedhttp2.RequireExtendedConnect") {
+		t.Errorf("colliding sibling name reused:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("call not on the reserved alias:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("support import does not avoid the sibling name:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectReuseYieldsToSiblingNames(t *testing.T) {
+	// An existing support import cannot be reused when a sibling file
+	// declares its name at package level: the import would collide
+	// with that declaration in the ejected package.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.go"), []byte("package main\n\nvar ejectedhttp = 1\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	const in = `package main
+
+import (
+	"net/http"
+	ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
+)
+
+func enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(in), 0666); err != nil {
+		t.Fatal(err)
+	}
+	out, _, ok := remapEjectedFile([]byte(in), "", h2PackageReserved(dir))
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, "ejectedhttp.RequireExtendedConnect") && !strings.Contains(got, "ejectedhttp2.RequireExtendedConnect") {
+		t.Errorf("shadowed-by-sibling binding reused:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("fresh support import missing:\n%s", got)
+	}
+}
+
+func TestH2ExtendedConnectAvoidsImplicitPackageNames(t *testing.T) {
+	// An unaliased import binds its package clause name, which can
+	// differ from the path basename the import scan reserves. The
+	// file's own uses are the only trace of that binding, so the
+	// fresh alias must avoid every identifier the file mentions.
+	const in = `package main
+
+import (
+	"net/http"
+	"example.com/transport"
+)
+
+func probe(s *http.Server) {
+	_ = ejectedhttp.Probe()
+	s.EnableHTTP2ExtendedConnect()
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if strings.Contains(got, `"github.com/gosuda/loGos/rt/logos/net/http"`) && !strings.Contains(got, "ejectedhttp2") {
+		t.Errorf("implicit package name reused for the support import:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("call not on the fresh alias:\n%s", got)
+	}
+	if !strings.Contains(got, `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("fresh support import missing:\n%s", got)
+	}
+}
+
+func TestH2PackageReservedSkipsNonregular(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs FIFOs")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("package p\n\nconst A = 1\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(dir, "_input.go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan map[string]bool, 1)
+	go func() { done <- h2PackageReserved(dir) }()
+	select {
+	case used := <-done:
+		if !used["A"] {
+			t.Errorf("regular file names missing: %v", used)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("h2PackageReserved hangs on a .go-named pipe")
 	}
 }

@@ -18,7 +18,7 @@ func enable(s *http.Server) {
 `
 	// An overlap must fail the remap so the caller preserves the
 	// original bytes; reporting success writes a partial rewrite.
-	out, _, ok := remapEjectedFile([]byte(in), "")
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
 	if ok || out != nil {
 		t.Errorf("overlapping remap reported success (ok=%v out=%q); copyDataFile would write a partial rewrite", ok, out)
 	}
