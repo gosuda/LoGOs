@@ -849,7 +849,7 @@ func logosCtMethodSplit(origin *Func, targs []Type) (rtparams []*TypeParam, rtar
 	if cnamed == nil || cnamed.Obj() != rnamed.Obj() {
 		return nil, nil, false
 	}
-	rtparams = rnamed.TypeParams().list()
+	rtparams = origin.Signature().RecvTypeParams().list()
 	rtargs = cnamed.TypeArgs().list()
 	if len(rtparams) != len(rtargs) {
 		return nil, nil, false
@@ -1107,7 +1107,13 @@ func (check *Checker) logosCtCheckBody(origin *Func, sig *Signature, targs []Typ
 		if recvName == "" {
 			recvName = "_"
 		}
-		recvVar := NewVar(fdecl.Pos(), origin.Pkg(), recvName, targs[0])
+		recvType := targs[0]
+		if declRecv := origin.Signature().Recv().Type(); isValid(declRecv) {
+			if concrete := check.subst(fdecl.Pos(), declRecv, smap, nil, check.context()); isValid(concrete) {
+				recvType = concrete
+			}
+		}
+		recvVar := NewVar(fdecl.Pos(), origin.Pkg(), recvName, recvType)
 		recvParams := make([]*Var, 0, bodySig.params.Len()+1)
 		recvParams = append(recvParams, recvVar)
 		for i := range bodySig.params.Len() {
