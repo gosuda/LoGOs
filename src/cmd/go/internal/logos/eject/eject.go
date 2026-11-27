@@ -2276,11 +2276,7 @@ func supportRelPath(path string) (string, bool) {
 	if sub, ok := strings.CutPrefix(rest, "rt/"); ok {
 		return sub, true
 	}
-	// arena and sync keep their short support paths, and so does net/http:
-	// the h2 extended-connect rewrite imports it as rt/net/http, the
-	// support tree scan looks for that path, and every other package
-	// keeps its logos/ prefix to preserve its identity.
-	for _, fixed := range []string{"arena", "sync", "net/http"} {
+	for _, fixed := range []string{"arena", "sync"} {
 		if rest == fixed || strings.HasPrefix(rest, fixed+"/") {
 			return rest, true
 		}
@@ -2413,7 +2409,7 @@ func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) {
 // the helper import to staged files the loader inventories never describe,
 // so the seed-based roots miss logos/net/http for exactly those outputs.
 func ejectedUsesSupportHTTP(out string) bool {
-	want := []byte(strconv.Quote(rtModulePath + "/net/http"))
+	want := []byte(strconv.Quote(rtModulePath + "/logos/net/http"))
 	found := false
 	_ = filepath.WalkDir(out, func(path string, e fs.DirEntry, err error) error {
 		if err != nil || found {
