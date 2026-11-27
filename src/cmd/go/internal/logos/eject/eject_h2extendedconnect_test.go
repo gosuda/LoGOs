@@ -711,6 +711,45 @@ func shadowed() {
 	}
 }
 
+func TestH2ExtendedConnectScopesCalleeTempsPerBinding(t *testing.T) {
+	// Lowering restarts its callee-temporary numbering in every
+	// function, so two functions can bind one spelling to different
+	// values. The rewrite attributes each use to its own binding: the
+	// zero-argument server capture rebinds even though an unrelated
+	// one-argument call shares its spelling in another function.
+	const in = `package main
+
+import "net/http"
+
+func serve(srv *http.Server) {
+	_logos_f0 := srv.EnableHTTP2ExtendedConnect
+	go _logos_f0()
+}
+
+func other(work func(int)) {
+	_logos_f0 := work
+	go _logos_f0(1)
+}
+`
+	out, _, ok := remapEjectedFile([]byte(in), "", nil)
+	if !ok {
+		t.Fatal("remapEjectedFile failed")
+	}
+	got := string(out)
+	if !strings.Contains(got, `_logos_f0 := ejectedhttp.RequireExtendedConnectFunc("srv", srv)`) {
+		t.Errorf("server capture not rebound when another function shares its spelling:\n%s", got)
+	}
+	if strings.Contains(got, "_logos_f0 := srv.EnableHTTP2ExtendedConnect") {
+		t.Errorf("fork-only method value left in the export:\n%s", got)
+	}
+	if !strings.Contains(got, "_logos_f0 := work") {
+		t.Errorf("unrelated binding lost:\n%s", got)
+	}
+	if !strings.Contains(got, "_logos_f0(1)") {
+		t.Errorf("unrelated call site lost:\n%s", got)
+	}
+}
+
 func TestH2ExtendedConnectSkipsDotBlankBindings(t *testing.T) {
 	const in = `package main
 
