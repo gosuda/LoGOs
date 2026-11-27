@@ -1155,3 +1155,39 @@ func namedDeferWholeRootUncheckedFails() {
 		use(n /* ERROR "[correctness::result_before_error_check]" */)
 	}()
 }
+
+// A cleanup helper that forwards its result with its unchanged error does
+// not read the result: the caller checks the returned error instead.
+func cleanupForwardPairStaysSilent() {
+	h := heldField{}
+	func() {
+		defer func() {
+			stats, err := func() (int, error) {
+				h.stats, h.err = fetchHeld()
+				return h.stats, h.err
+			}()
+			if err != nil {
+				return
+			}
+			use(stats)
+		}()
+	}()
+}
+
+// A cleanup return of a computed result still reads it: only an unchanged
+// forwarded pair is exempt.
+func cleanupForwardComputedFails() {
+	h := heldField{}
+	func() {
+		defer func() {
+			stats, err := func() (int, error) {
+				h.stats, h.err = fetchHeld()
+				return h.stats /* ERROR "[correctness::result_before_error_check]" */ + 1, h.err
+			}()
+			if err != nil {
+				return
+			}
+			use(stats)
+		}()
+	}()
+}

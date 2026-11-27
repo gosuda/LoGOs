@@ -4423,15 +4423,33 @@ func (p *logosEFPass) derefRoot(e syntax.Expr) *Var {
 func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState {
 	results := syntax.UnpackListExpr(s.Results)
 	passed := make(map[*Var]bool, len(results))
+	passedKeys := make(map[logosEFKey]bool, len(results))
 	for _, r := range results {
 		if v := p.varOf(r); v != nil {
 			passed[v] = true
+		}
+		if k, ok := p.destKey(r); ok {
+			passedKeys[k] = true
 		}
 	}
 	for _, r := range results {
 		if k, ok := p.destKey(r); ok {
 			if e, found := st.m[k]; found && e.err != nil && passed[e.err] {
 				continue
+			}
+			// A return that passes a result with its live field pairing
+			// unchanged is forwarding, not a read: the same return
+			// passes the exact error destination, so the caller still
+			// checks the pair intact. Vetoed, discarded, and overwritten
+			// pairings stay checked.
+			if ek, ok := st.mayErr[k]; ok && ek != (logosEFKey{}) && passedKeys[ek] {
+				if len(st.mayAlt[k]) == 0 {
+					continue
+				}
+			} else if e, found := st.m[k]; found && e.errKey != (logosEFKey{}) && passedKeys[e.errKey] {
+				if len(st.mayAlt[k]) == 0 {
+					continue
+				}
 			}
 		}
 		st = p.expr(r, st)
