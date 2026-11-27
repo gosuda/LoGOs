@@ -1,0 +1,28 @@
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Box[T any] struct {
+	N int
+}
+
+func (b *Box[T]) Fill() {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		b.N++
+	}
+}
+
+type Pair struct {
+	A int
+	B string
+}
+
+func main() {
+	var v Box[Pair]
+	v.Fill()
+	fmt.Println(v.N)
+}

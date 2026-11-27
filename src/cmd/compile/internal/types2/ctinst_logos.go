@@ -868,6 +868,55 @@ func logosCtNamedRecv(t Type) *Named {
 	return named
 }
 
+// LogosCtNormalizedRecv returns the declared receiver type of origin
+// with its receiver type arguments replaced by the concrete arguments
+// of recvTyp, preserving the declared pointer indirection. A
+// pointer-receiver method called on an addressable value (and the
+// symmetric value-receiver call through a pointer) therefore shares one
+// instance keyed by the declared receiver, and ctMethodRecvAdjust adds
+// the & or * at the call site.
+func LogosCtNormalizedRecv(pos syntax.Pos, origin *Func, recvTyp Type) Type {
+	if recv := origin.Signature().Recv(); recv == nil || !isValid(recvTyp) {
+		return recvTyp
+	} else {
+		declRecv := recv.Type()
+		if !isValid(declRecv) {
+			return recvTyp
+		}
+		declNamed := logosCtNamedRecv(declRecv)
+		concNamed := logosCtNamedRecv(recvTyp)
+		if declNamed == nil || concNamed == nil || declNamed.Obj() != concNamed.Obj() {
+			return recvTyp
+		}
+		declArgs := declNamed.TypeArgs().list()
+		concArgs := concNamed.TypeArgs().list()
+		if len(declArgs) != len(concArgs) {
+			return recvTyp
+		}
+		var tparams []*TypeParam
+		var args []Type
+		for i, d := range declArgs {
+			tp, ok := d.(*TypeParam)
+			if !ok {
+				if !Identical(d, concArgs[i]) {
+					return recvTyp
+				}
+				continue
+			}
+			tparams = append(tparams, tp)
+			args = append(args, concArgs[i])
+		}
+		if len(tparams) == 0 {
+			return declRecv
+		}
+		smap := makeSubstMap(tparams, args)
+		if concrete := (*Checker)(nil).subst(pos, declRecv, smap, nil, NewContext()); isValid(concrete) {
+			return concrete
+		}
+		return recvTyp
+	}
+}
+
 // logosCtMethodDecl rewrites a cloned generic method declaration as a
 // plain function for instantiation: the receiver becomes the first
 // parameter, keeping its name and type. Type parameters substitute

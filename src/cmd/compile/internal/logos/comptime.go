@@ -1305,6 +1305,7 @@ func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string
 	if id == "" {
 		if fn, ok := info.Uses[sel.Sel].(*types2.Func); ok && fn.Signature().Recv() != nil {
 			if recvTyp := info.TypeOf(syntax.Unparen(sel.X)); recvTyp != nil {
+				recvTyp = types2.LogosCtNormalizedRecv(call.Pos(), fn.Origin(), recvTyp)
 				var targs []types2.Type
 				targs = append(targs, recvTyp)
 				if nparams := fn.Signature().TypeParams().Len(); nparams != 0 {
@@ -1364,8 +1365,14 @@ func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string
 		switch ctMethodRecvAdjust(sig.Params().At(0).Type(), got) {
 		case 1:
 			arg = addrOf(recv.Pos(), recv)
+			tvArg := syntax.TypeAndValue{Type: sig.Params().At(0).Type()}
+			tvArg.SetIsValue()
+			arg.SetTypeInfo(tvArg)
 		case -1:
 			arg = at(&syntax.Operation{Op: syntax.Mul, X: recv}, recv.Pos())
+			tvArg := syntax.TypeAndValue{Type: sig.Params().At(0).Type()}
+			tvArg.SetIsValue()
+			arg.SetTypeInfo(tvArg)
 		}
 	}
 	if !methodExpr {
