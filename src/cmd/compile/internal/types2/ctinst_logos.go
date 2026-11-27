@@ -330,6 +330,7 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 		for _, edge := range logosCtEdges(rec.Info, rec.Decl.Body, nil) {
 			w.bind(edge, pos)
 		}
+		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
 		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 		return id
 	}
@@ -615,8 +616,6 @@ func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []T
 	defer func() {
 		check.logosCtSubst, check.pkg, check.version = savedSubst, savedPkg, savedVersion
 		check.logosCtPos = check.logosCtPos[:len(check.logosCtPos)-1]
-		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
-		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
 	}()
 	decl = syntax.CloneLogosCtSyntax(decl)
 	if origin.Signature().Recv() != nil {
@@ -624,6 +623,7 @@ func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []T
 	}
 	sig, facts := check.logosCtInstanceBody(origin, origin.Signature(), targs, decl, generic.Scope)
 	if failed {
+		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
 		return nil
 	}
 	return &LogosCtInst{
