@@ -873,8 +873,12 @@ func supportCandidates(imp string) []string {
 	if !ok || suffix == "" || strings.HasPrefix(suffix, "internal/") {
 		return nil
 	}
+	cands := []string{"logos/" + suffix, "logos/rt/" + suffix}
+	if rest, ok := strings.CutPrefix(suffix, "logos/"); ok && rest != "" {
+		cands = append(cands, "logos/"+rest)
+	}
 	var out []string
-	for _, cand := range []string{"logos/" + suffix, "logos/rt/" + suffix} {
+	for _, cand := range cands {
 		rel, ok := supportRelPath(cand)
 		if !ok {
 			continue
