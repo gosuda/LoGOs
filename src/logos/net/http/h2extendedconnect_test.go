@@ -10,6 +10,7 @@ import (
 )
 
 func TestH2ExtendedConnectEnableReturnsNil(t *testing.T) {
+	t.Setenv("GODEBUG", "http2xconnect=1")
 	s := &stdhttp.Server{Addr: "127.0.0.1:0"}
 	if err := EnableHTTP2ExtendedConnect(s); err != nil {
 		t.Fatalf("EnableHTTP2ExtendedConnect = %v, want nil", err)

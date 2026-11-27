@@ -100,9 +100,13 @@ func (p *logosEFPass) runCleanup(call logosEFDeferredCall, st *logosEFState) *lo
 	// enclosing invocation projects its exit. Materialize the live
 	// unchecked pairings so the cleanup reads need the same check a
 	// flow read would; a cleanup that checks the guard first proves
-	// its own read.
+	// its own read. Reads of values the cleanup body itself stores
+	// fail on their may-reach marks while the body runs; ordinary
+	// reads elsewhere stay silent.
 	seeded := p.seedCleanupReads(call.lit, st)
+	p.inCleanup++
 	out := p.inlineFuncLit(call.lit, seeded)
+	p.inCleanup--
 	out = p.dropCleanupSeeds(st, seeded, out)
 	if call.onError {
 		// The error return is not generally known at this join. Keep
