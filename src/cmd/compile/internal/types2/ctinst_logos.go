@@ -1235,6 +1235,10 @@ func (check *Checker) logosCtCheckBody(origin *Func, sig *Signature, targs []Typ
 		}
 	}
 
+	savedDecl := check.logosCtFuncDecl
+	check.logosCtFuncDecl = fdecl
+	defer func() { check.logosCtFuncDecl = savedDecl }()
+
 	saved := check.environment
 	check.environment = environment{
 		decl:    nil,
@@ -1294,8 +1298,10 @@ func substTupleVars(check *Checker, t *Tuple, smap substMap) []*Var {
 // fallthrough from a deferred switch, so it leaves the continuation for the
 // concrete check without marking it dead. An instance checks the code after
 // a terminating statement like any other code: that code is
-// termination-dead, not const-dead, so it is type-checked and a
-// comptime.Error in it fails.
+// termination-dead, not const-dead, so it is type-checked. Instance
+// comptime.Error liveness after a terminating const switch is decided in
+// logosComptimeError, which silences the Error while leaving the tail
+// type-checked.
 func (check *Checker) logosCtStopAfter(s syntax.Stmt, tail []syntax.Stmt) bool {
 	if len(tail) == 0 || !check.logosCtDeclCheck || !check.logosCtHasDeferredSwitch(s) {
 		return false

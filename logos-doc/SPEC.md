@@ -587,6 +587,8 @@ A `const func` MUST NOT perform I/O, spawn a goroutine, read a mutable package v
 
 The compiler MUST evaluate `const` composites and `const func` calls at compile time with target integer widths, a step limit from `max_ctfe_steps` with default 100,000, and a value cap of 1 MB. [T-201][T-102]
 
+A constant with an exact rational payload MUST first add the bit lengths of its numerator and denominator, then round that sum up to whole bytes for its charge against the 1 MB value cap. An exact complex payload MUST apply that rounding separately to its real and imaginary components, then add the two byte charges. A complex value without an exact payload MUST charge 16 bytes. [T-201] A typed `float32` or `float64` value MUST charge at least eight bytes. [T-201]
+
 Compile-time assignments MUST preserve Go's operand evaluation order, destination identity, value-copy rules, and left-to-right store order. [T-201]
 The evaluation and assignment phases, including failures while evaluating a destination operand and failures while storing a result, MUST follow Go assignment semantics. [T-201]
 A two-value lookup on a nil map MUST return the element's zero value and `false`. [T-201]
@@ -1263,7 +1265,7 @@ An assignment to it MUST fail with `[comptime::const_for_assign]`. [T-205]
 
 `f.Tag.Get(k)` MUST constant-fold when `k` is a compile-time constant: a literal, a named constant, an imported constant, or a constant expression. A run-time `k` cannot fold and stays an ordinary call. [T-205]
 
-A `comptime.Error(msg)` that is not const-dead MUST fail compilation with `msg`. Termination-dead code is not const-dead. [T-205]
+A `comptime.Error` is live except when it is const-dead, and except when it is a switch-tail error in an instance outside a `const for` iteration: it shares its statement list (a block or a switch, select, or `const switch` clause body) with a `const switch` whose selected case terminates, with no labeled statement between them. Such a switch-tail error is termination-dead and not live. A live `comptime.Error(msg)` MUST fail compilation with `msg`. Termination-dead code is not const-dead. [T-205]
 
 Const-dead code is code that a compile-time choice removes. It is the branch of a `const if` that a boolean constant condition does not select, in any function. In an instance of a comptime generic and in a field iteration of a `const for`, it is also a `const if` branch or a `const switch` case that the instance or the iteration does not take. [T-205]
 
@@ -1273,11 +1275,13 @@ A `const switch` whose tag is a type parameter of a generic function that is not
 
 Termination-dead code is code that is not const-dead and that control flow cannot reach. A statement is termination-dead when an earlier statement of the same statement list is terminating and no labeled statement stands after that earlier statement, up to and including this statement. A field iteration of a `const for` is termination-dead when it comes after the first iteration whose body is terminating. A statement is terminating by the Go rules for terminating statements, with these changes: a `const if` counts only the branch that it takes, a `const switch` terminates only when it takes a case at compile time and that case body terminates, and a `const for` follows the termination rule above. [T-205]
 
-The compiler MUST type-check termination-dead code as it type-checks live code, in a plain function and in an instance, and a `comptime.Error` in termination-dead code MUST fail compilation. Lowering MAY omit termination-dead code, as unrolling omits the iterations after the first terminating field, but the compiler MUST NOT omit the check of that code. [T-205]
+The compiler MUST type-check termination-dead code as it type-checks live code, in a plain function and in an instance, and a `comptime.Error` in termination-dead code MUST fail compilation, except the switch-tail error defined above, which stays silent while the tail is still type-checked for other errors. Lowering MAY omit termination-dead code, as unrolling omits the iterations after the first terminating field, but the compiler MUST NOT omit the check of that code. [T-205]
 
 The declaration check of a comptime generic MUST leave the statements after a statement that holds a `const switch` to each instantiation, because the declaration cannot decide if that statement completes normally. When one of those statements is a labeled statement, the declaration check MUST check them itself, because a jump can reach them. A comptime generic with no instantiation therefore does not check the statements that it leaves; they are not termination-dead, because no check decides the termination of the `const switch`. [T-205]
 
 `comptime.Error(msg)` MUST take a constant string. [T-205]
+
+After checking a silenced `comptime.Error` message, lowering MUST retain only the uses of enclosing local variables needed by the prepared check. It MUST NOT retain package dependencies or variables declared inside the discarded message expression. [T-205]
 
 A non-constant `msg` MUST fail with `[comptime::error_not_constant]`. [T-205]
 

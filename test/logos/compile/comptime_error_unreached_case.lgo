@@ -13,12 +13,11 @@ func pick[F any]() int {
 	return 0
 }
 
-// For pick[int] the comptime.Error below the const switch is
-// termination-dead: constant analysis reaches it, and only the return
-// of case int stops control flow before it. Termination-dead code is
-// checked, so the error fires for every instantiation. A panic stops
-// control flow the same way.
-var _ = pick[int]() // ERROR "\[comptime::error\] unsupported"
+// For pick[int] the comptime.Error below the const switch is dead: the
+// selected case returns, so no instantiation path reaches it. For
+// pick[string] no case matches, the switch falls through, and the error
+// fires. A panic stops control flow the same way.
+var _ = pick[int]()
 var _ = pick[string]() // ERROR "\[comptime::error\] unsupported"
 
 func stop[F any]() int {
@@ -30,7 +29,7 @@ func stop[F any]() int {
 	return 0
 }
 
-var _ = stop[int]() // ERROR "\[comptime::error\] stop unsupported"
+var _ = stop[int]()
 
 func pickChecked[F any]() int {
 	const switch F {

@@ -1,0 +1,23 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"unsafe"
+)
+
+func pick[F any]() int {
+	var x byte
+	const switch F {
+	case int:
+		return 1
+	}
+	comptime.Error(string('0' + unsafe.Sizeof(x)))
+	return 0
+}
+
+func main() {
+	fmt.Println(pick[int]())
+}

@@ -1,0 +1,39 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func pick[F any]() int {
+	const switch F {
+	case int:
+		return 1
+	}
+	comptime.Error("unsupported")
+	return 0
+}
+
+func stop[F any]() int {
+	const switch F {
+	case int:
+		panic("int")
+	}
+	comptime.Error("stop unsupported")
+	return 0
+}
+
+func pickChecked[F any]() int {
+	const switch F {
+	case int:
+		return 1
+	}
+	return 0
+}
+
+func main() {
+	_ = stop[int]
+	fmt.Println(pick[int](), pickChecked[int]())
+}
