@@ -119,7 +119,10 @@ func (p *logosEFPass) runCleanup(call logosEFDeferredCall, st *logosEFState) *lo
 // dropCleanupSeeds forgets the ordinary entries seedCleanupReads added
 // that the cleanup body never replaced: they scoped the cleanup's own
 // reads and must not leak into caller flow. Entries the body proved
-// or rewrote, and all may-mark and pairing changes, survive.
+// or rewrote, and all may-mark and pairing changes, survive. A seed the
+// cleanup left untouched while breaking its guard survives as an entry
+// no check can discharge instead: the cleanup erased the only error that
+// could validate the value, so the later ordinary read must fail.
 func (p *logosEFPass) dropCleanupSeeds(before, seeded, out *logosEFState) *logosEFState {
 	if out == nil || seeded == nil || len(seeded.m) == 0 {
 		return out
@@ -139,6 +142,12 @@ func (p *logosEFPass) dropCleanupSeeds(before, seeded, out *logosEFState) *logos
 		}
 		if mout == nil {
 			mout = maps.Clone(out.m)
+		}
+		if e.errKey != (logosEFKey{}) {
+			if _, live := out.mayErr[k]; !live {
+				mout[k] = logosEFEntry{name: e.name, pos: e.pos}
+				continue
+			}
 		}
 		delete(mout, k)
 	}

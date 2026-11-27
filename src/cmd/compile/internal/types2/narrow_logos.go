@@ -1395,10 +1395,12 @@ func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 // survive a directly invoked literal: after the invocation, later reads
 // check the guard instead of staying silent. Only results the invocation
 // wrote, or whose incoming guard it broke, project: an unrelated write
-// leaves incoming marks silent. A pairing the invocation broke (empty
-// guard) seeds an entry no check can discharge, and so does a vetoed
-// possible guard the invocation broke. Results never paired
-// with a named error stay silent.
+// leaves incoming marks silent. A pairing the invocation broke, a vetoed
+// possible guard it broke, and a possible guard it broke on a returning
+// path even when an earlier break already recorded it, each seed an entry
+// no check can discharge. With no live pairing and no surviving veto or
+// break, every path discarded the latest store and ordinary reads stay
+// silent. Results never paired with a named error stay silent.
 func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *syntax.FuncLit, eff *logosEFEffects) *logosEFState {
 	if end == nil || len(end.may) == 0 {
 		return end
@@ -1411,54 +1413,52 @@ func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *synta
 		if _, ok := end.m[k]; ok {
 			continue
 		}
-		brokeAlt := false
+		brokeIncoming := false
 		if !invocationWrote(eff, k) {
 			ekIn, ok := before.mayErr[k]
 			if ok && ekIn != (logosEFKey{}) && invocationWrote(eff, ekIn) {
 				// Live guard broken: fall into the paired seeding below.
-			} else if brokeVetoedGuard(before.mayBroke[k], end.mayBroke[k]) {
+				brokeIncoming = true
+			} else if brokeVetoedGuard(before.mayBroke[k], end.mayBroke[k]) ||
+				invocationBrokePossible(before, end, eff, k) {
 				// A vetoed possible guard broken on a normal or
 				// recovered exit leaves no single guard a later check
 				// could use. The broken set survives joins by union,
 				// so a path that skips the write cannot restore the
 				// guard; writes on unrecovered panic paths die with
-				// the path and never enter the set.
-				brokeAlt = true
+				// the path and never enter the set. Breaking a possible
+				// guard on a returning path counts the same even when
+				// an earlier break already recorded it.
+				name := "its error"
+				if n, ok := p.tracked[k]; ok {
+					name = n
+				}
+				if out == nil {
+					out = maps.Clone(end.m)
+					if out == nil {
+						out = make(map[logosEFKey]logosEFEntry, 1)
+					}
+				}
+				out[k] = logosEFEntry{name: name, pos: lit.Pos()}
+				continue
 			} else {
 				continue
 			}
 		}
-		if brokeAlt {
-			name := "its error"
-			if n, ok := p.tracked[k]; ok {
-				name = n
-			}
-			if out == nil {
-				out = maps.Clone(end.m)
-				if out == nil {
-					out = make(map[logosEFKey]logosEFEntry, 1)
-				}
-			}
-			out[k] = logosEFEntry{name: name, pos: lit.Pos()}
-			continue
-		}
-		// The live pairing decides: a latest store that discarded its
-		// error stays silent for ordinary reads, so the invocation
-		// projects nothing for it. A broken or vetoed pairing (no live
-		// pairing) seeds an entry no check can discharge. A live
-		// pairing seeds an entry the guard check discharges.
+		// The exit state decides: a discarded store on every path stays
+		// silent for ordinary reads, so the invocation projects nothing
+		// for it. A surviving possible guard or break, a broken incoming
+		// live guard, and a named pairing from any path that survives in
+		// no pairing at exit each mean some path lost the guard the value
+		// needs: seed an entry no check can discharge. A live pairing
+		// seeds an entry the guard check discharges.
 		ek, ok := end.mayErr[k]
 		if ok && ek == (logosEFKey{}) {
 			continue
 		}
 		if !ok {
-			// No live pairing at exit: silent only when the invocation
-			// itself records a discarded latest store. Any other
-			// absence means the pairing broke with no guard to check.
-			if eff != nil {
-				if eek, ok := eff.may[k]; ok && eek == (logosEFKey{}) {
-					continue
-				}
+			if !brokeIncoming && len(end.mayAlt[k]) == 0 && len(end.mayBroke[k]) == 0 && !effPaired(eff, k) {
+				continue
 			}
 		}
 		name := "its error"
@@ -1504,6 +1504,38 @@ func invocationWrote(eff *logosEFEffects, k logosEFKey) bool {
 func brokeVetoedGuard(before, after []logosEFKey) bool {
 	for _, g := range after {
 		if !slices.Contains(before, g) {
+			return true
+		}
+	}
+	return false
+}
+
+// invocationBrokePossible reports whether the invocation wrote an error
+// destination that could guard k before the call, and the break survives
+// on a returning path. A guard already broken before the call still counts
+// when this invocation breaks it again: the difference of cumulative
+// broken sets cannot see a repeated break on a previously untouched path.
+// The surviving end break excludes unrecovered panic paths, whose writes
+// die with the path and never enter the set.
+
+// effPaired reports whether the invocation ever paired k with a named
+// error on any path, even when a later store discarded the error or broke
+// the pairing: the value may still hold the older guarded result.
+func effPaired(eff *logosEFEffects, k logosEFKey) bool {
+	return eff != nil && eff.paired[k]
+}
+func invocationBrokePossible(before, end *logosEFState, eff *logosEFEffects, k logosEFKey) bool {
+	if eff == nil || end == nil || before == nil {
+		return false
+	}
+	for _, g := range end.mayBroke[k] {
+		if !eff.writes(g) {
+			continue
+		}
+		if ek, ok := before.mayErr[k]; ok && ek == g {
+			return true
+		}
+		if slices.Contains(before.mayAlt[k], g) {
 			return true
 		}
 	}
@@ -1968,6 +2000,7 @@ type logosEFEffects struct {
 	inside   map[*Var]bool
 	assigned map[logosEFKey]bool
 	created  map[logosEFKey]string
+	paired   map[logosEFKey]bool
 	may      map[logosEFKey]logosEFKey
 	deferred *logosEFEffects
 	// panicked collects the pre-panic states of builtin panic calls
@@ -2031,7 +2064,10 @@ type logosEFPass struct {
 	loopTuple   map[*syntax.ForStmt]map[logosEFKey]bool
 	reenter     map[*syntax.ForStmt]bool
 	runsOnce    map[*syntax.ForStmt]bool
-	loopDepth   int
+	// litParents records the direct parent of every node in the analyzed
+	// body, built lazily when cleanup mode meets an escaping position.
+	litParents map[syntax.Node]syntax.Node
+	loopDepth  int
 	// inCleanup counts the cleanup bodies under analysis: reads inside
 	// a deferred cleanup must check the stores the cleanup itself
 	// makes, while ordinary reads of the same values stay silent.
@@ -3219,6 +3255,16 @@ func (p *logosEFPass) noteMay(k logosEFKey, errKey logosEFKey) {
 			p.eff.may = make(map[logosEFKey]logosEFKey)
 		}
 		p.eff.may[k] = errKey
+		// A named pairing on any path counts even when a later store
+		// discards or breaks it: the value may still hold the older
+		// guarded result, so losing every live pairing leaves the
+		// exit with no guard to check.
+		if errKey != (logosEFKey{}) {
+			if p.eff.paired == nil {
+				p.eff.paired = make(map[logosEFKey]bool)
+			}
+			p.eff.paired[k] = true
+		}
 	}
 }
 
@@ -4460,10 +4506,6 @@ func (p *logosEFPass) ret(s *syntax.ReturnStmt, st *logosEFState) *logosEFState 
 				if len(st.mayAlt[k]) == 0 {
 					continue
 				}
-			} else if e, found := st.m[k]; found && e.errKey != (logosEFKey{}) && passedKeys[e.errKey] {
-				if len(st.mayAlt[k]) == 0 {
-					continue
-				}
 			}
 		}
 		st = p.expr(r, st)
@@ -5611,6 +5653,7 @@ func cleanupClausesRecover(p *logosEFPass, bodies [][]syntax.Stmt, recovered boo
 	return true
 }
 
+// refused_by: merge_ladder_exhausted · collision: none (both sides edited, nowhere the same lines)
 func cleanupExprRecovers(p *logosEFPass, e syntax.Node) bool {
 	if e == nil {
 		return false
@@ -5875,6 +5918,59 @@ func (s *logosEFState) literalPairings(before, end *logosEFState, eff *logosEFEf
 	return &logosEFState{m: s.m, may: s.may, mayErr: out, mayAlt: mayAlt, mayBroke: mayBroke, cleanups: s.cleanups}
 }
 
+// logosEFParentVisitor records the direct parent of every node it walks.
+// Walk calls Visit(nil) after each node's children, so the stack stays
+// balanced without a post-order hook.
+type logosEFParentVisitor struct {
+	stack   []syntax.Node
+	parents map[syntax.Node]syntax.Node
+}
+
+func (v *logosEFParentVisitor) Visit(n syntax.Node) syntax.Visitor {
+	if n == nil {
+		v.stack = v.stack[:len(v.stack)-1]
+		return v
+	}
+	if len(v.stack) > 0 {
+		if _, ok := v.parents[n]; !ok {
+			v.parents[n] = v.stack[len(v.stack)-1]
+		}
+	}
+	v.stack = append(v.stack, n)
+	return v
+}
+
+// litParent returns the direct parent of n in the analyzed function body,
+// skipping parentheses. It builds the map once per pass.
+func (p *logosEFPass) litParent(n syntax.Node) syntax.Node {
+	if p.litParents == nil {
+		v := &logosEFParentVisitor{parents: make(map[syntax.Node]syntax.Node)}
+		syntax.Walk(p.body, v)
+		p.litParents = v.parents
+	}
+	par := p.litParents[n]
+	for {
+		un, ok := par.(*syntax.ParenExpr)
+		if !ok {
+			return par
+		}
+		par = p.litParents[un]
+	}
+}
+
+// litValueEscapes reports whether an expression lambda is stored as a value
+// instead of running where it stands: an assignment, declaration, or return
+// carries it past the cleanup that registers it, so its body runs later in
+// ordinary mode. A call argument or an immediately invoked lambda runs
+// synchronously and keeps the cleanup mode.
+func (p *logosEFPass) litValueEscapes(lam *syntax.LambdaExpr) bool {
+	switch p.litParent(lam).(type) {
+	case *syntax.AssignStmt, *syntax.VarDecl, *syntax.ReturnStmt:
+		return true
+	}
+	return false
+}
+
 func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFState {
 	body, isBlock := lam.Body.(*syntax.BlockStmt)
 	if p.check.logosInPlace[lam] {
@@ -5882,6 +5978,17 @@ func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFS
 	}
 	if isBlock {
 		return p.later(lam, body, st)
+	}
+	if p.inCleanup > 0 && p.litValueEscapes(lam) {
+		// An escaping expression body runs after the cleanup that
+		// registers it, not under it: analyze it in ordinary mode so
+		// its own locals stay silent, while capture checks remain
+		// through lateCaptures.
+		saved := p.inCleanup
+		p.inCleanup = 0
+		p.expr(lam.Body, p.lateCaptures(p.capture(st), lam, p.defsIn(lam)))
+		p.inCleanup = saved
+		return st
 	}
 	p.expr(lam.Body, p.lateCaptures(p.capture(st), lam, p.defsIn(lam)))
 	return st
