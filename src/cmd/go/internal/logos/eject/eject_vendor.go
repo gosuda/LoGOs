@@ -250,25 +250,33 @@ func ejectedSelected(expr constraint.Expr) bool {
 // boolean identities: logosejected is set, logosconc is unset because the
 // support copy has no monitored file. It returns nil for a
 // constantly-true residual and reports a constantly-false one via
-// excluded. When folding would change the Go version the build line
-// implies, it keeps the original structure with version-neutral mode
-// tags instead, so the emitted file selects the same files under the
+// excluded. version is the file's recorded language version: the
+// constraint package reads it from //go:build lines alone, so a
+// legacy-only guard contributes "". When folding would change that
+// recorded version, it keeps the original structure with version-neutral
+// mode tags instead, so the emitted file selects the same files under the
 // same language version (a folded go1.N tag would pin the file to that
-// version's semantics, such as shared loop variables before go1.22).
-func foldEjectedGuard(expr constraint.Expr) (guard constraint.Expr, excluded bool) {
+// version's semantics, such as shared loop variables before go1.22). A
+// versionless file whose residual still names a release tag keeps the
+// selection with a version-neutral, always-false disjunct, which drops
+// the implied version without selecting anything new.
+func foldEjectedGuard(expr constraint.Expr, version string) (guard constraint.Expr, excluded bool) {
 	guard, excluded = foldEjectedModeTags(expr)
 	if excluded {
 		return nil, true
 	}
-	if constraint.GoVersion(guard) != constraint.GoVersion(expr) {
-		guard = neutralizeEjectedGuard(expr)
+	if constraint.GoVersion(guard) != version {
+		if version == "" {
+			if constraint.GoVersion(guard) != "" {
+				guard = &constraint.OrExpr{X: guard, Y: &constraint.TagExpr{Tag: "ignore"}}
+			}
+		} else {
+			guard = neutralizeEjectedGuard(expr)
+		}
 	}
 	return guard, false
 }
 
-// neutralizeEjectedGuard keeps the original expression structure but
-// replaces ejected-mode tags with version-neutral equivalents holding
-// the same truth value with logosejected set and logosconc unset:
 // logosejected and !logosconc become !ignore (always true), !logosejected
 // and logosconc become ignore (always false). Neither spelling names a
 // Go version, so constraint.GoVersion reports the same version as for
@@ -302,7 +310,11 @@ func neutralizeEjectedGuard(expr constraint.Expr) constraint.Expr {
 				return neutral
 			}
 		}
-		return &constraint.NotExpr{X: neutralizeEjectedGuard(e.X)}
+		inner := neutralizeEjectedGuard(e.X)
+		if neg, ok := inner.(*constraint.NotExpr); ok {
+			return neg.X
+		}
+		return &constraint.NotExpr{X: inner}
 	case *constraint.AndExpr:
 		return &constraint.AndExpr{X: neutralizeEjectedGuard(e.X), Y: neutralizeEjectedGuard(e.Y)}
 	case *constraint.OrExpr:
@@ -401,7 +413,11 @@ func (c *supportCopy) ejectedSupportGuard(p supportSourcePackage, name string) (
 	if !ejectedSelected(expr) {
 		return true, nil, false
 	}
-	guard, excluded := foldEjectedGuard(expr)
+	version := ""
+	if modern, err := ownedModernHeaderExpr(f); err == nil && modern != nil {
+		version = constraint.GoVersion(modern)
+	}
+	guard, excluded := foldEjectedGuard(expr, version)
 	if excluded {
 		return true, nil, false
 	}
@@ -540,6 +556,11 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	if lowered {
 		edits = append(edits, siteIdentEdits(fset, f, siteNamespace(logosStem(name)))...)
 	}
+	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, nil)
+	if _, overlap := h2OverlapOffset(edits, h2edits); overlap {
+		return nil, false, fmt.Errorf("overlapping extended-CONNECT rewrite")
+	}
+	edits = append(edits, h2edits...)
 	embeds := false
 	for _, imp := range f.Imports {
 		importPath, err := strconv.Unquote(imp.Path.Value)
@@ -556,6 +577,11 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		}
 		start := fset.Position(imp.Path.Pos()).Offset
 		edits = append(edits, textEdit{start, start + len(imp.Path.Value), strconv.Quote(target)})
+	}
+	if h2uses {
+		if _, err := c.supportImport("logos/net/http"); err != nil {
+			return nil, false, err
+		}
 	}
 	fixed, ok := applyTextEdits(data, edits)
 	if !ok {

@@ -1,0 +1,40 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failedOptList bool
+
+func checkOptList(name string, cond bool, got, want any) {
+	if !cond {
+		failedOptList = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func optPick[T any](v T) string {
+	_ = v
+	const switch T {
+	case int?, string:
+		return "opt-or-string"
+	case bool:
+		return "bool"
+	}
+	return "other"
+}
+
+func main() {
+	checkOptList("list-opt-string", optPick("x") == "opt-or-string", optPick("x"), "opt-or-string")
+	checkOptList("list-opt-bool", optPick(true) == "bool", optPick(true), "bool")
+	checkOptList("list-opt-other-float", optPick(1.5) == "other", optPick(1.5), "other")
+	checkOptList("list-opt-other-int", optPick(1) == "other", optPick(1), "other")
+	if failedOptList {
+		os.Exit(1)
+	}
+}

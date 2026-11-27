@@ -96,6 +96,23 @@ func (check *Checker) logosTypeKind(x *operand, call *syntax.CallExpr, name stri
 		return false
 	}
 	targ := check.varType(targs[0])
+	// A read-only view names its element: `const T` depends on the
+	// parameter T, so a predicate on it waits for instantiation like a
+	// bare T does. Deciding on the wrapper would fold the constraint
+	// interface for IsInterface, or miss the struct for IsStruct, before
+	// any copy sees a concrete type.
+	for {
+		u := Unalias(targ)
+		if cv, ok := u.(*ConstView); ok {
+			targ = cv.Elem
+			continue
+		}
+		if rd, ok := u.(*ReadonlyDescendants); ok {
+			targ = rd.Elem
+			continue
+		}
+		break
+	}
 	x.expr = call
 	switch {
 	case !isValid(targ):
@@ -349,9 +366,11 @@ func (check *Checker) logosComptimeError(call *syntax.CallExpr) {
 
 // logosErrorAfterTerminatingSwitch reports whether the Error call under
 // check sits after a const switch whose selected case terminates, in an
-// instance outside a const-for iteration. The tail itself is still
-// type-checked for other errors; only the Error is silent. Labels between
-// the switch and the Error keep it live, since a jump can reach it.
+// instance outside a const-for iteration. The switch and the Error share
+// one statement list: a block or a switch, select, or const-switch clause
+// body. The tail itself is still type-checked for other errors; only the
+// Error is silent. Labels between the switch and the Error keep it live,
+// since a jump can reach it.
 func (check *Checker) logosErrorAfterTerminatingSwitch() bool {
 	if check.logosCtSubst == nil || check.logosCtDeclCheck || check.logosFieldBind != nil {
 		return false
@@ -363,20 +382,35 @@ func (check *Checker) logosErrorAfterTerminatingSwitch() bool {
 	}
 	var list []syntax.Stmt
 	var found bool
+	at := func(stmts []syntax.Stmt) {
+		if found {
+			return
+		}
+		for _, s := range stmts {
+			if s == cur {
+				list = stmts
+				found = true
+				return
+			}
+		}
+	}
 	syntax.Inspect(fdecl.Body, func(n syntax.Node) bool {
 		if found {
 			return false
 		}
-		if b, ok := n.(*syntax.BlockStmt); ok {
-			for _, s := range b.List {
-				if s == cur {
-					list = b.List
-					found = true
-					return false
-				}
+		switch t := n.(type) {
+		case *syntax.BlockStmt:
+			at(t.List)
+		case *syntax.CaseClause:
+			at(t.Body)
+		case *syntax.CommClause:
+			at(t.Body)
+		case *syntax.ConstSwitchStmt:
+			for _, c := range t.Cases {
+				at(c.Body)
 			}
 		}
-		return true
+		return !found
 	})
 	if !found {
 		return false
