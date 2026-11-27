@@ -445,7 +445,9 @@ func ownedResolveGroup(ctx context.Context, plan *ejectPlan, dir string, dests [
 		emitOne := func(rep *ownedDest, cond constraint.Expr, test bool) error {
 			header := ownedRenderHeader(cond)
 			finalSource := header + body
-			fixed, uses, ok := remapEjectedFile([]byte(finalSource), "")
+			// Generated helpers have no package siblings: the file-local
+			// alias decision stands.
+			fixed, uses, ok := remapEjectedFile([]byte(finalSource), "", nil)
 			if !ok {
 				return fmt.Errorf("helper %s does not parse after condition merge", rep.req.ID)
 			}

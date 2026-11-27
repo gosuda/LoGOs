@@ -1,0 +1,9 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package units
+
+// Count is a test fixture whose package name collides with unitsa's:
+// both print as units.Count through %T while staying distinct types.
+type Count int

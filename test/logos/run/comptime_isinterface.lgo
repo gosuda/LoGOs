@@ -1,0 +1,36 @@
+// run
+
+package main
+
+import "comptime"
+
+type described322 interface { String() string }
+type empty322 interface{}
+type alias322 = described322
+type view322 = const described322
+type union322 interface { int | string }
+
+func interfaceKind322[T any]() bool {
+	const if comptime.IsInterface[T]() { return true }
+	return false
+}
+
+func interfaceFields322[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		const if comptime.IsInterface[f.Type]() { n++ }
+	}
+	return n
+}
+
+func main() {
+	if !interfaceKind322[any]() || !interfaceKind322[empty322]() || !interfaceKind322[described322]() || !interfaceKind322[alias322]() || !interfaceKind322[view322]() || !interfaceKind322[union322]() {
+		panic("an interface kind was lost")
+	}
+	if interfaceKind322[int]() || interfaceKind322[string]() || interfaceKind322[*int]() || interfaceKind322[[]any]() || interfaceKind322[map[string]any]() || interfaceKind322[[0]any]() || interfaceKind322[func()]() || interfaceKind322[struct{ Value any }]() {
+		panic("a static kind was treated as an interface")
+	}
+	if interfaceFields322[struct{ A any; B described322; C int; D *int }]() != 2 {
+		panic("interface field predicates did not bind per field")
+	}
+}

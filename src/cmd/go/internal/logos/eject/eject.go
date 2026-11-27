@@ -830,13 +830,13 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string)
 	var rtDir string
 	if usedRT {
 		rtDir = filepath.Join(out, "_logos_deps", "rt")
-		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan, staging)
+		decided := writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan, staging)
 		addSupportRequire(filepath.Join(out, "go.mod"), "./_logos_deps/rt")
-		materializeGorootLogos(plan, staging, out, rtDir)
+		materializeGorootLogos(plan, staging, out, rtDir, decided)
 	}
 	rewriteMainGoMod(out, plan)
 	for _, m := range plan.deps {
-		rewriteDepGoMod(plan, m, ejected)
+		rewriteDepGoMod(plan, m, ejected, out)
 	}
 	if usedRT {
 		for _, m := range plan.deps {
@@ -874,8 +874,13 @@ func supportCandidates(imp string) []string {
 		return nil
 	}
 	cands := []string{"logos/" + suffix, "logos/rt/" + suffix}
-	if rest, ok := strings.CutPrefix(suffix, "logos/"); ok && rest != "" {
-		cands = append(cands, "logos/"+rest)
+	// A default-mapped package (logos/<rest> outside rt/, arena and sync)
+	// forward-maps to rtModulePath + "/logos/<rest>", so the suffix itself
+	// is the GOROOT package that round-trips. Without it the h2 rewrite's
+	// support import resolves only to a nonexistent logos/rt/... package
+	// and nothing is materialized.
+	if strings.HasPrefix(suffix, "logos/") {
+		cands = append(cands, suffix)
 	}
 	var out []string
 	for _, cand := range cands {
@@ -959,7 +964,17 @@ func hasEjectedGoFiles(dir string) bool {
 	return false
 }
 
-func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
+// materializeGorootLogos emits every reached GOROOT logos/* package
+// outside the fixed set into the shared support module, following the
+// import graph transitively. Packages owning .lgo files are emitted from
+// compiler staging (built as plan roots, or staged by variant helpers);
+// pure-Go packages are copied from GOROOT. A referenced package with no
+// lowered output is a loud failure, never a dangling import. The support
+// module ships no tests, so test files stay out on both paths. Stems the
+// support copy already decided stay out: the copy specializes ejected
+// guards, so a second write would restore files the copy excluded.
+
+func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string, decided map[string]map[string]bool) {
 	done := map[string]bool{}
 	queue := ejectedSupportRefs(out)
 	for len(queue) > 0 {
@@ -1016,11 +1031,14 @@ func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
 		taken := ejectOutputStems(rec.Dir, names)
 		for _, name := range names {
 			stem := logosStem(name)
+			if decided[rel][stem] {
+				continue
+			}
 			raw, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(path), stem+".go"))
 			if err != nil {
 				base.Fatalf("logos eject: missing ejected output for %s: the ejected tree references it but no build lowered it", filepath.Join(rec.Dir, name))
 			}
-			writeLoweredFile(dst, ".", stem, name, raw, taken)
+			writeLoweredFile(dst, ".", stem, name, raw, taken, nil)
 		}
 		for _, cand := range ejectedSupportRefs(dst) {
 			if !done[cand] {
@@ -1052,8 +1070,8 @@ func ejectPackageNames(p *load.Package, plan *ejectPlan) ([]string, map[string]b
 	return names, ignoredSet
 }
 
-func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte, taken map[string]bool) bool {
-	fixed, uses := rewriteEjectedGo(raw, name)
+func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte, taken map[string]bool, extraUsed map[string]bool) bool {
+	fixed, uses := rewriteEjectedGo(raw, name, extraUsed)
 	mainBytes, extraBytes, extraStem := splitJSONv2File(fixed, stem, taken)
 	dst := filepath.Join(dstRoot, rel, stem+".go")
 	if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
@@ -1460,6 +1478,8 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 	used := false
 	seen := make(map[string]bool, len(names))
 	taken := ejectOutputStems(p.Dir, names)
+	stagingPkg := filepath.Join(dest.staging, filepath.FromSlash(p.ImportPath))
+	reserved := h2PackageReservedFor(names, stagingPkg, p.Dir)
 	for _, name := range names {
 		if seen[name] || !logosfile.Is(name) {
 			continue
@@ -1472,15 +1492,31 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 				continue
 			}
 		}
-		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw, taken) {
+		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw, taken, reserved) {
 			used = true
 		}
 		// The compiler writes one edit-map sidecar per ejected file
-		// into staging; carry it to the output so the map can be
-		// checked against the sources. A file without a sidecar
-		// (plain Go, or an older staging layout) ejects unchanged.
+		// into staging; carry it to the output. The map partitions
+		// the staging bytes before import rewriting, JSONv2
+		// splitting and gofmt, not the final bytes beside it, so
+		// pairing it with the final file through editmap.Check is
+		// unsupported; the map pins shared source spans and
+		// generated marks as the eject scripts check them. A file
+		// without a sidecar (plain Go, or an older staging layout)
+		// ejects unchanged. A source file already sitting at the
+		// sidecar path is a collision: eject stops instead of
+		// silently embedding map JSON under the asset's name.
 		if editRaw, editErr := os.ReadFile(filepath.Join(dest.staging, filepath.FromSlash(p.ImportPath), stem+".go"+editmap.Suffix)); editErr == nil {
-			if writeErr := os.WriteFile(filepath.Join(dest.dstRoot, rel, stem+".go"+editmap.Suffix), editRaw, 0666); writeErr != nil {
+			sidecar := filepath.Join(dest.dstRoot, rel, stem+".go"+editmap.Suffix)
+			if old, statErr := os.ReadFile(sidecar); statErr == nil {
+				// Variant merges emit the same package twice with
+				// identical sidecar bytes; rewriting them is a no-op.
+				// Anything else at this path is a source asset the
+				// map must not clobber, so eject stops instead.
+				if !bytes.Equal(old, editRaw) {
+					base.Fatalf("logos eject: edit map %s collides with a source file of the same name; rename the source file", sidecar)
+				}
+			} else if writeErr := os.WriteFile(sidecar, editRaw, 0666); writeErr != nil {
 				base.Fatalf("logos eject: %s", writeErr)
 			}
 		}
@@ -2029,6 +2065,7 @@ func copyModuleTree(srcRoot, dstRoot, skip string) bool {
 	uses := false
 	keep := localReplaceDirs(srcRoot)
 	nested := map[string]bool{}
+	reserveCache := map[string]map[string]bool{}
 	err := filepath.WalkDir(srcRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -2075,7 +2112,7 @@ func copyModuleTree(srcRoot, dstRoot, skip string) bool {
 		if name == "logos.toml" || logosfile.Is(name) {
 			return nil
 		}
-		fileUses, err := copyDataFile(path, filepath.Join(dstRoot, rel))
+		fileUses, err := copyDataFile(path, filepath.Join(dstRoot, rel), reserveCache)
 		if fileUses {
 			uses = true
 		}
@@ -2113,15 +2150,29 @@ func inCopiedModule(nested map[string]bool, rel string) bool {
 // are rewritten to the ejected import paths and formatted by the gofmt
 // pass, so the tree stays gofmt-clean; anything else rides along byte
 // for byte. It reports whether the written file imports the loGo/s
-// support packages.
-func copyDataFile(src, dst string) (bool, error) {
+// support packages. A copied Go file takes the same package-wide
+// reserved names as a lowered file in that package, so a fresh import
+// alias avoids a top-level name declared by a sibling file; the set is
+// computed once per source directory and only when the file can carry
+// an extended CONNECT call.
+func copyDataFile(src, dst string, reserveCache map[string]map[string]bool) (bool, error) {
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return false, err
 	}
 	uses := false
 	if strings.HasSuffix(src, ".go") {
-		if fixed, fixedUses, ok := remapEjectedFile(data, ""); ok {
+		var extra map[string]bool
+		if bytes.Contains(data, []byte(h2extendedConnectMethod)) {
+			dir := filepath.Dir(src)
+			cached, ok := reserveCache[dir]
+			if !ok {
+				cached = h2PackageReserved(dir)
+				reserveCache[dir] = cached
+			}
+			extra = cached
+		}
+		if fixed, fixedUses, ok := remapEjectedFile(data, "", extra); ok {
 			data = fixed
 			uses = fixedUses
 			queueEjectGofmt(dst)
@@ -2137,12 +2188,12 @@ func copyDataFile(src, dst string) (bool, error) {
 }
 
 // rewriteEjectedGo rewrites one compiler-emitted file to the ejected
-// import paths. Compiler output must parse; anything else is a loud
-// failure, never a silent copy.
-func rewriteEjectedGo(data []byte, name string) ([]byte, bool) {
-	fixed, uses, ok := remapEjectedFile(data, siteNamespace(logosStem(name)))
+// import paths. Compiler output must rewrite cleanly; anything else is a
+// loud failure naming the file, never a silent copy.
+func rewriteEjectedGo(data []byte, name string, extraUsed map[string]bool) ([]byte, bool) {
+	fixed, uses, ok := remapEjectedFile(data, siteNamespace(logosStem(name)), extraUsed)
 	if !ok {
-		base.Fatalf("logos eject: cannot parse ejected file for %s", name)
+		base.Fatalf("logos eject: cannot rewrite ejected file for %s", name)
 	}
 	return fixed, uses
 }
@@ -2193,7 +2244,7 @@ func siteNamespace(stem string) string {
 	return sanitized + "_" + strconv.FormatUint(uint64(h), 16)
 }
 
-func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
+func remapEjectedFile(data []byte, siteNS string, extraUsed map[string]bool) ([]byte, bool, bool) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", data, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
@@ -2201,16 +2252,14 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	}
 	edits, uses := ejectedImportEdits(data, fset, f)
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
-	h2edits := h2ExtendedConnectEdits(fset, data, f)
-	if off, overlap := h2OverlapOffset(edits, h2edits); overlap {
-		pos := fset.Position(token.Pos(fset.File(f.Pos()).Base() + off))
-		base.Errorf("logos eject: overlapping h2extendedconnect import edit at line %d: EnableHTTP2ExtendedConnect left unrewritten", pos.Line)
-		h2edits = nil
+	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, extraUsed)
+	uses = uses || h2uses
+	if h2Overlaps(edits, h2edits) {
+		// The caller owns failure policy: compiled output fails loudly,
+		// while an uncompiled data fixture keeps its original bytes.
+		return nil, false, false
 	}
 	edits = append(edits, h2edits...)
-	if len(h2edits) > 0 {
-		uses = true
-	}
 	out, ok := applyTextEdits(data, edits)
 	if !ok {
 		return nil, false, false
@@ -2417,53 +2466,46 @@ func applyTextEdits(data []byte, edits []textEdit) ([]byte, bool) {
 // writeSupportModule writes the shared, self-contained support module.
 // Staging carries the lowered toolchain outputs the copy reads for
 // LoGOs sources; overlay insertions and deletions resolve through it.
-func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) {
+func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) map[string]map[string]bool {
 	src := filepath.Join(cfg.GOROOT, "src")
 	dst := filepath.Join(out, "_logos_deps", "rt")
 	roots := ejectSupportRoots(plan)
-	if !slices.Contains(roots, "logos/net/http") && ejectedUsesSupportHTTP(out) {
-		roots = append(roots, "logos/net/http")
-		slices.Sort(roots)
+	for _, ref := range ejectedSupportRefs(out) {
+		if slices.Contains(roots, ref) || !ejectedPureGoPackage(src, ref) {
+			continue
+		}
+		// Rewrites can inject a support import the loader never saw,
+		// such as the extended-CONNECT guard. Materialize it when it
+		// names a pure-Go GOROOT package; anything else stays a
+		// hand-written import for the plain build to judge.
+		roots = append(roots, ref)
 	}
-	if err := copyEjectedSupport(src, staging, dst, roots); err != nil {
+	slices.Sort(roots)
+	decided, err := copyEjectedSupport(src, staging, dst, roots)
+	if err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 	copyJSONScanSupport(filepath.Join(src, "internal", "jsonscan"), filepath.Join(dst, "internal", "jsonscan"))
 	if err := os.WriteFile(filepath.Join(dst, "go.mod"), []byte("module "+rtModulePath+"\n\ngo "+goVer+"\n"), 0666); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
+	return decided
 }
 
-// ejectedUsesSupportHTTP reports whether the emitted tree already imports
-// the ejected HTTP support module. A rewrite in an inactive variant adds
-// the helper import to staged files the loader inventories never describe,
-// so the seed-based roots miss logos/net/http for exactly those outputs.
-func ejectedUsesSupportHTTP(out string) bool {
-	want := []byte(strconv.Quote(rtModulePath + "/logos/net/http"))
-	found := false
-	_ = filepath.WalkDir(out, func(path string, e fs.DirEntry, err error) error {
-		if err != nil || found {
-			return err
+// ejectedPureGoPackage reports whether ref names a GOROOT package
+// directory holding no LoGOs sources, so the support copy can carry it
+// without lowering from compiler staging.
+func ejectedPureGoPackage(src, ref string) bool {
+	entries, err := fsys.ReadDir(filepath.Join(src, filepath.FromSlash(ref)))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && logosfile.Is(entry.Name()) {
+			return false
 		}
-		if e.IsDir() {
-			if e.Name() == "_logos_deps" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(e.Name(), ".go") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		if bytes.Contains(data, want) {
-			found = true
-		}
-		return nil
-	})
-	return found
+	}
+	return true
 }
 
 // ejectSupportRoots keeps support imports from owned packages, their tests,
@@ -2477,26 +2519,15 @@ func ejectSupportRoots(plan *ejectPlan) []string {
 	seeds = append(seeds, plan.testRoots...)
 	seen := map[string]bool{load.LogosRTPkg: true}
 	roots := []string{load.LogosRTPkg}
-	needHTTP := false
 	for _, p := range load.PackageList(seeds) {
 		if p == nil {
 			continue
-		}
-		for _, imp := range p.Imports {
-			if imp == "net/http" || imp == "logos/net/http" {
-				needHTTP = true
-				break
-			}
 		}
 		if !strings.HasPrefix(p.ImportPath, "logos/") || seen[p.ImportPath] {
 			continue
 		}
 		seen[p.ImportPath] = true
 		roots = append(roots, p.ImportPath)
-	}
-	if needHTTP && !seen["logos/net/http"] {
-		seen["logos/net/http"] = true
-		roots = append(roots, "logos/net/http")
 	}
 	// Variant inventories retain package identities but not dependency edges.
 	for path := range plan.provenance {
@@ -2745,10 +2776,10 @@ func localReplaceDirs(modDir string) map[string]bool {
 	}
 	dirs := map[string]bool{}
 	for _, r := range f.Replace {
-		if r.New.Version != "" || r.New.Path == "" || filepath.IsAbs(r.New.Path) {
+		if r.New.Version != "" || r.New.Path == "" {
 			continue
 		}
-		target := filepath.Join(absMod, filepath.FromSlash(r.New.Path))
+		target := absReplaceTarget(absMod, r.New.Path)
 		if rel, err := filepath.Rel(absMod, target); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			dirs[filepath.Clean(rel)] = true
 		}
@@ -2756,6 +2787,42 @@ func localReplaceDirs(modDir string) map[string]bool {
 	return dirs
 }
 
+// absReplaceTarget resolves a local replacement target against the module
+// that declares it. Absolute targets stand; relative targets join the
+// declaring module directory. Callers then rebase inside-module targets
+// at the ejected copy, so the export never points at the source checkout.
+func absReplaceTarget(absBase, newPath string) string {
+	absTarget := filepath.FromSlash(newPath)
+	if !filepath.IsAbs(absTarget) {
+		absTarget = filepath.Join(absBase, absTarget)
+	}
+	return absTarget
+}
+
+// outsideModule reports whether an absolute target lies outside the
+// module root. filepath.Rel fails across drives, so a target on another
+// drive is outside, and it compares drive letters without case, so
+// c: and C: are one drive. Inside targets return false and are rebased
+// at the ejected copy by the caller.
+func outsideModule(absOrig, absTarget string) bool {
+	rel, err := filepath.Rel(absOrig, absTarget)
+	return err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// rebaseLocalReplaces points each local replace of f at the ejected
+// copy. Every directive is edited independently by its exact old path
+// and version, so two versions of one module keep two replace lines and
+// a wildcard replace stays a wildcard replace. An absolute target
+// outside the module stays untouched; an absolute target inside is
+// rebased at the ejected copy, so the export never points at the
+// source checkout. Outside targets never reach the filepath.Rel calls
+// below that abort eject, since outsideModule decides them first.
+//
+// The directives are snapshotted by value first: every rebasing edit
+// drops and re-adds lines, and the vendored AddReplace matches an empty
+// old version against every remaining directive of the path, so editing
+// through the live pointers would read entries a previous edit already
+// rewrote or zeroed.
 func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[string]string) {
 	absOrig, err := filepath.Abs(origDir)
 	if err != nil {
@@ -2765,20 +2832,24 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 	if err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
-	type pending struct {
-		oldPath string
-		oldVers string
-		newPath string
+	type directive struct{ oldPath, oldVers, newPath, newVers string }
+	snapshot := make([]directive, 0, len(f.Replace))
+	for _, r := range f.Replace {
+		snapshot = append(snapshot, directive{r.Old.Path, r.Old.Version, r.New.Path, r.New.Version})
 	}
-	var work []pending
-	for _, r := range slices.Clone(f.Replace) {
-		if _, ok := ejected[r.Old.Path]; ok {
+	for _, d := range snapshot {
+		if _, ok := ejected[d.oldPath]; ok {
 			continue
 		}
-		if r.New.Version != "" || r.New.Path == "" || filepath.IsAbs(r.New.Path) {
+		if d.newVers != "" || d.newPath == "" {
 			continue
 		}
-		target := filepath.Join(absOrig, filepath.FromSlash(r.New.Path))
+		// Absolute targets outside the module stay untouched; absolute
+		// targets inside are rebased at the ejected copy below.
+		if filepath.IsAbs(filepath.FromSlash(d.newPath)) && outsideModule(absOrig, filepath.FromSlash(d.newPath)) {
+			continue
+		}
+		target := absReplaceTarget(absOrig, d.newPath)
 		if relOrig, err := filepath.Rel(absOrig, target); err == nil && relOrig != ".." && !strings.HasPrefix(relOrig, ".."+string(filepath.Separator)) {
 			dstTarget := filepath.Join(absDst, relOrig)
 			if fi, err := os.Stat(dstTarget); err == nil && fi.IsDir() {
@@ -2789,10 +2860,19 @@ func rebaseLocalReplaces(f *modfile.File, origDir, dstDir string, ejected map[st
 		if err != nil {
 			base.Fatalf("logos eject: %v", err)
 		}
-		work = append(work, pending{r.Old.Path, r.Old.Version, "./" + filepath.ToSlash(rel)})
-	}
-	for _, w := range work {
-		setGoReplace(f, w.oldPath, w.oldVers, w.newPath)
+		newPath := "./" + filepath.ToSlash(rel)
+		if newPath == d.newPath {
+			continue
+		}
+		// Route through the version-aware editors: a raw AddReplace
+		// with an empty old version matches every remaining directive
+		// of the path and would rewrite or delete the pinned
+		// exact-version lines beside the wildcard.
+		if d.oldVers == "" {
+			setGoReplaceWildcard(f, d.oldPath, newPath)
+		} else {
+			setGoReplaceExact(f, d.oldPath, d.oldVers, newPath)
+		}
 	}
 }
 
@@ -2818,7 +2898,7 @@ func relEjectTarget(from, to string) string {
 // rewriteDepGoMod points one ejected dependency go.mod at every other
 // ejected dependency module, and repoints its own replaces of ejected
 // modules at the ejected copies.
-func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string) {
+func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string, out string) {
 	dst := ejected[m.path]
 	f := parseGoModFile(filepath.Join(dst, "go.mod"))
 	for _, other := range plan.deps {
@@ -2839,7 +2919,57 @@ func rewriteDepGoMod(plan *ejectPlan, m *ejectModule, ejected map[string]string)
 		setGoReplace(f, o[0], o[1], relEjectTarget(dst, ejected[o[0]]))
 	}
 	rebaseLocalReplaces(f, m.dir, dst, ejected)
+	rebaseDepReplacesOnMain(f, ejected, plan, dst, out)
 	writeGoModFile(filepath.Join(dst, "go.mod"), f)
+}
+
+// rebaseDepReplacesOnMain repoints a dependency replace that names a
+// directory outside the dependency module at the ejected copy when the
+// target is a kept nested module of the main module. Absolute targets
+// resolve directly; relative targets resolve against the ejected
+// dependency. The shared rebasing resolves such targets against the
+// source tree, which the exported module must not reference; the eject
+// copies those nested modules to the same main-relative path under out.
+// A target already inside the ejected tree or outside the main module
+// is left alone.
+func rebaseDepReplacesOnMain(f *modfile.File, ejected map[string]string, plan *ejectPlan, dst, out string) {
+	absDst, err := filepath.Abs(dst)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	absMain, err := filepath.Abs(plan.main.dir)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	absOut, err := filepath.Abs(out)
+	if err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	for _, r := range slices.Clone(f.Replace) {
+		if _, ok := ejected[r.Old.Path]; ok {
+			continue
+		}
+		if r.New.Version != "" || r.New.Path == "" {
+			continue
+		}
+		absTarget := absReplaceTarget(absDst, r.New.Path)
+		if rel, err := filepath.Rel(absOut, absTarget); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		relMain, err := filepath.Rel(absMain, absTarget)
+		if err != nil || relMain == ".." || strings.HasPrefix(relMain, ".."+string(filepath.Separator)) {
+			continue
+		}
+		cand := filepath.Join(absOut, relMain)
+		if fi, err := os.Stat(cand); err != nil || !fi.IsDir() {
+			continue
+		}
+		rel, err := filepath.Rel(absDst, cand)
+		if err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+		setGoReplace(f, r.Old.Path, r.Old.Version, "./"+filepath.ToSlash(rel))
+	}
 }
 
 // ensureGoRequire adds a require line unless one already names path.
@@ -2854,18 +2984,87 @@ func ensureGoRequire(f *modfile.File, path, vers string) {
 	}
 }
 
-// setGoReplace points every replace of oldPath at newPath, dropping
-// stale targets first so no duplicate replaces remain.
+// setGoReplace points the replace of oldPath at oldVers at newPath,
+// dropping only that directive's stale target so no duplicate replaces
+// remain. A wildcard replace (oldVers "") and an exact-version replace
+// are distinct directives: each call edits exactly one, so replaces of
+// other versions of the same module keep their own targets. The vendored
+// AddReplace matches an empty version against every existing version of
+// the path, so a wildcard edit saves the exact-version directives, drops
+// every directive of the path, and adds them all back instead of calling
+// through.
 func setGoReplace(f *modfile.File, oldPath, oldVers, newPath string) {
+	if oldVers == "" {
+		setGoReplaceWildcard(f, oldPath, newPath)
+		return
+	}
 	for _, r := range slices.Clone(f.Replace) {
-		if r.Old.Path == oldPath && (r.New.Path != newPath || r.New.Version != "") {
+		if r.Old.Path == oldPath && r.Old.Version == oldVers && (r.New.Path != newPath || r.New.Version != "") {
 			if err := f.DropReplace(r.Old.Path, r.Old.Version); err != nil {
 				base.Fatalf("logos eject: %v", err)
 			}
 		}
 	}
 	for _, r := range f.Replace {
-		if r.Old.Path == oldPath && r.New.Path == newPath && r.New.Version == "" {
+		if r.Old.Path == oldPath && r.Old.Version == oldVers && r.New.Path == newPath && r.New.Version == "" {
+			return
+		}
+	}
+	if err := f.AddReplace(oldPath, oldVers, newPath, ""); err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+}
+
+// setGoReplaceWildcard points the wildcard replace of oldPath at newPath
+// and leaves every exact-version replace of oldPath on its own target,
+// preserving both fields of each replacement target. The vendored
+// AddReplace matches an empty version against every existing version of
+// the path, so a wildcard edit saves the exact-version directives, drops
+// every directive of the path, and adds them all back instead of calling
+// through.
+func setGoReplaceWildcard(f *modfile.File, oldPath, newPath string) {
+	type exact struct{ vers, target, targetVers string }
+	var keep []exact
+	for _, r := range slices.Clone(f.Replace) {
+		if r.Old.Path == oldPath && r.Old.Version != "" {
+			keep = append(keep, exact{r.Old.Version, r.New.Path, r.New.Version})
+		}
+	}
+	if len(keep) == 0 {
+		setGoReplaceExact(f, oldPath, "", newPath)
+		return
+	}
+	for _, e := range keep {
+		if err := f.DropReplace(oldPath, e.vers); err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+	}
+	if err := f.DropReplace(oldPath, ""); err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	if err := f.AddReplace(oldPath, "", newPath, ""); err != nil {
+		base.Fatalf("logos eject: %v", err)
+	}
+	for _, e := range keep {
+		if err := f.AddReplace(oldPath, e.vers, e.target, e.targetVers); err != nil {
+			base.Fatalf("logos eject: %v", err)
+		}
+	}
+}
+
+// setGoReplaceExact points the replace of oldPath at oldVers at newPath.
+// oldVers names one exact version here, so the vendored AddReplace can
+// only match that same directive.
+func setGoReplaceExact(f *modfile.File, oldPath, oldVers, newPath string) {
+	for _, r := range slices.Clone(f.Replace) {
+		if r.Old.Path == oldPath && r.Old.Version == oldVers && (r.New.Path != newPath || r.New.Version != "") {
+			if err := f.DropReplace(r.Old.Path, r.Old.Version); err != nil {
+				base.Fatalf("logos eject: %v", err)
+			}
+		}
+	}
+	for _, r := range f.Replace {
+		if r.Old.Path == oldPath && r.Old.Version == oldVers && r.New.Path == newPath && r.New.Version == "" {
 			return
 		}
 	}

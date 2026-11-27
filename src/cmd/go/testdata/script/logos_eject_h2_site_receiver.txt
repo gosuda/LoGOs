@@ -1,0 +1,33 @@
+# A platform argument check introduces a site identifier in the receiver.
+# An unrewritable fork-only call must be refused before output is accepted.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd m
+logos build .
+! logos eject -o out
+stderr 'fork_stdlib_api.*EnableHTTP2ExtendedConnect'
+! exists out/main.go
+
+-- m/go.mod --
+module example.com/h2sitereceiver
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"flag"
+	"net/http"
+)
+
+func serverFor(f *flag.Flag) *http.Server {
+	_ = f
+	return &http.Server{}
+}
+
+func main() {
+	flag.String("listen", ":0", "listen address")
+	serverFor(flag.Lookup("listen")).EnableHTTP2ExtendedConnect()
+}

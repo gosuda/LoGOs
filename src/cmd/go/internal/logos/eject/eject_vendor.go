@@ -31,14 +31,14 @@ import (
 
 const supportVendorDir = "internal/toolchainvendor"
 
-func copyEjectedSupport(src, staging, dst string, roots []string) (err error) {
+func copyEjectedSupport(src, staging, dst string, roots []string) (decided map[string]map[string]bool, err error) {
 	destinations, err := supportDestinations(roots)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	root, err := os.OpenRoot(src)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		if closeErr := root.Close(); closeErr != nil {
@@ -55,16 +55,17 @@ func copyEjectedSupport(src, staging, dst string, roots []string) (err error) {
 		written:      make(map[string]string),
 		notices:      make(map[string]bool),
 		embedded:     make(map[string]bool),
+		decided:      make(map[string]map[string]bool),
 	}
 	for len(c.pending) > 0 {
 		importPath := c.pending[0]
 		c.pending = c.pending[1:]
 		p, err := ejectedSupportPackage(importPath)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := c.copyPackage(p); err != nil {
-			return fmt.Errorf("support package %s: %w", importPath, err)
+			return nil, fmt.Errorf("support package %s: %w", importPath, err)
 		}
 	}
 	for _, name := range c.format {
@@ -72,7 +73,7 @@ func copyEjectedSupport(src, staging, dst string, roots []string) (err error) {
 			queueEjectGofmt(filepath.Join(dst, filepath.FromSlash(name)))
 		}
 	}
-	return nil
+	return c.decided, nil
 }
 
 type supportCopy struct {
@@ -86,6 +87,26 @@ type supportCopy struct {
 	notices      map[string]bool
 	embedded     map[string]bool
 	format       []string
+	decided      map[string]map[string]bool
+}
+
+// markDecided records one lowered stem the support copy owns: written or
+// deliberately skipped. materializeGorootLogos must not emit these again:
+// the second writer disagrees with the copy on ejected guards, so the
+// first writer wins every stem it decided.
+func (c *supportCopy) markDecided(p supportSourcePackage, stem string) {
+	if p.vendored {
+		return
+	}
+	if c.decided == nil {
+		c.decided = make(map[string]map[string]bool)
+	}
+	m := c.decided[p.dst]
+	if m == nil {
+		m = make(map[string]bool)
+		c.decided[p.dst] = m
+	}
+	m[stem] = true
 }
 
 // absSrcDir returns the host path of one support source package.
@@ -156,6 +177,25 @@ func (c *supportCopy) copyPackage(p supportSourcePackage) error {
 			taken[strings.TrimSuffix(name, ".go")] = true
 		case !p.vendored && isLoweredSupportFile(name):
 			taken[logosStem(name)] = true
+		}
+	}
+	// A package that selects constants by ejected mode and consumes them
+	// under const-if cannot ship host lowering: the ejected tree builds
+	// without the ejected tag, so refuse instead of publishing a host
+	// specialization.
+	if !p.vendored {
+		var logosNames []string
+		for _, entry := range entries {
+			name := entry.Name()
+			if entry.IsDir() || name[0] == '.' || name[0] == '_' || !isLoweredSupportFile(name) {
+				continue
+			}
+			logosNames = append(logosNames, name)
+		}
+		if len(logosNames) > 0 && modeDependentSupportLowering(func(name string) ([]byte, error) {
+			return c.readOriginal(p, name)
+		}, logosNames) {
+			return fmt.Errorf("support package %s mixes ejected-mode sources with const-if lowering", p.src)
 		}
 	}
 	goFiles := 0
@@ -237,8 +277,11 @@ func ejectedSelected(expr constraint.Expr) bool {
 // same language version (a folded go1.N tag would pin the file to that
 // version's semantics, such as shared loop variables before go1.22). A
 // versionless file whose residual still names a release tag keeps the
-// selection with a version-neutral, always-false disjunct, which drops
-// the implied version without selecting anything new.
+// selection with a version-neutral, never-selected disjunct, which drops
+// the implied version without selecting anything new: the disjunct is
+// ignore && !ignore, unsatisfiable under every tag set, because a bare
+// ignore tag is satisfiable with -tags ignore and would newly select
+// the file.
 func foldEjectedGuard(expr constraint.Expr, version string) (guard constraint.Expr, excluded bool) {
 	guard, excluded = foldEjectedModeTags(expr)
 	if excluded {
@@ -247,13 +290,24 @@ func foldEjectedGuard(expr constraint.Expr, version string) (guard constraint.Ex
 	if constraint.GoVersion(guard) != version {
 		if version == "" {
 			if constraint.GoVersion(guard) != "" {
-				guard = &constraint.OrExpr{X: guard, Y: &constraint.TagExpr{Tag: "ignore"}}
+				guard = &constraint.OrExpr{X: guard, Y: neverSelected()}
 			}
 		} else {
 			guard = neutralizeEjectedGuard(expr)
 		}
 	}
 	return guard, false
+}
+
+// neverSelected is a constraint no tag set satisfies. A bare ignore tag
+// is satisfiable with -tags ignore, so it cannot serve as the
+// version-neutral disjunct; conjoining it with its own negation keeps the
+// versionless shape while selecting nothing.
+func neverSelected() constraint.Expr {
+	return &constraint.AndExpr{
+		X: &constraint.TagExpr{Tag: "ignore"},
+		Y: &constraint.NotExpr{X: &constraint.TagExpr{Tag: "ignore"}},
+	}
 }
 
 // logosejected and !logosconc become !ignore (always true), !logosejected
@@ -474,6 +528,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 				return nil, false, readErr
 			}
 			if isBuildIgnored(original) {
+				c.markDecided(p, logosStem(name))
 				return nil, false, nil
 			}
 		}
@@ -495,7 +550,10 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 			return nil, false, err
 		}
 	}
-	if !p.vendored {
+	if !p.vendored && !lowered {
+		// Handwritten Go sources only: lowered output already had its
+		// header rewritten to the ejected residual, so the whole-file
+		// legacy strip would also eat matching lines inside raw strings.
 		data = stripEjectedBuildTag(data)
 	}
 	// The support copy is the ejected form: a lowered LoGOs source belongs
@@ -505,6 +563,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	if lowered {
 		skip, guard, rewrite := c.ejectedSupportGuard(p, name)
 		if skip {
+			c.markDecided(p, logosStem(name))
 			return nil, false, nil
 		}
 		if rewrite {
@@ -533,6 +592,22 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	if lowered {
 		edits = append(edits, siteIdentEdits(fset, f, siteNamespace(logosStem(name)))...)
 	}
+	// The generated support import must avoid package-level names from
+	// sibling files, exactly as the main-module copy does: an alias that
+	// collides with a sibling declaration makes the exported package fail
+	// to build.
+	var h2reserved map[string]bool
+	if bytes.Contains(data, []byte(h2extendedConnectMethod)) {
+		h2reserved = h2PackageReserved(c.absSrcDir(p), filepath.Join(c.staging, filepath.FromSlash(p.src)))
+	}
+	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, h2reserved)
+	if h2Overlaps(edits, h2edits) {
+		return nil, false, fmt.Errorf("overlapping extended-CONNECT rewrite")
+	}
+	edits = append(edits, h2edits...)
+	if len(h2edits) > 0 && !lowered && c.packageDeclaresExtendedConnect(p, name) {
+		return nil, false, fmt.Errorf("ambiguous extended-CONNECT opt-in in %s: package declares %s and %s calls it, so eject cannot tell the fork method from the user method", p.src, h2extendedConnectMethod, name)
+	}
 	embeds := false
 	for _, imp := range f.Imports {
 		importPath, err := strconv.Unquote(imp.Path.Value)
@@ -550,6 +625,11 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		start := fset.Position(imp.Path.Pos()).Offset
 		edits = append(edits, textEdit{start, start + len(imp.Path.Value), strconv.Quote(target)})
 	}
+	if h2uses {
+		if _, err := c.supportImport("logos/net/http"); err != nil {
+			return nil, false, err
+		}
+	}
 	fixed, ok := applyTextEdits(data, edits)
 	if !ok {
 		return nil, false, fmt.Errorf("overlapping import edits")
@@ -565,6 +645,9 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	if err := c.writeFile(src, dst, mainBytes); err != nil {
 		return nil, false, err
 	}
+	if lowered {
+		c.markDecided(p, strings.TrimSuffix(outputName, ".go"))
+	}
 	if !p.vendored {
 		c.format = append(c.format, dst)
 	}
@@ -578,6 +661,90 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		}
 	}
 	return patterns, true, nil
+}
+
+// modeDependentSupportLowering reports whether a toolchain support package
+// mixes ejected-mode source selection with const-if lowering: one of its
+// LoGOs sources carries a logosejected build constraint while another
+// holds a const-if or const-switch. The support copy ships host lowering
+// without the ejected tag, so such a package cannot lower the same way in
+// both modes.
+func modeDependentSupportLowering(read func(name string) ([]byte, error), names []string) bool {
+	var twin, branch bool
+	for _, name := range names {
+		if !isSupportLogosFile(name) {
+			continue
+		}
+		data, err := read(name)
+		if err != nil {
+			continue
+		}
+		if selectsEjectedMode(data) {
+			twin = true
+		}
+		if bytes.Contains(data, []byte("const if")) || bytes.Contains(data, []byte("const switch")) {
+			branch = true
+		}
+		if twin && branch {
+			return true
+		}
+	}
+	return false
+}
+
+// selectsEjectedMode reports whether a LoGOs source mentions the ejected
+// build tag in its header constraint. Only the header parses: the body
+// may hold LoGOs syntax the Go parser rejects.
+func selectsEjectedMode(data []byte) bool {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", data, parser.PackageClauseOnly|parser.ParseComments)
+	if err != nil {
+		return false
+	}
+	expr, err := ownedHeaderExpr(f)
+	if err != nil || expr == nil {
+		return false
+	}
+	var tags []string
+	collectConstraintTags(expr, &tags)
+	for _, tag := range tags {
+		if tag == "logosejected" {
+			return true
+		}
+	}
+	return false
+}
+
+// packageDeclaresExtendedConnect reports whether any handwritten Go file
+// of the support source package other than name declares the extended
+// CONNECT method name. Lowered files carry the compiler's own ambiguity
+// verification, so only handwritten sources need this package-wide check:
+// the text rewrite cannot tell a genuine server opt-in from a same-named
+// user method in a sibling file.
+func (c *supportCopy) packageDeclaresExtendedConnect(p supportSourcePackage, name string) bool {
+	entries, err := c.readDir(p)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		other := entry.Name()
+		if entry.IsDir() || other == name || !strings.HasSuffix(other, ".go") || strings.HasSuffix(other, "_test.go") {
+			continue
+		}
+		data, err := c.readOriginal(p, other)
+		if err != nil {
+			continue
+		}
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, other, data, 0)
+		if err != nil {
+			continue
+		}
+		if h2DefinesExtendedConnect(f) {
+			return true
+		}
+	}
+	return false
 }
 
 // copyAsset copies one non-Go build asset. Vendored assets keep the rooted

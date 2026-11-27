@@ -10,11 +10,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
+	"golang.org/x/mod/modfile"
 )
 
 func TestEjectIndependentTestGraphs(t *testing.T) {
@@ -292,5 +296,124 @@ func TestSupportDestinationsCollision(t *testing.T) {
 		if err.Error() != want {
 			t.Errorf("supportDestinations(%v) error = %q, want %q", paths, err.Error(), want)
 		}
+	}
+}
+
+func TestEjectSupportRootsSkipsUnusedHTTP(t *testing.T) {
+	plain := &load.Package{PackagePublic: load.PackagePublic{ImportPath: "example.com/plain", Imports: []string{"net/http"}}}
+	plan := &ejectPlan{main: &ejectModule{pkgs: []*load.Package{plain}}}
+	roots := ejectSupportRoots(plan)
+	for _, r := range roots {
+		if r == "logos/net/http" {
+			t.Errorf("stock net/http import pulled %s without a rewrite", r)
+		}
+	}
+	if !slices.Equal(roots, []string{"logos/rt"}) {
+		t.Errorf("roots = %v, want only the fixed runtime root", roots)
+	}
+}
+
+func TestEjectDiscoverDirsCoversUnloadable(t *testing.T) {
+	saved := cfg.GOROOT
+	t.Cleanup(func() { cfg.GOROOT = saved })
+	cfg.GOROOT = filepath.Join("fake", "goroot")
+	a := &load.Package{PackagePublic: load.PackagePublic{
+		Dir: "fake/goroot/src/logos/a", ImportPath: "logos/a",
+		Goroot: true, Standard: true,
+	}}
+	plan := &ejectPlan{provenance: map[string][]*load.Package{"logos/a": {a}}}
+	unloadable := map[string]bool{"logos/b": true}
+	dirs := ejectDiscoverDirs(plan, unloadable)
+	want := filepath.Join("fake", "goroot", "src", "logos", "b")
+	found := false
+	for _, d := range dirs {
+		if d == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("discover dirs = %q, want unloadable dir %q", dirs, want)
+	}
+}
+
+func TestRebaseAbsoluteReplaceTargets(t *testing.T) {
+	root := t.TempDir()
+	mainDir := filepath.Join(root, "main")
+	outDir := filepath.Join(root, "out")
+	for _, d := range []string{filepath.Join(mainDir, "testonly"), filepath.Join(outDir, "testonly")} {
+		if err := os.MkdirAll(d, 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	absTarget := filepath.Join(mainDir, "testonly")
+	mainMod := "module example.com/ejectabs\n\ngo 1.27\n\nrequire example.com/testonly v0.0.0\n\nreplace example.com/testonly => " + strconv.Quote(absTarget) + "\n"
+	if err := os.WriteFile(filepath.Join(mainDir, "go.mod"), []byte(mainMod), 0666); err != nil {
+		t.Fatal(err)
+	}
+	depDir := filepath.Join(root, "dep")
+	if err := os.MkdirAll(depDir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	depMod := "module example.com/deptestdep\n\ngo 1.27\n\nrequire example.com/testonly v0.0.0\n\nreplace example.com/testonly => " + strconv.Quote(absTarget) + "\n"
+	if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte(depMod), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if keep := localReplaceDirs(mainDir); !keep["testonly"] {
+		t.Errorf("localReplaceDirs = %v, want testonly kept", keep)
+	}
+	f := parseGoModFile(filepath.Join(mainDir, "go.mod"))
+	rebaseLocalReplaces(f, mainDir, outDir, nil)
+	if got := replacePath(f, "example.com/testonly"); got != "./testonly" {
+		t.Errorf("main replace = %q, want %q", got, "./testonly")
+	}
+	g := parseGoModFile(filepath.Join(depDir, "go.mod"))
+	plan := &ejectPlan{main: &ejectModule{dir: mainDir}}
+	rebaseDepReplacesOnMain(g, map[string]string{}, plan, depDir, outDir)
+	got := replacePath(g, "example.com/testonly")
+	if got == "" {
+		t.Fatal("dep replace dropped")
+	}
+	if filepath.IsAbs(got) {
+		t.Errorf("dep replace still absolute: %q", got)
+	}
+	if abs, err := filepath.Abs(filepath.Join(depDir, filepath.FromSlash(got))); err != nil || abs != filepath.Join(outDir, "testonly") {
+		t.Errorf("dep replace = %q, resolves to %v, want %v", got, abs, filepath.Join(outDir, "testonly"))
+	}
+}
+
+func replacePath(f *modfile.File, old string) string {
+	for _, r := range f.Replace {
+		if r.Old.Path == old {
+			return r.New.Path
+		}
+	}
+	return ""
+}
+
+func TestCopyDataFileAvoidsSiblingAlias(t *testing.T) {
+	srcDir := t.TempDir()
+	dstDir := t.TempDir()
+	sibling := "package p\n\nconst ejectedhttp = 1\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "sibling.go"), []byte(sibling), 0666); err != nil {
+		t.Fatal(err)
+	}
+	caller := "package p\n\nimport \"net/http\"\n\nfunc enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "caller.go"), []byte(caller), 0666); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dstDir, "caller.go")
+	if _, err := copyDataFile(filepath.Join(srcDir, "caller.go"), dst, map[string]map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), `ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("copied file does not avoid the sibling name:\n%s", got)
+	}
+	if !strings.Contains(string(got), `ejectedhttp2.RequireExtendedConnect("s", s)`) {
+		t.Errorf("delegation does not use the reserved alias:\n%s", got)
 	}
 }
