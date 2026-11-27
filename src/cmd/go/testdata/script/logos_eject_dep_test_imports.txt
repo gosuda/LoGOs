@@ -22,6 +22,11 @@ exists out/p/p_test.go
 exists out/p/engines_test.go
 grep '^//go:build engines' out/p/engines_test.go
 
+# The export must stand alone: drop the source nested module before
+# running the exported tests, so a replace that still points at the
+# checkout fails instead of passing.
+rm testonly
+
 cd out
 go build ./...
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
