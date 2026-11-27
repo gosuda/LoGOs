@@ -49,6 +49,8 @@ cd ws/g
 go build ./...
 go run .
 stdout '^from-logos$'
+go fmt -n main.go
+stdout 'gofmt'
 cd ../..
 
 # Excluded commands keep upstream text inside a LoGOs module.
@@ -60,6 +62,8 @@ cp stdout $WORK/go-goroot.txt
 logos env GOROOT
 cp stdout $WORK/logos-goroot.txt
 cmp $WORK/go-goroot.txt $WORK/logos-goroot.txt
+go fmt ./...
+! stderr 'unknown command'
 cd ..
 
 # A pure Go module is untouched.

@@ -28,9 +28,10 @@ func IsLogosOnlyCommand(name string) bool {
 
 // IsLogosRelaunchExcluded reports whether name is a command that never
 // re-executes as logos. Their text stays byte-identical to upstream.
+// fmt formats .go files and ignores .lgo files without re-executing.
 func IsLogosRelaunchExcluded(name string) bool {
 	switch name {
-	case "version", "env", "help", "bug", "telemetry":
+	case "version", "env", "help", "bug", "telemetry", "fmt":
 		return true
 	}
 	return false
