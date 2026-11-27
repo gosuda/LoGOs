@@ -93,17 +93,26 @@ stdout '^nested ready$'
 stderr 'fork_stdlib_api'
 cd ..
 
-# A same-named user method that takes arguments is refused when grouped:
-# lowering binds its callee through a marked temporary the rewrite
-# trusts by spelling, so the check fails closed instead of emitting a
-# guard call the extra argument cannot satisfy.
+# A same-named user method that takes arguments ejects untouched: the
+# opt-in takes no arguments, the direct rewrite needs zero arguments,
+# and a lowered capture used with arguments keeps its binding, so an
+# argument-bearing call can never be the genuine call and keeps its own
+# behavior in the export, which upstream Go builds.
 cd withargs
 logos run .
 stdout '^withargs ready$'
-! logos eject -o out
-stderr 'fork_stdlib_api'
-! exists out
-cd ..
+logos eject -o out
+exists out/main.go
+grep 'm.EnableHTTP2ExtendedConnect' out/main.go
+! grep 'RequireExtendedConnect' out/main.go
+cd out
+go build ./...
+go run .
+stdout '^withargs ready$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^withargs ready$'
+cd ../..
 
 # A sibling file declaring the fresh alias at package level does not
 # break the export: the support import alias avoids every package-level
@@ -142,6 +151,43 @@ go build ./...
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
 exec env -u GOROOT $UPROOT1272/bin/go run .
 stdout '^gouser ready: 1$'
+cd ../..
+
+# A plain Go direct call with arguments ejects untouched: a file without
+# net/http never reaches the rewrite, and the typed check tells the user
+# method apart from the fork-only opt-in.
+cd gouserargs
+logos build ./...
+logos eject -o out
+grep 'm.EnableHTTP2ExtendedConnect\(2\)' out/main.go
+cd out
+go build ./...
+go run .
+stdout '^gouserargs ready: 2$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^gouserargs ready: 2$'
+cd ../..
+
+# A server capture through a local that shadows the support import alias
+# is still the server method: the verifier approves it by type, so the
+# rewrite rebinds it through a fresh alias instead of skipping it by
+# spelling, while the saved helper value in the same file keeps working.
+cd shadowserver
+logos run .
+stdout '^helper used$'
+stdout '^shadow server ready$'
+logos eject -o out
+grep 'ejectedhttp.RequireExtendedConnectFunc\("logohttp", logohttp\)' out/main.go
+grep ':= logohttp.EnableHTTP2ExtendedConnect' out/main.go
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^helper used$'
+stdout '^shadow server ready$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+env GODEBUG=
 cd ../..
 
 # The ejected server really speaks extended CONNECT on the wire: with
@@ -606,6 +652,29 @@ func main() {
 	fmt.Println("gouser ready:", m.Hits)
 }
 
+-- gouserargs/go.mod --
+module example.com/h2gouserargs
+
+go 1.27
+
+-- gouserargs/main.go --
+package main
+
+import "fmt"
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. A direct call with arguments can never be
+// the zero-argument opt-in, so it ejects untouched.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect(level int) { m.Hits += level }
+
+func main() {
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect(2)
+	fmt.Println("gouserargs ready:", m.Hits)
+}
+
 -- withargs/go.mod --
 module example.com/h2withargs
 
@@ -882,4 +951,49 @@ func main() {
 	Touch[point](m, point{X: 1})
 	Touch[int](m, 2)
 	fmt.Println("ctuser meter:", m.Hits)
+}
+
+-- shadowserver/go.mod --
+module example.com/h2shadowserver
+
+go 1.27
+
+-- shadowserver/main.lgo --
+
+// Command shadowserverdemo groups the opt-in on a server that shadows
+// the support import alias, beside a saved helper value deferred in
+// the same file.
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	logohttp "logos/net/http"
+)
+
+func useHelper(srv *http.Server) {
+	enable := logohttp.EnableHTTP2ExtendedConnect
+	defer logohttp.EnableHTTP2ExtendedConnect(srv)
+	if err := enable(srv); err != nil {
+		panic(err)
+	}
+	fmt.Println("helper used")
+}
+
+func run() error {
+	logohttp := &http.Server{Addr: "127.0.0.1:0"}
+	go group (context.Background()) {
+		go logohttp.EnableHTTP2ExtendedConnect()
+	}
+	fmt.Println("shadow server ready")
+	return nil
+}
+
+func main() {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	useHelper(srv)
+	if err := run(); err != nil {
+		panic(err)
+	}
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
 )
@@ -123,6 +124,11 @@ func TestCgoOnlyGapSkipsPureGoClosure(t *testing.T) {
 }
 
 func TestCgoOnlyGapPureGoHelper(t *testing.T) {
+	// The gap is a cgo-off refusal: pin the precondition so the test
+	// does not depend on the ambient toolchain default.
+	saved := cfg.BuildContext
+	t.Cleanup(func() { cfg.BuildContext = saved })
+	cfg.BuildContext.CgoEnabled = false
 	dir := t.TempDir()
 	cgo := filepath.Join(dir, "helper_linux.go")
 	if err := os.WriteFile(cgo, []byte("package p\nimport \"C\"\nimport _ \"logos/ascii\"\n"), 0666); err != nil {
@@ -139,5 +145,40 @@ func TestCgoOnlyGapPureGoHelper(t *testing.T) {
 	msg, ok := cgoOnlyLogosGap(withlgo, plan)
 	if !ok || !strings.Contains(msg, "logos/json") {
 		t.Errorf("LoGOs helper gap = %q, %v; want a gap naming logos/json", msg, ok)
+	}
+}
+
+// A cgo-only inactive import is no gap when cgo is enabled: the file is
+// inactive by platform, not by toolchain, so the CGO_ENABLED=1 advice
+// cannot help and eject must not refuse.
+func TestCgoOnlyGapHonorsCgoEnabled(t *testing.T) {
+	saved := cfg.BuildContext
+	t.Cleanup(func() { cfg.BuildContext = saved })
+	dir := t.TempDir()
+	file := filepath.Join(dir, "helper_linux.go")
+	if err := os.WriteFile(file, []byte("package p\nimport \"C\"\nimport _ \"logos/json\"\n"), 0666); err != nil {
+		t.Fatal(err)
+	}
+	plan := &ejectPlan{provenance: map[string][]*load.Package{}}
+	cfg.BuildContext.CgoEnabled = true
+	if msg, ok := cgoOnlyLogosGap(file, plan); ok {
+		t.Errorf("cgo gap with cgo enabled: %s", msg)
+	}
+	cfg.BuildContext.CgoEnabled = false
+	if _, ok := cgoOnlyLogosGap(file, plan); !ok {
+		t.Errorf("cgo gap with cgo disabled reported no gap, want a refusal")
+	}
+}
+
+// A platform-only package reached transitively through a newly discovered
+// closure stays out of provenance: the variant inventory lowers it with a
+// selecting context instead of aborting the eject.
+func TestCheckDiscoveredPackageErrorsKeepsTransitiveNoGo(t *testing.T) {
+	a := &load.Package{PackagePublic: load.PackagePublic{ImportPath: "logos/a", Incomplete: true}}
+	b := &load.Package{PackagePublic: load.PackagePublic{ImportPath: "logos/b", Incomplete: true, Error: &load.PackageError{Err: &load.NoGoError{}}}}
+	unloadable := map[string]bool{}
+	checkDiscoveredPackageErrors([]*load.Package{a, b}, map[string]bool{"logos/a": true}, unloadable)
+	if !unloadable["logos/b"] {
+		t.Errorf("transitive platform-only logos/b not recorded unloadable: %v", unloadable)
 	}
 }

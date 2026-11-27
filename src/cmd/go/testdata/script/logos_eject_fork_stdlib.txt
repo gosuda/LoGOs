@@ -21,6 +21,23 @@ logos build ./...
 stderr 'server\.lgo:5.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
 ! exists out
 
+cd ../wrapper
+# A file that defines the method itself is skipped by the text rewrite,
+# so its delegate call to the real method must not be exempted either:
+# approving it would emit code upstream Go rejects. Eject fails here
+# instead of writing the unrewritten call.
+logos build ./...
+! logos eject -o out
+stderr 'server\.lgo:10.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
+! exists out
+
+cd ../rawimport
+# A raw net/http import literal names the same path the decoded emitter
+# accepts, so the direct call keeps its exemption and ejects.
+logos build ./...
+logos eject -o out
+exists out/server.go
+! grep 'EnableHTTP2ExtendedConnect' out/server.go
 cd ../samename
 # A file that declares the method name itself is skipped by the eject
 # rewrite, so verification must refuse even the genuine server call in
@@ -65,6 +82,37 @@ func KeepAlive(s *http.Server) {
 	s.SetKeepAlivesEnabled(true)
 }
 
+-- wrapper/go.mod --
+module example.com/h2wrapper
+
+go 1.27
+
+-- wrapper/server.lgo --
+package h2wrapper
+
+import "net/http"
+
+type Server struct {
+	*http.Server
+}
+
+func (s *Server) EnableHTTP2ExtendedConnect() {
+	s.Server.EnableHTTP2ExtendedConnect()
+}
+
+-- rawimport/go.mod --
+module example.com/h2rawimport
+
+go 1.27
+
+-- rawimport/server.lgo --
+package h2rawimport
+
+import `net/http`
+
+func Enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
 -- expression/go.mod --
 module example.com/h2expression
 
