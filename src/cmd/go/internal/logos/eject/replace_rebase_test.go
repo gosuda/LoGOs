@@ -259,6 +259,9 @@ func TestRebaseDepWildcardKeepsVersionedPin(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A kept nested module carries its go.mod into the export; the
+	// rebase only follows targets that hold one.
+	writeGoMod(t, outNested, "module example.com/nested\n\ngo 1.27\n")
 	path := writeGoMod(t, depDir, "module example.com/deptestdep\n\ngo 1.27\n\n"+
 		"replace example.com/lib => "+strconv.Quote(nested)+"\n"+
 		"replace example.com/lib v2.0.0+incompatible => example.com/other v2.1.0+incompatible\n")
@@ -379,4 +382,60 @@ func TestRebaseDepWildcardFollowedByTwoLocalPins(t *testing.T) {
 	if _, err := modfile.Parse(path, formatted, nil); err != nil {
 		t.Fatalf("reparsing rewritten go.mod: %v\n%s", err, formatted)
 	}
+}
+
+// A replacement that names a parent directory is left alone when the
+// export keeps a child module but omits its parent: the copy creates
+// the parent directories on the way to the kept child, so a directory
+// check alone mistakes the parent for the copied module. Only a
+// target holding the module's go.mod is rebased.
+func TestRebaseDepSkipsParentWithoutGoMod(t *testing.T) {
+	root := t.TempDir()
+	mainDir := filepath.Join(root, "main")
+	depDir := filepath.Join(root, "dep")
+	outDir := filepath.Join(root, "out")
+	// Source tree: outer is its own module, inner a kept child module.
+	writeGoMod(t, filepath.Join(mainDir, "outer"), "module example.com/outer\n\ngo 1.27\n")
+	writeGoMod(t, filepath.Join(mainDir, "outer", "inner"), "module example.com/inner\n\ngo 1.27\n")
+	// Export tree: the copy holds the child module at its main-relative
+	// path; the parent directory exists only as its ancestor and has
+	// no go.mod.
+	writeGoMod(t, filepath.Join(outDir, "outer", "inner"), "module example.com/inner\n\ngo 1.27\n")
+	outer := filepath.Join(mainDir, "outer")
+	inner := filepath.Join(mainDir, "outer", "inner")
+	path := writeGoMod(t, depDir, "module example.com/deptestdep\n\ngo 1.27\n\n"+
+		"replace example.com/outer => "+strconv.Quote(outer)+"\n"+
+		"replace example.com/inner => "+strconv.Quote(inner)+"\n")
+	g := parseGoModFile(path)
+	plan := &ejectPlan{main: &ejectModule{dir: mainDir}}
+	rebaseDepReplacesOnMain(g, map[string]string{}, plan, depDir, outDir)
+	outerGot := liveOuterReplace(g, "example.com/outer")
+	if outerGot == nil {
+		t.Fatal("outer replace lost")
+	}
+	if outerGot.New.Path != outer {
+		t.Errorf("outer replace = %q, want untouched %q", outerGot.New.Path, outer)
+	}
+	innerGot := liveOuterReplace(g, "example.com/inner")
+	if innerGot == nil {
+		t.Fatal("inner replace lost")
+	}
+	if want := "./" + toSlashRel(t, depDir, filepath.Join(outDir, "outer", "inner")); innerGot.New.Path != want {
+		t.Errorf("inner replace = %q, want %q", innerGot.New.Path, want)
+	}
+}
+
+// liveOuterReplace returns the surviving replace directive for an
+// arbitrary old path, skipping the zeroed ghosts the vendored
+// DropReplace leaves in f.Replace.
+func liveOuterReplace(f *modfile.File, oldPath string) *modfile.Replace {
+	for _, r := range f.Replace {
+		if r.Old.Path == "" {
+			continue
+		}
+		if r.Old.Path == oldPath {
+			return r
+		}
+	}
+	return nil
 }

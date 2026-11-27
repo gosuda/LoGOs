@@ -2970,6 +2970,12 @@ func rebaseDepReplacesOnMain(f *modfile.File, ejected map[string]string, plan *e
 		if fi, err := os.Stat(cand); err != nil || !fi.IsDir() {
 			continue
 		}
+		// The copy creates ancestor directories of a kept nested
+		// module, so the candidate directory alone does not prove the
+		// replacement module was copied: only a go.mod marks its root.
+		if fi, err := os.Stat(filepath.Join(cand, "go.mod")); err != nil || fi.IsDir() {
+			continue
+		}
 		rel, err := filepath.Rel(absDst, cand)
 		if err != nil {
 			base.Fatalf("logos eject: %v", err)
