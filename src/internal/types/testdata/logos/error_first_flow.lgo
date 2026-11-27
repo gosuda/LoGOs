@@ -831,3 +831,24 @@ func joinFieldCheckProvesAfterJoinSwapped(cond bool) {
 	use(h.stats)
 	_ = err
 }
+
+type heldSplit struct {
+	stats int
+	errA  error
+	errB  error
+}
+
+// Branches that pair one result with different errors leave no single
+// guard: a literal that breaks one guard makes the caller read fail.
+func joinSplitGuardsBrokenByLiteral(cond bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	func() {
+		h.errA = nil
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+}
