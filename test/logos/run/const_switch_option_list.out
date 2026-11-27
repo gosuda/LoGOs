@@ -2,3 +2,4 @@ ok list-opt-string
 ok list-opt-bool
 ok list-opt-other-float
 ok list-opt-other-int
+ok list-opt-int-value

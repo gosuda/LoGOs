@@ -30,10 +30,13 @@ func optPick[T any](v T) string {
 }
 
 func main() {
+	optPresent := 41
+	var optInt int? = optPresent
 	checkOptList("list-opt-string", optPick("x") == "opt-or-string", optPick("x"), "opt-or-string")
 	checkOptList("list-opt-bool", optPick(true) == "bool", optPick(true), "bool")
 	checkOptList("list-opt-other-float", optPick(1.5) == "other", optPick(1.5), "other")
 	checkOptList("list-opt-other-int", optPick(1) == "other", optPick(1), "other")
+	checkOptList("list-opt-int-value", optPick(optInt) == "opt-or-string", optPick(optInt), "opt-or-string")
 	if failedOptList {
 		os.Exit(1)
 	}
