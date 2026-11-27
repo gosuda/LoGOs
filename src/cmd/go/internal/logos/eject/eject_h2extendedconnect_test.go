@@ -29,7 +29,7 @@ func enable(s *http.Server) {
 	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
 		t.Errorf("no helper call with the receiver as argument:\n%s", got)
 	}
-	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/net/http"`) {
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
 		t.Errorf("missing ejectedhttp support import:\n%s", got)
 	}
 	if strings.Contains(got, "os.Getenv") || strings.Contains(got, "strings.Contains") {
@@ -84,7 +84,7 @@ func enable(s *http.Server) {
 	if strings.Count(got, `"os"`) != 1 || strings.Count(got, `"strings"`) != 1 {
 		t.Errorf("duplicate imports:\n%s", got)
 	}
-	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/net/http"`) {
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
 		t.Errorf("missing ejectedhttp support import:\n%s", got)
 	}
 	if strings.Contains(got, "os.Getenv") || strings.Contains(got, "strings.Contains") {
@@ -120,7 +120,7 @@ func enable(s *http.Server) {
 	if !strings.Contains(got, `ejectedhttp.RequireExtendedConnect("s", s)`) {
 		t.Errorf("no hygienic helper call with the receiver as argument:\n%s", got)
 	}
-	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/net/http"`) {
+	if !strings.Contains(got, `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"`) {
 		t.Errorf("missing ejectedhttp support import:\n%s", got)
 	}
 }

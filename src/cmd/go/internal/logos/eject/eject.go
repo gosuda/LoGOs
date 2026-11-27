@@ -164,6 +164,13 @@ type ejectPlan struct {
 	// they stay out of logos and deps; they still need compiler lowering
 	// into staging, which phaseOneRoots and makeEjectStagingDirs arrange.
 	gorootLogos []*load.Package
+	// unloadable holds import paths of GOROOT logos/* packages the host
+	// load cannot resolve (no buildable source for this target, for
+	// example a platform-only package reached through an inactive Go
+	// import). They stay out of provenance, but their host-inactive
+	// sources still need helper lowering under a selecting context, so
+	// the variant inventory walks them.
+	unloadable []string
 }
 
 // testBuild holds the test variant of one package for emission of its
@@ -208,6 +215,11 @@ func ejectToDir(ctx context.Context, out string) {
 		if err != nil {
 			base.Fatalf("logos eject: %v", err)
 		}
+		// base.Fatalf exits without running defers, so a later cgo
+		// refusal would leak the staging tree. Register the same
+		// cleanup at exit as well as on the normal return path.
+		stagingCopy := staging
+		base.AtExit(func() { _ = os.RemoveAll(stagingCopy) })
 		defer func() {
 			if err := os.RemoveAll(staging); err != nil {
 				base.Errorf("logos eject: %v", err)
@@ -246,6 +258,8 @@ func ejectToDir(ctx context.Context, out string) {
 	}
 	plan := arrangeEjectPlan(pkgs)
 	builds := collectTestBuilds(moduleLoader, ctx, opts, plan)
+	discoverGoImportLogos(moduleLoader, ctx, opts, plan)
+	plan.gorootLogos = collectGorootLogos(plan.provenance)
 	makeEjectStagingDirs(plan, staging, builds)
 	buildEjectRoots(moduleLoader, ctx, phaseOneRoots(plan))
 	if len(builds) > 0 {
@@ -816,7 +830,7 @@ func writeEjectedTree(ctx context.Context, plan *ejectPlan, staging, out string)
 	var rtDir string
 	if usedRT {
 		rtDir = filepath.Join(out, "_logos_deps", "rt")
-		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan)
+		writeSupportModule(out, goVersionOf(parseGoModFile(filepath.Join(out, "go.mod"))), plan, staging)
 		addSupportRequire(filepath.Join(out, "go.mod"), "./_logos_deps/rt")
 		materializeGorootLogos(plan, staging, out, rtDir)
 	}
@@ -859,8 +873,12 @@ func supportCandidates(imp string) []string {
 	if !ok || suffix == "" || strings.HasPrefix(suffix, "internal/") {
 		return nil
 	}
+	cands := []string{"logos/" + suffix, "logos/rt/" + suffix}
+	if rest, ok := strings.CutPrefix(suffix, "logos/"); ok && rest != "" {
+		cands = append(cands, "logos/"+rest)
+	}
 	var out []string
-	for _, cand := range []string{"logos/" + suffix, "logos/rt/" + suffix} {
+	for _, cand := range cands {
 		rel, ok := supportRelPath(cand)
 		if !ok {
 			continue
@@ -920,6 +938,27 @@ func ejectedSupportRefs(root string) []string {
 // pure-Go packages are copied from GOROOT. A referenced package with no
 // lowered output is a loud failure, never a dangling import. The support
 // module ships no tests, so test files stay out on both paths.
+// hasEjectedGoFiles reports whether dir already holds ejected Go sources.
+// The support copy writes every GOROOT package it reaches with ejected-guard
+// specialization and exclusion; materializing the same package again from
+// staging without that specialization would overwrite the correct files and
+// resurrect excluded ones (for example !logosejected twins).
+func hasEjectedGoFiles(dir string) bool {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".go") {
+			return true
+		}
+	}
+	return false
+}
+
 func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
 	done := map[string]bool{}
 	queue := ejectedSupportRefs(out)
@@ -929,7 +968,6 @@ func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
 		if done[path] || gorootCovered(path) {
 			continue
 		}
-		done[path] = true
 		recs := plan.provenance[path]
 		if len(recs) == 0 {
 			continue
@@ -962,6 +1000,12 @@ func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
 		dst := rtDir
 		if rel != "" {
 			dst = filepath.Join(rtDir, filepath.FromSlash(rel))
+		}
+		// The support copy already emitted this package with guard
+		// specialization; writing it again from staging would clobber the
+		// residual and resurrect excluded files.
+		if hasEjectedGoFiles(dst) {
+			continue
 		}
 		if len(names) == 0 {
 			// Pure-Go packages ride the support closure, which copies
@@ -2226,17 +2270,14 @@ func groupedImportEdits(data []byte, fset *token.FileSet, gen *ast.GenDecl, uses
 	return edits
 }
 
-// supportRelPath maps a logos/ import path to its directory relative to
-// the support module root, the same mapping the import rewrite and the
-// support copy share. logos/rt is the root itself, so it maps to "".
-// A leading rt/ segment is trimmed, so logos/rt/json and logos/json both
-// map to "json". It reports false for paths outside logos/.
+// supportRelPath maps a toolchain package to its directory in the support
+// module. The runtime stays at the root; its json package is distinct
+// from the logos/json twin. Arena and sync keep their existing paths.
 
 // supportDestinations maps each closure member to its destination directory
 // relative to the support module root. Two distinct members mapping to one
-// destination stop the eject, so logos/json and logos/rt/json can never
-// silently overwrite each other. The input order does not matter: members
-// are considered in sorted order, so the reported pair is deterministic.
+// destination stop eject instead of silently overwriting each other.
+// Members are considered in sorted order so the reported pair is deterministic.
 func supportDestinations(paths []string) (map[string]string, error) {
 	sorted := slices.Clone(paths)
 	slices.Sort(sorted)
@@ -2256,13 +2297,21 @@ func supportDestinations(paths []string) (map[string]string, error) {
 
 func supportRelPath(path string) (string, bool) {
 	rest, ok := strings.CutPrefix(path, "logos/")
-	if !ok {
+	if !ok || rest == "" {
 		return "", false
 	}
 	if rest == "rt" {
 		return "", true
 	}
-	return strings.TrimPrefix(rest, "rt/"), true
+	if sub, ok := strings.CutPrefix(rest, "rt/"); ok {
+		return sub, true
+	}
+	for _, fixed := range []string{"arena", "sync"} {
+		if rest == fixed || strings.HasPrefix(rest, fixed+"/") {
+			return rest, true
+		}
+	}
+	return "logos/" + rest, true
 }
 func supportPathEdit(fset *token.FileSet, imp *ast.ImportSpec, uses *bool) (textEdit, bool) {
 	path, err := strconv.Unquote(imp.Path.Value)
@@ -2366,7 +2415,9 @@ func applyTextEdits(data []byte, edits []textEdit) ([]byte, bool) {
 }
 
 // writeSupportModule writes the shared, self-contained support module.
-func writeSupportModule(out, goVer string, plan *ejectPlan) {
+// Staging carries the lowered toolchain outputs the copy reads for
+// LoGOs sources; overlay insertions and deletions resolve through it.
+func writeSupportModule(out, goVer string, plan *ejectPlan, staging string) {
 	src := filepath.Join(cfg.GOROOT, "src")
 	dst := filepath.Join(out, "_logos_deps", "rt")
 	roots := ejectSupportRoots(plan)
@@ -2374,7 +2425,7 @@ func writeSupportModule(out, goVer string, plan *ejectPlan) {
 		roots = append(roots, "logos/net/http")
 		slices.Sort(roots)
 	}
-	if err := copyEjectedSupport(src, dst, roots); err != nil {
+	if err := copyEjectedSupport(src, staging, dst, roots); err != nil {
 		base.Fatalf("logos eject: %v", err)
 	}
 	copyJSONScanSupport(filepath.Join(src, "internal", "jsonscan"), filepath.Join(dst, "internal", "jsonscan"))
@@ -2388,7 +2439,7 @@ func writeSupportModule(out, goVer string, plan *ejectPlan) {
 // the helper import to staged files the loader inventories never describe,
 // so the seed-based roots miss logos/net/http for exactly those outputs.
 func ejectedUsesSupportHTTP(out string) bool {
-	want := []byte(strconv.Quote(rtModulePath + "/net/http"))
+	want := []byte(strconv.Quote(rtModulePath + "/logos/net/http"))
 	found := false
 	_ = filepath.WalkDir(out, func(path string, e fs.DirEntry, err error) error {
 		if err != nil || found {
