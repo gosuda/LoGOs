@@ -67,6 +67,9 @@ cp stdout $WORK/logos-goroot.txt
 cmp $WORK/go-goroot.txt $WORK/logos-goroot.txt
 go fmt ./...
 ! stderr 'unknown command'
+go help lint
+stdout '^usage: logos lint'
+! stderr .
 cd ..
 
 # A pure Go module is untouched.

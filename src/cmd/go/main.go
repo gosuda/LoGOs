@@ -124,6 +124,11 @@ func main() {
 
 	cfg.CmdName = args[0] // for error messages
 	if args[0] == "help" {
+		topic := ""
+		if len(args) > 1 {
+			topic = args[1]
+		}
+		cfg.MaybeRelaunchForHelpTopic(topic)
 		counter.Inc("go/subcommand:" + strings.Join(append([]string{"help"}, args[1:]...), "-"))
 		help.Help(os.Stdout, args[1:])
 		return

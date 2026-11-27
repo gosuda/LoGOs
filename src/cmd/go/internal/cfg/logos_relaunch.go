@@ -90,6 +90,18 @@ func MaybeRelaunchForArgs(args []string) {
 	}
 }
 
+// MaybeRelaunchForHelpTopic re-executes as logos when the help topic
+// names a LoGOs-only subcommand, so go help describes that command.
+// A go help with no LoGOs-only topic keeps the upstream text.
+func MaybeRelaunchForHelpTopic(topic string) {
+	if Logos || topic == "" || !relaunchAllowed() {
+		return
+	}
+	if IsLogosOnlyCommand(topic) {
+		RelaunchAsLogos("logos-only command " + topic)
+	}
+}
+
 // MaybeRelaunchForDir implements the last two re-execution triggers: a
 // main-module directory the command named, or an import inside the main
 // modules, that resolves to LoGOs sources and no .go files, and a
