@@ -127,3 +127,51 @@ func (_logos_v Item) MarshalJSONTo(_logos_enc *_logos_jsontext.Encoder) error { 
 		}
 	}
 }
+
+func TestSupportCopyRewritesExtendedConnect(t *testing.T) {
+	src := t.TempDir()
+	staging := t.TempDir()
+	out := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttesth2")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	const source = "package ejecttesth2\n\nimport \"net/http\"\n\nfunc Enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "h2.go"), []byte(source), 0666); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      staging,
+		dst:          out,
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttesth2", dst: "rt/logos/ejecttesth2"}
+	if err := c.copyPackage(p); err != nil {
+		t.Fatalf("copyPackage: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(out, "rt", "logos", "ejecttesth2", "h2.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "EnableHTTP2ExtendedConnect()") {
+		t.Errorf("fork-only call survives support copy:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation:\n%s", got)
+	}
+	if !strings.Contains(got, `"github.com/gosuda/loGos/rt/logos/net/http"`) {
+		t.Errorf("support copy missing HTTP helper import:\n%s", got)
+	}
+	if _, ok := c.destinations["logos/net/http"]; !ok {
+		t.Errorf("HTTP support package not enqueued, destinations=%v", c.destinations)
+	}
+}
