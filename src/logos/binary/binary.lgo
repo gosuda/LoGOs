@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package binary is the loGo/s twin of encoding/binary for fixed-size
+// Package binary is the LoGOs twin of encoding/binary for fixed-size
 // data.
 //
 // The twin covers the fixed-size entry points of encoding/binary with
@@ -23,11 +23,7 @@
 // Mechanism: layout is derived at compile time. A comptime generic
 // walks comptime.Fields[T]() in declaration order and dispatches each
 // field with const switch over its type: the fixed-size scalars encode
-// through ByteOrder append helpers, a nested struct recurses, and a
-// blank (_) field writes zero bytes and skips on read.
-// There is no reflect, no unsafe and no per-type plan: every
-// instantiation lowers to plain field code, so Size folds to a constant
-// and a warmed call is a straight-line field walk.
+// through ByteOrder append helpers and a nested struct recurses.
 //
 // Fixed-size scalars, the enumerated array shapes, and structs of
 // those encode through comptime dispatch with no reflect, no unsafe
@@ -49,8 +45,9 @@
 // partial layout stands in for them. A foreign struct with only
 // zero-width visible fields, such as an exported struct{} beside a
 // hidden uint32, likewise keeps every byte through the original
-// encoder. Blank (_) fields take the original path with the same skip
-// semantics.
+// encoder. A struct with a blank (_) field also takes the original
+// path: the field adds its size to the layout, encodes as zero bytes
+// and is skipped on decode, as with encoding/binary.
 //
 // Mapping from the original (data any) to the twin: ReadInto and
 // Decode take *T where the original takes a pointer or slice operand,
