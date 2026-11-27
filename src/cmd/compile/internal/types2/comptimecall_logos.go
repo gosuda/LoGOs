@@ -96,6 +96,23 @@ func (check *Checker) logosTypeKind(x *operand, call *syntax.CallExpr, name stri
 		return false
 	}
 	targ := check.varType(targs[0])
+	// A read-only view names its element: `const T` depends on the
+	// parameter T, so a predicate on it waits for instantiation like a
+	// bare T does. Deciding on the wrapper would fold the constraint
+	// interface for IsInterface, or miss the struct for IsStruct, before
+	// any copy sees a concrete type.
+	for {
+		u := Unalias(targ)
+		if cv, ok := u.(*ConstView); ok {
+			targ = cv.Elem
+			continue
+		}
+		if rd, ok := u.(*ReadonlyDescendants); ok {
+			targ = rd.Elem
+			continue
+		}
+		break
+	}
 	x.expr = call
 	switch {
 	case !isValid(targ):

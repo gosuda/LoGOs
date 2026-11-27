@@ -35,3 +35,23 @@ func countInterfaceFields322[T any]() int {
 func interfaceKindRuntime322() bool {
 	return comptime /* ERROR "comptime::runtime_use" */ .IsInterface[any]()
 }
+
+type viewPair322 struct{ Value int }
+
+func genericViewIface322[T any]() int {
+	const if comptime.IsInterface[const T]() {
+		return undefinedInViewIfaceBranch322
+	} else {
+		return undefinedInViewElseBranch322
+	}
+}
+
+func genericViewStruct322[T any]() int {
+	const if comptime.IsStruct[const T]() {
+		return 0
+	} else {
+		comptime.Error("view must be struct")
+	}
+}
+
+var _ = genericViewStruct322[viewPair322]()
