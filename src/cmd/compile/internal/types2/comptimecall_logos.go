@@ -126,9 +126,9 @@ func (check *Checker) logosTypeKind(x *operand, call *syntax.CallExpr, name stri
 }
 
 // logosTypeKindBase strips the transparent wrappers a type-kind predicate
-// sees through — const views and read-only descendants — to the type that
-// decides whether the verdict waits for an instantiation. A type parameter
-// under those wrappers still defers, so the verdict follows the
+// sees through — const views, read-only descendants, and options — to the
+// type that decides whether the verdict waits for an instantiation. A type
+// parameter under those wrappers still defers, so the verdict follows the
 // instantiated type argument instead of folding against its constraint.
 func logosTypeKindBase(t Type) Type {
 	for {
@@ -137,19 +137,28 @@ func logosTypeKindBase(t Type) Type {
 			t = u.Elem
 		case *ReadonlyDescendants:
 			t = u.Elem
+		case *Option:
+			t = u.Elem
 		default:
 			return t
 		}
 	}
 }
 
-// Read-only wrappers change access, not the interface value's dynamic type.
+// Read-only wrappers change access, not the interface value's dynamic type. An
+// option the lowering keeps bare erases to its payload, so the predicate
+// answers for the payload; a wrapped option is a struct, not an interface.
 func logosInterfaceType(t Type) bool {
 	for {
 		switch u := Unalias(t).Underlying().(type) {
 		case *ConstView:
 			t = u.Elem
 		case *ReadonlyDescendants:
+			t = u.Elem
+		case *Option:
+			if !LogosOptionIsBare(u.Elem) {
+				return false
+			}
 			t = u.Elem
 		case *Interface:
 			return true

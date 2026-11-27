@@ -1195,7 +1195,7 @@ The condition MUST end at the `{` that opens the branch, so a name or `true` bef
 
 `comptime.IsStruct[T]()` MUST be a constant `const if` condition, true when the underlying type of `T` is a struct. [T-205]
 
-`comptime.IsInterface[T]()` MUST be a constant `const if` condition, true when the underlying type of `T`, after removing transparent const-view and read-only-descendant wrappers, is an interface. It includes named interfaces and value unions; pointers and other containers are not interfaces. The predicate MUST fold per instantiation or field, so a library MAY restrict runtime type-identity checks to interface values. [T-205]
+`comptime.IsInterface[T]()` MUST be a constant `const if` condition, true when the underlying type of `T`, after removing transparent const-view and read-only-descendant wrappers, is an interface. An option that the lowering keeps bare answers for its payload, and an option that the lowering wraps is not an interface. It includes named interfaces and value unions; pointers and other containers are not interfaces. The predicate MUST fold per instantiation or field, so a library MAY restrict runtime type-identity checks to interface values. [T-205]
 
 Inside a comptime generic its value MUST be taken per instantiation, and a condition built from it with `!`, `&&`, `||`, `==`, `!=` and constants MUST NOT fail `[comptime::not_constant]`. [T-205]
 
