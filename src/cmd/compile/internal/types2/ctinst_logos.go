@@ -441,8 +441,13 @@ type logosCtIfaceSite struct {
 // logosCtDeferInterfaceFormation records pos/V/T for drain-time
 // interface rejection instead of checking immediately.
 func (check *Checker) logosCtDeferInterfaceFormation(pos syntax.Pos, V, T Type) {
-	if !isValid(V) || !isValid(T) {
+	if !check.conf.Logos || !isValid(V) || !isValid(T) {
 		return
+	}
+	if _, ok := Unalias(T).(*Interface); !ok {
+		if _, ok2 := Unalias(T).Underlying().(*Interface); !ok2 {
+			return
+		}
 	}
 	check.logosCtIfaceSites = append(check.logosCtIfaceSites, logosCtIfaceSite{pos: pos, v: V, t: T})
 }
@@ -457,8 +462,11 @@ func (check *Checker) logosCtRejectInterfaceFormation(pos syntax.Pos, V, T Type)
 	if !isValid(V) || !isValid(T) {
 		return
 	}
-	named, ok := Unalias(V).(*Named)
-	if !ok || logosContainsTypeParam(Unalias(V), nil) {
+	base := Unalias(V)
+	if ptr, ok := base.(*Pointer); ok {
+		base = Unalias(ptr.Elem())
+	}
+	if _, ok := base.(*Named); !ok || logosContainsTypeParam(Unalias(V), nil) {
 		return
 	}
 	iface, ok := Unalias(T).(*Interface)
@@ -472,7 +480,7 @@ func (check *Checker) logosCtRejectInterfaceFormation(pos syntax.Pos, V, T Type)
 	}
 	for i := 0; i < iface.NumMethods(); i++ {
 		m := iface.Method(i)
-		obj, _, _ := lookupFieldOrMethod(named, false, check.pkg, m.Name(), false)
+		obj, _, _ := lookupFieldOrMethod(V, false, check.pkg, m.Name(), false)
 		fn, ok := obj.(*Func)
 		if !ok || !check.logosCtIsMethodGeneric(fn.Origin()) {
 			continue
