@@ -8,8 +8,12 @@ import (
 	"fmt"
 	"go/build"
 	"internal/logosfile"
+	"path/filepath"
 	"slices"
 	"strings"
+
+	"cmd/go/internal/cfg"
+	"cmd/go/internal/fsys"
 )
 
 // LoGo/s source classification.
@@ -83,4 +87,25 @@ func checkLogosPackage(p *build.Package, badGoFile func(string, error)) {
 		}
 		seen[stem] = name
 	}
+}
+
+// logosStandardPackageFallback reports whether an unindexed directory
+// holds a LoGOs toolchain package. The upstream fallback recognizes
+// only .go files; under an overlay a .lgo-only package stays standard
+// even when a fresh overlay file keeps it out of the index. Plain go
+// keeps the upstream answer: .lgo files never count without logos mode.
+func logosStandardPackageFallback(goroot_, path string) bool {
+	if !cfg.Logos {
+		return false
+	}
+	entries, err := fsys.ReadDir(filepath.Join(goroot_, "src", path))
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && logosfile.Is(e.Name()) {
+			return true
+		}
+	}
+	return false
 }

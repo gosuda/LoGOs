@@ -1525,7 +1525,7 @@ func (c *cfLeaf) subCall(n *syntax.CallExpr) bool {
 	}
 	if name := cfComptimeCall(n, c.run.info); name != "" {
 		switch name {
-		case "SizeOf", "AlignOf", "HasPointers":
+		case "SizeOf", "AlignOf", "HasPointers", "HasUnexported":
 			if v, ok := typeConst(c.run.info, n); ok {
 				s, e := cfCallSpan(ctx, n)
 				c.add(s, e, keepComments(ctx.buf.b, s, e, v.String()))

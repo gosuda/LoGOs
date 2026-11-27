@@ -1,0 +1,74 @@
+// run
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+type exportedOnly struct {
+	A int32
+	B float64
+}
+
+type hasHidden struct {
+	A int32
+	b int32
+}
+
+type nestedHidden struct {
+	A int32
+	In hasHidden
+}
+
+type blanked struct {
+	A int32
+	_ [2]byte
+}
+
+type hiddenArray [3]hasHidden
+
+var failed bool
+
+func check(name string, got, want bool) {
+	if got != want {
+		fmt.Println("FAIL", name, "got", got, "want", want)
+		failed = true
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func condHidden[T any]() bool {
+	const if comptime.HasUnexported[T]() {
+		return true
+	}
+	return false
+}
+
+func direct[T any]() bool {
+	return comptime.HasUnexported[T]()
+}
+
+func main() {
+	check("exported-false", direct[exportedOnly](), false)
+	check("hidden-true", direct[hasHidden](), true)
+	check("nested-true", direct[nestedHidden](), true)
+	check("blank-true", direct[blanked](), true)
+	check("array-true", direct[hiddenArray](), true)
+	check("scalar-false", direct[int32](), false)
+	check("cond-hidden-true", condHidden[hasHidden](), true)
+	check("cond-exported-false", condHidden[exportedOnly](), false)
+	check("const-hidden-true", direct[const hasHidden](), true)
+	check("option-hidden-true", direct[hasHidden?](), true)
+	check("array-option-hidden-true", direct[[2]hasHidden?](), true)
+	check("const-option-hidden-true", condHidden[const hasHidden?](), true)
+	check("option-pointer-false", direct[*hasHidden?](), false)
+	check("zero-array-false", direct[[0]hasHidden?](), false)
+	check("const-exported-false", direct[const exportedOnly](), false)
+	check("option-exported-false", condHidden[exportedOnly?](), false)
+	if failed {
+		os.Exit(1)
+	}
+}

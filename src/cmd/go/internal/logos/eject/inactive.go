@@ -5,18 +5,25 @@
 package eject
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"internal/logosfile"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"cmd/go/internal/base"
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
+	"cmd/go/internal/modload"
 	"cmd/go/internal/search"
 )
 
@@ -24,6 +31,43 @@ import (
 // of the host package load. Census-only package records describe source paths;
 // they never enter a build root or the declaration-provenance plan. Only actual
 // helper loads supply the packages later used for emission.
+// cgoOnlyLogosGap reports an owned Go source the host build leaves out
+// that imports C together with LoGOs packages the load never reaches.
+// Lowering those packages without cgo would bake the wrong branch, and
+// no helper can lower them with cgo while the host disables it, so the
+// eject must refuse instead of emitting a tree that disagrees with the
+// native build. The second result names the file and the unreachable
+// packages for the refusal.
+func cgoOnlyLogosGap(path string, plan *ejectPlan) (string, bool) {
+	data, err := fsys.ReadFile(path)
+	if err != nil || isBuildIgnored(data) {
+		return "", false
+	}
+	imports := goSourceImports(data)
+	hasCgo := false
+	var missing []string
+	seen := map[string]bool{}
+	for _, imp := range imports {
+		if imp == "C" {
+			hasCgo = true
+			continue
+		}
+		rest, ok := strings.CutPrefix(imp, "logos/")
+		if !ok || rest == "" || seen[imp] {
+			continue
+		}
+		seen[imp] = true
+		if _, ok := plan.provenance[imp]; !ok && imp != load.LogosRTPkg {
+			missing = append(missing, imp)
+		}
+	}
+	if !hasCgo || len(missing) == 0 {
+		return "", false
+	}
+	slices.Sort(missing)
+	return path + " imports C and unreachable " + strings.Join(missing, ", "), true
+}
+
 func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 	active := map[string]bool{}
 	loaded := map[string]*load.Package{}
@@ -42,6 +86,24 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 			}
 		}
 	}
+	activeGo := map[string]bool{}
+	for _, p := range plan.main.pkgs {
+		for _, files := range [][]string{p.GoFiles, p.CgoFiles} {
+			for _, name := range files {
+				activeGo[filepath.Join(p.Dir, name)] = true
+			}
+		}
+	}
+	for _, m := range plan.deps {
+		for _, p := range m.pkgs {
+			for _, files := range [][]string{p.GoFiles, p.CgoFiles} {
+				for _, name := range files {
+					activeGo[filepath.Join(p.Dir, name)] = true
+				}
+			}
+		}
+	}
+	var cgoGaps []string
 	var out []inactiveFile
 	for _, module := range append([]*ejectModule{plan.main}, plan.deps...) {
 		modFile := parseGoModFile(filepath.Join(module.dir, "go.mod"))
@@ -83,6 +145,11 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 					}
 					continue
 				}
+				if entry.Type().IsRegular() && !strings.HasPrefix(name, ".") && !strings.HasPrefix(name, "_") && isSupportCopyFile(name) && !activeGo[path] {
+					if cgoGap, ok := cgoOnlyLogosGap(path, plan); ok {
+						cgoGaps = append(cgoGaps, cgoGap)
+					}
+				}
 				if !entry.Type().IsRegular() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !logosfile.Is(name) || active[path] {
 					continue
 				}
@@ -121,6 +188,10 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 		if err := walk(root); err != nil {
 			base.Fatalf("logos eject: inventory module %s: %v", module.path, err)
 		}
+		if len(cgoGaps) > 0 {
+			slices.Sort(cgoGaps)
+			base.Fatalf("logos eject: cgo-only Go sources reach logos packages the load cannot see without cgo:\n%s\nexport with CGO_ENABLED=1 and a C compiler", strings.Join(cgoGaps, "\n"))
+		}
 	}
 	collectInactiveGorootLogosFiles(plan, staging, active, loaded, &out)
 	slices.SortFunc(out, func(a, b inactiveFile) int {
@@ -129,6 +200,134 @@ func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
 		}
 		return strings.Compare(a.name, b.name)
 	})
+	return out
+}
+
+// discoverGoImportLogos loads GOROOT logos/* packages that only inactive
+// Go sources import. The loader never sees those imports, so without this
+// the packages miss phase-one lowering and the support copy fails on their
+// missing staged output even for the default build. Only files the support
+// copy would read seed the search, and ignore-tagged files stay out exactly
+// as in the copy.
+func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, plan *ejectPlan) {
+	unloadable := map[string]bool{}
+	for {
+		dirs := map[string]bool{}
+		for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
+			for _, p := range plan.provenance[path] {
+				if !isGorootLogos(p) {
+					continue
+				}
+				dirs[p.Dir] = true
+			}
+		}
+		known := map[string]bool{}
+		for path := range plan.provenance {
+			known[path] = true
+		}
+		for path := range unloadable {
+			known[path] = true
+		}
+		added := map[string]bool{}
+		var newPaths []string
+		for _, dir := range slices.Sorted(maps.Keys(dirs)) {
+			entries, err := fsys.ReadDir(dir)
+			if err != nil {
+				base.Fatalf("logos eject: inventory GOROOT sources in %s: %v", dir, err)
+			}
+			for _, entry := range entries {
+				name := entry.Name()
+				if entry.IsDir() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || !isSupportCopyFile(name) {
+					continue
+				}
+				data, err := fsys.ReadFile(filepath.Join(dir, name))
+				if err != nil {
+					base.Fatalf("logos eject: read GOROOT source %s: %v", filepath.Join(dir, name), err)
+				}
+				for _, imp := range goSourceImports(data) {
+					rest, ok := strings.CutPrefix(imp, "logos/")
+					if !ok || rest == "" || known[imp] || added[imp] {
+						continue
+					}
+					added[imp] = true
+					newPaths = append(newPaths, imp)
+				}
+			}
+		}
+		if len(newPaths) == 0 {
+			// A discovered package with no buildable source for the host
+			// target stays out of provenance, but the variant inventory
+			// still needs its host-inactive sources: a selecting-context
+			// helper lowers them into staging for the support copy.
+			// Without this, the copy reaches the package through the
+			// inactive import edge and aborts on the missing staged output.
+			if len(unloadable) > 0 {
+				plan.unloadable = slices.Sorted(maps.Keys(unloadable))
+			}
+			return
+		}
+		slices.Sort(newPaths)
+		pkgs := load.PackagesAndErrors(moduleLoader, ctx, opts, newPaths)
+		checkDiscoveredPackageErrors(pkgs, added, unloadable)
+		for _, p := range load.PackageList(pkgs) {
+			if p == nil || p.Error != nil {
+				continue
+			}
+			found := false
+			for _, q := range plan.provenance[p.ImportPath] {
+				if q == p {
+					found = true
+					break
+				}
+			}
+			if !found {
+				plan.provenance[p.ImportPath] = append(plan.provenance[p.ImportPath], p)
+			}
+		}
+	}
+}
+
+// checkDiscoveredPackageErrors fatals on failures loading discovered
+// packages, except a discovered package with no Go files for the current
+// target. A platform-only dependency (for example a helper holding only a
+// windows-tagged file) cannot load on this target, and aborting would
+// reject the valid alternate build the variant helpers lower. Skipped
+// packages stay out of provenance; anything they would have contributed
+// to the current target fails loudly where it is used.
+func checkDiscoveredPackageErrors(pkgs []*load.Package, discovered, unloadable map[string]bool) {
+	load.PackageErrors(pkgs, func(p *load.Package) {
+		var nogo *load.NoGoError
+		if discovered[p.ImportPath] && errors.As(p.Error, &nogo) {
+			unloadable[p.ImportPath] = true
+			return
+		}
+		load.DefaultPrinter().Errorf(p, "%v", p.Error)
+	})
+	base.ExitIfErrors()
+}
+
+// goSourceImports returns the import paths of one Go source, or nil when
+// the file does not parse or carries an ignore constraint. Unparseable and
+// ignored files stay out of the discovery exactly as they stay out of the
+// copy, which still fails loudly on them when it matters.
+func goSourceImports(data []byte) []string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", data, parser.ParseComments|parser.SkipObjectResolution)
+	if err != nil {
+		return nil
+	}
+	expr, err := ownedHeaderExpr(f)
+	if err == nil && hasIgnoreTag(expr) {
+		return nil
+	}
+	var out []string
+	for _, imp := range f.Imports {
+		impPath, err := strconv.Unquote(imp.Path.Value)
+		if err != nil {
+			continue
+		}
+		out = append(out, impPath)
+	}
 	return out
 }
 
@@ -156,6 +355,22 @@ func collectInactiveGorootLogosFiles(plan *ejectPlan, staging string, active map
 			if _, ok := dirs[p.Dir]; !ok {
 				dirs[p.Dir] = p
 			}
+		}
+	}
+	// Packages the host load cannot resolve still need helper lowering
+	// for the support copy, so seed the walk with census records for
+	// them. Their sources are host-inactive by definition (an active
+	// source would have loaded), and the walk below inventories exactly
+	// those for a selecting-context helper.
+	for _, path := range plan.unloadable {
+		dir := filepath.Join(cfg.GOROOT, "src", filepath.FromSlash(path))
+		if _, ok := dirs[dir]; ok {
+			continue
+		}
+		p := &load.Package{PackagePublic: load.PackagePublic{Dir: dir, ImportPath: path}}
+		dirs[dir] = p
+		if _, ok := loaded[dir]; !ok {
+			loaded[dir] = p
 		}
 	}
 	var walk func(string) error

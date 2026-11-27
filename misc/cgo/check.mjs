@@ -95,6 +95,7 @@ export function assessRow(name, iterations, phases, reference) {
     status = candidateRatio >= 1.05 && integrationRatio >= 1.05 ? "latency-pass" : "latency-rejected";
   }
   return { name, iterations, status, blocked, candidateRatio, integrationRatio,
+    statistics,
     promotion: "not established: latency evidence does not replace parity, admission, or a justified floor" };
 }
 
