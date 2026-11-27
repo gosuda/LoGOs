@@ -47,12 +47,14 @@ const h2SupportImport = `ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"
 // import under a fresh file-wide alias. The gofmt pass
 // normalizes layout.
 //
-// A saved value of the public logos/net/http helper is not a capture: its
-// receiver names the support package itself, so the rewrite leaves it
-// alone. Rewriting it would pass a package as the server and change the
-// signature from func(*Server) error to func(). The logos/net/http import
-// still remaps to the ejected support copy, so the saved value keeps
-// working.
+// A saved value of the public logos/net/http helper is not a capture,
+// and a lowered capture of the helper keeps its binding: the helper
+// takes the server as an argument, so the rewrite rebinds only captures
+// used with no arguments, which must be the zero-argument server method.
+// Arity, not the receiver spelling, decides, so a server capture through
+// a local that shadows the support import alias still rewrites. The
+// logos/net/http import still remaps to the ejected support copy, so the
+// saved value keeps working.
 //
 // A capture whose receiver holds another opt-in call composes the inner
 // guard into the capture's replacement, so the receiver still evaluates
@@ -104,6 +106,25 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 		return nil, false
 	}
 	local, needImport := h2SupportLocal(f, supportPath, supportLocal, extraUsed)
+	// useArgs records, for each marked callee temporary, the argument
+	// counts at its call sites. The verifier already refused every
+	// same-named user method, so a marked capture holds either the
+	// zero-argument server method or the one-argument helper value:
+	// arity at the uses tells which one, even when the receiver
+	// spells a shadowed import alias.
+	useArgs := map[string][]int{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		id, ok := call.Fun.(*ast.Ident)
+		if !ok || !h2IsLoweredCalleeTemp(id.Name) {
+			return true
+		}
+		useArgs[id.Name] = append(useArgs[id.Name], len(call.Args))
+		return true
+	})
 	var assigns []h2assignSite
 	var calls []textEdit
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -111,21 +132,30 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extra
 			// Group lowering binds the opt-in as a method value before
 			// spawning its child. The verifier exempts the source call
 			// by type, so a file that reaches the rewrite can only hold
-			// this shape as lowering output, except for a saved value
-			// of the public logos/net/http helper (handled below): a
-			// same-named user method value never passes verification.
-			// Rebind it through the deferred guard so the receiver
+			// this shape as lowering output or a saved value of the
+			// public logos/net/http helper: a same-named user method
+			// value never passes verification. Rebind the server
+			// capture through the deferred guard so the receiver
 			// still evaluates exactly once, eagerly, and the spawned
 			// child runs the same check.
 			sel, ok := as.Rhs[0].(*ast.SelectorExpr)
 			if !ok || sel.Sel.Name != h2extendedConnectMethod || h2HasSiteIdent(sel.X) {
 				return true
 			}
-			if id, ok := sel.X.(*ast.Ident); ok && supportLocal != "" && id.Name == supportLocal {
-				return true
-			}
+			// A capture used with arguments is the public helper
+			// value, whose receiver names its import: the helper takes
+			// the server as an argument, so rebinding it would change
+			// its signature and break the deferred call. Arity, not
+			// spelling, decides, so a server capture through a
+			// shadowing local still rewrites while a helper capture
+			// stays put. A capture with no recorded call site stays
+			// put as well; lowering always uses the temporary it
+			// binds.
 			lhsIdent, ok := as.Lhs[0].(*ast.Ident)
 			if !ok || !h2IsLoweredCalleeTemp(lhsIdent.Name) {
+				return true
+			}
+			if args, ok := useArgs[lhsIdent.Name]; !ok || !h2AllZeroArgs(args) {
 				return true
 			}
 			recvStart := fset.Position(sel.X.Pos()).Offset
@@ -361,32 +391,32 @@ func h2DefinesExtendedConnect(f *ast.File) bool {
 	return found
 }
 
-// h2OverlapOffset returns the start offset of the first h2 edit that
-// overlaps an edit outside the h2 set, if any. The import-insertion edit
-// is zero-width, so it overlaps only when strictly inside another edit
-// (for example a whole-line comptime removal spanning the last import
-// declaration); boundary-touching inserts apply cleanly in offset order.
+// h2Overlaps reports whether any h2 edit overlaps an edit outside the h2
+// set. The import-insertion edit is zero-width, so it overlaps only when
+// strictly inside another edit (for example a whole-line comptime removal
+// spanning the last import declaration); boundary-touching inserts apply
+// cleanly in offset order.
 // Call spans avoid the other rewrites by construction (see h2HasSiteIdent
 // and the import-only span of ejectedImportEdits), but they are checked
 // the same way so a future overlap fails safe.
-func h2OverlapOffset(others, h2edits []textEdit) (int, bool) {
+func h2Overlaps(others, h2edits []textEdit) bool {
 	for _, h := range h2edits {
 		if h.start == h.end {
 			for _, o := range others {
 				if o.start < h.start && h.start < o.end {
-					return h.start, true
+					return true
 				}
 			}
 			continue
 		}
 		for _, o := range others {
 			if h.start < o.end && o.start < h.end {
-				return h.start, true
+				return true
 			}
 		}
 	}
 
-	return 0, false
+	return false
 }
 
 // h2HasSiteIdent reports whether the receiver subtree holds a
@@ -412,6 +442,19 @@ func h2HasSiteIdent(n ast.Node) bool {
 func h2IsLoweredCalleeTemp(name string) bool {
 	rest, ok := strings.CutPrefix(name, "_logos_f")
 	return ok && rest != "" && strings.Trim(rest, "0123456789") == ""
+}
+
+// h2AllZeroArgs reports whether every recorded call site passes no
+// arguments. The verifier already refused every same-named user method,
+// so a marked capture the rewrite trusts holds the zero-argument server
+// method exactly then; any argument means the one-argument helper value.
+func h2AllZeroArgs(args []int) bool {
+	for _, n := range args {
+		if n != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // h2ImportEdit appends a fresh import declaration holding the missing paths
