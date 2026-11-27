@@ -125,12 +125,17 @@ func fixedMake[T any](r Region, n int) []T {
 }
 
 // fixedSpareAccounted reports whether appending n elements into s's spare
-// capacity stays clear of the region's unallocated space. The write range
-// may sit inside bytes the cursor already accounts for (a reslice of a
-// previous allocation) or entirely outside the region buffer (an unrelated
-// heap slice). Anything else overlaps space a later allocation will claim,
-// so the caller must take the checked path and let the cursor account for
-// the returned bytes.
+// capacity leaves the region's unallocated space untouched. Both the
+// write range and the retained prefix s must avoid the free interval
+// between the cursor and the end of the buffer: a later allocation would
+// overwrite bytes the caller still holds. A write inside bytes the cursor
+// already accounts for (a reslice of a previous allocation) or entirely
+// outside the region buffer (an unrelated heap slice) needs no
+// accounting, so the caller appends in place. Anything else overlaps
+// space a later allocation will claim, so the caller must take the
+// checked path and let the cursor account for the returned bytes. A full
+// or empty region has no free interval, so every spare-capacity write is
+// already disjoint from it.
 func fixedSpareAccounted[T any](st *fixedState, s []T, n, size int) bool {
 	if st == nil {
 		return true
@@ -140,10 +145,19 @@ func fixedSpareAccounted[T any](st *fixedState, s []T, n, size int) bool {
 	we := ws + uintptr(n)*uintptr(size)
 	base := uintptr(unsafe.Pointer(unsafe.SliceData(st.buf)))
 	front := base + uintptr(st.used)
-	if ws >= base && we <= front {
+	end := base + uintptr(len(st.buf))
+	if front == end {
 		return true
 	}
-	return we <= base || ws >= base+uintptr(len(st.buf))
+	if we > front && ws < end {
+		return false
+	}
+	if len(s) == 0 {
+		return true
+	}
+	ss := uintptr(unsafe.Pointer(&s[0]))
+	se := ss + uintptr(len(s))*uintptr(size)
+	return se <= front || ss >= end
 }
 
 func fixedAppend[T any](r Region, s []T, v []T) []T {
@@ -176,6 +190,22 @@ func fixedAppend[T any](r Region, s []T, v []T) []T {
 			st.used += add
 			copy(out[len(s):], v)
 			return out
+		}
+	}
+	// A subslice of the buffer whose extension lies entirely in free
+	// space appends in place: the write touches no allocated byte, so
+	// reserve the result through the cursor instead of copying it over
+	// its own prefix. The capacity is bound to the accounted bytes so
+	// later appends re-check the cursor. Anything reaching past the
+	// cursor into allocated bytes still takes the copy path.
+	if len(s) > 0 {
+		start := uintptr(unsafe.Pointer(&s[0]))
+		se := start + uintptr(len(s))*uintptr(size)
+		we := se + uintptr(len(v))*uintptr(size)
+		if start >= base && se >= front && we <= base+uintptr(len(st.buf)) {
+			out := append(s, v...)
+			st.used = int(we - base)
+			return out[:len(out):len(out)]
 		}
 	}
 	total := len(s) + len(v)
