@@ -377,7 +377,7 @@ func (fc *funcLower) definePieces(plan *callPlan, tw *twin, cpos syntax.Pos) []s
 			kind[j] = pieceAlone
 			continue
 		}
-		if fc.groupHasCall(piece.expr) {
+		if fc.groupHasCall(piece.expr) || fc.groupHasRecv(piece.expr) {
 			kind[j] = pieceCall
 			continue
 		}
@@ -492,6 +492,9 @@ func (fc *funcLower) ifaceLitCopy(raw syntax.Expr, param types2.Type) bool {
 		if pt == nil {
 			return false
 		}
+		if _, isTP := types2.Unalias(pt).(*types2.TypeParam); isTP {
+			return false
+		}
 		if _, isI := types2.Unalias(pt).Underlying().(*types2.Interface); !isI {
 			return false
 		}
@@ -499,7 +502,7 @@ func (fc *funcLower) ifaceLitCopy(raw syntax.Expr, param types2.Type) bool {
 	} else {
 		ot = info.TypeOf(node)
 	}
-	if ot == nil || ot == types2.Typ[types2.Invalid] {
+	if ot == nil || ot == types2.Typ[types2.Invalid] || !fixedLayout(ot) {
 		return false
 	}
 	sizes := types2.SizesFor("gc", buildcfg.GOARCH)
@@ -527,6 +530,49 @@ func (fc *funcLower) ifaceLitCopy(raw syntax.Expr, param types2.Type) bool {
 		return false
 	}
 	return true
+}
+
+// fixedLayout reports whether t has a target-independent layout, so the
+// boxing path order.go picks cannot depend on instantiation. A type
+// parameter nested inside a composite literal makes its size and
+// alignment variable until the generic call is instantiated, and the
+// size helpers assert on it; such literals stay on the general capture
+// path instead of being classified by a layout they cannot answer.
+func fixedLayout(t types2.Type) bool {
+	if _, isTP := types2.Unalias(t).(*types2.TypeParam); isTP {
+		return false
+	}
+	switch u := types2.Unalias(t).Underlying().(type) {
+	case *types2.Struct:
+		for i := range u.NumFields() {
+			if !fixedLayout(u.Field(i).Type()) {
+				return false
+			}
+		}
+	case *types2.Array:
+		return fixedLayout(u.Elem())
+	}
+	return true
+}
+
+// groupHasRecv reports whether e contains a channel receive outside a
+// nested function literal. Receives block and observe channel state, so
+// a deferred operand holding one keeps its position among the ordered
+// captures instead of moving to the plain reads at the end.
+func (fc *funcLower) groupHasRecv(e syntax.Expr) bool {
+	found := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit:
+			return false
+		case syntax.Expr:
+			if _, ok := groupRecvOp(n); ok {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 // soleIfaceComponent returns the only primitive component in t, or nil.
