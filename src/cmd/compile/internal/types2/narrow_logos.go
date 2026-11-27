@@ -2675,10 +2675,12 @@ func (p *logosEFPass) expr(n syntax.Node, st *logosEFState) *logosEFState {
 			if st == nil {
 				return false
 			}
-			// Drain scope cleanups before function cleanups, in the same
-			// order as lowering exits scopes before returning.
-			st = p.finishCleanups(st, func(call logosEFDeferredCall) bool { return call.scope != nil })
-			st = p.finishCleanups(st, func(call logosEFDeferredCall) bool { return call.scope == nil })
+			// Exit cleanups run only when the call fails, so check them on
+			// a separate failure-edge state: their writes must not reach
+			// the success continuation the try returns below. Drain scope
+			// cleanups before function cleanups, in the same order as
+			// lowering exits scopes before returning.
+			p.finishCleanups(p.finishCleanups(st, func(call logosEFDeferredCall) bool { return call.scope != nil }), func(call logosEFDeferredCall) bool { return call.scope == nil })
 			return false
 		case *syntax.CoalesceExpr:
 			// The fallback runs only when the option is absent: join the

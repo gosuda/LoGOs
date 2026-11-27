@@ -1,0 +1,20 @@
+package p
+
+func fetchCL() (int, error) { return 1, nil }
+func stepCL() (int, error) { return 2, nil }
+func useCL(n int) {}
+
+// A cleanup that runs only when a ? call fails must not clear the success
+// continuation: the step below succeeds, so the scope has not exited and n
+// is still unchecked when it is read.
+func successKeepsUncheckedCL() error {
+	n, err := fetchCL()
+	_ = err
+	{
+		scope defer func() { n = 0 }()
+		m := stepCL()?
+		_ = m
+		useCL(n /* ERROR "[correctness::result_before_error_check]" */)
+	}
+	return nil
+}
