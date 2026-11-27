@@ -788,7 +788,10 @@ func logosCtLabel(targs []Type) string {
 // LogosCtKey is the stable identity of an instance of a package-level
 // function or method. For a method, targs start with the concrete
 // receiver type followed by the method type arguments. It returns an
-// empty key if the arguments are not concrete.
+// empty key if the arguments are not concrete. Methods carry the
+// declaring receiver identity separately from the ordered type
+// arguments, so a function and a same-named method with matching type
+// lists never share an identity.
 func LogosCtKey(origin *Func, targs []Type) string {
 	want := origin.Signature().TypeParams().Len()
 	if origin.Signature().Recv() != nil {
@@ -803,7 +806,24 @@ func LogosCtKey(origin *Func, targs []Type) string {
 		}
 	}
 	var key logosCtTypeKey
-	key.name(origin)
+	if origin.Signature().Recv() != nil {
+		key.WriteByte('m')
+		if named := logosCtNamedRecv(origin.Signature().Recv().Type()); named != nil && named.Obj() != nil {
+			pkgPath := ""
+			if pkg := named.Obj().Pkg(); pkg != nil {
+				pkgPath = pkg.Path()
+			}
+			key.text(pkgPath)
+			key.text(named.Obj().Name())
+		} else {
+			key.text("")
+			key.text("")
+		}
+		key.text(origin.Name())
+	} else {
+		key.WriteByte('f')
+		key.name(origin)
+	}
 	key.list(targs)
 	return key.String()
 }

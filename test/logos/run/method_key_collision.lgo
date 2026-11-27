@@ -1,0 +1,33 @@
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Box[T any] struct {
+	V T
+}
+
+func Run[T any](v T) string {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	return "func"
+}
+
+func (b Box[T]) Run() string {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	return "method"
+}
+
+type Pair struct {
+	A int
+}
+
+func main() {
+	fmt.Println(Run[Box[Pair]](Box[Pair]{}))
+	fmt.Println(Box[Pair]{}.Run())
+}
