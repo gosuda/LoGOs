@@ -301,3 +301,23 @@ func probeBrokeDiscCheckedSwap(reset bool) {
 		use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
 	}
 }
+
+// A nested call after a repeated guard overwrite must not hide the break:
+// the caller read still fails.
+func probeNestedBreak(cond bool, reset bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if reset {
+		h.errA = nil
+	}
+	func() {
+		h.errA = nil
+		func() {}()
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
+}
+

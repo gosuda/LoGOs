@@ -5465,6 +5465,36 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 		end = p.projectInvocationMay(st, end, lit, eff)
 	}
 	end = end.withoutLocals(inside)
+	// A nested call starts from an empty per-invocation set so its exit
+	// projection stays scoped to its own writes. Its empty exit must not
+	// hide breaks the enclosing invocation already established: restore
+	// caller breaks that survive in the cumulative history. A result the
+	// nested call superseded drops its break, so only guards still in the
+	// exit history return.
+	if end != nil && len(st.brokeHere) != 0 {
+		var restore map[logosEFKey][]logosEFKey
+		for k, gs := range st.brokeHere {
+			if inside[k.root] {
+				continue
+			}
+			live, ok := end.mayBroke[k]
+			if !ok {
+				continue
+			}
+			for _, g := range gs {
+				if inside[g.root] || !slices.Contains(live, g) || slices.Contains(end.brokeHere[k], g) {
+					continue
+				}
+				if restore == nil {
+					restore = make(map[logosEFKey][]logosEFKey)
+				}
+				restore[k] = append(restore[k], g)
+			}
+		}
+		if len(restore) != 0 {
+			end = end.unionBrokeHere(&logosEFState{brokeHere: restore}, inside)
+		}
+	}
 	if saved != nil {
 		for k := range eff.assigned {
 			p.noteAssigned(k)
