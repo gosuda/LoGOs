@@ -1844,6 +1844,28 @@ func (g *overlayGraph) prepare() error {
 			}
 		}
 	}
+	// Aliases built before the shells were filled may have kept the
+	// original generic instance when the new origin was still a shell.
+	// Every shell is filled now, so rebuild each affected alias from the
+	// original right-hand side; the substitution retargets instances to
+	// the new origins and restores their qualifiers.
+	for node := range g.affected {
+		if a, ok := node.(*types2.Alias); ok {
+			delete(g.sub.aliases, a)
+		}
+	}
+	for node := range g.affected {
+		if a, ok := node.(*types2.Alias); ok {
+			g.alias(a)
+		}
+	}
+	for node := range g.affected {
+		if a, ok := node.(*types2.Alias); ok {
+			if err := g.applyAliasReadonly(a); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
