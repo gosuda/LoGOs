@@ -18,6 +18,7 @@ import (
 	"cmd/go/internal/base"
 	"cmd/go/internal/load"
 	"cmd/go/internal/modinfo"
+	"cmd/internal/logos/editmap"
 	"cmd/internal/logosowned"
 )
 
@@ -97,6 +98,13 @@ func absorbVariantState(plan *ejectPlan, out, staging string, ordinal int) {
 	}
 	resortEjectPlan(plan)
 	srcRoot := filepath.Join(dir, "staging")
+	// wonGo records the staging-relative companion each merged .go
+	// file won. WalkDir visits entries lexically, so a file sorts
+	// before its own sidecars and the companion decision is known
+	// when a sidecar arrives. A sidecar merges only beside the .go
+	// bytes its own context wrote; it never attaches to another
+	// context's bytes.
+	wonGo := map[string]bool{}
 	err = filepath.WalkDir(srcRoot, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -116,12 +124,23 @@ func absorbVariantState(plan *ejectPlan, out, staging string, ordinal int) {
 			// Sidecars from each context stay separate until the existing
 			// owned-request merger combines their declaration conditions.
 			dst = filepath.Join(staging, "_variants", strconv.Itoa(ordinal), rel)
+		} else if comp, ok := strings.CutSuffix(rel, editmap.Suffix); ok {
+			if !wonGo[comp] {
+				return nil
+			}
+			if _, err := os.Stat(dst); err == nil {
+				return nil
+			} else if !os.IsNotExist(err) {
+				return err
+			}
 		} else if !strings.HasSuffix(entry.Name(), ".go") {
 			return nil
 		} else if _, err := os.Stat(dst); err == nil {
 			return nil
 		} else if !os.IsNotExist(err) {
 			return err
+		} else {
+			wonGo[rel] = true
 		}
 		data, err := os.ReadFile(path)
 		if err != nil {

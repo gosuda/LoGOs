@@ -5,8 +5,12 @@
 package eject
 
 import (
+	"bytes"
 	"go/ast"
+	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -36,7 +40,7 @@ const h2extendedConnectMethod = "EnableHTTP2ExtendedConnect"
 // rewritten call in the process checks the same setting, and a process
 // without it fails fast at the first call instead of serving without the
 // feature.
-func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []textEdit {
+func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File, extraUsed map[string]bool) []textEdit {
 	hasNetHTTP := false
 	for _, imp := range f.Imports {
 		path, err := strconv.Unquote(imp.Path.Value)
@@ -60,10 +64,16 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 	}
 	// Reuse existing os/strings bindings by their actual local names so
 	// aliased imports keep working and no duplicate import is added.
-	// Only missing paths get a fresh collision-free alias.
+	// Only missing paths get a fresh collision-free alias. extraUsed
+	// holds package-level names from sibling files in the ejected
+	// package: an import alias must not match a name declared at
+	// package level in another file of the same package.
 	osName, osOk := h2ImportLocal(f, "os")
 	stringsName, stringsOk := h2ImportLocal(f, "strings")
 	used := h2UsedNames(f)
+	for name := range extraUsed {
+		used[name] = true
+	}
 	var missing []string
 	if !osOk {
 		osName = h2FreshName(used, "logosH2Os")
@@ -100,7 +110,10 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 		// later. Name a simple identifier receiver with itself so the
 		// output keeps _ = s; complex receivers get a fresh name.
 		param := h2RecvParam(used, osName, stringsName, receiver)
-		repl := "func(" + param + " any) {\n_ = " + param + "\nif !" + stringsName + ".Contains(" + osName + ".Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}(" + receiver + ")"
+		// The closure parameter type is interface{} rather than any:
+		// interface is a keyword and cannot be redeclared, while a
+		// package-level any would change the parameter's meaning.
+		repl := "func(" + param + " interface{}) {\n_ = " + param + "\nif !" + stringsName + ".Contains(" + osName + ".Getenv(\"GODEBUG\"), \"http2xconnect=1\") {\npanic(" + strconv.Quote(msg) + ")\n}\n}(" + receiver + ")"
 		edits = append(edits, textEdit{start, end, repl})
 		return true
 	})
@@ -114,7 +127,9 @@ func h2ExtendedConnectEdits(fset *token.FileSet, data []byte, f *ast.File) []tex
 }
 
 // h2ImportLocal returns the file-local name bound to path, or false when
-// the file does not import it.
+// the file does not import it. Dot and blank imports bind no usable
+// name, so they are skipped: the caller adds a fresh named import
+// instead. Go permits the same path under distinct names.
 func h2ImportLocal(f *ast.File, path string) (string, bool) {
 	for _, imp := range f.Imports {
 		p, err := strconv.Unquote(imp.Path.Value)
@@ -122,6 +137,9 @@ func h2ImportLocal(f *ast.File, path string) (string, bool) {
 			continue
 		}
 		if imp.Name != nil {
+			if imp.Name.Name == "." || imp.Name.Name == "_" {
+				continue
+			}
 			return imp.Name.Name, true
 		}
 		if i := strings.LastIndex(p, "/"); i >= 0 {
@@ -134,7 +152,7 @@ func h2ImportLocal(f *ast.File, path string) (string, bool) {
 
 // h2RecvParam picks the closure parameter name: a simple identifier
 // receiver reuses itself (keeping _ = s), otherwise a fresh name that
-// cannot collide with the helper imports.
+// cannot collide with the helper imports or shadow the panic call.
 func h2RecvParam(used map[string]bool, osName, stringsName, receiver string) string {
 	trimmed := strings.TrimSpace(receiver)
 	if trimmed != "" && trimmed[0] != '*' {
@@ -146,7 +164,7 @@ func h2RecvParam(used map[string]bool, osName, stringsName, receiver string) str
 				break
 			}
 		}
-		if ok && trimmed != "_" && trimmed != osName && trimmed != stringsName && !used[trimmed+"_"] {
+		if ok && trimmed != "_" && trimmed != "panic" && trimmed != osName && trimmed != stringsName && !used[trimmed+"_"] {
 			return trimmed
 		}
 	}
@@ -286,4 +304,74 @@ func h2ImportEdit(fset *token.FileSet, f *ast.File, missing []string) textEdit {
 	}
 	b.WriteString(")\n")
 	return textEdit{end, end, b.String()}
+}
+
+// h2PackageReserved collects top-level declared names from every Go
+// file that will land in one ejected package directory: lowered
+// staging files plus the plain Go sources copied verbatim. A generated
+// import alias in any file of the package must avoid all of them,
+// because no identifier may be declared in both the file and package
+// block. Over-reservation is safe: it only lengthens a fresh alias.
+// Files that fail to parse are skipped; their names stay reserved
+// through the importing file's own identifiers.
+func h2PackageReserved(dirs ...string) map[string]bool {
+	used := map[string]bool{}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") {
+				continue
+			}
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+			if err != nil {
+				continue
+			}
+			for _, decl := range f.Decls {
+				switch d := decl.(type) {
+				case *ast.FuncDecl:
+					used[d.Name.Name] = true
+				case *ast.GenDecl:
+					for _, spec := range d.Specs {
+						switch s := spec.(type) {
+						case *ast.TypeSpec:
+							used[s.Name.Name] = true
+						case *ast.ValueSpec:
+							for _, id := range s.Names {
+								used[id.Name] = true
+							}
+						}
+					}
+				}
+			}
+			for _, imp := range f.Imports {
+				if imp.Name != nil {
+					used[imp.Name.Name] = true
+				}
+			}
+		}
+	}
+	return used
+}
+
+// h2PackageReservedFor returns the package-wide reserved names for
+// the h2 rewrite of one package, or nil when no emitted file in the
+// package can carry an h2 call. The gate is a substring scan of the
+// staging files: only a file mentioning the method name can produce
+// h2 edits, and only h2 edits add fresh imports.
+func h2PackageReservedFor(names []string, stagingPkgDir, srcDir string) map[string]bool {
+	for _, name := range names {
+		raw, err := os.ReadFile(filepath.Join(stagingPkgDir, logosStem(name)+".go"))
+		if err != nil {
+			continue
+		}
+		if bytes.Contains(raw, []byte(h2extendedConnectMethod)) {
+			return h2PackageReserved(stagingPkgDir, srcDir)
+		}
+	}
+	return nil
 }

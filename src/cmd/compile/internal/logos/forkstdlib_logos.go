@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -134,8 +135,10 @@ func mappedEjectStdlibCalls(info *types2.Info, roots []syntax.Node) map[*syntax.
 		return true
 	}
 	for _, root := range roots {
-		if f, ok := root.(*syntax.File); ok && !fileImportsNetHTTP(f) {
-			continue
+		if f, ok := root.(*syntax.File); ok {
+			if !fileImportsNetHTTP(f) || fileDefinesExtendedConnect(f) {
+				continue
+			}
 		}
 		syntax.Inspect(root, inspect)
 	}
@@ -152,11 +155,40 @@ func fileImportsNetHTTP(f *syntax.File) bool {
 		if !ok || imp.Path == nil {
 			continue
 		}
-		if imp.Path.Value == "\"net/http\"" {
+		if path, err := strconv.Unquote(imp.Path.Value); err == nil && path == "net/http" {
 			return true
 		}
 	}
 	return false
+}
+
+// fileDefinesExtendedConnect mirrors the eject rewrite's skip
+// (h2DefinesExtendedConnect in cmd/go/internal/logos/eject): the text
+// rewrite declines any file that declares EnableHTTP2ExtendedConnect
+// itself, so verification must not exempt calls from such files. The
+// wrapper's delegate call would otherwise be approved here and left
+// unrewritten there, emitting code upstream Go rejects.
+func fileDefinesExtendedConnect(f *syntax.File) bool {
+	found := false
+	syntax.Inspect(f, func(node syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch x := node.(type) {
+		case *syntax.Field:
+			if x.Name != nil && x.Name.Value == "EnableHTTP2ExtendedConnect" {
+				found = true
+				return false
+			}
+		case *syntax.FuncDecl:
+			if x.Name != nil && x.Name.Value == "EnableHTTP2ExtendedConnect" {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // verifyEjectStdlibDone keeps VerifyEjectStdlib to one report per package:

@@ -976,7 +976,7 @@ func materializeGorootLogos(plan *ejectPlan, staging, out, rtDir string) {
 			if err != nil {
 				base.Fatalf("logos eject: missing ejected output for %s: the ejected tree references it but no build lowered it", filepath.Join(rec.Dir, name))
 			}
-			writeLoweredFile(dst, ".", stem, name, raw, taken)
+			writeLoweredFile(dst, ".", stem, name, raw, taken, nil)
 		}
 		for _, cand := range ejectedSupportRefs(dst) {
 			if !done[cand] {
@@ -1008,8 +1008,8 @@ func ejectPackageNames(p *load.Package, plan *ejectPlan) ([]string, map[string]b
 	return names, ignoredSet
 }
 
-func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte, taken map[string]bool) bool {
-	fixed, uses := rewriteEjectedGo(raw, name)
+func writeLoweredFile(dstRoot, rel, stem, name string, raw []byte, taken map[string]bool, extraUsed map[string]bool) bool {
+	fixed, uses := rewriteEjectedGo(raw, name, extraUsed)
 	mainBytes, extraBytes, extraStem := splitJSONv2File(fixed, stem, taken)
 	dst := filepath.Join(dstRoot, rel, stem+".go")
 	if err := os.MkdirAll(filepath.Dir(dst), 0777); err != nil {
@@ -1416,6 +1416,8 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 	used := false
 	seen := make(map[string]bool, len(names))
 	taken := ejectOutputStems(p.Dir, names)
+	stagingPkg := filepath.Join(dest.staging, filepath.FromSlash(p.ImportPath))
+	reserved := h2PackageReservedFor(names, stagingPkg, p.Dir)
 	for _, name := range names {
 		if seen[name] || !logosfile.Is(name) {
 			continue
@@ -1428,15 +1430,31 @@ func emitLoweredGoFiles(p *load.Package, plan *ejectPlan, dest emitDest, onMissi
 				continue
 			}
 		}
-		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw, taken) {
+		if writeLoweredFile(dest.dstRoot, rel, stem, name, raw, taken, reserved) {
 			used = true
 		}
 		// The compiler writes one edit-map sidecar per ejected file
-		// into staging; carry it to the output so the map can be
-		// checked against the sources. A file without a sidecar
-		// (plain Go, or an older staging layout) ejects unchanged.
+		// into staging; carry it to the output. The map partitions
+		// the staging bytes before import rewriting, JSONv2
+		// splitting and gofmt, not the final bytes beside it, so
+		// pairing it with the final file through editmap.Check is
+		// unsupported; the map pins shared source spans and
+		// generated marks as the eject scripts check them. A file
+		// without a sidecar (plain Go, or an older staging layout)
+		// ejects unchanged. A source file already sitting at the
+		// sidecar path is a collision: eject stops instead of
+		// silently embedding map JSON under the asset's name.
 		if editRaw, editErr := os.ReadFile(filepath.Join(dest.staging, filepath.FromSlash(p.ImportPath), stem+".go"+editmap.Suffix)); editErr == nil {
-			if writeErr := os.WriteFile(filepath.Join(dest.dstRoot, rel, stem+".go"+editmap.Suffix), editRaw, 0666); writeErr != nil {
+			sidecar := filepath.Join(dest.dstRoot, rel, stem+".go"+editmap.Suffix)
+			if old, statErr := os.ReadFile(sidecar); statErr == nil {
+				// Variant merges emit the same package twice with
+				// identical sidecar bytes; rewriting them is a no-op.
+				// Anything else at this path is a source asset the
+				// map must not clobber, so eject stops instead.
+				if !bytes.Equal(old, editRaw) {
+					base.Fatalf("logos eject: edit map %s collides with a source file of the same name; rename the source file", sidecar)
+				}
+			} else if writeErr := os.WriteFile(sidecar, editRaw, 0666); writeErr != nil {
 				base.Fatalf("logos eject: %s", writeErr)
 			}
 		}
@@ -2077,7 +2095,7 @@ func copyDataFile(src, dst string) (bool, error) {
 	}
 	uses := false
 	if strings.HasSuffix(src, ".go") {
-		if fixed, fixedUses, ok := remapEjectedFile(data, ""); ok {
+		if fixed, fixedUses, ok := remapEjectedFile(data, "", nil); ok {
 			data = fixed
 			uses = fixedUses
 			queueEjectGofmt(dst)
@@ -2095,8 +2113,8 @@ func copyDataFile(src, dst string) (bool, error) {
 // rewriteEjectedGo rewrites one compiler-emitted file to the ejected
 // import paths. Compiler output must parse; anything else is a loud
 // failure, never a silent copy.
-func rewriteEjectedGo(data []byte, name string) ([]byte, bool) {
-	fixed, uses, ok := remapEjectedFile(data, siteNamespace(logosStem(name)))
+func rewriteEjectedGo(data []byte, name string, extraUsed map[string]bool) ([]byte, bool) {
+	fixed, uses, ok := remapEjectedFile(data, siteNamespace(logosStem(name)), extraUsed)
 	if !ok {
 		base.Fatalf("logos eject: cannot parse ejected file for %s", name)
 	}
@@ -2149,7 +2167,7 @@ func siteNamespace(stem string) string {
 	return sanitized + "_" + strconv.FormatUint(uint64(h), 16)
 }
 
-func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
+func remapEjectedFile(data []byte, siteNS string, extraUsed map[string]bool) ([]byte, bool, bool) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", data, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
@@ -2157,7 +2175,7 @@ func remapEjectedFile(data []byte, siteNS string) ([]byte, bool, bool) {
 	}
 	edits, uses := ejectedImportEdits(data, fset, f)
 	edits = append(edits, siteIdentEdits(fset, f, siteNS)...)
-	h2edits := h2ExtendedConnectEdits(fset, data, f)
+	h2edits := h2ExtendedConnectEdits(fset, data, f, extraUsed)
 	if off, overlap := h2OverlapOffset(edits, h2edits); overlap {
 		pos := fset.Position(token.Pos(fset.File(f.Pos()).Base() + off))
 		base.Errorf("logos eject: overlapping h2extendedconnect import edit at line %d: EnableHTTP2ExtendedConnect left unrewritten", pos.Line)
