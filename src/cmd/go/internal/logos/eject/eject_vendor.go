@@ -31,14 +31,14 @@ import (
 
 const supportVendorDir = "internal/toolchainvendor"
 
-func copyEjectedSupport(src, staging, dst string, roots []string) (err error) {
+func copyEjectedSupport(src, staging, dst string, roots []string) (decided map[string]map[string]bool, err error) {
 	destinations, err := supportDestinations(roots)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	root, err := os.OpenRoot(src)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		if closeErr := root.Close(); closeErr != nil {
@@ -55,16 +55,17 @@ func copyEjectedSupport(src, staging, dst string, roots []string) (err error) {
 		written:      make(map[string]string),
 		notices:      make(map[string]bool),
 		embedded:     make(map[string]bool),
+		decided:      make(map[string]map[string]bool),
 	}
 	for len(c.pending) > 0 {
 		importPath := c.pending[0]
 		c.pending = c.pending[1:]
 		p, err := ejectedSupportPackage(importPath)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := c.copyPackage(p); err != nil {
-			return fmt.Errorf("support package %s: %w", importPath, err)
+			return nil, fmt.Errorf("support package %s: %w", importPath, err)
 		}
 	}
 	for _, name := range c.format {
@@ -72,7 +73,7 @@ func copyEjectedSupport(src, staging, dst string, roots []string) (err error) {
 			queueEjectGofmt(filepath.Join(dst, filepath.FromSlash(name)))
 		}
 	}
-	return nil
+	return c.decided, nil
 }
 
 type supportCopy struct {
@@ -86,6 +87,26 @@ type supportCopy struct {
 	notices      map[string]bool
 	embedded     map[string]bool
 	format       []string
+	decided      map[string]map[string]bool
+}
+
+// markDecided records one lowered stem the support copy owns: written or
+// deliberately skipped. materializeGorootLogos must not emit these again:
+// the second writer disagrees with the copy on ejected guards, so the
+// first writer wins every stem it decided.
+func (c *supportCopy) markDecided(p supportSourcePackage, stem string) {
+	if p.vendored {
+		return
+	}
+	if c.decided == nil {
+		c.decided = make(map[string]map[string]bool)
+	}
+	m := c.decided[p.dst]
+	if m == nil {
+		m = make(map[string]bool)
+		c.decided[p.dst] = m
+	}
+	m[stem] = true
 }
 
 // absSrcDir returns the host path of one support source package.
@@ -474,6 +495,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 				return nil, false, readErr
 			}
 			if isBuildIgnored(original) {
+				c.markDecided(p, logosStem(name))
 				return nil, false, nil
 			}
 		}
@@ -505,6 +527,7 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	if lowered {
 		skip, guard, rewrite := c.ejectedSupportGuard(p, name)
 		if skip {
+			c.markDecided(p, logosStem(name))
 			return nil, false, nil
 		}
 		if rewrite {
@@ -533,6 +556,11 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	if lowered {
 		edits = append(edits, siteIdentEdits(fset, f, siteNamespace(logosStem(name)))...)
 	}
+	h2edits, h2uses := h2ExtendedConnectEdits(fset, data, f, nil)
+	if h2Overlaps(edits, h2edits) {
+		return nil, false, fmt.Errorf("overlapping extended-CONNECT rewrite")
+	}
+	edits = append(edits, h2edits...)
 	embeds := false
 	for _, imp := range f.Imports {
 		importPath, err := strconv.Unquote(imp.Path.Value)
@@ -550,6 +578,11 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 		start := fset.Position(imp.Path.Pos()).Offset
 		edits = append(edits, textEdit{start, start + len(imp.Path.Value), strconv.Quote(target)})
 	}
+	if h2uses {
+		if _, err := c.supportImport("logos/net/http"); err != nil {
+			return nil, false, err
+		}
+	}
 	fixed, ok := applyTextEdits(data, edits)
 	if !ok {
 		return nil, false, fmt.Errorf("overlapping import edits")
@@ -564,6 +597,9 @@ func (c *supportCopy) copyPackageGo(p supportSourcePackage, name string, taken m
 	}
 	if err := c.writeFile(src, dst, mainBytes); err != nil {
 		return nil, false, err
+	}
+	if lowered {
+		c.markDecided(p, strings.TrimSuffix(outputName, ".go"))
 	}
 	if !p.vendored {
 		c.format = append(c.format, dst)

@@ -1,0 +1,78 @@
+// run
+
+package jsonlonesurrogate
+
+import (
+	"bytes"
+	"encoding/json"
+	"testing"
+)
+
+type surrogateHolder struct {
+	S string `json:"s"`
+}
+
+type surrogateHolderMirror struct {
+	S string `json:"s"`
+	// NoGen defeats static MarshalJSON generation (any is not a static
+	// kind), so json.Marshal takes the reflective path and stays an
+	// independent oracle instead of a second copy of the generator.
+	NoGen any `json:"-"`
+}
+
+type surrogateMapHolder struct {
+	M map[string]string `json:"m"`
+}
+
+type surrogateMapHolderMirror struct {
+	M map[string]string `json:"m"`
+	// NoGen defeats static MarshalJSON generation (any is not a static
+	// kind), so json.Marshal takes the reflective path and stays an
+	// independent oracle instead of a second copy of the generator.
+	NoGen any `json:"-"`
+}
+
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func matchSurrogate(t *testing.T, got []byte, want []byte) {
+	t.Helper()
+	if !bytes.Equal(got, want) {
+		t.Fatalf("generated differs from encoding/json\n got %s\nwant %s", got, want)
+	}
+	if !json.Valid(got) {
+		t.Fatalf("generated output is not valid JSON: %s", got)
+	}
+}
+
+// Lone surrogates follow the encoding/json replacement rule in generated
+// encoders: they encode as U+FFFD, exactly like the standard library,
+// instead of failing. The marshal sweep pins this parity across random
+// inputs; this fixture pins the representative field, map-key and
+// map-value positions directly.
+func TestSurrogateFieldMatchesEncodingJSON(t *testing.T) {
+	for _, s := range []string{"\xed\xa0\x80", "a\xed\xa0\x80b", "plain", "\xff\xfe"} {
+		matchSurrogate(t,
+			must((surrogateHolder{S: s}).MarshalJSON()),
+			must(json.Marshal(surrogateHolderMirror{S: s})))
+	}
+}
+
+func TestSurrogateMapMatchesEncodingJSON(t *testing.T) {
+	pairs := []struct{ k, v string }{
+		{"\xed\xa0\x80", "v"},
+		{"k", "\xed\xa0\x80"},
+		{"\xed\xa0\x80", "\xed\xa0\x80"},
+		{"k", "v"},
+	}
+	for _, p := range pairs {
+		m := map[string]string{p.k: p.v}
+		matchSurrogate(t,
+			must((surrogateMapHolder{M: m}).MarshalJSON()),
+			must(json.Marshal(surrogateMapHolderMirror{M: m})))
+	}
+}

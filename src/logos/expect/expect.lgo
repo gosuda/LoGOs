@@ -21,6 +21,7 @@ package expect
 import (
 	"comptime"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -33,7 +34,8 @@ type Reporter interface {
 
 // Equal asserts that want and got render identically, and fails the
 // test with a unified diff otherwise. Struct values compare field by
-// field through comptime iteration; every other value compares through
+// field through comptime iteration, checking both the rendered text and
+// each field's dynamic type; every other value compares through
 // LeafText. Strings compare line by line so the diff shows the exact
 // line that changed. Equal leaf texts of different dynamic types still
 // fail, with both types named, so an ambiguous value such as the
@@ -49,19 +51,76 @@ func Equal[T any](r Reporter, want T, got T) {
 		}
 		if wantText != gotText {
 			r.Errorf("expect: values differ\n%s", Diff(wantText, gotText))
+			return
+		}
+		wantTypes, gotTypes := "", ""
+		different := false
+		const for _, f := range comptime.Fields[T]() {
+			const if comptime.IsInterface[f.Type]() {
+				wt, gt, changed := DynamicTypeDifference(any(want.[f]), any(got.[f]))
+				if changed {
+					different = true
+					wantTypes += f.Name + ": " + wt + "\n"
+					gotTypes += f.Name + ": " + gt + "\n"
+				}
+			}
+		}
+		if different {
+			r.Errorf("expect: struct fields differ in type\n%s", Diff(wantTypes, gotTypes))
 		}
 	} else {
 		wantText := LeafText(any(want))
 		gotText := LeafText(any(got))
 		if wantText != gotText {
 			r.Errorf("expect: values differ\n%s", Diff(wantText, gotText))
-		} else if fmt.Sprintf("%T", any(want)) != fmt.Sprintf("%T", any(got)) {
-			// A string "nil" renders like nil and equal texts can hide
-			// different types, so a text match across types fails with
-			// both types named.
-		r.Errorf("expect: ambiguous values differ in type\n- (%T) %s\n+ (%T) %s\n",
-				any(want), wantText, any(got), gotText)
+			return
 		}
+		const if comptime.IsInterface[T]() {
+			wt, gt, changed := DynamicTypeDifference(any(want), any(got))
+			if changed {
+				r.Errorf("expect: ambiguous values differ in type\n- (%s) %s\n+ (%s) %s\n",
+					wt, wantText, gt, gotText)
+			}
+		}
+	}
+}
+
+// DynamicTypeDifference compares interface values by actual type identity.
+// Equal calls it only for interface types selected at compile time. The
+// helper is exported because an exported comptime instance names it.
+func DynamicTypeDifference(want any, got any) (string, string, bool) {
+	wt, gt := reflect.TypeOf(want), reflect.TypeOf(got)
+	if wt == gt {
+		return "", "", false
+	}
+	wantName, gotName := dynamicTypeName(wt), dynamicTypeName(gt)
+	if wantName == gotName {
+		// Reflection display names are not identities, even after package
+		// qualification (for example generic arguments with equal names).
+		wantName += " [want type]"
+		gotName += " [different type]"
+	}
+	return wantName, gotName, true
+}
+
+func dynamicTypeName(t reflect.Type) string {
+	if t == nil {
+		return "<nil>"
+	}
+	if t.PkgPath() != "" {
+		return t.PkgPath() + "." + t.Name()
+	}
+	switch t.Kind() {
+	case reflect.Pointer:
+		return "*" + dynamicTypeName(t.Elem())
+	case reflect.Slice:
+		return "[]" + dynamicTypeName(t.Elem())
+	case reflect.Array:
+		return fmt.Sprintf("[%d]%s", t.Len(), dynamicTypeName(t.Elem()))
+	case reflect.Map:
+		return "map[" + dynamicTypeName(t.Key()) + "]" + dynamicTypeName(t.Elem())
+	default:
+		return t.String()
 	}
 }
 

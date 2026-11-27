@@ -963,7 +963,7 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 					r.invalid(e, "[comptime::error_not_constant] comptime.Error needs a constant message")
 				}
 			}
-		case "IsStruct", "SizeOf", "AlignOf", "HasPointers":
+		case "IsStruct", "IsInterface", "SizeOf", "AlignOf", "HasPointers", "HasUnexported":
 			if tv := f.info.Types[e]; tv.Value != nil {
 				return r.constant(e.Pos(), tv.Value)
 			}
