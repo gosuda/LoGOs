@@ -43,7 +43,15 @@ type cfExpander struct {
 	byObj    map[*types2.Func]*cfGenericDef
 	byDecl   map[*syntax.FuncDecl]*cfGenericDef
 	pkgs     map[string]*types2.Package
-	switches map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase
+	switches map[*syntax.ConstSwitchStmt]ctSwitchSel
+}
+
+// ctSwitchSel records one const switch's compile-time selection: the
+// selected case and element, or nil with elem -1 when nothing matches.
+// The default arm selects with elem -1.
+type ctSwitchSel struct {
+	sel  *syntax.ConstSwitchCase
+	elem int
 }
 
 func newCfExpander(shared *packageLower, files []*syntax.File, src map[*syntax.File][]byte) {
@@ -87,7 +95,14 @@ func (fl *fileLower) cfCollectGenerics() []*cfGenericDef {
 	var out []*cfGenericDef
 	for _, decl := range fl.file.DeclList {
 		fn, ok := decl.(*syntax.FuncDecl)
-		if !ok || fn.Body == nil || len(fn.TParamList) == 0 || !types2.LogosUsesComptime(fn, fl.pkg.info.Scopes[fl.file]) {
+		if !ok || fn.Body == nil || !types2.LogosUsesComptime(fn, fl.pkg.info.Scopes[fl.file]) {
+			continue
+		}
+		// A plain function needs type parameters to be generic. A
+		// method is generic when it declares its own type parameters
+		// or its receiver instantiates a generic type; either shape
+		// is admitted by the types2 drain, so both retire here.
+		if len(fn.TParamList) == 0 && (fn.Recv == nil || !ctRecvGeneric(fn.Recv)) {
 			continue
 		}
 		var obj *types2.Func
@@ -97,6 +112,21 @@ func (fl *fileLower) cfCollectGenerics() []*cfGenericDef {
 		out = append(out, &cfGenericDef{decl: fn, obj: obj, file: fl.file})
 	}
 	return out
+}
+
+// ctRecvGeneric reports whether a method receiver instantiates a generic
+// type: after stripping parentheses and one pointer indirection the type
+// is an index expression (Box[T] or Box[T, U]).
+func ctRecvGeneric(recv *syntax.Field) bool {
+	if recv == nil {
+		return false
+	}
+	t := syntax.Unparen(recv.Type)
+	if op, ok := t.(*syntax.Operation); ok && op.Op == syntax.Mul && op.Y == nil {
+		t = syntax.Unparen(op.X)
+	}
+	_, ok := t.(*syntax.IndexExpr)
+	return ok
 }
 
 func (fl *fileLower) cfCollectForwarders() []*cfGenericDef {
@@ -382,9 +412,23 @@ func (fl *fileLower) cfKnownPackage(path string) *types2.Package {
 func (fl *fileLower) cfRetireDef(def *cfGenericDef) {
 	fn := def.decl
 	call := "panic(" + strconv.Quote("logos: comptime generic "+fn.Name.Value+" runs only through loGo/s instantiation") + ")"
-	runtime := base.LogosEject != "" && !def.forward && def.obj != nil && def.obj.Exported() && fl.cfRuntimeBody(fn)
+	runtime := base.LogosEject != "" && !def.forward && def.obj != nil && def.obj.Exported() && fn.Recv == nil && fl.cfRuntimeBody(fn)
 	if !def.forward {
 		fn.Body.List = fl.reparseStmts(call, fn.Pos())
+	}
+	if fn.Recv != nil && len(fn.TParamList) != 0 && base.LogosEject != "" {
+		// A generic method has no upstream spelling: drop it from
+		// ejected text. Instances print separately and method call
+		// sites are renamed to them.
+		s := fl.cfDeclSpan(fn)
+		fl.add(s.start, s.end, "")
+		fl.ejectRetired = append(fl.ejectRetired, fn)
+		if fl.ejectSites == nil {
+			fl.ejectSites = make(map[syntax.Node]bool)
+		}
+		fl.ejectSites[fn] = true
+		fl.changed = true
+		return
 	}
 	switch {
 	case base.LogosEject != "" && (def.obj == nil || !def.obj.Exported()):
@@ -936,9 +980,9 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 				return r.constant(e.Pos(), tv.Value)
 			}
 		}
-		if selected := f.info.LogosConstSel[e]; selected != nil {
+		if selected := f.info.LogosConstSel[e]; selected.Case != nil {
 			pos := e.Pos()
-			typ := f.caseType(selected)
+			typ := f.caseType(selected.Case, selected.Elem)
 			if typ == nil {
 				r.invalid(e, "missing concrete interface case type")
 				return nil
@@ -963,7 +1007,7 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 					r.invalid(e, "[comptime::error_not_constant] comptime.Error needs a constant message")
 				}
 			}
-		case "IsStruct", "SizeOf", "AlignOf", "HasPointers":
+		case "IsStruct", "IsInterface", "SizeOf", "AlignOf", "HasPointers", "HasUnexported":
 			if tv := f.info.Types[e]; tv.Value != nil {
 				return r.constant(e.Pos(), tv.Value)
 			}
@@ -974,17 +1018,18 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 	}
 	return nil
 }
-
-func (f *ctFrame) caseType(c *syntax.ConstSwitchCase) types2.Type {
+func (f *ctFrame) caseType(c *syntax.ConstSwitchCase, elem int) types2.Type {
+	if elem < 0 || elem >= len(c.Elems) {
+		return nil
+	}
 	for f != nil {
-		if typ := f.info.TypeOf(c.Type); typ != nil {
+		if typ := f.info.TypeOf(c.Elems[elem].Type); typ != nil {
 			return typ
 		}
 		f = f.outer
 	}
 	return nil
 }
-
 func (r *ctReducer) constant(pos syntax.Pos, v constant.Value) syntax.Expr {
 	switch v.Kind() {
 	case constant.Int:
@@ -1101,11 +1146,19 @@ type ctPreparedPackage struct {
 	instances []ctPreparedInstance
 	sites     ctTraceSites
 	localDefs map[*syntax.Name]*types2.TypeName
+	files     []*syntax.File
 }
 
-func stageCtPreparedPackage(pkg *types2.Package, info *types2.Info) (*ctPreparedPackage, error) {
-	p := &ctPreparedPackage{instances: make([]ctPreparedInstance, 0, len(info.LogosCtInst))}
-	var files map[*types2.Scope]*ctPreparedFile
+// ctMethodTarget is the checked instance a direct comptime-method call
+// rewrites to: a plain function whose first parameter is the receiver.
+type ctMethodTarget struct {
+	fn  *types2.Func
+	rec *types2.LogosCtInst
+}
+
+func stageCtPreparedPackage(pkg *types2.Package, info *types2.Info, files []*syntax.File) (*ctPreparedPackage, error) {
+	p := &ctPreparedPackage{instances: make([]ctPreparedInstance, 0, len(info.LogosCtInst)), files: files}
+	var byScope map[*types2.Scope]*ctPreparedFile
 	for _, key := range slices.Sorted(maps.Keys(info.LogosCtInst)) {
 		record := info.LogosCtInst[key]
 		var file *ctPreparedFile
@@ -1114,13 +1167,13 @@ func stageCtPreparedPackage(pkg *types2.Package, info *types2.Info) (*ctPrepared
 			if scope == nil {
 				return nil, fmt.Errorf("logos: missing defining scope for comptime function %s", record.Origin)
 			}
-			file = files[scope]
+			file = byScope[scope]
 			if file == nil {
-				if files == nil {
-					files = make(map[*types2.Scope]*ctPreparedFile)
+				if byScope == nil {
+					byScope = make(map[*types2.Scope]*ctPreparedFile)
 				}
 				file = &ctPreparedFile{initial: scope}
-				files[scope] = file
+				byScope[scope] = file
 			}
 		}
 		unit, err := stageCtPreparedUnit(record, &p.sites, pkg)
@@ -1179,9 +1232,186 @@ func (p *ctPreparedPackage) finalize(pkg *types2.Package, info *types2.Info, con
 		}
 	}
 	info.LogosCtPrepared = records
+	p.rewriteMethodSites(info, records)
 	info.LogosCtImports = slices.Sorted(maps.Keys(imports))
 	info.LogosCtFinish = nil
 	return nil
+}
+
+// rewriteMethodSites redirects every direct call of a comptime generic
+// method in the compiled files and in every checked instance body to
+// its checked instance. The instance is a plain function whose first
+// parameter is the receiver, so the call recv.M(args) becomes
+// Origin_logosct_<id>(recv, args). Calls inside instance bodies resolve
+// through the body's own facts, and the fresh name is keyed there too,
+// so logos eject prints the instance's ejected name. Method values and
+// interface calls are out of scope: only a direct call carries a site
+// key the drain produced.
+func (p *ctPreparedPackage) rewriteMethodSites(info *types2.Info, records map[*types2.Func]*types2.LogosCtInst) {
+	byID := make(map[string]ctMethodTarget, len(records))
+	for fn, rec := range records {
+		if rec.Origin.Signature().Recv() == nil {
+			continue
+		}
+		byID[rec.ID] = ctMethodTarget{fn: fn, rec: rec}
+	}
+	if len(byID) == 0 {
+		return
+	}
+	for _, file := range p.files {
+		syntax.Inspect(file, func(n syntax.Node) bool {
+			call, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			rewriteMethodCall(info, call, byID)
+			return true
+		})
+	}
+	for _, rec := range records {
+		if rec.Info == nil || rec.Decl == nil {
+			continue
+		}
+		syntax.Inspect(rec.Decl, func(n syntax.Node) bool {
+			call, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			if fresh, id := rewriteMethodCall(rec.Info, call, byID); fresh != nil {
+				if rec.Info.LogosCtSiteKeys == nil {
+					rec.Info.LogosCtSiteKeys = make(map[*syntax.Name]string)
+				}
+				rec.Info.LogosCtSiteKeys[fresh] = id
+			}
+			return true
+		})
+	}
+}
+
+// rewriteMethodCall rewrites one direct comptime-method call to its
+// instance. A pointer receiver wraps an addressable-by-construction
+// value argument in &, mirroring Go's automatic addressing; a value
+// receiver dereferences a pointer argument symmetrically.
+func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string]ctMethodTarget) (*syntax.Name, string) {
+	fun := syntax.Unparen(call.Fun)
+	if idx, ok := fun.(*syntax.IndexExpr); ok {
+		fun = syntax.Unparen(idx.X)
+	}
+	sel, ok := fun.(*syntax.SelectorExpr)
+	if !ok {
+		return nil, ""
+	}
+	id := info.LogosCtSiteKeys[sel.Sel]
+	if id == "" {
+		if fn, ok := info.Uses[sel.Sel].(*types2.Func); ok && fn.Signature().Recv() != nil {
+			if recvTyp := info.TypeOf(syntax.Unparen(sel.X)); recvTyp != nil {
+				var targs []types2.Type
+				targs = append(targs, recvTyp)
+				if nparams := fn.Signature().TypeParams().Len(); nparams != 0 {
+					if inst, found := info.Instances[sel.Sel]; found && nparams == inst.TypeArgs.Len() {
+						targs = append(targs, typeArgsOf(inst.TypeArgs)...)
+					} else {
+						targs = nil
+					}
+				}
+				if targs != nil {
+					if key := types2.LogosCtKey(fn.Origin(), targs); key != "" {
+						for candID, tgt := range byID {
+							if types2.LogosCtKey(tgt.fn.Origin(), tgt.rec.Targs) == key {
+								id = candID
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		if id == "" {
+			return nil, ""
+		}
+	}
+	target, ok := byID[id]
+	if !ok {
+		return nil, ""
+	}
+	selection, ok := info.Selections[sel]
+	if !ok {
+		return nil, ""
+	}
+	methodExpr := selection.Kind() == types2.MethodExpr
+	if !methodExpr && selection.Kind() != types2.MethodVal {
+		return nil, ""
+	}
+	sig := target.fn.Signature()
+	if sig.Params().Len() == 0 {
+		return nil, ""
+	}
+	// A method expression already passes the receiver explicitly;
+	// a method value call prepends the selector's receiver.
+	recvExpr := syntax.Expr(sel.X)
+	newArgs := call.ArgList
+	if methodExpr {
+		if len(newArgs) == 0 {
+			return nil, ""
+		}
+		recvExpr = newArgs[0]
+	} else {
+		newArgs = append([]syntax.Expr{syntax.Expr(syntax.Unparen(sel.X))}, call.ArgList...)
+	}
+	recv := syntax.Unparen(recvExpr)
+	arg := syntax.Expr(recv)
+	if got := info.TypeOf(recvExpr); got != nil {
+		switch ctMethodRecvAdjust(sig.Params().At(0).Type(), got) {
+		case 1:
+			arg = addrOf(recv.Pos(), recv)
+		case -1:
+			arg = at(&syntax.Operation{Op: syntax.Mul, X: recv}, recv.Pos())
+		}
+	}
+	if !methodExpr {
+		newArgs[0] = arg
+	} else if len(newArgs) != 0 {
+		if _, ok := arg.(*syntax.Operation); ok {
+			adjusted := append([]syntax.Expr{arg}, newArgs[1:]...)
+			newArgs = adjusted
+		}
+	}
+	name := nameOf(sel.Sel.Pos(), target.rec.Origin.Name()+"_logosct_"+id)
+	tv := syntax.TypeAndValue{Type: sig}
+	tv.SetIsValue()
+	name.SetTypeInfo(tv)
+	call.Fun = name
+	call.ArgList = newArgs
+	if info.Uses == nil {
+		info.Uses = make(map[*syntax.Name]types2.Object)
+	}
+	info.Uses[name] = target.fn
+	// Instance functions check in a preparation scope, so they are not
+	// package-scoped globals the backend resolves by itself. Mark the
+	// reference the way exact generated-name bindings are marked, so the
+	// writer emits a plain global reference to the emitted instance.
+	if info.LogosCtGlobalRefs == nil {
+		info.LogosCtGlobalRefs = make(map[types2.Object]bool)
+	}
+	info.LogosCtGlobalRefs[target.fn] = true
+	return name, id
+}
+
+// ctMethodRecvAdjust reports how a method-call receiver argument must be
+// adjusted for an instance whose first parameter wants a different
+// indirection: 1 means wrap in &, -1 means dereference, 0 means as is.
+func ctMethodRecvAdjust(want, got types2.Type) int {
+	want, got = types2.Unalias(want), types2.Unalias(got)
+	if ptr, ok := want.(*types2.Pointer); ok {
+		if _, ok := got.(*types2.Pointer); !ok && types2.Identical(types2.Unalias(ptr.Elem()), got) {
+			return 1
+		}
+		return 0
+	}
+	if ptr, ok := got.(*types2.Pointer); ok && types2.Identical(want, types2.Unalias(ptr.Elem())) {
+		return -1
+	}
+	return 0
 }
 
 func (inst ctPreparedInstance) check(consumer *types2.Package, info *types2.Info, conf *types2.Config, locals map[*types2.TypeName]*types2.TypeName) (*types2.Func, *types2.LogosCtInst, error) {

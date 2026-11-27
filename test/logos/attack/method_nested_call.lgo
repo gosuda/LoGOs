@@ -1,0 +1,43 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Box[T any] struct {
+	Items []T
+}
+
+func (b Box[T]) Count() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+func (b Box[T]) Twice() int {
+	const if comptime.IsStruct[T]() {
+	}
+	return b.Count() + b.Count()
+}
+
+func Sum[T any](b Box[T]) int {
+	const if comptime.IsStruct[T]() {
+	}
+	return b.Count()
+}
+
+type Pair struct {
+	A int
+	B string
+}
+
+func main() {
+	fmt.Println(Box[Pair]{}.Twice())
+	fmt.Println(Sum[Pair](Box[Pair]{}))
+}

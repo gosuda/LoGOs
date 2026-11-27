@@ -1,0 +1,60 @@
+# Preserve native and exported dispatch for mixed and nested type switches.
+env GOPROXY=off
+env GOTOOLCHAIN=local
+exists $UPROOT1272/bin/go$GOEXE
+exec $UPROOT1272/bin/go$GOEXE version
+stdout '^go version go1\.27\.2 '
+
+cp $GOROOT/test/logos/run/const_switch_nested_list_review328.lgo const_switch_nested_list_review328/main.lgo
+cp $GOROOT/test/logos/run/const_switch_nested_list_review328.out const_switch_nested_list_review328/expected.txt
+cd const_switch_nested_list_review328
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+cp $GOROOT/test/logos/run/const_switch_mixed_default_review328.lgo const_switch_mixed_default_review328/main.lgo
+cp $GOROOT/test/logos/run/const_switch_mixed_default_review328.out const_switch_mixed_default_review328/expected.txt
+cd const_switch_mixed_default_review328
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+cp $GOROOT/test/logos/run/const_switch_live_list_review328.lgo const_switch_live_list_review328/main.lgo
+cp $GOROOT/test/logos/run/const_switch_live_list_review328.out const_switch_live_list_review328/expected.txt
+cd const_switch_live_list_review328
+logos run .
+cmp stdout expected.txt
+logos eject -o out
+cd out
+env GOROOT=$UPROOT1272
+exec $UPROOT1272/bin/go$GOEXE run .
+cmp stdout ../expected.txt
+env GOROOT=$TESTGO_GOROOT
+cd ../..
+
+-- const_switch_nested_list_review328/go.mod --
+module example.com/const_switch_nested_list_review328
+
+go 1.27
+
+-- const_switch_mixed_default_review328/go.mod --
+module example.com/const_switch_mixed_default_review328
+
+go 1.27
+
+-- const_switch_live_list_review328/go.mod --
+module example.com/const_switch_live_list_review328
+
+go 1.27

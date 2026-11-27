@@ -66,7 +66,6 @@ max_nesting_depth = 30
 max_cognitive_complexity = 150
 max_function_lines = 600
 max_function_params = 40
-max_comptime_ast_nodes = 40960
 max_ctfe_steps = 1000000
 
 -- marker.lgo --

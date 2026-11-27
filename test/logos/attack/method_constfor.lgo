@@ -1,0 +1,35 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Box[T any] struct {
+	Items []T
+}
+
+func (b Box[T]) Count() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+type Pair struct {
+	A int
+	B string
+}
+
+type Single struct {
+	X int
+}
+
+func main() {
+	fmt.Println(Box[Pair]{}.Count())
+	fmt.Println(Box[Single]{}.Count())
+}

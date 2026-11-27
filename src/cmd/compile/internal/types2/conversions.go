@@ -116,7 +116,9 @@ func (check *Checker) conversion(x *operand, T Type) {
 		check.updateExprType(x.expr, final, true)
 	}
 
+	V := x.typ()
 	x.typ_ = T
+	check.logosCtDeferInterfaceFormation(x.Pos(), V, T)
 }
 
 // TODO(gri) convertibleTo checks if T(x) is valid. It assumes that the type

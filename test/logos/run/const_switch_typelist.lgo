@@ -1,0 +1,76 @@
+// run
+
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func pick[T any](v T) string {
+	_ = v
+	const switch T {
+	case int, string:
+		var z T = v
+		_ = z
+		return "int-or-string"
+	case bool:
+		return "bool"
+	}
+	return "other"
+}
+
+type UserID int
+
+func mixed[T any](v T) string {
+	_ = v
+	const switch T {
+	case ~int, string:
+		return "intish"
+	case fmt.Stringer, io.Writer:
+		return "writerish"
+	}
+	return "other"
+}
+
+type greeting string
+
+func (g greeting) String() string { return string(g) }
+
+func ifaceList[T any](v T) string {
+	_ = v
+	const switch T {
+	case io.Reader, io.Writer:
+		return "rw"
+	}
+	return "other"
+}
+
+func main() {
+	check("list-int", pick(1) == "int-or-string", pick(1), "int-or-string")
+	check("list-string", pick("x") == "int-or-string", pick("x"), "int-or-string")
+	check("list-bool", pick(true) == "bool", pick(true), "bool")
+	check("list-other", pick(1.5) == "other", pick(1.5), "other")
+	check("mixed-tilde", mixed(UserID(7)) == "intish", mixed(UserID(7)), "intish")
+	check("mixed-exact", mixed("x") == "intish", mixed("x"), "intish")
+	check("mixed-iface", mixed(greeting("hi")) == "writerish", mixed(greeting("hi")), "writerish")
+	check("mixed-other", mixed(1.5) == "other", mixed(1.5), "other")
+	check("iface-list-reader", ifaceList(&bytes.Buffer{}) == "rw", ifaceList(&bytes.Buffer{}), "rw")
+	check("iface-list-other", ifaceList(1) == "other", ifaceList(1), "other")
+	if failed {
+		os.Exit(1)
+	}
+}

@@ -1,0 +1,68 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+// An option-typed const-switch tag that matches no case must skip the
+// switch and continue after it (SPEC Sec 2.5), not crash the compiler.
+func describeOpt[F any]() string {
+	const switch F {
+	case string:
+		return "string"
+	}
+	const if comptime.IsStruct[F]() {
+		return "struct"
+	} else {
+		return "other"
+	}
+}
+
+type oneRow struct {
+	Count int64?
+}
+
+func scanFields[T any]() string {
+	out := ""
+	const for _, f := range comptime.Fields[T]() {
+		out += scanField[f.Type]() + ";"
+	}
+	return out
+}
+
+func scanField[F any]() string {
+	const switch F {
+	case string:
+		return "string"
+	}
+	const if comptime.IsStruct[F]() {
+		return "struct"
+	} else {
+		return "other"
+	}
+}
+
+func main() {
+	check("opt-nomatch", describeOpt[int64?]() == "other", describeOpt[int64?](), "other")
+	check("opt-struct", describeOpt[oneRow]() == "struct", describeOpt[oneRow](), "struct")
+	check("plain-nomatch", describeOpt[int]() == "other", describeOpt[int](), "other")
+	check("field-opt", scanFields[oneRow]() == "other;", scanFields[oneRow](), "other;")
+	if failed {
+		os.Exit(1)
+	}
+}

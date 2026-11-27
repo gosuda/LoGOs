@@ -647,3 +647,104 @@ func c2DeadStoreDiscardedOuter() {
 		use(n)
 	}()
 }
+
+type heldField struct {
+	stats int
+	err   error
+}
+
+func fetchHeld() (int, error) {
+	return 1, nil
+}
+
+// A deferred cleanup inside a directly invoked literal reads with the
+// state at the cleanup's entry: an unchecked field result fails.
+func cleanupUncheckedInInvokedLit() {
+	h := heldField{}
+	func() {
+		h.stats, h.err = fetchHeld()
+		defer func() {
+			use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+		}()
+	}()
+}
+
+// A cleanup that checks the guard first proves its own read.
+func cleanupCheckedInInvokedLit() {
+	h := heldField{}
+	func() {
+		h.stats, h.err = fetchHeld()
+		defer func() {
+			if h.err == nil {
+				use(h.stats)
+			}
+		}()
+	}()
+}
+
+// A checked arm does not mask an unchecked field arm: the join keeps no
+// proof when one path holds only a may mark for the result.
+func joinCheckedPlainMasksUncheckedField(cond bool) {
+	h := heldField{}
+	var err error
+	func() {
+		if cond {
+			h.stats, err = fetchHeld()
+			if err != nil {
+				panic("boom")
+			}
+		} else {
+			h.stats, h.err = fetchHeld()
+		}
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+	_ = err
+}
+
+// Both arms checked through their own errors: the joined read is proven.
+func joinBothArmsChecked(cond bool) {
+	h := heldField{}
+	var err error
+	var err2 error
+	func() {
+		if cond {
+			h.stats, err = fetchHeld()
+			if err != nil {
+				panic("boom")
+			}
+		} else {
+			h.stats, err2 = fetchHeld()
+			if err2 != nil {
+				panic("boom")
+			}
+		}
+	}()
+	use(h.stats)
+	_ = err
+	_ = err2
+}
+
+var unrelatedReady bool
+
+// An unrelated write inside an invoked literal leaves an earlier pairing,
+// overwritten by a discarded-error store, silent.
+func unrelatedWriteDiscardedStore() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	h.stats, _ = fetchHeld()
+	func() {
+		unrelatedReady = true
+	}()
+	use(h.stats)
+}
+
+// A literal that overwrites the guard breaks the pairing: no later check
+// can discharge the read.
+func invokedLitBreaksGuard() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		h.err = nil
+	}()
+	use(h.stats /* ERROR "[correctness::result_before_error_check]" */)
+}

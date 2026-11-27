@@ -1,0 +1,45 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+type Big struct {
+	F0 int
+	F1 int
+	F2 int
+	F3 int
+	F4 int
+	F5 int
+	F6 int
+	F7 int
+	F8 int
+	F9 int
+	F10 int
+	F11 int
+	F12 int
+	F13 int
+	F14 int
+	F15 int
+	F16 int
+	F17 int
+	F18 int
+	F19 int
+	F20 int
+	F21 int
+	F22 int
+	F23 int
+	F24 int
+}
+
+func Show[T any](v T) int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		const for _, g := range comptime.Fields[T]() {
+			n += v.[f] + v.[g]
+		}
+	}
+	return n
+}
+
+var _ = Show[Big](Big{}) // ERROR "comptime::node_limit"

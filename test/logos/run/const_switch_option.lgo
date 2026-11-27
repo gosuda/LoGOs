@@ -1,0 +1,168 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+type OrderID int64
+
+type Point struct {
+	X int64
+	Y int64
+}
+
+func Describe[T any]() string {
+	const switch T {
+	case int64:
+		return "int64"
+	case int64?:
+		return "int64opt"
+	case OrderID:
+		return "orderid"
+	case OrderID?:
+		return "orderidopt"
+	}
+	return "other"
+}
+
+func Leaf[F any]() string {
+	const switch F {
+	case int64:
+		return "int64"
+	case int64?:
+		return "int64opt"
+	case OrderID:
+		return "orderid"
+	case OrderID?:
+		return "orderidopt"
+	}
+	return "other"
+}
+
+type All struct {
+	A int64
+	B int64?
+	C OrderID
+	D OrderID?
+}
+
+func DescribeFields[T any]() string {
+	out := ""
+	const for _, f := range comptime.Fields[T]() {
+		out += Leaf[f.Type]() + ";"
+	}
+	return out
+}
+
+func unwrapOr[T any](v T, d int64) int64 {
+	const switch T {
+	case int64?:
+		return v ?? d
+	}
+	return d
+}
+
+func unwrapNamed[T any](v T) int64 {
+	const switch T {
+	case OrderID?:
+		if v == nil {
+			return -1
+		}
+		return int64(v)
+	}
+	return -2
+}
+
+func sumX[T any](v T) int64 {
+	const switch T {
+	case Point?:
+		return v?.X ?? -1
+	}
+	return -2
+}
+
+func derefPtr[T any](v T) int {
+	const switch T {
+	case *int?:
+		if v == nil {
+			return -1
+		}
+		return *v
+	}
+	return -2
+}
+
+func firstLen[T any](v T) int {
+	const switch T {
+	case []int?:
+		if v == nil {
+			return -1
+		}
+		return len(v)
+	}
+	return -2
+}
+
+func mixed[T any]() string {
+	const switch T {
+	case int64?:
+		return "opt"
+	case ~int64:
+		return "tilde"
+	}
+	return "other"
+}
+
+func main() {
+	check("describe-int", Describe[int64]() == "int64", Describe[int64](), "int64")
+	check("describe-intopt", Describe[int64?]() == "int64opt", Describe[int64?](), "int64opt")
+	check("describe-named", Describe[OrderID]() == "orderid", Describe[OrderID](), "orderid")
+	check("describe-namedopt", Describe[OrderID?]() == "orderidopt", Describe[OrderID?](), "orderidopt")
+	check("fields", DescribeFields[All]() == "int64;int64opt;orderid;orderidopt;", DescribeFields[All](), "int64;int64opt;orderid;orderidopt;")
+
+	var seven int64? = 7
+	check("unwrap-some", unwrapOr[int64?](seven, -1) == 7, unwrapOr[int64?](seven, -1), 7)
+	check("unwrap-none", unwrapOr[int64?](nil, -1) == -1, unwrapOr[int64?](nil, -1), -1)
+	check("unwrap-nomatch", unwrapOr[int](5, -1) == -1, unwrapOr[int](5, -1), -1)
+
+	var three OrderID? = OrderID(3)
+	check("named-some", unwrapNamed[OrderID?](three) == 3, unwrapNamed[OrderID?](three), 3)
+	check("named-none", unwrapNamed[OrderID?](nil) == -1, unwrapNamed[OrderID?](nil), -1)
+	check("named-nomatch", unwrapNamed[int](1) == -2, unwrapNamed[int](1), -2)
+
+	var pt Point? = Point{X: 4, Y: 5}
+	check("select-some", sumX[Point?](pt) == 4, sumX[Point?](pt), 4)
+	check("select-none", sumX[Point?](nil) == -1, sumX[Point?](nil), -1)
+
+	m := 3
+	var bp *int? = &m
+	check("bare-some", derefPtr[*int?](bp) == 3, derefPtr[*int?](bp), 3)
+	check("bare-none", derefPtr[*int?](nil) == -1, derefPtr[*int?](nil), -1)
+
+	var sl []int? = []int{1, 2, 3}
+	check("slice-some", firstLen[[]int?](sl) == 3, firstLen[[]int?](sl), 3)
+	check("slice-none", firstLen[[]int?](nil) == -1, firstLen[[]int?](nil), -1)
+
+	check("mixed-opt", mixed[int64?]() == "opt", mixed[int64?](), "opt")
+	check("mixed-tilde", mixed[OrderID]() == "tilde", mixed[OrderID](), "tilde")
+	check("mixed-other", mixed[string]() == "other", mixed[string](), "other")
+
+	if failed {
+		os.Exit(1)
+	}
+}

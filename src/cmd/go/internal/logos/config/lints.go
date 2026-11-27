@@ -19,7 +19,7 @@ var lintGroups = []string{
 
 var lintThresholds = []string{
 	"max_nesting_depth", "max_cognitive_complexity", "max_function_lines",
-	"max_function_params", "max_comptime_ast_nodes", "max_ctfe_steps",
+	"max_function_params", "max_ctfe_steps",
 }
 
 var forbidGroups = []string{"correctness", "concurrency"}

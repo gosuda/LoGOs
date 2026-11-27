@@ -1,12 +1,12 @@
 # Comptime instantiation attacks
 
-Each `.lgo` file is one behavior and a complete program. A `// run` file pairs with a `.out` file of the same stem. A `// errorcheck` file carries `// ERROR` comments. A `// compile` file must build with no diagnostic. Expected results follow three invariants that SPEC 2.5 states [T-205]. I1: a comptime generic reached with the same type arguments, directly or through plain generics, is one instance, and different type arguments are different instances. I2: `f.Name`, `f.Index`, `f.Exported`, `f.Tag.Get` of a constant, and `comptime.TypeOf` identity are constants inside an instance. I3: an untaken `const if` arm or `const switch` case is const-dead. Other diagnostics follow SPEC 2.5, including the chain spelling in `test/logos/compile/comptime_cycle.lgo`.
+Each `.lgo` file is one behavior and a complete program. A `// run` file pairs with a `.out` file of the same stem. A `// errorcheck` file carries `// ERROR` comments. A `// compile` file must build with no diagnostic. Expected results follow three invariants that SPEC 2.5 states [T-205]. I1: a comptime generic reached with the same type arguments, directly or through plain generics, is one instance, and different type arguments are different instances. I2: `f.Name`, `f.Index`, `f.Exported`, `f.Tag.Get` of a constant, and `comptime.TypeOf` identity are constants inside an instance. I3: an untaken `const if` arm or `const switch` case is const-dead. I5: one node budget per instance chain; every comptime error carries the `instantiated here` note chain. Other diagnostics follow SPEC 2.5, including the chain spelling in `test/logos/compile/comptime_cycle.lgo`.
 
 An untaken branch is const-dead: it is not type-checked, is not counted for termination or break, and does not report `comptime.Error`. Code after a `return` or `panic` in the taken branch is termination-dead, not untaken: it is type-checked and reports `comptime.Error` (owner decision of 2026-11-23, the #186 pin `test/logos/compile/comptime_error_unreached_case.lgo`). `f.Name`, `f.Index`, `f.Exported`, `f.Tag.Get` of a constant, and `comptime.TypeOf` identity are constants inside an instance. A comptime generic may name an unexported helper and an unexported type of its defining package, because each instance is checked there (owner decision of 2026-11-23).
 
 Two packages are not a fixture. The logos testdir harness writes one source file into a throwaway module and builds that file. A second package has no import path. `identity_two_callsites.lgo` is the single-file form of I1 (one instance per type-argument list). An importing caller of an exported comptime generic is the same gap. `cross_unexported_helper.lgo` and `cross_unexported_type.lgo` attack the defining-package half of that rule. `src/cmd/go/testdata/script/logos_comptime_unexported.txt` covers the importer half: the instance is compiled for the defining package, so an instantiation in another package builds and runs. `logos eject` refuses with `[comptime::unexported_in_exported]` only an instance that it prints outside its defining package and that names such an identifier (`src/cmd/go/testdata/script/logos_comptime_instance_identity.txt`).
 
-`eval.zig:413`, `inline_switch.zig`, and `for.zig:396` are not here. They are `const for` over arrays and `const switch` type lists, which SPEC 2.5 still rejects and which later slices own.
+`eval.zig:413` and `for.zig:396` are not here. They are `const for` over arrays, which a later slice owns. `const switch` type lists and `default` are covered below (slice 3).
 
 | File | Invariant | Zig |
 | --- | --- | --- |
@@ -28,6 +28,13 @@ Two packages are not a fixture. The logos testdir harness writes one source file
 | switch_no_match_error.lgo | I3 and SPEC 2.5. No matching case leaves the later `comptime.Error` live. | |
 | taken_arm_type_error.lgo | I3. A type error in the taken `const if` arm still fails. | |
 | taken_switch_type_error.lgo | I3. A type error in the taken `const switch` case still fails. | |
+| switch_typelist_firstmatch.lgo | SPEC 2.5. A `case int, string:` list matches in order and rebinds per element; no match falls through. | |
+| switch_typelist_mixed.lgo | SPEC 2.5. One case mixes `~int` and exact elements; an interface list matches either member. | |
+| switch_default_taken.lgo | SPEC 2.5. `default` runs when nothing matches and never when a case matches; a default-only switch always runs. | |
+| switch_shadow_partial_list.lgo | SPEC 2.5. A list partly covered by an earlier case stays live for the rest: shadowing is case-level. | |
+| switch_shadow_after_default.lgo | SPEC 2.5. A case after `default` fails `[comptime::unreachable_case]`. | |
+| switch_shadow_full_list.lgo | SPEC 2.5. A list wholly covered by earlier cases fails `[comptime::unreachable_case]`. | |
+| switch_default_shadowed_by_any.lgo | SPEC 2.5. A `default` arm after `case any:` fails `[comptime::unreachable_case]`. | |
 | fact_name_constif.lgo | I2. `f.Name` is a `const if` condition. | |
 | fact_index_constif.lgo | I2. `f.Index` is a `const if` condition. | |
 | fact_exported_constif.lgo | I2. `f.Exported` is a `const if` condition. | |
@@ -49,3 +56,7 @@ Two packages are not a fixture. The logos testdir harness writes one source file
 | hostile_string_brace.lgo | A `}` inside a string in the generic body survives instantiation. | |
 | hostile_string_quote.lgo | A quote inside a string in the generic body survives instantiation. | |
 | hostile_all.lgo | One instantiation carries `]`, `}`, and a quote in a body string and in three tags. | |
+| chain_budget.lgo | I5. Nested const for breadth over one instance trips the chain budget while each declaration stays small. | |
+| chain_notes.lgo | I5. A two-deep instantiation carries one `instantiated here` note per frame, outermost first. | |
+| method_nested_call.lgo | SPEC 2.5. A comptime method call inside another method instance rewrites to that instance. | |
+| method_value.lgo | SPEC 2.5. A method value and an interface conversion over a comptime generic method fail with `[comptime::method_value]`. | |

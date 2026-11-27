@@ -13,9 +13,9 @@ stdout '^big-ok$'
 cd ..
 
 cd wsmall
-! logos build -gcflags=all=-logos.comptime_nodes=4 ./...
+! logos build -gcflags=all=-logos.comptime_nodes=1 ./...
 stderr 'comptime::node_limit'
-stderr 'expansion has 24 nodes above the selected limit 4'
+stderr 'const for has [0-9]+ iterations above the selected limit 1'
 logos build -gcflags=all=-logos.comptime_nodes=24 ./...
 ! logos build -gcflags=all=-logos.comptime_nodes=23 ./...
 stderr 'comptime::node_limit'
@@ -40,18 +40,15 @@ cp wbig/big.lgo wtoml/big.lgo
 cd wtoml
 ! logos build ./...
 stderr 'comptime::node_limit'
-cp ../toml-raised.toml logos.toml
-logos run ./...
-stdout '^big-ok$'
+cp ../toml-removed.toml logos.toml
+! logos build ./...
+stderr 'unknown key "max_comptime_ast_nodes"'
 cd ..
 
 cd wsmall
-cp ../toml-limit-23.toml logos.toml
-! logos build ./...
+! logos build -gcflags=all=-logos.comptime_nodes=23 ./...
 stderr 'expansion has 24 nodes above the selected limit 23'
-cp ../toml-limit-24.toml logos.toml
-logos build ./...
-rm logos.toml
+logos build -gcflags=all=-logos.comptime_nodes=24 ./...
 cd ..
 
 -- wbig/go.mod --
@@ -133,17 +130,9 @@ func main() {
 	fmt.Println("small-ok")
 }
 
--- toml-raised.toml --
+-- toml-removed.toml --
 [lints.thresholds]
 max_comptime_ast_nodes = 1000000
-
--- toml-limit-23.toml --
-[lints.thresholds]
-max_comptime_ast_nodes = 23
-
--- toml-limit-24.toml --
-[lints.thresholds]
-max_comptime_ast_nodes = 24
 
 -- wmed/go.mod --
 module example.com/mednest

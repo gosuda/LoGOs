@@ -1,0 +1,68 @@
+// run
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var failed bool
+
+func check(name string, cond bool, got, want any) {
+	if !cond {
+		failed = true
+		fmt.Println("FAIL", name+":", "got", got, "want", want)
+		return
+	}
+	fmt.Println("ok", name)
+}
+
+func withDefault[T any](v T) string {
+	_ = v
+	out := ""
+	const switch T {
+	case int:
+		out = "int"
+	default:
+		out = "fallback"
+	}
+	return out
+}
+
+func defaultOnly[T any](v T) string {
+	_ = v
+	out := ""
+	const switch T {
+	default:
+		out = "always"
+	}
+	return out
+
+}
+func defaultAfterList[T any](v T) string {
+	_ = v
+	out := ""
+	const switch T {
+	case int, string:
+		out = "listed"
+	case bool:
+		out = "bool"
+	default:
+		out = "fallback"
+	}
+	return out
+}
+
+func main() {
+	check("default-match", withDefault(1) == "int", withDefault(1), "int")
+	check("default-taken", withDefault(1.5) == "fallback", withDefault(1.5), "fallback")
+	check("default-only-int", defaultOnly(1) == "always", defaultOnly(1), "always")
+	check("default-only-string", defaultOnly("x") == "always", defaultOnly("x"), "always")
+	check("default-list-match", defaultAfterList("x") == "listed", defaultAfterList("x"), "listed")
+	check("default-list-bool", defaultAfterList(true) == "bool", defaultAfterList(true), "bool")
+	check("default-list-fallback", defaultAfterList(1.5) == "fallback", defaultAfterList(1.5), "fallback")
+	if failed {
+		os.Exit(1)
+	}
+}

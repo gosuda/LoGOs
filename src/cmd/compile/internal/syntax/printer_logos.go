@@ -119,12 +119,21 @@ func printLogos(p *printer, n Node) {
 		if len(n.Cases) > 0 {
 			p.print(newline)
 			for i, c := range n.Cases {
-				p.print(_Case, blank)
-				if c.Tilde {
-					p.print(Tilde)
+				if c.Default {
+					p.print(_Default, _Colon)
+				} else {
+					p.print(_Case, blank)
+					for j := range c.Elems {
+						if j > 0 {
+							p.print(_Comma, blank)
+						}
+						if c.Elems[j].Tilde {
+							p.print(Tilde)
+						}
+						p.printNode(c.Elems[j].Type)
+					}
+					p.print(_Colon)
 				}
-				p.printNode(c.Type)
-				p.print(_Colon)
 				if len(c.Body) > 0 {
 					p.print(newline, indent)
 					p.printStmtList(c.Body, i+1 == len(n.Cases))

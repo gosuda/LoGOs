@@ -74,13 +74,19 @@ func logosCtLocalABISuffix(decl typeDeclGen) string {
 }
 
 func (w *writer) logosCtWriteEdges(edges []types2.LogosCtEdge) {
-	e := logosCtEdgeWriter{writer: w}
-	w.Len(len(edges))
+	var plain []types2.LogosCtEdge
 	for _, edge := range edges {
+		if edge.Origin.Signature().Recv() != nil {
+			continue
+		}
+		plain = append(plain, edge)
+	}
+	e := logosCtEdgeWriter{writer: w}
+	w.Len(len(plain))
+	for _, edge := range plain {
 		sig := edge.Origin.Signature()
-		base.Assertf(sig.Recv() == nil && sig.TypeParams().Len() != 0 &&
-			sig.TypeParams().Len() == len(edge.Targs), "invalid comptime forwarding target %v", edge.Origin)
-		// The linker relocates the callee without interpreting semantic arguments.
+		want := sig.TypeParams().Len()
+		base.Assertf(want != 0 && len(edge.Targs) == want, "invalid comptime forwarding target %v", edge.Origin)
 		w.obj(edge.Origin, nil)
 		e.typeList(edge.Targs)
 		w.pos(edge.Pos)
