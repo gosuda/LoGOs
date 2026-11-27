@@ -962,28 +962,61 @@ func (s *logosEFState) dropWriting(k logosEFKey) *logosEFState {
 		}
 	}
 	// A write also drops pairings whose error destination it overlaps:
-	// the stored error no longer guards the paired result. Vetoed guard
-	// sets narrow the same way: a write overlapping the result kills
-	// the set, and a write overlapping a possible guard removes it.
+	// the stored error no longer guards the paired result. A write that
+	// breaks the guard without touching the result records it: the exit
+	// stays loud even when another path keeps or discards its own
+	// pairing. A write that touches the result supersedes the value and
+	// drops any record of guards broken before it. Vetoed guard sets
+	// narrow the same way: a write overlapping the result kills the set,
+	// and a write overlapping a possible guard removes it.
 	var errOut map[logosEFKey]logosEFKey
+	brokeOut := s.mayBroke
+	brokeChanged := false
 	for v, ek := range s.mayErr {
 		if v.root != k.root && ek.root != k.root {
 			continue
 		}
-		overlapped := v.root == k.root && (logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path))
-		if !overlapped && ek.root == k.root {
-			overlapped = logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path)
+		vHit := v.root == k.root && (logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path))
+		guardHit := ek != (logosEFKey{}) && ek.root == k.root && (logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path))
+		if !vHit && !guardHit {
+			continue
 		}
-		if overlapped {
-			if errOut == nil {
-				errOut = maps.Clone(s.mayErr)
+		if errOut == nil {
+			errOut = maps.Clone(s.mayErr)
+		}
+		delete(errOut, v)
+		if vHit {
+			// A fresh store of the result supersedes it: drop any
+			// record of guards broken before it.
+			if _, ok := brokeOut[v]; ok {
+				if !brokeChanged {
+					brokeOut = maps.Clone(s.mayBroke)
+					brokeChanged = true
+				}
+				delete(brokeOut, v)
 			}
-			delete(errOut, v)
+			continue
 		}
+		merged := append([]logosEFKey(nil), brokeOut[v]...)
+		if !slices.Contains(merged, ek) {
+			merged = append(merged, ek)
+		}
+		slices.SortFunc(merged, func(x, y logosEFKey) int {
+			if x.root.name != y.root.name {
+				return strings.Compare(x.root.name, y.root.name)
+			}
+			return strings.Compare(x.path, y.path)
+		})
+		if !brokeChanged {
+			brokeOut = maps.Clone(s.mayBroke)
+			brokeChanged = true
+		}
+		if brokeOut == nil {
+			brokeOut = make(map[logosEFKey][]logosEFKey, 1)
+		}
+		brokeOut[v] = merged
 	}
 	var altOut map[logosEFKey][]logosEFKey
-	brokeOut := s.mayBroke
-	brokeChanged := false
 	for v, gs := range s.mayAlt {
 		vHit := v.root == k.root && (logosEFPathUnder(v.path, k.path) || logosEFPathUnder(k.path, v.path))
 		var kept []logosEFKey
@@ -1101,21 +1134,48 @@ func (s *logosEFState) dropCovered(k logosEFKey) *logosEFState {
 		}
 	}
 	var errOut map[logosEFKey]logosEFKey
-	for v, ek := range s.mayErr {
-		overlapped := v.root == k.root && logosEFPathUnder(v.path, k.path)
-		if !overlapped && ek.root == k.root {
-			overlapped = logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path)
-		}
-		if overlapped {
-			if errOut == nil {
-				errOut = maps.Clone(s.mayErr)
-			}
-			delete(errOut, v)
-		}
-	}
-	var altOut map[logosEFKey][]logosEFKey
 	brokeOut := s.mayBroke
 	brokeChanged := false
+	for v, ek := range s.mayErr {
+		vHit := v.root == k.root && logosEFPathUnder(v.path, k.path)
+		guardHit := ek != (logosEFKey{}) && ek.root == k.root && (logosEFPathUnder(ek.path, k.path) || logosEFPathUnder(k.path, ek.path))
+		if !vHit && !guardHit {
+			continue
+		}
+		if errOut == nil {
+			errOut = maps.Clone(s.mayErr)
+		}
+		delete(errOut, v)
+		if vHit {
+			if _, ok := brokeOut[v]; ok {
+				if !brokeChanged {
+					brokeOut = maps.Clone(s.mayBroke)
+					brokeChanged = true
+				}
+				delete(brokeOut, v)
+			}
+			continue
+		}
+		merged := append([]logosEFKey(nil), brokeOut[v]...)
+		if !slices.Contains(merged, ek) {
+			merged = append(merged, ek)
+		}
+		slices.SortFunc(merged, func(x, y logosEFKey) int {
+			if x.root.name != y.root.name {
+				return strings.Compare(x.root.name, y.root.name)
+			}
+			return strings.Compare(x.path, y.path)
+		})
+		if !brokeChanged {
+			brokeOut = maps.Clone(s.mayBroke)
+			brokeChanged = true
+		}
+		if brokeOut == nil {
+			brokeOut = make(map[logosEFKey][]logosEFKey, 1)
+		}
+		brokeOut[v] = merged
+	}
+	var altOut map[logosEFKey][]logosEFKey
 	for v, gs := range s.mayAlt {
 		vHit := v.root == k.root && logosEFPathUnder(v.path, k.path)
 		var kept []logosEFKey
@@ -5653,7 +5713,6 @@ func cleanupClausesRecover(p *logosEFPass, bodies [][]syntax.Stmt, recovered boo
 	return true
 }
 
-// refused_by: merge_ladder_exhausted · collision: none (both sides edited, nowhere the same lines)
 func cleanupExprRecovers(p *logosEFPass, e syntax.Node) bool {
 	if e == nil {
 		return false

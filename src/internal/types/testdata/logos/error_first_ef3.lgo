@@ -184,3 +184,32 @@ func probeD6() {
 	}
 	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
 }
+
+// A discarded store on one exit and a broken guard on the other leave no
+// single guard on any exit: the caller read fails whatever order the
+// arms ran in.
+func probeBrokeDisc(reset bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		if reset {
+			h.err = nil
+		} else {
+			h.stats, _ = fetchHeld()
+		}
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+func probeBrokeDiscSwap(reset bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		if reset {
+			h.stats, _ = fetchHeld()
+		} else {
+			h.err = nil
+		}
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
