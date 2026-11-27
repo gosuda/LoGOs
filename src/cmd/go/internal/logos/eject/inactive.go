@@ -36,8 +36,9 @@ import (
 // Lowering those packages without cgo would bake the wrong branch, and
 // no helper can lower them with cgo while the host disables it, so the
 // eject must refuse instead of emitting a tree that disagrees with the
-// native build. The second result names the file and the unreachable
-// packages for the refusal.
+// native build. A missing import whose whole logos closure is pure Go
+// needs no lowering: the support copy carries it directly. The second
+// result names the file and the unreachable packages for the refusal.
 func cgoOnlyLogosGap(path string, plan *ejectPlan) (string, bool) {
 	data, err := fsys.ReadFile(path)
 	if err != nil || isBuildIgnored(data) {
@@ -58,7 +59,9 @@ func cgoOnlyLogosGap(path string, plan *ejectPlan) (string, bool) {
 		}
 		seen[imp] = true
 		if _, ok := plan.provenance[imp]; !ok && imp != load.LogosRTPkg {
-			missing = append(missing, imp)
+			if logosNeedsLowering(filepath.Join(cfg.GOROOT, "src"), imp, map[string]bool{}) {
+				missing = append(missing, imp)
+			}
 		}
 	}
 	if !hasCgo || len(missing) == 0 {
@@ -66,6 +69,52 @@ func cgoOnlyLogosGap(path string, plan *ejectPlan) (string, bool) {
 	}
 	slices.Sort(missing)
 	return path + " imports C and unreachable " + strings.Join(missing, ", "), true
+}
+
+// logosNeedsLowering reports whether ejecting the GOROOT logos package
+// imp needs compiler lowering: the package itself or any logos package
+// it reaches through Go imports holds LoGOs sources. Anything unprovable
+// (an unreadable directory or file) counts as needing lowering, so the
+// gap stays fail-closed.
+func logosNeedsLowering(srcDir, imp string, seen map[string]bool) bool {
+	if seen[imp] {
+		return false
+	}
+	seen[imp] = true
+	dir := filepath.Join(srcDir, filepath.FromSlash(imp))
+	entries, err := fsys.ReadDir(dir)
+	if err != nil {
+		return true
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+			continue
+		}
+		if logosfile.Is(name) {
+			return true
+		}
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		data, err := fsys.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return true
+		}
+		for _, dep := range goSourceImports(data) {
+			rest, ok := strings.CutPrefix(dep, "logos/")
+			if !ok || rest == "" {
+				continue
+			}
+			if logosNeedsLowering(srcDir, dep, seen) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func collectInactiveLogosFiles(plan *ejectPlan, staging string) []inactiveFile {
