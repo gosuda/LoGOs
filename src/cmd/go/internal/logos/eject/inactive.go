@@ -37,7 +37,9 @@ import (
 // no helper can lower them with cgo while the host disables it, so the
 // eject must refuse instead of emitting a tree that disagrees with the
 // native build. A missing import whose whole logos closure is pure Go
-// needs no lowering: the support copy carries it directly. The second
+// needs no lowering: the support copy carries it directly. A file left
+// out while cgo is enabled is inactive by platform, not by toolchain, so
+// the CGO_ENABLED=1 advice cannot help and no gap is reported. The second
 // result names the file and the unreachable packages for the refusal.
 func cgoOnlyLogosGap(path string, plan *ejectPlan) (string, bool) {
 	data, err := fsys.ReadFile(path)
@@ -64,7 +66,7 @@ func cgoOnlyLogosGap(path string, plan *ejectPlan) (string, bool) {
 			}
 		}
 	}
-	if !hasCgo || len(missing) == 0 {
+	if !hasCgo || len(missing) == 0 || cfg.BuildContext.CgoEnabled {
 		return "", false
 	}
 	slices.Sort(missing)
@@ -282,6 +284,23 @@ func ejectDiscoverDirs(plan *ejectPlan, unloadable map[string]bool) []string {
 
 func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, opts load.PackageOpts, plan *ejectPlan) {
 	unloadable := map[string]bool{}
+	// Host-active GOROOT sources need no gap check: the main load already
+	// sees their imports. Anything else the scan reads is inactive on the
+	// host, so a cgo-only file among them reaches its logos imports
+	// exactly like the owned-module case cgoOnlyLogosGap refuses.
+	active := map[string]bool{}
+	for _, path := range slices.Sorted(maps.Keys(plan.provenance)) {
+		for _, p := range plan.provenance[path] {
+			if !isGorootLogos(p) {
+				continue
+			}
+			for _, files := range [][]string{p.GoFiles, p.CgoFiles} {
+				for _, name := range files {
+					active[filepath.Join(p.Dir, name)] = true
+				}
+			}
+		}
+	}
 	for {
 		dirs := ejectDiscoverDirs(plan, unloadable)
 		known := map[string]bool{}
@@ -293,6 +312,7 @@ func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, op
 		}
 		added := map[string]bool{}
 		var newPaths []string
+		var cgoGaps []string
 		for _, dir := range dirs {
 			entries, err := fsys.ReadDir(dir)
 			if err != nil {
@@ -315,7 +335,16 @@ func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, op
 					added[imp] = true
 					newPaths = append(newPaths, imp)
 				}
+				if fpath := filepath.Join(dir, name); !active[fpath] {
+					if gap, ok := cgoOnlyLogosGap(fpath, plan); ok {
+						cgoGaps = append(cgoGaps, gap)
+					}
+				}
 			}
+		}
+		if len(cgoGaps) > 0 {
+			slices.Sort(cgoGaps)
+			base.Fatalf("logos eject: cgo-only Go sources reach logos packages the load cannot see without cgo:\n%s\nexport with CGO_ENABLED=1 and a C compiler", strings.Join(cgoGaps, "\n"))
 		}
 		if len(newPaths) == 0 {
 			// A discovered package with no buildable source for the host
@@ -354,13 +383,17 @@ func discoverGoImportLogos(moduleLoader *modload.Loader, ctx context.Context, op
 // packages, except a discovered package with no Go files for the current
 // target. A platform-only dependency (for example a helper holding only a
 // windows-tagged file) cannot load on this target, and aborting would
-// reject the valid alternate build the variant helpers lower. Skipped
-// packages stay out of provenance; anything they would have contributed
-// to the current target fails loudly where it is used.
+// reject the valid alternate build the variant helpers lower. The same
+// holds one level down: a platform-only package reached transitively
+// through a newly discovered closure never entered the request list, but
+// its NoGoError still surfaces here, so logos-prefixed transitive failures
+// join the unloadable set too. Skipped packages stay out of provenance;
+// anything they would have contributed to the current target fails loudly
+// where it is used.
 func checkDiscoveredPackageErrors(pkgs []*load.Package, discovered, unloadable map[string]bool) {
 	load.PackageErrors(pkgs, func(p *load.Package) {
 		var nogo *load.NoGoError
-		if discovered[p.ImportPath] && errors.As(p.Error, &nogo) {
+		if errors.As(p.Error, &nogo) && (discovered[p.ImportPath] || strings.HasPrefix(p.ImportPath, "logos/")) {
 			unloadable[p.ImportPath] = true
 			return
 		}
