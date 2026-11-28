@@ -980,3 +980,55 @@ func TestSupportCopyRewritesSiblingTypeAliasServer(t *testing.T) {
 		t.Errorf("support copy missing guard delegation:\n%s", got)
 	}
 }
+
+// An explicit method on a type that embeds *http.Server shadows the
+// promoted fork method: the call is a user method and must survive,
+// not be rewritten to the guard.
+func TestSupportCopyKeepsExplicitMethodOverEmbeddedServer(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestexplicitmethod")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"holder.go": "package ejecttestexplicitmethod\n\nimport \"net/http\"\n\ntype Holder struct {\n\t*http.Server\n\tHits int\n}\n\nfunc (h *Holder) EnableHTTP2ExtendedConnect() {\n\th.Hits++\n}\n",
+		"call.go":   "package ejecttestexplicitmethod\n\nimport \"net/http\"\n\nvar _ = http.Get\n\nfunc Enable(h Holder) {\n\th.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestexplicitmethod", dst: "rt/logos/ejecttestexplicitmethod"}
+	if _, _, err := c.copyPackageGo(p, "call.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestexplicitmethod", "call.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("explicit user method was rewritten through an embedded server:\n%s", got)
+	}
+	if !strings.Contains(got, "h.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("explicit user method call did not survive:\n%s", got)
+	}
+}

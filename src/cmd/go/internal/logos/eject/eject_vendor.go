@@ -962,6 +962,31 @@ func h2EmbedsHTTPServer(origins []*h2TypeOrigin, name string, seen map[string]bo
 	return false
 }
 
+// h2DeclaresMethod reports whether any file of the package declares a
+// method with the given name on the named type. An explicit method
+// shadows a promoted one, so a call on such a type is a user method
+// even when the type embeds a server.
+func h2DeclaresMethod(origins []*h2TypeOrigin, typeName, method string) bool {
+	for _, o := range origins {
+		for _, decl := range o.file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != method || fn.Recv == nil {
+				continue
+			}
+			for _, field := range fn.Recv.List {
+				recv := field.Type
+				if star, ok := recv.(*ast.StarExpr); ok {
+					recv = star.X
+				}
+				if id, ok := recv.(*ast.Ident); ok && id.Name == typeName {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // h2TypeDecl returns the type declaration of name in one file, or nil
 // when the file does not declare it.
 func h2TypeDecl(f *ast.File, name string) *ast.TypeSpec {
@@ -1359,6 +1384,9 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 			return h2ReceiverHTTP
 		}
 		if name, ok := typ.(*ast.Ident); ok && h2EmbedsHTTPServer(origins, name.Name, map[string]bool{}) {
+			if h2DeclaresMethod(origins, name.Name, h2extendedConnectMethod) {
+				return h2ReceiverUser
+			}
 			return h2ReceiverHTTP
 		}
 		return h2ReceiverUser
