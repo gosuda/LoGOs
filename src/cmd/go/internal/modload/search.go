@@ -148,6 +148,9 @@ func matchPackages(ld *Loader, ctx context.Context, m *search.Match, tags map[st
 							addPkg(pkgName)
 						} else if keepMain && search.LogosKeepCgoOnlyDir(dir) {
 							addPkg(pkgName)
+							// A ...-style pattern walk that meets LoGOs sources
+							// re-executes before toolchain selection in
+							// cfg.MaybeRelaunchEarly instead of here.
 						}
 					})
 				}

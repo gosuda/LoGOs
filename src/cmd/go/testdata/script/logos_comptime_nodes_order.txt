@@ -1,0 +1,324 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# Both orders build under the default limit. At a limit below the
+# true chain, both orders must fail: reusing a cached instance still
+# charges its subtree, even through an ordinary generic wrapper.
+# Shapes c and d route Leaf through the ordinary generic Fwd; the
+# true chain is 616 nodes in either visit order, so both fail at 460
+# and both build at 632.
+cd w
+logos build ./...
+! logos build -o $WORK/a.exe -gcflags=all=-logos.comptime_nodes=430 ./a
+stderr 'comptime::node_limit'
+! logos build -o $WORK/b.exe -gcflags=all=-logos.comptime_nodes=430 ./b
+stderr 'comptime::node_limit'
+! logos build -o $WORK/c.exe -gcflags=all=-logos.comptime_nodes=460 ./c
+stderr 'comptime::node_limit'
+! logos build -o $WORK/d.exe -gcflags=all=-logos.comptime_nodes=460 ./d
+stderr 'comptime::node_limit'
+logos build -o $WORK/c632.exe -gcflags=all=-logos.comptime_nodes=632 ./c
+logos build -o $WORK/d632.exe -gcflags=all=-logos.comptime_nodes=632 ./d
+
+-- w/go.mod --
+module example.com/nodeorder
+
+go 1.27
+
+-- w/a/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Wide struct {
+	F0 int
+	F1 int
+	F2 int
+	F3 int
+	F4 int
+	F5 int
+	F6 int
+	F7 int
+	F8 int
+	F9 int
+	F10 int
+	F11 int
+	F12 int
+	F13 int
+	F14 int
+	F15 int
+	F16 int
+	F17 int
+	F18 int
+	F19 int
+	F20 int
+	F21 int
+	F22 int
+	F23 int
+	F24 int
+	F25 int
+	F26 int
+	F27 int
+	F28 int
+	F29 int
+}
+
+func Leaf[T any]() int {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	return 1
+}
+
+func Outer[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return Leaf[T]() + 1
+	}
+	return 0
+}
+
+func main() {
+	fmt.Println(Leaf[Wide]())
+	fmt.Println(Outer[Wide]())
+}
+
+-- w/b/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Wide struct {
+	F0 int
+	F1 int
+	F2 int
+	F3 int
+	F4 int
+	F5 int
+	F6 int
+	F7 int
+	F8 int
+	F9 int
+	F10 int
+	F11 int
+	F12 int
+	F13 int
+	F14 int
+	F15 int
+	F16 int
+	F17 int
+	F18 int
+	F19 int
+	F20 int
+	F21 int
+	F22 int
+	F23 int
+	F24 int
+	F25 int
+	F26 int
+	F27 int
+	F28 int
+	F29 int
+}
+
+func Leaf[T any]() int {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	return 1
+}
+
+func Outer[T any]() int {
+	const if comptime.IsStruct[T]() {
+		return Leaf[T]() + 1
+	}
+	return 0
+}
+
+func main() {
+	fmt.Println(Outer[Wide]())
+	fmt.Println(Leaf[Wide]())
+}
+
+-- w/c/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Wide struct {
+	F0 int
+	F1 int
+	F2 int
+	F3 int
+	F4 int
+	F5 int
+	F6 int
+	F7 int
+	F8 int
+	F9 int
+	F10 int
+	F11 int
+	F12 int
+	F13 int
+	F14 int
+	F15 int
+	F16 int
+	F17 int
+	F18 int
+	F19 int
+	F20 int
+	F21 int
+	F22 int
+	F23 int
+	F24 int
+	F25 int
+	F26 int
+	F27 int
+	F28 int
+	F29 int
+}
+
+func Leaf[T any]() int {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	return 1
+}
+
+func Fwd[T any]() int {
+	return Leaf[T]()
+}
+
+func Outer[T any]() int {
+	const if comptime.IsStruct[T]() {
+	_ = 100
+	_ = 101
+	_ = 102
+	_ = 103
+	_ = 104
+	_ = 105
+	_ = 106
+	_ = 107
+	_ = 108
+	_ = 109
+	_ = 110
+	_ = 111
+	_ = 112
+	_ = 113
+	_ = 114
+	_ = 115
+	_ = 116
+	_ = 117
+	_ = 118
+	_ = 119
+	_ = 120
+	_ = 121
+	_ = 122
+	_ = 123
+	_ = 124
+		return Fwd[T]() + 1
+	}
+	return 0
+}
+
+func main() {
+	fmt.Println(Fwd[Wide]())
+	fmt.Println(Outer[Wide]())
+}
+
+-- w/d/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Wide struct {
+	F0 int
+	F1 int
+	F2 int
+	F3 int
+	F4 int
+	F5 int
+	F6 int
+	F7 int
+	F8 int
+	F9 int
+	F10 int
+	F11 int
+	F12 int
+	F13 int
+	F14 int
+	F15 int
+	F16 int
+	F17 int
+	F18 int
+	F19 int
+	F20 int
+	F21 int
+	F22 int
+	F23 int
+	F24 int
+	F25 int
+	F26 int
+	F27 int
+	F28 int
+	F29 int
+}
+
+func Leaf[T any]() int {
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+	}
+	return 1
+}
+
+func Fwd[T any]() int {
+	return Leaf[T]()
+}
+
+func Outer[T any]() int {
+	const if comptime.IsStruct[T]() {
+	_ = 100
+	_ = 101
+	_ = 102
+	_ = 103
+	_ = 104
+	_ = 105
+	_ = 106
+	_ = 107
+	_ = 108
+	_ = 109
+	_ = 110
+	_ = 111
+	_ = 112
+	_ = 113
+	_ = 114
+	_ = 115
+	_ = 116
+	_ = 117
+	_ = 118
+	_ = 119
+	_ = 120
+	_ = 121
+	_ = 122
+	_ = 123
+	_ = 124
+		return Fwd[T]() + 1
+	}
+	return 0
+}
+
+func main() {
+	fmt.Println(Outer[Wide]())
+	fmt.Println(Fwd[Wide]())
+}

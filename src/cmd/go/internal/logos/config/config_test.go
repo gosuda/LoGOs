@@ -271,6 +271,7 @@ func TestParseViolations(t *testing.T) {
 		{"duplicate table", "[project]\nstrict_files = [\".lgo\"]\n[project]\n", `logos.toml:3:1: duplicate table "project"`},
 		{"unknown table", "[frobnicate]\n", `logos.toml:1:1: unknown table "frobnicate"`},
 		{"unknown key", "[project]\nbogus = \"x\"\n", `logos.toml:2:1: unknown key "bogus"`},
+		{"removed node limit key", "[lints.thresholds]\nmax_comptime_ast_nodes = 1000000\n", `logos.toml:2:1: unknown key "max_comptime_ast_nodes": the TOML key was removed; pass -logos.comptime_nodes=N with -gcflags, e.g. logos build -gcflags=all=-logos.comptime_nodes=4096 ./...`},
 		{"project name rejected", "[project]\nname = \"m\"\n", `logos.toml:2:1: unknown key "name"`},
 		{"project edition rejected", "[project]\nedition = \"2026\"\n", `logos.toml:2:1: unknown key "edition"`},
 		{"direct reflect rejected", "[capabilities]\ndirect_reflect = \"deny\"\n", `logos.toml:2:1: unknown key "direct_reflect"`},

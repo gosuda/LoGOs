@@ -6,12 +6,14 @@ package modload
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/search"
+	"cmd/internal/pkgpattern"
 )
 
 // logosDirHasGoFiles reports whether dir holds a plausible Go-family
@@ -106,4 +108,94 @@ func matchLogosWorkspaceRoot(ld *Loader, m *search.Match, modRoots []string, abs
 		}
 	}
 	return len(m.Dirs) > 0
+}
+
+// logosCandidates collects directories that hold LoGOs sources and no Go
+// files while the resolver looks for a Go provider. dirInModule stays free
+// of relaunch side effects; the import trigger fires only when the resolver
+// found no Go provider and exactly one such directory.
+type logosCandidates struct {
+	seen map[string]bool
+	dirs []string
+}
+
+// add records dir once.
+func (c *logosCandidates) add(dir string) {
+	if dir == "" {
+		return
+	}
+	if c.seen == nil {
+		c.seen = make(map[string]bool)
+	}
+	if !c.seen[dir] {
+		c.seen[dir] = true
+		c.dirs = append(c.dirs, dir)
+	}
+}
+
+// single reports the one LoGOs-only directory when exactly one exists.
+func (c *logosCandidates) single() (string, bool) {
+	if len(c.dirs) == 1 {
+		return c.dirs[0], true
+	}
+	return "", false
+}
+
+// logosPatternDirs returns the directories under root whose import path
+// (prefix joined with the slash-separated path relative to root) matches
+// the ...-style pattern and that hold LoGOs sources and no .go files. It
+// mirrors the package walker's eligibility: dot, underscore, and testdata
+// trees are skipped, vendor subtrees are pruned, nested modules are
+// skipped, go.mod ignore rules apply, and subtrees the pattern cannot
+// match are pruned. Only a directory the full pattern matches is
+// returned, so a wildcard that matches no package records no candidate.
+func logosPatternDirs(root, prefix, pattern string, ignore *search.IgnorePatterns, isLocal bool) []string {
+	var dirs []string
+	match := pkgpattern.MatchPattern(pattern)
+	treeCanMatch := pkgpattern.TreeCanMatchPattern(pattern)
+	stack := []string{root}
+	for len(stack) > 0 {
+		d := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		relSlash := ""
+		if d != root {
+			rel, err := filepath.Rel(root, d)
+			if err != nil {
+				continue
+			}
+			relSlash = filepath.ToSlash(rel)
+			_, elem := filepath.Split(d)
+			if strings.HasPrefix(elem, ".") || strings.HasPrefix(elem, "_") || elem == "testdata" || elem == "vendor" {
+				continue
+			}
+			if isLocal {
+				if info, err := os.Stat(filepath.Join(d, "go.mod")); err == nil && !info.IsDir() {
+					continue
+				}
+			}
+		}
+		name := prefix
+		if relSlash != "" {
+			name = path.Join(prefix, relSlash)
+		}
+		if !treeCanMatch(name) {
+			continue
+		}
+		if ignore != nil && relSlash != "" && ignore.ShouldIgnore(relSlash) {
+			continue
+		}
+		if match(name) && cfg.LogosOnlyDir(d) {
+			dirs = append(dirs, d)
+		}
+		fis, err := fsys.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		for _, fi := range fis {
+			if fi.IsDir() {
+				stack = append(stack, filepath.Join(d, fi.Name()))
+			}
+		}
+	}
+	return dirs
 }

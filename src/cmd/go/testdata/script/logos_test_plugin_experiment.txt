@@ -6,17 +6,20 @@ env GOPROXY=off
 env CGO_ENABLED=1
 env GOEXPERIMENT=
 cd m
+cp arena-off.toml logos.toml
 
-# Like xxhash's upstream TestMain, the test builds its plugin with plain go.
-# Plugin identity requires matching optimization and experiment settings.
-# Pin the logos host to O1 and explicitly share the arena experiment with the
-# plain-go child. Unconfigured mixed-driver failures remain separate evidence.
-go test -count=1 -run '^TestChildPlugin$' .
+# The test builds its plugin with a bare go build (no -O), which re-executes
+# as logos in this marked module. Plugin identity requires matching
+# optimization and experiment settings, so the host's effective level flows
+# to the child in LOGOS_OPT_LEVEL. Unconfigured mixed-driver failures remain
+# separate evidence.
+logos test -O=1 -count=1 -run '^TestChildPlugin$' .
+go test -O=1 -count=1 -run '^TestChildPlugin$' .
+logos test -O=2 -count=1 -run '^TestChildPlugin$' .
 env GOEXPERIMENT=logosarena
 logos test -O=1 -count=1 -run '^TestChildPlugin$' .
 
 # An explicit arena opt-out and GOEXPERIMENT=none must reach both binaries.
-cp arena-off.toml logos.toml
 env GOEXPERIMENT=none
 logos test -O=1 -count=1 -run '^TestChildPlugin$' .
 
@@ -45,6 +48,8 @@ import (
 
 func TestChildPlugin(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "child.so")
+	// Bare build: the host's effective level reaches the child through
+	// LOGOS_OPT_LEVEL, never through a flag on this command line.
 	out, err := exec.Command("go", "build", "-buildmode=plugin", "-o", path, "./plugin").CombinedOutput()
 	if err != nil {
 		t.Fatalf("build child plugin: %v\n%s", err, out)

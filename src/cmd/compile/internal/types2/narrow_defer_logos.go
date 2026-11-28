@@ -96,13 +96,65 @@ func (s *logosEFState) deferCall(call logosEFDeferredCall) *logosEFState {
 }
 
 func (p *logosEFPass) runCleanup(call logosEFDeferredCall, st *logosEFState) *logosEFState {
-	out := p.inlineFuncLit(call.lit, st)
+	// A cleanup runs against the state at its entry, before the
+	// enclosing invocation projects its exit. Materialize the live
+	// unchecked pairings so the cleanup reads need the same check a
+	// flow read would; a cleanup that checks the guard first proves
+	// its own read. Reads of values the cleanup body itself stores
+	// fail on their may-reach marks while the body runs; ordinary
+	// reads elsewhere stay silent.
+	seeded := p.seedCleanupReads(call.lit, st)
+	p.inCleanup++
+	out := p.inlineFuncLit(call.lit, seeded)
+	p.inCleanup--
+	out = p.dropCleanupSeeds(st, seeded, out)
 	if call.onError {
 		// The error return is not generally known at this join. Keep
 		// the success path, on which errdefer does not execute.
 		out = logosEFJoin(st, out)
 	}
 	return out
+}
+
+// dropCleanupSeeds forgets the ordinary entries seedCleanupReads added
+// that the cleanup body never replaced: they scoped the cleanup's own
+// reads and must not leak into caller flow. Entries the body proved
+// or rewrote, and all may-mark and pairing changes, survive. A seed the
+// cleanup left untouched while breaking its guard survives as an entry
+// no check can discharge instead: the cleanup erased the only error that
+// could validate the value, so the later ordinary read must fail.
+func (p *logosEFPass) dropCleanupSeeds(before, seeded, out *logosEFState) *logosEFState {
+	if out == nil || seeded == nil || len(seeded.m) == 0 {
+		return out
+	}
+	var bm map[logosEFKey]logosEFEntry
+	if before != nil {
+		bm = before.m
+	}
+	var mout map[logosEFKey]logosEFEntry
+	for k, e := range seeded.m {
+		if _, ok := bm[k]; ok {
+			continue
+		}
+		oe, ok := out.m[k]
+		if !ok || oe != e {
+			continue
+		}
+		if mout == nil {
+			mout = maps.Clone(out.m)
+		}
+		if e.errKey != (logosEFKey{}) {
+			if _, live := out.mayErr[k]; !live {
+				mout[k] = logosEFEntry{name: e.name, pos: e.pos}
+				continue
+			}
+		}
+		delete(mout, k)
+	}
+	if mout == nil {
+		return out
+	}
+	return &logosEFState{m: mout, may: out.may, mayErr: out.mayErr, mayAlt: out.mayAlt, mayBroke: out.mayBroke, brokeHere: out.brokeHere, cleanups: out.cleanups}
 }
 
 // finishCleanups consumes only calls whose boundary is being crossed.
@@ -132,6 +184,12 @@ func (p *logosEFPass) finishCleanups(st *logosEFState, crosses func(logosEFDefer
 					panicked = false
 				} else {
 					st = next
+					if node.call.lit.Body != nil && cleanupRecoversOnAllPaths(p, node.call.lit.Body) {
+						// A callback that recovers on every normal path and
+						// completes ends unwinding: an earlier panic no
+						// longer discards the return path.
+						panicked = false
+					}
 				}
 			} else {
 				keep = append(keep, logosEFCleanup{call: node.call})

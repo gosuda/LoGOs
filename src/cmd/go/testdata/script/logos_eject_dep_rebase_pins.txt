@@ -1,0 +1,135 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOWORK=off
+env GOEXPERIMENT=
+
+# A dependency with a wildcard replace followed by two exact-version
+# pins of one module, all with local targets kept in the export, must
+# rebase every directive into the ejected tree: the wildcard edit drops
+# and re-adds the file's replace lines, so a pass over live pointers
+# strands the pins at the source checkout.
+cd lapp
+logos run .
+stdout '^dep-pinned2$'
+
+logos eject -o $WORK/out
+exists $WORK/out/_logos_deps/example.com/dep@v1.0.0/go.mod
+grep 'example.com/lib => ./../../../fallback$' $WORK/out/_logos_deps/example.com/dep@v1.0.0/go.mod
+grep 'example.com/lib v1.0.0 => ./../../../pinned1$' $WORK/out/_logos_deps/example.com/dep@v1.0.0/go.mod
+grep 'example.com/lib v1.1.0 => ./../../../pinned2$' $WORK/out/_logos_deps/example.com/dep@v1.0.0/go.mod
+
+# The pins must not reference the source checkout: remove it and build
+# the ejected dependency standalone.
+cd ..
+rm lapp
+! exists lapp
+cd $WORK/out/_logos_deps/example.com/dep@v1.0.0
+go build ./...
+go vet .
+
+-- lapp/go.mod --
+module example.com/wapp
+
+go 1.27
+
+require (
+	example.com/dep v1.0.0
+	example.com/lib v1.1.0
+)
+
+replace example.com/dep v1.0.0 => ./dep
+
+replace example.com/lib => ./fallback
+
+replace example.com/lib v1.0.0 => ./pinned1
+
+replace example.com/lib v1.1.0 => ./pinned2
+
+-- lapp/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/dep"
+)
+
+func main() {
+	fmt.Println(dep.Msg())
+}
+
+-- lapp/dep/go.mod --
+module example.com/dep
+
+go 1.27
+
+require example.com/lib v1.0.0
+
+replace example.com/lib => ../fallback
+
+replace example.com/lib v1.0.0 => ../pinned1
+
+replace example.com/lib v1.1.0 => ../pinned2
+
+-- lapp/dep/dep.go --
+// Package dep exercises rebased replaces: its non-test code imports
+// logos/sync so the eject plan keeps this module, while its lib
+// import resolves through the rebased wildcard and pins.
+package dep
+
+import (
+	"example.com/lib"
+	"logos/sync"
+)
+
+// Msg names the selected lib copy through a locked value.
+func Msg() string {
+	var locked sync.Locked[string]
+	locked.WithLock(func(value *string) {
+		*value = "dep-" + lib.Which()
+	})
+	var got string
+	locked.WithLock(func(value *string) {
+		got = *value
+	})
+	return got
+}
+
+-- lapp/fallback/go.mod --
+module example.com/lib
+
+go 1.27
+
+-- lapp/fallback/lib.go --
+package lib
+
+// Which names this copy of the library.
+func Which() string {
+	return "fallback"
+}
+
+-- lapp/pinned1/go.mod --
+module example.com/lib
+
+go 1.27
+
+-- lapp/pinned1/lib.go --
+package lib
+
+// Which names this copy of the library.
+func Which() string {
+	return "pinned1"
+}
+
+-- lapp/pinned2/go.mod --
+module example.com/lib
+
+go 1.27
+
+-- lapp/pinned2/lib.go --
+package lib
+
+// Which names this copy of the library.
+func Which() string {
+	return "pinned2"
+}

@@ -1,7 +1,9 @@
 # Eject widens the opt-in: the fork enables extended CONNECT per server
 # while stock Go offers only the process-global GODEBUG=http2xconnect=1.
-# The rewritten call requires that setting and panics naming the server
-# otherwise, so ejected servers fail fast instead of serving without it.
+# The rewritten call delegates to the ejected support module, which
+# requires that setting in the process startup environment and panics
+# naming the server otherwise, so ejected servers fail fast instead of
+# serving without it.
 
 env GOPROXY=off
 env GOTOOLCHAIN=local
@@ -9,11 +11,18 @@ env GOTOOLCHAIN=local
 cd m
 logos run .
 stdout '^h2 extended connect ready$'
+stdout '^deferred registered: true$'
+stdout '^async registered: true$'
 cp stdout $WORK/native.txt
 logos eject -o out
 exists out/main.go
 ! grep 'EnableHTTP2ExtendedConnect' out/main.go
-grep 'http2xconnect=1' out/main.go
+grep 'RequireExtendedConnect' out/main.go
+grep 'http2xconnect=1' out/_logos_deps/rt/logos/net/http/h2extendedconnect_ejected.go
+grep 'ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"' out/main.go
+! grep 'os.Getenv' out/main.go
+! grep 'strings.Contains' out/main.go
+grep 'func RequireExtendedConnect' out/_logos_deps/rt/logos/net/http/h2extendedconnect_ejected.go
 cd out
 go build ./...
 env GODEBUG=http2xconnect=1
@@ -32,6 +41,265 @@ stdout '^go version go1\.27\.2 '
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
 cd ..
 
+# A receiver that carries error-tracing temporaries from '?' inside an
+# inline callback cannot be rewritten without overlapping the tracing
+# edits, so eject leaves it alone. Verification must refuse it instead of
+# passing a fork-only method into output upstream Go rejects.
+cd ../trace
+logos run .
+stdout '^trace receiver stays native$'
+! logos eject -o out
+stderr 'fork_stdlib_api'
+cd ..
+
+# A user type with the same method name keeps its own binding: the method
+# value in a net/http file is not lowering output, so the rewrite leaves
+# it alone and the ejected program builds and runs with upstream Go.
+cd uservalue
+logos run .
+stdout '^before defer: 0$'
+stdout '^after defer: 1$'
+cp stdout $WORK/usernative.txt
+logos eject -o out
+exists out/main.go
+grep 'f := m.EnableHTTP2ExtendedConnect' out/main.go
+! grep 'RequireExtendedConnect' out/main.go
+cd out
+go build ./...
+go run .
+cmp stdout $WORK/usernative.txt
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+cmp stdout $WORK/usernative.txt
+cd ../..
+
+# A direct call of the same name on a user type is ambiguous with the
+# stdlib opt-in: the text rewrite matches by spelling, so verification
+# refuses it instead of ejecting the wrong behavior.
+cd usercall
+logos build ./...
+! logos eject -o out
+stderr 'fork_stdlib_api.*ambiguous.*EnableHTTP2ExtendedConnect'
+! exists out
+cd ..
+# A grouped opt-in whose receiver holds another opt-in is refused at
+# eject check: a call nested in another call's receiver span would lower
+# into a site temporary overlapping the rewrite, so verification fails
+# closed instead of emitting overlapping edits.
+cd nested
+logos run .
+stdout '^nested ready$'
+! logos eject -o out
+stderr 'fork_stdlib_api'
+cd ..
+
+# A same-named user method that takes arguments ejects untouched: the
+# opt-in takes no arguments, the direct rewrite needs zero arguments,
+# and a lowered capture used with arguments keeps its binding, so an
+# argument-bearing call can never be the genuine call and keeps its own
+# behavior in the export, which upstream Go builds.
+cd withargs
+logos run .
+stdout '^withargs ready$'
+logos eject -o out
+exists out/main.go
+grep 'm.EnableHTTP2ExtendedConnect' out/main.go
+! grep 'RequireExtendedConnect' out/main.go
+cd out
+go build ./...
+go run .
+stdout '^withargs ready$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^withargs ready$'
+cd ../..
+
+# A sibling file declaring the fresh alias at package level does not
+# break the export: the support import alias avoids every package-level
+# name in the ejected package, and upstream Go builds the result.
+cd sibling
+logos run .
+stdout '^sibling ready$'
+logos eject -o out
+grep 'ejectedhttp2.RequireExtendedConnect' out/server.go
+grep 'ejectedhttp2 "github.com/gosuda/loGos/rt/logos/net/http"' out/server.go
+cd out
+go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^sibling ready$'
+cd ../..
+
+# A plain Go file binding the fork-only method value is refused before
+# writing: the rewrite leaves method values intact, so without the typed
+# check the fork-only binding would reach upstream Go, which rejects it.
+cd gofile
+logos build ./...
+! logos eject -o out
+stderr 'fork_stdlib_api'
+! exists out
+cd ..
+
+# A plain Go file binding a same-named user method value still ejects:
+# the typed check tells it apart from the fork-only method.
+cd gouser
+logos build ./...
+logos eject -o out
+cd out
+go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^gouser ready: 1$'
+cd ../..
+
+# A plain Go direct call with arguments ejects untouched: a file without
+# net/http never reaches the rewrite, and the typed check tells the user
+# method apart from the fork-only opt-in.
+cd gouserargs
+logos build ./...
+logos eject -o out
+grep 'm.EnableHTTP2ExtendedConnect\(2\)' out/main.go
+cd out
+go build ./...
+go run .
+stdout '^gouserargs ready: 2$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^gouserargs ready: 2$'
+cd ../..
+
+# A server capture through a local that shadows the support import alias
+# is still the server method: the verifier approves it by type, so the
+# rewrite rebinds it through a fresh alias instead of skipping it by
+# spelling, while the saved helper value in the same file keeps working.
+cd shadowserver
+logos run .
+stdout '^helper used$'
+stdout '^shadow server ready$'
+logos eject -o out
+grep 'ejectedhttp.RequireExtendedConnectFunc\("logohttp", logohttp\)' out/main.go
+grep ':= logohttp.EnableHTTP2ExtendedConnect' out/main.go
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^helper used$'
+stdout '^shadow server ready$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+env GODEBUG=
+cd ../..
+
+# The ejected server really speaks extended CONNECT on the wire: with
+# the process-global setting in effect, the native and the
+# upstream-built binaries both advertise
+# SETTINGS_ENABLE_CONNECT_PROTOCOL, so the handshake pins what the
+# ejected guard predicts.
+cd h2wire
+logos run .
+stdout '^extended connect advertised$'
+logos eject -o out
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^extended connect advertised$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^extended connect advertised$'
+env GODEBUG=
+cd ../..
+
+# Saving the public logos/net/http helper as a value is not a lowered
+# server method value: the rewrite leaves it alone, the import still
+# remaps to the ejected support copy, and both binaries run it.
+cd helper
+logos run .
+stdout '^helper ready$'
+logos eject -o out
+! grep 'RequireExtendedConnectFunc' out/main.go
+grep 'logohttp.EnableHTTP2ExtendedConnect' out/main.go
+grep 'logohttp "github.com/gosuda/loGos/rt/logos/net/http"' out/main.go
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^helper ready$'
+env GODEBUG=
+! exec go run .
+stderr 'needs GODEBUG=http2xconnect=1'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ../..
+
+# A user method declared in the same file as its call needs no rewrite:
+# the emitter skips files declaring the name, so ejection keeps the method
+# and the call unchanged, including through a nested receiver that returns
+# the user type, and upstream Go builds them.
+cd samefile
+logos run .
+stdout '^samefile meter: 1 4$'
+logos eject -o out
+exists out/main.go
+grep 'm.EnableHTTP2ExtendedConnect()' out/main.go
+! grep 'RequireExtendedConnect' out/main.go
+cd out
+go build ./...
+go run .
+stdout '^samefile meter: 1 4$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^samefile meter: 1 4$'
+cd ../..
+
+# An optional call desugared by lowering is verified after lowering: the
+# source `?.` records no selector, but the lowered ordinary call on
+# *http.Server in a file without net/http has no rewrite and must be
+# refused instead of reaching output upstream Go rejects.
+cd optalias
+logos run .
+stdout '^optalias ready$'
+! logos eject -o out
+stderr 'fork_stdlib_api'
+! exists out
+cd ..
+
+# A comptime instance calling a user method in a package without net/http
+# keeps the call: no destination file can reach the rewrite, so there is
+# nothing to refuse.
+cd ctuser
+logos run .
+stdout '^ctuser meter: 1$'
+logos eject -o out
+exists out/main.go
+grep 'm.EnableHTTP2ExtendedConnect()' out/main.go
+! grep 'RequireExtendedConnect' out/main.go
+cd out
+go build ./...
+go run .
+stdout '^ctuser meter: 1$'
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ../..
+
+# A module whose only net/http import and extended-CONNECT call live in
+# a non-host variant still needs the helper package in the output: the
+# variant inventory carries no import edges, so the seed-based roots miss
+# logos/net/http and the support bundle is selected from the imports the
+# rewrite actually emitted instead. The native run prints the host
+# variant's message, so each host asserts its own.
+cd variant
+[!GOOS:windows] logos run .
+[!GOOS:windows] stdout '^other ready$'
+[GOOS:windows] logos run .
+[GOOS:windows] stdout '^windows ready$'
+logos eject -o out
+grep 'RequireExtendedConnect' out/server_windows.go
+grep 'ejectedhttp "github.com/gosuda/loGos/rt/logos/net/http"' out/server_windows.go
+env GOOS=windows
+env CGO_ENABLED=0
+cd out
+go build ./...
+cd ../..
+
 -- m/go.mod --
 module example.com/h2xconnect
 
@@ -43,17 +311,689 @@ go 1.27
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	sys "os"
 )
 
-func main() {
+var registry = map[string]*http.Server{}
+
+var mode = sys.Getenv("H2XCONNECT_MODE")
+
+func getOrCreate(name string) *http.Server {
+	if s, ok := registry[name]; ok {
+		return s
+	}
+	s := &http.Server{
+		Addr:      "127.0.0.1:0",
+		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13},
+		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+	}
+	registry[name] = s
+	return s
+}
+
+func run() error {
 	srv := &http.Server{
 		Addr:      "127.0.0.1:0",
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13},
 		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
 	}
 	srv.EnableHTTP2ExtendedConnect()
+	app{Server: srv}.start()
+	strings := "shadow"
+	_ = strings
+	_ = mode
+	defer getOrCreate("deferred").EnableHTTP2ExtendedConnect()
+	go group (context.Background()) {
+		go getOrCreate("async").EnableHTTP2ExtendedConnect()
+	}
 	fmt.Println("h2 extended connect ready")
+	fmt.Println("deferred registered:", registry["deferred"] != nil)
+	fmt.Println("async registered:", registry["async"] != nil)
+	return nil
+}
+
+// app exercises the promoted opt-in: the call records the outer struct
+// as its receiver, but the method object is the Server method the
+// textual rewrite accepts.
+type app struct{ *http.Server }
+
+func (a app) start() {
+	a.EnableHTTP2ExtendedConnect()
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- trace/go.mod --
+module example.com/h2trace
+
+go 1.27
+
+-- trace/main.lgo --
+
+// Command h2tracedemo covers the unrewritable receiver: '?' inside the
+// inline callback leaves tracing temporaries in the receiver subtree.
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func loadConfig() (string, error) {
+	return "cfg", nil
+}
+
+func makeServer(init func() error) *http.Server {
+	if err := init(); err != nil {
+		panic(err)
+	}
+	return &http.Server{Addr: "127.0.0.1:0"}
+}
+
+func main() {
+	makeServer(func() error { loadConfig()?; return nil }).EnableHTTP2ExtendedConnect()
+	fmt.Println("trace receiver stays native")
+}
+
+-- variant/go.mod --
+module example.com/h2variant
+
+go 1.27
+
+-- variant/server_windows.lgo --
+//go:build windows
+
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	srv.EnableHTTP2ExtendedConnect()
+	fmt.Println("windows ready")
+}
+
+-- variant/server_other.lgo --
+//go:build !windows
+
+package main
+
+import "fmt"
+
+func main() { fmt.Println("other ready") }
+
+-- uservalue/go.mod --
+module example.com/h2uservalue
+
+go 1.27
+
+-- uservalue/meter.lgo --
+package main
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. Its method value must survive ejection.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- uservalue/main.lgo --
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	m := &Meter{}
+	func() {
+		f := m.EnableHTTP2ExtendedConnect
+		defer f()
+		fmt.Println("before defer:", m.Hits)
+	}()
+	fmt.Println("after defer:", m.Hits)
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+}
+
+-- usercall/go.mod --
+module example.com/h2usercall
+
+go 1.27
+
+-- usercall/meter.lgo --
+package main
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. A direct call is ambiguous with the
+// stdlib call the eject rewrite matches by spelling.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- usercall/main.lgo --
+package main
+
+import "net/http"
+
+func main() {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect()
+}
+-- nested/go.mod --
+module example.com/h2nested
+
+go 1.27
+
+-- nested/main.lgo --
+
+// Command nesteddemo covers a grouped opt-in whose receiver holds another
+// opt-in: eject composes the inner guard into the capture instead of
+// emitting overlapping edits that stop the export.
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+)
+
+var backup = &http.Server{Addr: "127.0.0.1:0"}
+
+func makeServer(init func()) *http.Server {
+	init()
+	return &http.Server{Addr: "127.0.0.1:0"}
+}
+
+func run() error {
+	go group (context.Background()) {
+		go makeServer(func() { backup.EnableHTTP2ExtendedConnect() }).EnableHTTP2ExtendedConnect()
+	}
+	fmt.Println("nested ready")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- helper/go.mod --
+module example.com/h2helper
+
+go 1.27
+
+-- helper/main.lgo --
+
+// Command helperdemo saves the public logos/net/http helper as a value:
+// eject must not mistake it for a lowered server method value.
+package main
+
+import (
+	"fmt"
+	"net/http"
+	logohttp "logos/net/http"
+)
+
+func run() {
+	enable := logohttp.EnableHTTP2ExtendedConnect
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	if err := enable(srv); err != nil {
+		panic(err)
+	}
+	fmt.Println("helper ready")
+}
+
+func main() {
+	run()
+}
+
+-- sibling/go.mod --
+module example.com/h2sibling
+
+go 1.27
+
+-- sibling/server.lgo --
+
+// Command siblingdemo calls the opt-in beside a sibling file that
+// declares the fresh alias at package level.
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func run() error {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	srv.EnableHTTP2ExtendedConnect()
+	fmt.Println("sibling ready")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- sibling/config.lgo --
+package main
+
+// ejectedhttp is a package-level name in a sibling file: the eject
+// rewrite must not take it as the support import alias.
+var ejectedhttp = 1
+-- gofile/go.mod --
+module example.com/h2gofile
+
+go 1.27
+
+-- gofile/main.go --
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func configure(s *http.Server) func() {
+	enable := s.EnableHTTP2ExtendedConnect
+	return enable
+}
+
+func main() {
+	s := &http.Server{Addr: "127.0.0.1:0"}
+	configure(s)()
+	fmt.Println("gofile ready")
+}
+
+-- gouser/go.mod --
+module example.com/h2gouser
+
+go 1.27
+
+-- gouser/meter.go --
+package main
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. Its method value must survive ejection.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- gouser/main.go --
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+func main() {
+	m := &Meter{}
+	f := m.EnableHTTP2ExtendedConnect
+	f()
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+	fmt.Println("gouser ready:", m.Hits)
+}
+
+-- gouserargs/go.mod --
+module example.com/h2gouserargs
+
+go 1.27
+
+-- gouserargs/main.go --
+package main
+
+import "fmt"
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. A direct call with arguments can never be
+// the zero-argument opt-in, so it ejects untouched.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect(level int) { m.Hits += level }
+
+func main() {
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect(2)
+	fmt.Println("gouserargs ready:", m.Hits)
+}
+
+-- withargs/go.mod --
+module example.com/h2withargs
+
+go 1.27
+
+-- withargs/meter.lgo --
+package main
+
+// Meter carries a same-named method that takes an argument, so no call
+// of it can be the zero-argument stdlib opt-in.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect(level int) { m.Hits += level }
+
+-- withargs/main.lgo --
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+)
+
+func run() error {
+	m := &Meter{}
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+	go group (context.Background()) {
+		go m.EnableHTTP2ExtendedConnect(1)
+	}
+	fmt.Println("withargs ready")
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+
+-- h2wire/go.mod --
+module example.com/h2wire
+
+go 1.27
+
+-- h2wire/main.lgo --
+
+// Command h2wiredemo serves with the opt-in and checks on the wire that
+// the server advertises SETTINGS_ENABLE_CONNECT_PROTOCOL. The client
+// parses the SETTINGS frame by hand so the fixture needs only the
+// standard library.
+package main
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"io"
+	"math/big"
+	"net"
+	"net/http"
+	"time"
+)
+
+func serveQuiet(srv *http.Server, ln net.Listener) {
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		panic(err)
+	}
+}
+
+func closeConn(conn *tls.Conn, err error) error {
+	if cerr := conn.Close(); cerr != nil {
+		return cerr
+	}
+	return err
+}
+
+
+func clientPreface() []byte {
+	out := []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+	return append(out, 0, 0, 0, 4, 0, 0, 0, 0, 0)
+}
+
+func settingsHasExtendedConnect(conn *tls.Conn) (bool, error) {
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return false, err
+	}
+	var hdr [9]byte
+	for {
+		if _, err := io.ReadFull(conn, hdr[:]); err != nil {
+			return false, err
+		}
+		length := int(hdr[0])<<16 | int(hdr[1])<<8 | int(hdr[2])
+		typ := hdr[3]
+		payload := make([]byte, length)
+		if _, err := io.ReadFull(conn, payload); err != nil {
+			return false, err
+		}
+		if typ != 4 {
+			continue
+		}
+		for i := 0; i+6 <= len(payload); i += 6 {
+			id := int(payload[i])<<8 | int(payload[i+1])
+			if id == 8 {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+}
+
+func handshake(addr string) error {
+	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"h2"}})
+	if err != nil {
+		return err
+	}
+	if proto := conn.ConnectionState().NegotiatedProtocol; proto != "h2" {
+		return closeConn(conn, fmt.Errorf("h2wire: negotiated %q, want h2", proto))
+	}
+	if _, err := conn.Write(clientPreface()); err != nil {
+		return closeConn(conn, err)
+	}
+	found, serr := settingsHasExtendedConnect(conn)
+	cerr := conn.Close()
+	if serr != nil {
+		return serr
+	}
+	if cerr != nil {
+		return cerr
+	}
+	if !found {
+		return fmt.Errorf("h2wire: SETTINGS without ENABLE_CONNECT_PROTOCOL")
+	}
+	fmt.Println("extended connect advertised")
+	return nil
+}
+
+func handshakeAndClose(addr string, srv *http.Server) error {
+	herr := handshake(addr)
+	if cerr := srv.Close(); cerr != nil && herr == nil {
+		return cerr
+	}
+	return herr
+}
+
+func run() error {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	tmpl.DNSNames = []string{"localhost"}
+	tmpl.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{
+		Addr:      "127.0.0.1:0",
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}, NextProtos: []string{"h2"}},
+		Handler:   http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}),
+	}
+	srv.EnableHTTP2ExtendedConnect()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", srv.TLSConfig)
+	if err != nil {
+		return err
+	}
+	go group (context.Background()) {
+		go serveQuiet(srv, ln)
+		return handshakeAndClose(ln.Addr().String(), srv)
+	}
+}
+
+func main() {
+	if err := run(); err != nil {
+		panic(err)
+	}
+}
+-- samefile/go.mod --
+module example.com/h2samefile
+
+go 1.27
+
+-- samefile/main.lgo --
+package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. This file declares the name, so the eject
+// text rewrite skips it and the calls below need no guard.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+func meterFor(port int) *Meter { return &Meter{Hits: port} }
+
+func main() {
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect()
+	n := meterFor(3)
+	n.EnableHTTP2ExtendedConnect()
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	_ = srv
+	fmt.Println("samefile meter:", m.Hits, n.Hits)
+}
+
+-- optalias/go.mod --
+module example.com/h2optalias
+
+go 1.27
+
+-- optalias/alias.lgo --
+package main
+
+import "net/http"
+
+type Server = http.Server
+
+-- optalias/main.lgo --
+package main
+
+import "fmt"
+
+func enable(s *Server?) {
+	s?.EnableHTTP2ExtendedConnect()
+}
+
+func main() {
+	enable(nil)
+	fmt.Println("optalias ready")
+}
+
+-- ctuser/go.mod --
+module example.com/h2ctuser
+
+go 1.27
+
+-- ctuser/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. No file here imports net/http, so no
+// destination file can reach the eject text rewrite.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+func Touch[T any](m *Meter, v T) {
+	const if comptime.IsStruct[T]() {
+		m.EnableHTTP2ExtendedConnect()
+		_ = v
+	} else {
+		_ = v
+	}
+}
+
+type point struct{ X int }
+
+func main() {
+	m := &Meter{}
+	Touch[point](m, point{X: 1})
+	Touch[int](m, 2)
+	fmt.Println("ctuser meter:", m.Hits)
+}
+
+-- shadowserver/go.mod --
+module example.com/h2shadowserver
+
+go 1.27
+
+-- shadowserver/main.lgo --
+
+// Command shadowserverdemo groups the opt-in on a server that shadows
+// the support import alias, beside a saved helper value deferred in
+// the same file.
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	logohttp "logos/net/http"
+)
+
+func useHelper(srv *http.Server) {
+	enable := logohttp.EnableHTTP2ExtendedConnect
+	defer logohttp.EnableHTTP2ExtendedConnect(srv)
+	if err := enable(srv); err != nil {
+		panic(err)
+	}
+	fmt.Println("helper used")
+}
+
+func run() error {
+	logohttp := &http.Server{Addr: "127.0.0.1:0"}
+	go group (context.Background()) {
+		go logohttp.EnableHTTP2ExtendedConnect()
+	}
+	fmt.Println("shadow server ready")
+	return nil
+}
+
+func main() {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	useHelper(srv)
+	if err := run(); err != nil {
+		panic(err)
+	}
 }

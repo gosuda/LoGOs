@@ -471,6 +471,9 @@ func runBuild(ctx context.Context, cmd *base.Command, args []string) {
 			base.Fatal(err)
 		}
 	}()
+	// A late re-execution during package loading replaces this process, so
+	// the builder's work directory is cleaned up before it runs.
+	cfg.RelaunchCleanup = func() { b.Close() }
 
 	pkgs := load.PackagesAndErrors(moduleLoader, ctx, load.PackageOpts{AutoVCS: true}, args)
 	load.CheckPackageErrors(pkgs)

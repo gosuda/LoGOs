@@ -40,8 +40,12 @@ func ReadLogosCtEdges(ctxt *types2.Context, packages map[string]*types2.Package,
 	r := reader{Decoder: pr.NewDecoder(pkgbits.SectionObjDict, idx, pkgbits.SyncObject1), p: &pr}
 
 	tparams := origin.Signature().TypeParams()
+	rtparams := origin.Signature().RecvTypeParams()
 	nreceivers, nexplicits := r.objDictTypeParamCounts()
-	assert(nreceivers == 0 && nexplicits == tparams.Len())
+	assert(nreceivers == rtparams.Len() && nexplicits == tparams.Len())
+	for range nreceivers {
+		r.typInfo()
+	}
 	for range nexplicits {
 		r.typInfo()
 	}
@@ -49,7 +53,7 @@ func ReadLogosCtEdges(ctxt *types2.Context, packages map[string]*types2.Package,
 		r.derivedInfo()
 	}
 
-	r.skipLogosCtRuntimeDict(nexplicits)
+	r.skipLogosCtRuntimeDict(nreceivers + nexplicits)
 	if r.Data.Len() == 0 {
 		return nil, nil
 	}
@@ -68,7 +72,12 @@ func ReadLogosCtEdges(ctxt *types2.Context, packages map[string]*types2.Package,
 	if n := r.Len(); n != 0 {
 		assert(packages[origin.Pkg().Path()] == origin.Pkg())
 		pr.initCaches()
-		edges = (&logosCtEdgeReader{reader: &r, typeParam: tparams.At}).readEdges(n)
+		edges = (&logosCtEdgeReader{reader: &r, typeParam: func(i int) *types2.TypeParam {
+			if i < rtparams.Len() {
+				return rtparams.At(i)
+			}
+			return tparams.At(i - rtparams.Len())
+		}}).readEdges(n)
 	}
 	if template {
 		decoder := r.Decoder
@@ -93,7 +102,11 @@ func (r *logosCtEdgeReader) readEdges(n int) []types2.LogosCtEdge {
 		assert(ok)
 		args := r.typeList()
 		sig := fn.Signature()
-		assert(sig.Recv() == nil && sig.TypeParams().Len() == len(args))
+		want := sig.TypeParams().Len()
+		if sig.Recv() != nil {
+			want++
+		}
+		assert(want != 0 && want == len(args))
 		edges[i] = types2.LogosCtEdge{Origin: fn, Targs: args, Pos: r.pos()}
 	}
 	return edges

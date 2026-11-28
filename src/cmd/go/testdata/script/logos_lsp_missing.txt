@@ -1,7 +1,8 @@
 logos help lsp
 stdout 'Lsp runs a Language Server Protocol server'
-! go help lsp
-stderr 'unknown help topic'
+go help lsp
+stdout 'usage: logos lsp'
+! stderr .
 
 mkdir $WORK/empty
 env PATH=$WORK/empty

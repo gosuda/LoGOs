@@ -196,8 +196,14 @@ type Checker struct {
 	logosCtTParamDecl   bool                 // logos comptime instantiation: true while any generic declaration is being checked.
 	logosTypeOfDeferred map[syntax.Expr]bool // logos comptime instantiation: TypeOf calls whose argument is still a type parameter.
 	logosCtSubst        map[*TypeParam]Type  // logos comptime instantiation: substitution for the running analysis.
+	logosCtFuncDecl     *syntax.FuncDecl     // logos comptime instantiation: cloned declaration of the running instance check, for Error liveness.
 	logosCtAbstract     map[Object]Type
-	logosCtPos          []syntax.Pos // logos comptime instantiation: call site of the current exact body check.
+	logosCtPos          []syntax.Pos       // logos comptime instantiation: call site of the current exact body check.
+	logosCtNotes        []syntax.Pos       // logos comptime instantiation: parent positions for instantiated-here notes; visit pushes parent, analyze pushes instance site.
+	logosCtChain        []int              // logos comptime instantiation: body-node frame per active instance; const-for iterations accrue to the top frame.
+	logosCtKeys         []string           // logos comptime instantiation: instance key per active analysis frame; visit pops each key when its instance completes.
+	logosCtCharge       map[string]int     // logos comptime instantiation: completed instances map to their own charge plus their maximum descendant chain, so cache hits validate the same budget.
+	logosCtIfaceSites   []logosCtIfaceSite // logos comptime instantiation: interface formations to recheck in drain when generics are known.
 	logosCtLocalDefs    map[*syntax.Name]*TypeName
 	logosTypeOfFact     map[syntax.Expr]Type     // logos comptime instantiation: concrete types of comptime.TypeOf calls.
 	methods             map[*TypeName][]*Func    // maps package scope type names to associated non-blank (non-interface) methods

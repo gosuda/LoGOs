@@ -256,6 +256,12 @@ func (p *parser) parseKeyVal() error {
 	valStart := p.pos
 	owner, known := keyOwner(p.table, key)
 	if !known {
+		// The comptime node-limit key moved out of TOML entirely:
+		// point readers of the old key at the flag and its command
+		// line instead of leaving a bare unknown-key error.
+		if key == "max_comptime_ast_nodes" {
+			return p.errorf(keyStart, "unknown key %q: the TOML key was removed; pass -logos.comptime_nodes=N with -gcflags, e.g. logos build -gcflags=all=-logos.comptime_nodes=4096 ./...", key)
+		}
 		return p.errorf(keyStart, "unknown key %q", key)
 	}
 	id := [2]string{owner, key}

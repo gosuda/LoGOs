@@ -365,3 +365,23 @@ func TestStringHelpersMatchStdlib(t *testing.T) {
 		}
 	}
 }
+
+func TestMisplacedPaddingOffset(t *testing.T) {
+	inputs := []string{"A=", "A===", "====", "=ABC", "A=C=", "Zm9vA="}
+	for _, in := range inputs {
+		_, stdErr := base64.StdEncoding.Strict().DecodeString(in)
+		var want base64.CorruptInputError
+		if !errors.As(stdErr, &want) {
+			t.Fatalf("oracle error for %q is %T, want CorruptInputError", in, stdErr)
+		}
+		dst := make([]byte, b64.Std.DecodedLen(len(in)))
+		_, err := b64.Std.Decode(dst, []byte(in))
+		var got b64.CorruptInputError
+		if !errors.As(err, &got) {
+			t.Fatalf("Decode(%q) error type %T, want CorruptInputError", in, err)
+		}
+		if int64(got) != int64(want) {
+			t.Errorf("Decode(%q) offset = %d, want oracle offset %d", in, int64(got), int64(want))
+		}
+	}
+}

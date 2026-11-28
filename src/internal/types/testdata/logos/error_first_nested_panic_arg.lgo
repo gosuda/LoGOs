@@ -1,0 +1,22 @@
+package p
+
+func fetchNP() (int, error) { return 1, nil }
+
+// A panic argument that never returns ends argument evaluation before the
+// outer panic is reached: the invocation has no panic to record there, so
+// the checker moves on without crashing.
+func nestedPanicArgCL(stop bool) error {
+	n, err := fetchNP()
+	_ = err
+	_ = n
+	defer func() { panic("cleanup") }()
+	func() {
+		if stop {
+			panic(func() int {
+				defer func() { panic("inner-cleanup") }()
+				panic("inner")
+			}())
+		}
+	}()
+	return nil
+}

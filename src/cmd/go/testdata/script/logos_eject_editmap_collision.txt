@@ -1,0 +1,38 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# A source asset sharing its path with a compiler edit-map sidecar must
+# survive eject. The sidecar write must not clobber it, so eject stops
+# with a collision error naming the path instead of silently embedding
+# map JSON under the asset's name.
+
+cd m
+logos run .
+stdout '^ASSET: do not clobber'
+logos build ./...
+! logos eject -o out
+stderr 'collides with a source file'
+grep '^ASSET: do not clobber' out/main.go.edits
+
+-- m/go.mod --
+module example.com/editmapcollision
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	_ "embed"
+	"fmt"
+)
+
+//go:embed main.go.edits
+var asset string
+
+func main() {
+	fmt.Println(asset)
+}
+
+-- m/main.go.edits --
+ASSET: do not clobber.

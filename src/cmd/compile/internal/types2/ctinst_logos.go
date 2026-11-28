@@ -86,26 +86,6 @@ func (check *Checker) logosIsComptimeGeneric(fn *Func) bool {
 	return ok && generic.Decl != nil && LogosUsesComptime(generic.Decl, generic.Scope)
 }
 
-func (check *Checker) logosRejectGenericMethod(decl *declInfo, body *syntax.BlockStmt) {
-	if !check.conf.Logos || decl == nil || decl.fdecl == nil || decl.fdecl.Recv == nil || body != decl.fdecl.Body {
-		return
-	}
-	if check.logosHasGenericConstFor(body) {
-		check.errorf(decl.fdecl.Pos(), InvalidPkgUse, "[comptime::generic_method] method %s of a generic type cannot be a comptime generic", decl.fdecl.Name.Value)
-	}
-}
-
-func (check *Checker) logosHasGenericConstFor(body *syntax.BlockStmt) bool {
-	found := false
-	syntax.Inspect(body, func(n syntax.Node) bool {
-		if loop, ok := n.(*syntax.ConstForStmt); ok && check.Info.LogosConstFor[loop] != nil {
-			found = found || check.Info.LogosConstFor[loop].Generic
-		}
-		return !found
-	})
-	return found
-}
-
 func (check *Checker) logosCtDrain() {
 	if !check.conf.Logos || check.firstErr != nil || check.conf.IgnoreFuncBodies || check.Instances == nil || check.Uses == nil {
 		return
@@ -123,7 +103,11 @@ func (check *Checker) logosCtDrain() {
 	}
 	for obj, di := range check.objMap {
 		fn, ok := obj.(*Func)
-		if !ok || di == nil || di.fdecl == nil || di.fdecl.Body == nil || fn.Signature().Recv() != nil || fn.Signature().TypeParams().Len() == 0 {
+		nparams := 0
+		if ok {
+			nparams = fn.Signature().TypeParams().Len() + fn.Signature().RecvTypeParams().Len()
+		}
+		if !ok || di == nil || di.fdecl == nil || di.fdecl.Body == nil || nparams == 0 {
 			continue
 		}
 		decl := di.fdecl
@@ -132,7 +116,13 @@ func (check *Checker) logosCtDrain() {
 			decls[decl] = true
 			generic = LogosCtGeneric{Decl: decl, Scope: di.file, GoVersion: string(di.version)}
 		} else {
-			generic.Edges = logosCtEdges(check.Info, decl.Body, nil)
+			// A forwarder edge list feeds export data, whose writer
+			// only names plain functions: method calls stay out of the
+			// export, but the local graph keeps them so a nested
+			// method call instantiates in the defining package.
+			for _, edge := range logosCtEdges(check.Info, decl.Body, nil) {
+				generic.Edges = append(generic.Edges, edge)
+			}
 			if len(generic.Edges) == 0 {
 				continue
 			}
@@ -142,12 +132,46 @@ func (check *Checker) logosCtDrain() {
 		}
 		check.LogosCtGenerics[fn] = generic
 	}
+	for _, s := range check.logosCtIfaceSites {
+		check.logosCtRejectInterfaceFormation(s.pos, s.v, s.t)
+	}
+	check.logosCtIfaceSites = nil
+	for _, file := range check.files {
+		syntax.Inspect(file, func(n syntax.Node) bool {
+			decl, ok := n.(*syntax.VarDecl)
+			if !ok {
+				return true
+			}
+			if decl.Type == nil || decl.Values == nil {
+				return true
+			}
+			T := check.Info.TypeOf(decl.Type)
+			if !isValid(T) {
+				return true
+			}
+			if _, ok := Unalias(T).(*Interface); !ok {
+				return true
+			}
+			for _, v := range syntax.UnpackListExpr(decl.Values) {
+				V := check.Info.TypeOf(v)
+				if !isValid(V) {
+					continue
+				}
+				check.logosCtRejectInterfaceFormation(v.Pos(), V, T)
+			}
+			return true
+		})
+	}
 	for _, file := range check.files {
 		for _, edge := range logosCtEdges(check.Info, file, decls) {
 			work.bind(edge, edge.Pos)
 		}
 	}
 	work.finish()
+	for _, file := range check.files {
+		logosCtMarkDirectCalls(check.Info, file)
+	}
+	check.logosCtRejectMethodValues(check.Info)
 	check.cleanup()
 }
 
@@ -157,13 +181,12 @@ type logosCtFrame struct {
 }
 
 type logosCtWork struct {
-	check         *Checker
-	seen          map[string]string
-	active        map[string]int
-	stack         []logosCtFrame
-	graph         map[string][]string
-	sites         []logosCtUse
-	comptimeDepth int
+	check  *Checker
+	seen   map[string]string
+	active map[string]int
+	stack  []logosCtFrame
+	graph  map[string][]string
+	sites  []logosCtUse
 }
 
 type logosCtUse struct {
@@ -173,7 +196,8 @@ type logosCtUse struct {
 }
 
 func (w *logosCtWork) bind(edge LogosCtEdge, pos syntax.Pos) {
-	if id := w.visit(edge, pos); id != "" {
+	id := w.visit(edge, pos)
+	if id != "" {
 		w.sites = append(w.sites, logosCtUse{edge.info, edge.Site, id})
 	}
 }
@@ -215,7 +239,9 @@ func (w *logosCtWork) finish() {
 	}
 	check.LogosCtGraph = graph
 	for _, site := range w.sites {
-		if _, ok := graph[site.id]; !ok && !exact[site.id] {
+		_, inGraph := graph[site.id]
+		_, inExact := exact[site.id]
+		if !inGraph && !inExact {
 			continue
 		}
 		if site.info.LogosCtSiteKeys == nil {
@@ -229,7 +255,14 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 	check := w.check
 	origin, targs := edge.Origin, edge.Targs
 	sig := origin.Signature()
-	if sig.Recv() != nil || sig.TypeParams().Len() != len(targs) {
+	if sig.Recv() != nil {
+		if _, _, ok := logosCtMethodSplit(origin, targs); !ok {
+			return ""
+		}
+		if len(targs) != 1+sig.TypeParams().Len() {
+			return ""
+		}
+	} else if sig.TypeParams().Len() != len(targs) {
 		return ""
 	}
 	generic, ok := check.LogosCtGenerics[origin]
@@ -257,45 +290,83 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 		return w.seen[key]
 	}
 	if id, ok := w.seen[key]; ok {
+		// A reused instance skipped its subtree, so validate the
+		// cached charge against the remaining budget. Otherwise the
+		// verdict depends on which call site the drain visits first.
+		if ch, ok := check.logosCtCharge[key]; ok {
+			if sum := logosCtChainSum(check.logosCtChain) + ch; sum > check.logosNodeLimit() {
+				check.errorf(pos, InvalidRangeExpr, "[comptime::node_limit] comptime instantiation chain has %d nodes above the limit %d", sum, check.logosNodeLimit())
+				return ""
+			}
+		}
 		return id
 	}
 	comptime := generic.Decl != nil
-	if comptime && w.comptimeDepth >= check.logosNodeLimit() {
-		check.errorf(pos, InvalidPkgUse, "[comptime::node_limit] comptime instantiation exceeds depth limit %d", check.logosNodeLimit())
-		return ""
-	}
 	sum := hash.Sum32([]byte(key))
 	id := hex.EncodeToString(sum[:])
 	w.seen[key] = id
 	w.active[key] = len(w.stack)
 	w.stack = append(w.stack, logosCtFrame{comptime: comptime, targs: targs})
-	if comptime {
-		w.comptimeDepth++
-	}
 	defer func() {
-		if comptime {
-			w.comptimeDepth--
-		}
 		w.stack = w.stack[:len(w.stack)-1]
 		delete(w.active, key)
 	}()
 
-	subst := makeSubstMap(sig.TypeParams().list(), targs)
+	var subst substMap
+	if sig.Recv() != nil {
+		rtparams, rtargs, ok := logosCtMethodSplit(origin, targs)
+		if !ok || len(targs) != 1+len(sig.TypeParams().list()) {
+			return ""
+		}
+		allpars := append(append([]*TypeParam{}, rtparams...), sig.TypeParams().list()...)
+		allargs := append(append([]Type{}, rtargs...), targs[1:]...)
+		subst = makeSubstMap(allpars, allargs)
+	} else {
+		subst = makeSubstMap(sig.TypeParams().list(), targs)
+	}
 	if comptime {
-		rec := check.logosCtAnalyzeFunc(pos, origin, targs, id, subst, generic)
+		rec := check.logosCtAnalyzeFunc(edge.Pos, origin, targs, id, subst, generic)
 		if rec == nil {
+			check.logosCtKeys = check.logosCtKeys[:len(check.logosCtKeys)-1]
 			return ""
 		}
 		if check.LogosCtInst == nil {
 			check.LogosCtInst = make(map[string]*LogosCtInst)
 		}
 		check.LogosCtInst[key] = rec
-		for _, edge := range logosCtEdges(rec.Info, rec.Decl.Body, nil) {
+		logosCtMarkDirectCalls(rec.Info, rec.Decl.Body)
+		check.logosCtRejectMethodValues(rec.Info)
+		check.logosCtNotes = append(check.logosCtNotes, pos)
+		edges := logosCtEdges(rec.Info, rec.Decl.Body, nil)
+		for _, edge := range edges {
 			w.bind(edge, pos)
 		}
+		// The instance kept its own charge plus its const-for
+		// accruals while the children bound; add the largest child
+		// chain so reuse validates the same budget the live walk saw.
+		maxChild := 0
+		for _, edge := range edges {
+			if child := LogosCtKey(edge.Origin, edge.Targs); child != "" {
+				if c, ok := check.logosCtCharge[child]; ok && c > maxChild {
+					maxChild = c
+				}
+			}
+		}
+		check.logosCtCharge[key] += maxChild
+		check.logosCtKeys = check.logosCtKeys[:len(check.logosCtKeys)-1]
+		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
+		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 		return id
 	}
 	children := make([]string, len(generic.Edges))
+	check.logosCtNotes = append(check.logosCtNotes, pos)
+	// A plain generic pushes no chain frame of its own, but reusing it
+	// must still count the comptime descendants it leads to. Record the
+	// largest child charge so a cached wrapper validates the same
+	// budget the live walk saw. The key comes from the substituted
+	// edge: the template edges still hold type parameters, which map
+	// to no charge.
+	maxChild := 0
 	for slot, edge := range generic.Edges {
 		var concrete []Type
 		for i, t := range edge.Targs {
@@ -311,11 +382,166 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 			edge.Targs = concrete
 		}
 		children[slot] = w.visit(edge, pos)
+		if child := LogosCtKey(edge.Origin, edge.Targs); child != "" {
+			if c, ok := check.logosCtCharge[child]; ok && c > maxChild {
+				maxChild = c
+			}
+		}
 	}
+	if maxChild != 0 {
+		if check.logosCtCharge == nil {
+			check.logosCtCharge = make(map[string]int)
+		}
+		check.logosCtCharge[key] = maxChild
+	}
+	check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 	w.graph[id] = children
 	return id
 }
 
+// logosCtMethodSel returns the method selector of a call function: a
+// selector itself, or the function of an explicit instantiation.
+func logosCtMethodSel(fun syntax.Expr) *syntax.SelectorExpr {
+	fun = syntax.Unparen(fun)
+	if idx, ok := fun.(*syntax.IndexExpr); ok {
+		fun = syntax.Unparen(idx.X)
+	}
+	sel, _ := fun.(*syntax.SelectorExpr)
+	return sel
+}
+
+// logosCtMarkDirectCalls records the selectors of direct comptime-method
+// calls, so the method-value check exempts them: only a bare method
+// value stays suspicious. Method expressions called with an explicit
+// receiver count as direct calls too.
+func logosCtMarkDirectCalls(info *Info, root syntax.Node) {
+	if info.LogosCtDirectCalls == nil {
+		info.LogosCtDirectCalls = make(map[*syntax.Name]bool)
+	}
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		call, ok := n.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		sel := logosCtMethodSel(call.Fun)
+		if sel == nil {
+			return true
+		}
+		if s, ok := info.Selections[sel]; ok && (s.Kind() == MethodVal || s.Kind() == MethodExpr) {
+			info.LogosCtDirectCalls[sel.Sel] = true
+		}
+		return true
+	})
+}
+
+// logosCtRejectMethodValues rejects method values of comptime generic
+// methods: only a direct call with concrete type arguments instantiates
+// one. Direct calls carry site keys or a direct-call mark; an interface
+// dispatch reaches no origin the checker knows, so formation through a
+// conversion is rejected separately by logosCtRejectInterfaceFormation.
+func (check *Checker) logosCtRejectMethodValues(info *Info) {
+	for sel, s := range info.Selections {
+		obj, ok := s.Obj().(*Func)
+		if !ok || obj.Signature().Recv() == nil {
+			continue
+		}
+		if info.LogosCtSiteKeys[sel.Sel] != "" || info.LogosCtDirectCalls[sel.Sel] {
+			continue
+		}
+		origin := obj.Origin()
+		if !check.logosCtIsMethodGeneric(origin) {
+			continue
+		}
+		check.errorf(sel.Pos(), InvalidPkgUse, "[comptime::method_value] method value of comptime generic method %s is not supported; only a direct call with concrete type arguments instantiates it", origin.FullName())
+	}
+}
+
+// logosCtIsMethodGeneric reports whether origin is a comptime generic
+// method known to this package, locally or through the import transport.
+func (check *Checker) logosCtIsMethodGeneric(origin *Func) bool {
+	if origin.Signature().Recv() == nil {
+		return false
+	}
+	if generic, ok := check.LogosCtGenerics[origin]; ok {
+		return generic.Decl != nil
+	}
+	if check.LogosCtImport == nil {
+		return false
+	}
+	generic, ok := check.LogosCtImport(origin)
+	return ok && generic.Decl != nil
+}
+
+// logosCtIfaceSite records one interface formation (conversion,
+// assignment, or assertion target) for drain-time checking, when the
+// comptime generic map is populated. Checking runs during type-checking
+// before the drain collects generics, so a direct check would miss.
+type logosCtIfaceSite struct {
+	pos  syntax.Pos
+	v, t Type
+}
+
+// logosCtDeferInterfaceFormation records pos/V/T for drain-time
+// interface rejection instead of checking immediately.
+func (check *Checker) logosCtDeferInterfaceFormation(pos syntax.Pos, V, T Type) {
+	if !check.conf.Logos || !isValid(V) || !isValid(T) {
+		return
+	}
+	if _, ok := Unalias(T).(*Interface); !ok {
+		if _, ok2 := Unalias(T).Underlying().(*Interface); !ok2 {
+			return
+		}
+	}
+	check.logosCtIfaceSites = append(check.logosCtIfaceSites, logosCtIfaceSite{pos: pos, v: V, t: T})
+}
+
+// logosCtRejectInterfaceFormation rejects a conversion of a value whose
+// type provides a comptime generic method required by the target
+// interface: the call would dispatch to the retired generic body. Only
+// a direct call on a concrete receiver instantiates such a method.
+// The check runs only when the formation is otherwise valid, so it
+// never doubles a normal diagnostic.
+func (check *Checker) logosCtRejectInterfaceFormation(pos syntax.Pos, V, T Type) {
+	if !isValid(V) || !isValid(T) {
+		return
+	}
+	// Unnamed receivers count too: an anonymous struct promotes the
+	// comptime methods of its embedded fields, and calling one through
+	// an interface would dispatch to the retired generic body. The
+	// method lookup below already follows promotion, and only a known
+	// comptime generic triggers the diagnostic.
+	base := Unalias(V)
+	if ptr, ok := base.(*Pointer); ok {
+		base = Unalias(ptr.Elem())
+	}
+	if _, ok := base.(*Named); !ok {
+		if _, ok := base.(*Struct); !ok {
+			return
+		}
+	}
+	if logosContainsTypeParam(Unalias(V), nil) {
+		return
+	}
+	iface, ok := Unalias(T).(*Interface)
+	if !ok {
+		if u, ok2 := T.Underlying().(*Interface); ok2 {
+			iface, ok = u, true
+		}
+	}
+	if !ok || iface.Empty() || logosContainsTypeParam(Unalias(T), nil) {
+		return
+	}
+	for i := 0; i < iface.NumMethods(); i++ {
+		m := iface.Method(i)
+		obj, _, _ := lookupFieldOrMethod(V, false, check.pkg, m.Name(), false)
+		fn, ok := obj.(*Func)
+		if !ok || !check.logosCtIsMethodGeneric(fn.Origin()) {
+			continue
+		}
+		check.errorf(pos, IncompatibleAssign, "[comptime::method_value] cannot use %s as %s: method %s is a comptime generic method and cannot be called through an interface; only a direct call on a concrete receiver instantiates it", V, T, m.Name())
+		return
+	}
+}
 func logosCtEdges(info *Info, root syntax.Node, generics map[*syntax.FuncDecl]bool) []LogosCtEdge {
 	var edges []LogosCtEdge
 	top := info
@@ -338,6 +564,47 @@ func logosCtEdges(info *Info, root syntax.Node, generics map[*syntax.FuncDecl]bo
 					}
 					return false
 				}
+			case *syntax.CallExpr:
+				sel := logosCtMethodSel(n.Fun)
+				if sel == nil {
+					return true
+				}
+				fn, ok := info.Uses[sel.Sel].(*Func)
+				if !ok || fn.Signature().Recv() == nil {
+					return true
+				}
+				recvTyp := info.TypeOf(syntax.Unparen(sel.X))
+				if !isValid(recvTyp) {
+					return true
+				}
+				if s, ok := info.Selections[sel]; ok {
+					if prom, _, ok := LogosCtPromotedRecv(recvTyp, s, fn.Origin()); ok && isValid(prom) {
+						recvTyp = prom
+					}
+				}
+				var methodTargs []Type
+				if nparams := fn.Signature().TypeParams().Len(); nparams != 0 {
+					inst, found := info.Instances[sel.Sel]
+					if !found || nparams != inst.TypeArgs.Len() {
+						return true
+					}
+					methodTargs = inst.TypeArgs.list()
+					for _, targ := range methodTargs {
+						if !isValid(targ) {
+							return true
+						}
+					}
+				}
+				targs := make([]Type, 0, 1+len(methodTargs))
+				targs = append(targs, recvTyp)
+				targs = append(targs, methodTargs...)
+				if shadows != nil {
+					targs = slices.Clone(targs)
+					for i, targ := range targs {
+						targs[i] = (*Checker)(nil).subst(n.Pos(), targ, shadows, nil, NewContext())
+					}
+				}
+				edges = append(edges, LogosCtEdge{Origin: fn.Origin(), Targs: targs, Pos: n.Pos(), Site: sel.Sel, info: info})
 			case *syntax.Name:
 				fn, ok := info.Uses[n].(*Func)
 				inst, found := info.Instances[n]
@@ -387,22 +654,45 @@ func logosConstShadows(infos ...*Info) substMap {
 
 func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []Type, id string, subst substMap, generic LogosCtGeneric) *LogosCtInst {
 	decl := generic.Decl
-	if nodes := logosCountBodyNodes(decl); nodes > check.logosNodeLimit() {
-		check.errorf(pos, InvalidRangeExpr, "[comptime::node_limit] comptime generic %s has %d nodes above the limit %d", origin.Name(), nodes, check.logosNodeLimit())
-		return nil
-	}
-	decl = syntax.CloneLogosCtSyntax(decl)
+	nodes := logosCountBodyNodes(decl)
+	failed := false
+	defer check.logosCtTrackFailure(&failed)()
 	savedSubst, savedPkg, savedVersion := check.logosCtSubst, check.pkg, check.version
 	check.logosCtSubst, check.pkg, check.version = subst, origin.Pkg(), asGoVersion(generic.GoVersion)
 	check.logosCtPos = append(check.logosCtPos, pos)
+	check.logosCtNotes = append(check.logosCtNotes, pos)
+	check.logosCtChain = append(check.logosCtChain, nodes+1)
+	// Record this frame's key and own charge now; const-for iterations
+	// accruing to it and the largest child chain join the same entry
+	// before visit pops the key, so a cache hit validates the budget
+	// the live walk saw. The key is popped in visit, which owns every
+	// return of this function.
+	key := LogosCtKey(origin, targs)
+	check.logosCtKeys = append(check.logosCtKeys, key)
+	if check.logosCtCharge == nil {
+		check.logosCtCharge = make(map[string]int)
+	}
+	check.logosCtCharge[key] = nodes + 1
+	if sum := logosCtChainSum(check.logosCtChain); sum > check.logosNodeLimit() {
+		check.errorf(pos, InvalidRangeExpr, "[comptime::node_limit] comptime instantiation chain has %d nodes above the limit %d", sum, check.logosNodeLimit())
+		check.logosCtSubst, check.pkg, check.version = savedSubst, savedPkg, savedVersion
+		check.logosCtPos = check.logosCtPos[:len(check.logosCtPos)-1]
+		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
+		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
+		return nil
+	}
 	defer func() {
 		check.logosCtSubst, check.pkg, check.version = savedSubst, savedPkg, savedVersion
 		check.logosCtPos = check.logosCtPos[:len(check.logosCtPos)-1]
+		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 	}()
-	failed := false
-	defer check.logosCtTrackFailure(&failed)()
+	decl = syntax.CloneLogosCtSyntax(decl)
+	if origin.Signature().Recv() != nil {
+		decl = logosCtMethodDecl(decl)
+	}
 	sig, facts := check.logosCtInstanceBody(origin, origin.Signature(), targs, decl, generic.Scope)
 	if failed {
+		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
 		return nil
 	}
 	return &LogosCtInst{
@@ -417,6 +707,16 @@ func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []T
 	}
 }
 
+// logosCtChainSum totals one instance chain: the body nodes of every
+// active instance plus the const-for iterations accrued to each frame.
+func logosCtChainSum(chain []int) int {
+	sum := 0
+	for _, n := range chain {
+		sum += n
+	}
+	return sum
+}
+
 func (check *Checker) logosCtTrackFailure(failed *bool) func() {
 	report := check.conf.Error
 	if report == nil {
@@ -426,9 +726,32 @@ func (check *Checker) logosCtTrackFailure(failed *bool) func() {
 		if e, ok := err.(Error); !ok || !check.logosWarnOnly(e) {
 			*failed = true
 		}
-		report(err)
+		report(logosCtNoteChain(check.logosCtNotes, err))
 	}
 	return func() { check.conf.Error = report }
+}
+
+// logosCtNoteChain appends one "instantiated here" note per active
+// instance frame to err, outermost first. Only the innermost wrapper
+// annotates: an error that already carries notes passes through
+// unchanged, so the full stack appears once.
+func logosCtNoteChain(frames []syntax.Pos, err error) error {
+	e, ok := err.(Error)
+	if !ok || strings.Contains(e.Msg, "\n\tinstantiated here ") {
+		return err
+	}
+	var b strings.Builder
+	b.WriteString(e.Msg)
+	for _, p := range frames {
+		b.WriteString("\n\tinstantiated here ")
+		b.WriteString(p.String())
+	}
+	note := b.String()
+	e.Msg = note
+	if e.Full != "" {
+		e.Full = note
+	}
+	return e
 }
 
 func (check *Checker) logosCtErrorPos(pos syntax.Pos) syntax.Pos {
@@ -504,14 +827,14 @@ func (check *Checker) logosCtInstanceBody(origin *Func, sig *Signature, targs []
 	parent, declInfo := check.Info, check.logosDeclInfo
 	untyped, bind, pred := check.untyped, check.logosFieldBind, check.logosPred
 	typeOf, deferred := check.logosTypeOfFact, check.logosTypeOfDeferred
-	depth, budget := check.logosConstForDepth, check.logosConstForBudget
+	depth := check.logosConstForDepth
 	switchCases := check.logosCSwitch
 	abstract := check.logosCtAbstract
 	defer func() {
 		check.Info, check.logosDeclInfo = parent, declInfo
 		check.untyped, check.logosFieldBind, check.logosPred = untyped, bind, pred
 		check.logosTypeOfFact, check.logosTypeOfDeferred = typeOf, deferred
-		check.logosConstForDepth, check.logosConstForBudget = depth, budget
+		check.logosConstForDepth = depth
 		check.logosCSwitch = switchCases
 		check.logosCtAbstract = abstract
 	}()
@@ -523,7 +846,7 @@ func (check *Checker) logosCtInstanceBody(origin *Func, sig *Signature, targs []
 	check.untyped, check.logosFieldBind = nil, nil
 	check.logosPred = logosPredState{}
 	check.logosTypeOfFact, check.logosTypeOfDeferred = nil, nil
-	check.logosConstForDepth, check.logosConstForBudget = 0, 0
+	check.logosConstForDepth = 0
 	check.logosCSwitch = nil
 	check.logosCtAbstract = nil
 	bodySig := check.logosCtCheckBody(origin, sig, targs, decl, scope)
@@ -540,9 +863,18 @@ func logosCtLabel(targs []Type) string {
 }
 
 // LogosCtKey is the stable identity of an instance of a package-level
-// function. It returns an empty key if the arguments are not concrete.
+// function or method. For a method, targs start with the concrete
+// receiver type followed by the method type arguments. It returns an
+// empty key if the arguments are not concrete. Methods carry the
+// declaring receiver identity separately from the ordered type
+// arguments, so a function and a same-named method with matching type
+// lists never share an identity.
 func LogosCtKey(origin *Func, targs []Type) string {
-	if origin.Signature().Recv() != nil || len(targs) != origin.Signature().TypeParams().Len() {
+	want := origin.Signature().TypeParams().Len()
+	if origin.Signature().Recv() != nil {
+		want++
+	}
+	if len(targs) != want {
 		return ""
 	}
 	for _, t := range targs {
@@ -551,9 +883,171 @@ func LogosCtKey(origin *Func, targs []Type) string {
 		}
 	}
 	var key logosCtTypeKey
-	key.name(origin)
+	if origin.Signature().Recv() != nil {
+		key.WriteByte('m')
+		if named := logosCtNamedRecv(origin.Signature().Recv().Type()); named != nil && named.Obj() != nil {
+			pkgPath := ""
+			if pkg := named.Obj().Pkg(); pkg != nil {
+				pkgPath = pkg.Path()
+			}
+			key.text(pkgPath)
+			key.text(named.Obj().Name())
+		} else {
+			key.text("")
+			key.text("")
+		}
+		key.text(origin.Name())
+	} else {
+		key.WriteByte('f')
+		key.name(origin)
+	}
 	key.list(targs)
 	return key.String()
+}
+
+// logosCtMethodSplit splits a method edge's type arguments into the
+// receiver part and the method part: targs[0] is the concrete receiver
+// type, the rest are the method type arguments. It returns the receiver
+// type parameters with their arguments, or not ok when the split is
+// invalid.
+func logosCtMethodSplit(origin *Func, targs []Type) (rtparams []*TypeParam, rtargs []Type, ok bool) {
+	if len(targs) == 0 {
+		return nil, nil, false
+	}
+	recv := origin.Signature().Recv()
+	if recv == nil {
+		return nil, nil, false
+	}
+	rnamed := logosCtNamedRecv(recv.Type())
+	if rnamed == nil {
+		return nil, nil, false
+	}
+	cnamed := logosCtNamedRecv(targs[0])
+	if cnamed == nil || cnamed.Obj() != rnamed.Obj() {
+		return nil, nil, false
+	}
+	rtparams = origin.Signature().RecvTypeParams().list()
+	rtargs = cnamed.TypeArgs().list()
+	if len(rtparams) != len(rtargs) {
+		return nil, nil, false
+	}
+	return rtparams, rtargs, true
+}
+
+// logosCtNamedRecv returns the named receiver base type, unwrapping a
+// pointer, or nil when the receiver is not a defined type.
+func logosCtNamedRecv(t Type) *Named {
+	t = Unalias(t)
+	if ptr, isPtr := t.(*Pointer); isPtr {
+		t = Unalias(ptr.Elem())
+	}
+	named, _ := t.(*Named)
+	return named
+}
+
+// LogosCtPromotedRecv resolves a promoted comptime method call to the
+// concrete embedded receiver type. recv is the type of the selector's X,
+// s is its checked selection, and origin is the method's generic origin.
+// It returns the embedded field type and its field-index path (excluding
+// the trailing method index), or false when the call is not a promoted
+// method of origin.
+func LogosCtPromotedRecv(recv Type, s *Selection, origin *Func) (Type, []int, bool) {
+	if s == nil || !isValid(recv) {
+		return nil, nil, false
+	}
+	idx := s.Index()
+	if len(idx) < 2 {
+		return nil, nil, false
+	}
+	cur := recv
+	for _, fi := range idx[:len(idx)-1] {
+		curUn := Unalias(cur)
+		if ptr, ok := curUn.(*Pointer); ok {
+			curUn = Unalias(ptr.Elem())
+		}
+		if named, ok := curUn.(*Named); ok {
+			curUn = named.Underlying()
+		}
+		st, ok := curUn.(*Struct)
+		if !ok {
+			return nil, nil, false
+		}
+		if fi < 0 || fi >= st.NumFields() {
+			return nil, nil, false
+		}
+		cur = st.Field(fi).Type()
+	}
+	if _, _, ok := logosCtMethodSplit(origin, []Type{cur}); !ok {
+		return nil, nil, false
+	}
+	path := append([]int(nil), idx[:len(idx)-1]...)
+	return cur, path, true
+}
+
+// LogosCtNormalizedRecv returns the declared receiver type of origin
+// with its receiver type arguments replaced by the concrete arguments
+// of recvTyp, preserving the declared pointer indirection. A
+// pointer-receiver method called on an addressable value (and the
+// symmetric value-receiver call through a pointer) therefore shares one
+// instance keyed by the declared receiver, and ctMethodRecvAdjust adds
+// the & or * at the call site.
+func LogosCtNormalizedRecv(pos syntax.Pos, origin *Func, recvTyp Type) Type {
+	if recv := origin.Signature().Recv(); recv == nil || !isValid(recvTyp) {
+		return recvTyp
+	} else {
+		declRecv := recv.Type()
+		if !isValid(declRecv) {
+			return recvTyp
+		}
+		declNamed := logosCtNamedRecv(declRecv)
+		concNamed := logosCtNamedRecv(recvTyp)
+		if declNamed == nil || concNamed == nil || declNamed.Obj() != concNamed.Obj() {
+			return recvTyp
+		}
+		declArgs := declNamed.TypeArgs().list()
+		concArgs := concNamed.TypeArgs().list()
+		if len(declArgs) != len(concArgs) {
+			return recvTyp
+		}
+		var tparams []*TypeParam
+		var args []Type
+		for i, d := range declArgs {
+			tp, ok := d.(*TypeParam)
+			if !ok {
+				if !Identical(d, concArgs[i]) {
+					return recvTyp
+				}
+				continue
+			}
+			tparams = append(tparams, tp)
+			args = append(args, concArgs[i])
+		}
+		if len(tparams) == 0 {
+			return declRecv
+		}
+		smap := makeSubstMap(tparams, args)
+		if concrete := (*Checker)(nil).subst(pos, declRecv, smap, nil, NewContext()); isValid(concrete) {
+			return concrete
+		}
+		return recvTyp
+	}
+}
+
+// logosCtMethodDecl rewrites a cloned generic method declaration as a
+// plain function for instantiation: the receiver becomes the first
+// parameter, keeping its name and type. Type parameters substitute
+// through smap during the instance check.
+func logosCtMethodDecl(decl *syntax.FuncDecl) *syntax.FuncDecl {
+	if decl.Recv == nil {
+		return decl
+	}
+	recv := decl.Recv
+	decl.Recv = nil
+	if decl.Type == nil {
+		return decl
+	}
+	decl.Type.ParamList = append([]*syntax.Field{recv}, decl.Type.ParamList...)
+	return decl
 }
 
 type logosCtTypeKey struct {
@@ -746,9 +1240,23 @@ func (check *Checker) logosCtCheckBody(origin *Func, sig *Signature, targs []Typ
 		}
 	}
 	paramScope := &Scope{parent: fileScope, pos: fdecl.Pos(), end: syntax.EndPos(fdecl), comment: "comptime instance"}
+	methodTargs := targs
+	if origin.Signature().Recv() != nil {
+		rtparams, rtargs, ok := logosCtMethodSplit(origin, targs)
+		if ok {
+			for i, tpar := range rtparams {
+				if name := tpar.Obj().Name(); name != "" {
+					binder := NewTypeName(fdecl.Pos(), origin.Pkg(), name, rtargs[i])
+					paramScope.insert(name, binder)
+					check.logosCtKeepType(binder, tpar)
+				}
+			}
+			methodTargs = targs[1:]
+		}
+	}
 	for i, tpar := range tp {
-		if name := tpar.Obj().Name(); name != "" {
-			binder := NewTypeName(fdecl.Pos(), origin.Pkg(), name, targs[i])
+		if name := tpar.Obj().Name(); name != "" && i < len(methodTargs) {
+			binder := NewTypeName(fdecl.Pos(), origin.Pkg(), name, methodTargs[i])
 			paramScope.insert(name, binder)
 			check.logosCtKeepType(binder, tpar)
 		}
@@ -759,6 +1267,27 @@ func (check *Checker) logosCtCheckBody(origin *Func, sig *Signature, targs []Typ
 	bodySig.scope = paramScope
 	bodySig.params = NewTuple(substTupleVars(check, sig.params, smap)...)
 	bodySig.results = NewTuple(substTupleVars(check, sig.results, smap)...)
+	if origin.Signature().Recv() != nil && len(targs) > 0 {
+		recvName := origin.Signature().Recv().Name()
+		if recvName == "" {
+			recvName = "_"
+		}
+		recvType := targs[0]
+		if declRecv := origin.Signature().Recv().Type(); isValid(declRecv) {
+			if concrete := check.subst(fdecl.Pos(), declRecv, smap, nil, check.context()); isValid(concrete) {
+				recvType = concrete
+			}
+		}
+		recvVar := NewVar(fdecl.Pos(), origin.Pkg(), recvName, recvType)
+		recvParams := make([]*Var, 0, bodySig.params.Len()+1)
+		recvParams = append(recvParams, recvVar)
+		for i := range bodySig.params.Len() {
+			recvParams = append(recvParams, bodySig.params.At(i))
+		}
+		bodySig.params = NewTuple(recvParams...)
+		bodySig.recv = nil
+		bodySig.rparams = nil
+	}
 	for _, tuple := range []*Tuple{bodySig.params, bodySig.results} {
 		if tuple == nil {
 			continue
@@ -769,6 +1298,10 @@ func (check *Checker) logosCtCheckBody(origin *Func, sig *Signature, targs []Typ
 			}
 		}
 	}
+
+	savedDecl := check.logosCtFuncDecl
+	check.logosCtFuncDecl = fdecl
+	defer func() { check.logosCtFuncDecl = savedDecl }()
 
 	saved := check.environment
 	check.environment = environment{
@@ -829,8 +1362,10 @@ func substTupleVars(check *Checker, t *Tuple, smap substMap) []*Var {
 // fallthrough from a deferred switch, so it leaves the continuation for the
 // concrete check without marking it dead. An instance checks the code after
 // a terminating statement like any other code: that code is
-// termination-dead, not const-dead, so it is type-checked and a
-// comptime.Error in it fails.
+// termination-dead, not const-dead, so it is type-checked. Instance
+// comptime.Error liveness after a terminating const switch is decided in
+// logosComptimeError, which silences the Error while leaving the tail
+// type-checked.
 func (check *Checker) logosCtStopAfter(s syntax.Stmt, tail []syntax.Stmt) bool {
 	if len(tail) == 0 || !check.logosCtDeclCheck || !check.logosCtHasDeferredSwitch(s) {
 		return false

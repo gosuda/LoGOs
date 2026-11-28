@@ -1,0 +1,10 @@
+ok list-int
+ok list-string
+ok list-bool
+ok list-other
+ok mixed-tilde
+ok mixed-exact
+ok mixed-iface
+ok mixed-other
+ok iface-list-reader
+ok iface-list-other

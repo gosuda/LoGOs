@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	logoslog "logos/log"
 )
@@ -190,5 +191,30 @@ func TestDisabledPathAllocatesNothing(t *testing.T) {
 	}
 	if n := testing.AllocsPerRun(100, func() { l.Logf(logoslog.Debug, "static") }); n != 0 {
 		t.Errorf("disabled Logf without args allocates %v times per call", n)
+	}
+}
+
+type reentrantString struct{ l *logoslog.Logger }
+
+func (r reentrantString) String() string {
+	r.l.Info("from-string")
+	return "v"
+}
+
+func TestLogfReentrantString(t *testing.T) {
+	var buf bytes.Buffer
+	l := logoslog.Scoped("s", logoslog.Debug).WithOutput(&buf)
+	done := make(chan string, 1)
+	go func() {
+		l.Infof("arg %s", reentrantString{l})
+		done <- buf.String()
+	}()
+	select {
+	case out := <-done:
+		if !strings.Contains(out, "from-string") || !strings.Contains(out, "arg v") {
+			t.Errorf("reentrant Logf wrote %q, want both lines", out)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Logf deadlocked on a String method that logs")
 	}
 }

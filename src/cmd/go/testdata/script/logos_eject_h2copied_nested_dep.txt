@@ -1,0 +1,61 @@
+# A plain Go dependency nested inside the main module through a local
+# replace is copied into the export, so its same-named user calls need
+# the full rewrite check: eject must refuse the call as ambiguous
+# instead of letting the spelling rewrite steal it.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd kdmain
+! logos eject -o out
+stderr 'ambiguous EnableHTTP2ExtendedConnect'
+! exists out
+cd ..
+
+-- kdmain/go.mod --
+module example.com/h2kdcopy
+
+go 1.27
+
+require example.com/h2kddep v0.0.0
+
+replace example.com/h2kddep => ./kddep
+
+-- kdmain/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/h2kddep"
+)
+
+func main() {
+	fmt.Println("kdmain ready:", kddep.Serve())
+}
+
+-- kdmain/kddep/go.mod --
+module example.com/h2kddep
+
+go 1.27
+
+-- kdmain/kddep/meter.go --
+package kddep
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. The export copies this nested dependency,
+// so the rewrite would steal the call and the check must refuse it.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- kdmain/kddep/dep.go --
+package kddep
+
+import "net/http"
+
+func Serve() int {
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect()
+	return len(http.MethodGet) + m.Hits
+}

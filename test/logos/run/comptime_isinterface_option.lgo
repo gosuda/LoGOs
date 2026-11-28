@@ -1,0 +1,28 @@
+// run
+
+package main
+
+import "comptime"
+
+type value345 interface{ int | string }
+
+type holder345[T any] struct{ V T? }
+
+func countOptIface345[T any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		const if comptime.IsInterface[f.Type]() {
+			n++
+		}
+	}
+	return n
+}
+
+func main() {
+	if countOptIface345[holder345[value345]]() != 1 {
+		panic("option field of union type was not an interface")
+	}
+	if countOptIface345[holder345[int]]() != 0 {
+		panic("option field of int was an interface")
+	}
+}

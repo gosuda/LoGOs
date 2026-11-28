@@ -403,3 +403,183 @@ func TestFixedEmptyBuffer(t *testing.T) {
 		t.Errorf("got %q, want %q", msg, want)
 	}
 }
+
+func TestFixedAppendSpareBoundaryIntoUsed(t *testing.T) {
+	buf := make([]byte, 8)
+	r := arena.OpenFixed(buf[2:6])
+	if n := arena.Make[byte](r, 2); len(n) != 2 {
+		t.Fatalf("Make took %d bytes, want 2", len(n))
+	}
+	got := arena.Append(r, buf[:1], 7, 8)
+	if want := []byte{0, 7, 8}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if &got[0] != &buf[0] {
+		t.Errorf("boundary write into used bytes moved the backing array")
+	}
+	if used := arena.FixedUsed(r); used != 2 {
+		t.Errorf("FixedUsed = %d, want 2: a write clear of free space needs no accounting", used)
+	}
+}
+
+func TestFixedAppendSpareStraddlesFull(t *testing.T) {
+	big := make([]byte, 10)
+	r := arena.OpenFixed(big[:8])
+	if n := arena.Make[byte](r, 8); len(n) != 8 {
+		t.Fatalf("Make took %d bytes, want 8", len(n))
+	}
+	s := big[6:9]
+	got := arena.Append(r, s, 9)
+	if want := []byte{0, 0, 0, 9}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if used := arena.FixedUsed(r); used != 8 {
+		t.Errorf("FixedUsed = %d, want 8: a full region has no free interval", used)
+	}
+}
+
+func TestFixedAppendEmptyRegionSpare(t *testing.T) {
+	buf := make([]byte, 3)
+	r := arena.OpenFixed(buf[1:1])
+	got := arena.Append(r, buf[:0], 7, 8)
+	if want := []byte{7, 8}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if &got[0] != &buf[0] {
+		t.Errorf("empty-region write moved the backing array")
+	}
+	if used := arena.FixedUsed(r); used != 0 {
+		t.Errorf("FixedUsed = %d, want 0: an empty region accounts nothing", used)
+	}
+}
+
+func TestFixedAppendOffsetSubslice(t *testing.T) {
+	buf := []byte{1, 2, 3, 0}
+	r := arena.OpenFixed(buf)
+	s := buf[1:3]
+	got := arena.Append(r, s, 9)
+	if want := []byte{2, 3, 9}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if !slices.Equal(s, []byte{2, 3}) {
+		t.Fatalf("original slice = %v, want [2 3]: the append overwrote its own prefix", s)
+	}
+	if used := arena.FixedUsed(r); used != 4 {
+		t.Fatalf("FixedUsed = %d, want 4", used)
+	}
+}
+
+func TestFixedAppendOffsetSubsliceCapClipped(t *testing.T) {
+	buf := []byte{1, 2, 3, 0}
+	r := arena.OpenFixed(buf)
+	s := buf[1:3:3]
+	got := arena.Append(r, s, 9)
+	if want := []byte{2, 3, 9}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if &got[0] != &buf[1] {
+		t.Errorf("clipped append left the backing buffer: the byte must land in the caller's buffer")
+	}
+	if buf[3] != 9 {
+		t.Errorf("buf[3] = %d, want 9: the extension must be written in place", buf[3])
+	}
+	if used := arena.FixedUsed(r); used != 4 {
+		t.Errorf("FixedUsed = %d, want 4", used)
+	}
+}
+
+func TestFixedAppendCopyDisjointFromRetainedPrefix(t *testing.T) {
+	big := []byte{1, 2, 3, 4, 5, 6, 7, 8, 0, 0}
+	r := arena.OpenFixed(big[:8])
+	s := big[3:8]
+	msg := fixedPanicText(t, func() { _ = arena.Append(r, s, 9) })
+	want := "arena: fixed region exhausted (want 6, have 8)"
+	if msg != want {
+		t.Errorf("got %q, want %q", msg, want)
+	}
+	if used := arena.FixedUsed(r); used != 0 {
+		t.Errorf("FixedUsed = %d, want 0: the failed append must not advance the cursor", used)
+	}
+	if !slices.Equal(big, []byte{1, 2, 3, 4, 5, 6, 7, 8, 0, 0}) {
+		t.Errorf("buffer changed to %v: nothing may be written before exhaustion", big)
+	}
+}
+
+func TestFixedAppendOffsetSubsliceAcrossCursor(t *testing.T) {
+	buf := []byte{1, 2, 3, 0, 0, 0, 0, 0}
+	r := arena.OpenFixed(buf)
+	if n := arena.Make[byte](r, 2); len(n) != 2 {
+		t.Fatalf("Make took %d bytes, want 2", len(n))
+	}
+	s := buf[1:3]
+	got := arena.Append(r, s, 9)
+	if want := []byte{0, 3, 9}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if !slices.Equal(s, []byte{0, 3}) {
+		t.Fatalf("original slice = %v, want [0 3]: the append overwrote its own prefix", s)
+	}
+	if used := arena.FixedUsed(r); used != 4 {
+		t.Fatalf("FixedUsed = %d, want 4", used)
+	}
+}
+
+func TestFixedAppendSpareRetainsFreeFailsLoud(t *testing.T) {
+	big := make([]byte, 10)
+	r := arena.OpenFixed(big[:8])
+	if n := arena.Make[byte](r, 2); len(n) != 2 {
+		t.Fatalf("Make took %d bytes, want 2", len(n))
+	}
+	msg := fixedPanicText(t, func() { _ = arena.Append(r, big[:8], 9) })
+	want := "arena: fixed region exhausted (want 9, have 6)"
+	if msg != want {
+		t.Errorf("got %q, want %q", msg, want)
+	}
+	if used := arena.FixedUsed(r); used != 2 {
+		t.Errorf("FixedUsed = %d, want 2: the failed append must not advance the cursor", used)
+	}
+}
+
+func TestFixedAppendCrossingInputSlidesPastInput(t *testing.T) {
+	buf := make([]byte, 16)
+	for i := range buf[:4] {
+		buf[i] = byte(i + 1)
+	}
+	r := arena.OpenFixed(buf[2:])
+	got := arena.Append(r, buf[:4:4], 9)
+	if want := []byte{1, 2, 3, 4, 9}; !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if !slices.Equal(buf[:4], []byte{1, 2, 3, 4}) {
+		t.Fatalf("input changed to %v: the copy must leave the input untouched", buf[:4])
+	}
+	if &got[0] != &buf[4] {
+		t.Errorf("result starts at %p, want &buf[4]: the slot must skip the input range", &got[0])
+	}
+	if used := arena.FixedUsed(r); used != 7 {
+		t.Errorf("FixedUsed = %d, want 7", used)
+	}
+}
+
+func TestFixedAppendCrossingInputAliasedValues(t *testing.T) {
+	buf := make([]byte, 16)
+	for i := range buf[:8] {
+		buf[i] = byte(i + 1)
+	}
+	r := arena.OpenFixed(buf[2:])
+	prefix := slices.Clone(buf[:4])
+	values := slices.Clone(buf[6:8])
+	got := arena.Append(r, buf[:4:4], buf[6:8]...)
+	if want := append(prefix, values...); !slices.Equal(got, want) {
+		t.Fatalf("Append = %v, want %v", got, want)
+	}
+	if !slices.Equal(buf[:4], prefix) {
+		t.Fatalf("input changed to %v: the copy must leave the input untouched", buf[:4])
+	}
+	if &got[0] != &buf[4] {
+		t.Errorf("result starts at %p, want &buf[4]: the slot must skip the input range", &got[0])
+	}
+	if used := arena.FixedUsed(r); used != 8 {
+		t.Errorf("FixedUsed = %d, want 8", used)
+	}
+}

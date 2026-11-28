@@ -1,0 +1,149 @@
+[!symlink] skip 'fake GOROOT needs symlinks'
+env GOPROXY=off
+env GOTOOLCHAIN=local
+env GOWORK=off
+env CGO_ENABLED=0
+
+# A cgo-only Go file in a GOROOT toolchain package can import a LoGOs
+# package that no host-active file imports. Lowering that dependency
+# without cgo bakes the cgo-off const branch, so eject refuses and names
+# the file instead of exporting a tree that disagrees with the native cgo
+# build. The test installs fixture packages in a private toolchain root
+# inside $WORK and selects it with GOROOT. Nothing is written into the
+# real GOROOT.
+go run mkgoroot.go $TESTGO_GOROOT $WORK/fakegoroot dep
+env GOROOT=$WORK/fakegoroot
+
+cd m
+logos run .
+stdout '^cgoimp$'
+
+# The unreachable cgo-only dependency cannot be lowered without cgo.
+! logos eject -o out
+stderr 'call_cgo\.go imports C and unreachable logos/ejecttestcgoleaf'
+stderr 'export with CGO_ENABLED=1 and a C compiler'
+
+-- mkgoroot.go --
+package main
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+func must(err error, what string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkgoroot: %s: %v\n", what, err)
+		os.Exit(1)
+	}
+}
+
+func link(oldname, newname string) {
+	must(os.MkdirAll(filepath.Dir(newname), 0777), "mkdir "+filepath.Dir(newname))
+	must(os.Symlink(oldname, newname), "symlink "+newname)
+}
+
+func main() {
+	if len(os.Args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: mkgoroot <realGOROOT> <fakeRoot> <fixtures>")
+		os.Exit(2)
+	}
+	real, fake, fixtures := os.Args[1], os.Args[2], os.Args[3]
+
+	must(os.MkdirAll(filepath.Join(fake, "src", "logos"), 0777), "mkdir fake src/logos")
+
+	ents, err := os.ReadDir(filepath.Join(real, "src"))
+	must(err, "read real src")
+	for _, e := range ents {
+		if e.Name() == "logos" {
+			continue
+		}
+		link(filepath.Join(real, "src", e.Name()), filepath.Join(fake, "src", e.Name()))
+	}
+
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(filepath.Join(real, "src", "logos"))), "copy support sources")
+	must(os.CopyFS(filepath.Join(fake, "src", "logos"), os.DirFS(fixtures)), "install fixture packages")
+
+	// The package index distinguishes .lgo-only standard packages, but
+	// bypasses files with recent mtimes. Age only the private copies.
+	old := time.Now().Add(-time.Hour)
+	must(filepath.WalkDir(filepath.Join(fake, "src", "logos"), func(name string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		return os.Chtimes(name, old, old)
+	}), "age copied support and fixture files")
+
+	link(filepath.Join(real, "pkg"), filepath.Join(fake, "pkg"))
+	link(filepath.Join(real, "VERSION"), filepath.Join(fake, "VERSION"))
+	if _, err := os.Stat(filepath.Join(real, "go.env")); err == nil {
+		link(filepath.Join(real, "go.env"), filepath.Join(fake, "go.env"))
+	}
+	if _, err := os.Stat(filepath.Join(real, "lib")); err == nil {
+		link(filepath.Join(real, "lib"), filepath.Join(fake, "lib"))
+	}
+}
+
+-- dep/ejecttestcgoimp/base.go --
+package ejecttestcgoimp
+
+func Name() string { return "cgoimp" }
+
+-- dep/ejecttestcgoimp/call_cgo.go --
+//go:build cgo
+
+package ejecttestcgoimp
+
+import "C"
+
+import "logos/ejecttestcgoleaf"
+
+func LeafName() string { return ejecttestcgoleaf.Leaf() }
+
+-- dep/ejecttestcgomode/mode_cgo.go --
+//go:build cgo
+
+package ejecttestcgomode
+
+const Native = true
+
+-- dep/ejecttestcgomode/mode_nocgo.go --
+//go:build !cgo
+
+package ejecttestcgomode
+
+const Native = false
+
+-- dep/ejecttestcgoleaf/leaf.lgo --
+package ejecttestcgoleaf
+
+import "logos/ejecttestcgomode"
+
+func Leaf() string {
+	const if ejecttestcgomode.Native {
+		return "native"
+	} else {
+		return "fallback"
+	}
+}
+
+-- m/go.mod --
+module example.com/cgoinactivegoimport
+
+go 1.27
+
+-- m/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"logos/ejecttestcgoimp"
+)
+
+func main() {
+	fmt.Println(ejecttestcgoimp.Name())
+}

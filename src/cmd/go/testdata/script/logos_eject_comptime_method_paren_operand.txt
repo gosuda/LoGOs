@@ -1,0 +1,76 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos run .
+stdout '^8$'
+stdout '^11$'
+stdout '^11$'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $WORK/native.txt
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+
+-- w/go.mod --
+module example.com/methodparenarg
+
+go 1.27
+
+-- w/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Box[T any] struct {
+	V int
+}
+
+func (b Box[T]) Add(x, y int) int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return x + y + n + b.V
+}
+
+func (b Box[T]) Add2(x, y int) int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return x + y + n + b.V
+}
+
+type Pair struct {
+	A int
+	B string
+}
+
+func mkBox() Box[Pair] {
+	return Box[Pair]{V: 4}
+}
+
+func seven(x int) int {
+	return x
+}
+
+func getSeven() func(int) int {
+	return seven
+}
+
+func main() {
+	fmt.Println((mkBox()).Add(1, 1))
+	b := Box[Pair]{V: 1}
+	fmt.Println(b.Add2(1, (seven)(7)))
+	fmt.Println(b.Add2(1, (getSeven())(7)))
+}

@@ -707,7 +707,15 @@ func (g *overlayGraph) route(t types2.Type, steps []string, q qualKind) {
 			// belongs to the referring object and is rebuilt per use when
 			// the overlay wraps that object; recording it under the origin
 			// would share it across every instantiation.
-			return
+			//
+			// A path that selects only concrete positions is identical in
+			// every instantiation, so it still belongs to the origin: an
+			// unexported generic type reached only through an exported use
+			// keeps its concrete option fields. A path that reaches a type
+			// parameter stays per-use as above.
+			if !collectConcreteOnly(n, steps) {
+				return
+			}
 		}
 		name := n.Origin().Obj().Name()
 		p := qualPath{path: joinPath(steps), qual: q}
@@ -1829,9 +1837,50 @@ func (g *overlayGraph) prepare() error {
 			return err
 		}
 	}
+	if g.sub.refill {
+		// A shell filled before the shells it references kept the
+		// original instances; the kept reference depends on map
+		// iteration order. Every shell is filled now, so redo the
+		// constraint and fill passes from the original declarations;
+		// the substitution retargets every instance to the shells.
+		g.sub.refill = false
+		for old := range g.sub.named {
+			for i := range old.TypeParams().Len() {
+				p := old.TypeParams().At(i)
+				g.sub.tparams[p].SetConstraint(substType(g.sub, p.Constraint()))
+			}
+		}
+		for old, shell := range g.sub.named {
+			if err := g.fillNamedShell(old, shell); err != nil {
+				return err
+			}
+		}
+	}
 	for old, shell := range g.sub.named {
 		for i := range old.NumMethods() {
 			if err := g.addShellMethod(old, shell, i); err != nil {
+				return err
+			}
+		}
+	}
+	// Aliases built before the shells were filled may have kept the
+	// original generic instance when the new origin was still a shell.
+	// Every shell is filled now, so rebuild each affected alias from the
+	// original right-hand side; the substitution retargets instances to
+	// the new origins and restores their qualifiers.
+	for node := range g.affected {
+		if a, ok := node.(*types2.Alias); ok {
+			delete(g.sub.aliases, a)
+		}
+	}
+	for node := range g.affected {
+		if a, ok := node.(*types2.Alias); ok {
+			g.alias(a)
+		}
+	}
+	for node := range g.affected {
+		if a, ok := node.(*types2.Alias); ok {
+			if err := g.applyAliasReadonly(a); err != nil {
 				return err
 			}
 		}
@@ -2019,6 +2068,11 @@ type typeSubst struct {
 	named   map[*types2.Named]*types2.Named
 	aliases map[*types2.Alias]*types2.Alias
 	graph   *overlayGraph
+	// refill is set when a substitution keeps an original instance
+	// because its shell is not filled yet. The fill order follows map
+	// iteration, so a kept original is order-dependent; prepare runs a
+	// second fill pass once every shell is filled to retarget it.
+	refill bool
 }
 
 func typeParamSlice(l *types2.TypeParamList) []*types2.TypeParam {
@@ -2084,6 +2138,15 @@ func substType(sub *typeSubst, t types2.Type) types2.Type {
 		}
 		origin := n.Origin()
 		if nn, ok := sub.named[origin]; ok {
+			if nn.Underlying() == nil {
+				// The shell is allocated but not yet filled (aliases
+				// rebuild before declarations): expanding an instance of
+				// it would inspect a missing right-hand side. Keep the
+				// original instance and mark the substitution for a
+				// second fill pass once every shell is filled.
+				sub.refill = true
+				return t
+			}
 			origin = nn
 		}
 		inst, err := types2.Instantiate(nil, origin, targs, false)
@@ -2596,6 +2659,26 @@ func sigTupleAt(sig *types2.Signature, head string) (types2.Type, bool) {
 		return nil, false
 	}
 	return tup.At(index).Type(), true
+}
+
+// collectConcreteOnly reports whether steps select only concrete positions
+// of the instantiation n: no selected position is or passes through one of
+// the origin's type parameters. A concrete-only path is identical in every
+// instantiation, so the origin fact restores it for all of them.
+func collectConcreteOnly(n *types2.Named, steps []string) bool {
+	origin := n.Origin()
+	if origin == nil {
+		return false
+	}
+	idx := typeParamIndex(origin)
+	if idx == nil {
+		return false
+	}
+	hits := make(map[int][][]string)
+	if !collectArgHits(origin.Underlying(), n.Underlying(), steps, idx, hits) {
+		return false
+	}
+	return len(hits) == 0
 }
 
 // collectArgHits walks an origin-space type and its actual instantiation in

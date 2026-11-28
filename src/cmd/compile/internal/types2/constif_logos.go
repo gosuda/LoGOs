@@ -290,7 +290,9 @@ func (w *logosDeadUseWalk) Visit(node syntax.Node) syntax.Visitor {
 	case *syntax.ConstSwitchStmt:
 		w.walk(n.Targ)
 		for _, c := range n.Cases {
-			w.walk(c.Type)
+			for i := range c.Elems {
+				w.walk(c.Elems[i].Type)
+			}
 			w.child().stmts(c.Body)
 		}
 	case *syntax.CompositeLit:

@@ -1,0 +1,36 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# An exported alias with an optional field backed by a cloned generic
+# pointer type imports cleanly.
+cd good
+logos run .
+stdout '^alias-import ok true$'
+
+-- good/go.mod --
+module example.com/optaliasimp
+
+go 1.27
+-- good/lib/lib.lgo --
+package lib
+
+type Target struct{}
+
+func (Target) Find() int? { return nil }
+
+type Ref[T any] *Target
+
+type API = struct{ Value Ref[int]? }
+-- good/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/optaliasimp/lib"
+)
+
+func main() {
+	var a lib.API
+	fmt.Println("alias-import ok", a.Value == nil)
+}

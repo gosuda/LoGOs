@@ -1,0 +1,22 @@
+// run
+
+package main
+
+import "fmt"
+
+func partial[T any](v T) string {
+	_ = v
+	const switch T {
+	case int:
+		return "int"
+	case int, string:
+		return "int-or-string"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(partial(1))
+	fmt.Println(partial("x"))
+	fmt.Println(partial(true))
+}

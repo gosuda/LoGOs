@@ -620,15 +620,19 @@ func (check *Checker) logosCheckUnionMemberJSON(fld *Var, m LogosUnionMember) {
 			return
 		}
 	}
-	if m.Type != nil {
-		check.logosCheckUnionTermJSON(fld, m.Type)
+	term := m.Type
+	if term == nil {
+		mt, ok := check.logosForeignMemberType(m.Text())
+		if !ok {
+			return
+		}
+		term = mt
+	}
+	if m.Ptr && !logosUnionPointerAllocSpellable(term, check.pkg) {
+		check.errorf(fld, BadDecl, "%s union member %s points to an unexported type, so no decoder for it can be generated here", logosNoUnionJSON, m.Text())
 		return
 	}
-	mt, ok := check.logosForeignMemberType(m.Text())
-	if !ok {
-		return
-	}
-	check.logosCheckUnionTermJSON(fld, mt)
+	check.logosCheckUnionTermJSON(fld, term)
 }
 
 type logosForeignName struct {

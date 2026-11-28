@@ -10,9 +10,9 @@
   },
   "new_tests": [
     {
-      "bytes": 3516,
+      "bytes": 4608,
       "path": "src/cmd/go/testdata/script/logos_cap_inline_context.txt",
-      "sha256": "26feb66faaec2df343f6f531a85584dcc405a0800683f3732cf4c75c708b520f"
+      "sha256": "b4f5a013f2387447d619b05113e08260aec7f5816988841be4c67b797f7014d3"
     }
   ],
   "observed_ci_head": "c47c4cfc56fc8bfa916d170ed51040195b567dc9",
@@ -66,9 +66,9 @@
       "sha256": "884666bdbf5956560246c837a619e6157ea7ff8ad2f4bc27e3ef1fdaa2a8a1f6"
     },
     {
-      "bytes": 15610,
+      "bytes": 15673,
       "path": "src/cmd/link/internal/ld/capabilities_logos_test.go",
-      "sha256": "0dbc548fcc6fec9d01106a686e83a285a21119c8e2a463700fa52e1e69754ce9"
+      "sha256": "bce49658b6b02baa50c24ba86b7c92c16ba49edfa5be6dc6805ef11d9d83fa69"
     }
   ],
   "schema": 1

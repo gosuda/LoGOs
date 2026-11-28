@@ -69,9 +69,14 @@ A Go declaration that a `.lgo` file imports MUST be a platform declaration per S
 See Sec 0.3 for the Go-facing signatures that a Go importer sees.
 A workspace root `logos build ./...` MUST build every Go module and every LoGOs module of the workspace [T-0.1][R-U2].
 The `logos` command alone MUST select the `.lgo` language. This covers file recognition, LoGOs syntax, LoGOs type rules, and LoGOs lints [T-0.1][A-LGOSEL].
-Plain `go` MUST ignore `.lgo` files [T-0.1][A-LGOSEL].
-Plain `go` MUST report the upstream `no Go files` result for a LoGOs-only package [T-0.1][A-LGOSEL].
-A plain `go` build of a Go package that imports a LoGOs package, including `go build ./...` of its module, MUST fail with a load error that names the imported package, because plain `go` ignores `.lgo` files [T-0.1][A-LGOSEL].
+When the binary is invoked as `go`, it MUST re-execute as `logos` with the same arguments and the same working directory, exactly once. Every trigger that arguments and files can settle runs before any toolchain selection and before any package is loaded; only the import trigger still runs during package loading [T-0.1][A-LGOSEL]:
+the first non-flag argument, or a `go help` topic, is `lint`, `eject`, `context`, `next`, `conc`, or `lsp`; the module that contains the working directory has a `logos.toml` next to its `go.mod`, or, when a `go.work` is in effect, any workspace member has one, in each case read through the `-overlay` file named on the command line; a directory the command names, the working directory when the command names no path, the `all` pattern, a `./...`-style pattern (at a workspace root, unioning the workspace members), or a package path or package-path pattern that maps onto a main-module directory, holds LoGOs source files and no `.go` files; an import that resolves to such a directory, in the main modules or in a dependency. A late import-triggered relaunch passes the environment as it was when the process started, runs the work-directory cleanup of a builder that already exists, and never returns on Windows: it exits with the status of the child [T-0.1][A-LGOSEL]. The import trigger fires only when the resolver found no Go provider and exactly one LoGOs-only candidate: one directory for a single-package path, or one module root for a `...` pattern [T-0.1][A-LGOSEL]. A named file is an input to the command, not a package, and never triggers a re-execution. A program that logos starts MUST see the host's effective -O level in LOGOS_OPT_LEVEL: a test binary and a logos run program carry it, and settings.Load in logos mode MUST resolve the level from the -O flag, then LOGOS_OPT_LEVEL, then the logos.toml of the main module roots [T-0.1][A-LGOSEL].
+In `logos` mode the command MUST NOT switch to a stock toolchain: a stock toolchain cannot build LoGOs sources. When the module needs a newer Go than this toolchain, `logos` MUST report that and exit with the upstream message for the case [T-0.1][A-LGOSEL].
+A LoGOs-only flag (`-pedantic`, `-json-diagnostics`) together with a marker or a directory that holds LoGOs sources re-executes as well: the flag reaches the directory check before the flag parser can reject it, and when neither a marker nor a source trigger applies the flag error stays the upstream one [T-0.1][A-LGOSEL].
+`go fmt` formats `.go` files, ignores `.lgo` files, and MUST NOT re-execute [T-0.1][A-LGOSEL]. `go version`, `go env`, `go bug`, and `go telemetry` MUST keep the upstream text in every module and MUST NOT re-execute. `go help` MUST keep the upstream text unless its topic is a LoGOs-only subcommand, in which case it MUST re-execute as `logos` [T-0.1][A-LGOSEL]. The standard library MUST NOT re-execute, and a pattern walk checks the main modules only [T-0.1][A-LGOSEL].
+The target scan skips the value of every flag that takes one, in both the `-flag value` form and the `-flag=value` form. A bare word that resolves to no path is no target, so the working-directory rule still applies when no word resolves to a path [T-0.1][A-LGOSEL].
+A `...` pattern tests every directory it can name: only a directory whose import path matches the full pattern counts. `vendor` trees and directories a `go.mod` `ignore` directive excludes never count [T-0.1][A-LGOSEL].
+Plain `go` MUST ignore `.lgo` files while it loads packages [T-0.1][A-LGOSEL].
 Packages from `golang.org/x` and other third-party Go modules MUST count as Go packages that `.lgo` code MAY import [A-XMOD][R-U2].
 A LoGOs package MUST NOT hold a generated `.go` file except cgo outputs [A-CODEGEN].
 A generator MAY write `.go` files into a Go package that a LoGOs package imports [A-CODEGEN][R-U2].
@@ -112,6 +117,7 @@ The output `go.mod` MUST carry a `replace` line for each ejected module [T-0.3].
 A Go dependency module MUST stay a `require` entry of the output `go.mod` [T-0.3][R-U2].
 The support sources MUST become one shared support module `github.com/gosuda/loGos/rt` [T-0.3][A-RTMOD].
 The shared module MUST land in `DIR/_logos_deps/rt` [T-0.3].
+Each toolchain package `logos/<path>` that the program imports, other than `logos/rt`, `logos/arena`, `logos/sync`, and their subpackages, MUST land in the shared module as `github.com/gosuda/loGos/rt/logos/<path>` [T-0.3].
 The output MUST carry a `replace` line for the shared module [T-0.3].
 The tool MUST remove `import "comptime"` during eject [T-0.3].
 The output MUST NOT include a `//go:build !logos` line [T-0.3][R-U3].
@@ -190,7 +196,7 @@ In a LoGOs package, `forbid` MUST ignore `//logos:allow(<rule>)` [T-102].
 In a LoGOs package, a `//logos:allow` directive on a `forbid` rule MUST itself be an error with `correctness::allow_forbidden_rule` [T-102].
 The default group severities MUST be `correctness` forbid, `concurrency` forbid, `slop` deny, `complexity` deny, `perf` warn, `style` warn, `suspicious` warn, `portability` warn, `pedantic` allow [T-102].
 The `logos.toml [lints]` table MUST control group severities [T-102].
-Configuration MAY raise `max_comptime_ast_nodes` and `max_ctfe_steps` above their defaults, which Sec 8.5 lists [T-102][T-Sec8].
+Configuration MAY raise `max_ctfe_steps` above its default, which Sec 8.5 lists [T-102][T-Sec8].
 `logos build` and `logos lint` MUST accept `--pedantic` with default false [T-102].
 `--pedantic` and `--pedantic=true` MUST NOT lower a stricter `logos.toml` severity [T-102]. `--pedantic` MUST raise the pedantic group from `allow` to `warn` and MUST keep a stricter configured severity, and `--pedantic=false` MUST set the pedantic group to `allow` [T-102].
 A `logos.toml` value that lowers a `forbid` group MUST fail with `configuration::forbid_lowered` [T-102].
@@ -586,6 +592,8 @@ A `const func` MUST NOT perform I/O, spawn a goroutine, read a mutable package v
 
 The compiler MUST evaluate `const` composites and `const func` calls at compile time with target integer widths, a step limit from `max_ctfe_steps` with default 100,000, and a value cap of 1 MB. [T-201][T-102]
 
+A constant with an exact rational payload MUST first add the bit lengths of its numerator and denominator, then round that sum up to whole bytes for its charge against the 1 MB value cap. An exact complex payload MUST apply that rounding separately to its real and imaginary components, then add the two byte charges. A complex value without an exact payload MUST charge 16 bytes. [T-201] A typed `float32` or `float64` value MUST charge at least eight bytes. [T-201]
+
 Compile-time assignments MUST preserve Go's operand evaluation order, destination identity, value-copy rules, and left-to-right store order. [T-201]
 The evaluation and assignment phases, including failures while evaluating a destination operand and failures while storing a result, MUST follow Go assignment semantics. [T-201]
 A two-value lookup on a nil map MUST return the element's zero value and `false`. [T-201]
@@ -805,15 +813,13 @@ A call that cannot return MUST discharge the `err == nil` proof. The calls that 
 
 An `err == nil` proof MUST remain valid for a captured result in a function literal, lambda, or `go group` child when that result is initialized at its declaration, is never assigned again, and never has its address taken. A result assigned anywhere besides its declaration or whose address is taken MUST NOT inherit that proof across the capture boundary. [T-202]
 
-A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result. [T-202]
+A return that passes a result and the err it came with, both unread and unchanged, MUST NOT count as a read of the result, whether the err has a tracked variable identity or a field pairing, when the same return passes that exact error destination unchanged. [T-202]
 
-Assigning a result to the blank identifier MUST NOT count as a read. [T-202]
-
-A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. [T-202]
+A read of a result stored in a value-struct field or a constant array element MUST fail before the proof. When the storing call's error has no tracked identity (a field error or a discarded error), an ordinary flow read of the result stays silent; the read MUST fail only where a deferred capture or a deferred cleanup can observe the stored value, or after a directly invoked function literal whose exit still holds the unchecked result. A cleanup body MUST check the values it stores before reading them, in every deferred body including an ordinary defer in a named function; a callback or goroutine body the cleanup saves for later execution is analyzed in ordinary mode, while checks on captured values remain. A branch join MUST keep only the guard every unchecked input agrees on, clearing an ordinary entry's guard when any unchecked input uses a different guard or none; the diagnostic MUST name the guard that proves the joined read. An invocation exit MUST project only the live pairing: a guard broken on any normal or recovered exit path leaves an entry no check can discharge even when another path keeps it, and breaking a possible guard on a returning path counts the same even when an earlier break already recorded it. Where the exit keeps no live pairing, no possible guard, and no break, and no path paired the result with a named error, every path discarded the latest store and ordinary reads stay silent; otherwise the exit seeds an entry no check can discharge. A cleanup that overwrites a guard without re-pairing the result leaves an entry no check can discharge behind. [T-202]
 
 A read of a result stored in a slice or map element, or reached through a pointer, MAY stay accepted. [T-202]
 
-A plain assignment destination MUST NOT count as a read. [T-202]
+A plain assignment destination MUST NOT count as a read. Discarding a plain name or a direct value-struct field path to the blank identifier MUST NOT count as a read. [T-202]
 
 A Go-mode callee (the standard library or any Go package, such as `io.Reader.Read`) MUST keep its own contract, so use of n first stays allowed. [T-202][R-U2]
 
@@ -1196,19 +1202,23 @@ The condition MUST end at the `{` that opens the branch, so a name or `true` bef
 
 `comptime.IsStruct[T]()` MUST be a constant `const if` condition, true when the underlying type of `T` is a struct. [T-205]
 
+`comptime.IsInterface[T]()` MUST be a constant `const if` condition, true when the underlying type of `T`, after removing transparent const-view and read-only-descendant wrappers, is an interface. An option that the lowering keeps bare answers for its payload, and an option that the lowering wraps is not an interface. It includes named interfaces and value unions; pointers and other containers are not interfaces. The predicate MUST fold per instantiation or field, so a library MAY restrict runtime type-identity checks to interface values. [T-205]
+
 Inside a comptime generic its value MUST be taken per instantiation, and a condition built from it with `!`, `&&`, `||`, `==`, `!=` and constants MUST NOT fail `[comptime::not_constant]`. [T-205]
 
 `comptime.SizeOf[T]()`, `comptime.AlignOf[T]()`, and `comptime.HasPointers[T]()` are compile-time constants describing the size, alignment, and pointer-containing status of `T`.
 
-Each of them MUST equal what `unsafe.Sizeof`, `unsafe.Alignof`, and the garbage collector pointer map give for the Go type that the lowering emits for `T` on the target. That holds for every LoGOs type form: an option that the lowering keeps bare or wraps, a const view, a tuple, a closed union, and any struct, array, or option that holds them. [T-205]
+`comptime.HasUnexported[T]()` is a compile-time constant, true when the layout of `T` holds a source-declared unexported field, including a blank field, in a struct or array element at any depth, including inline option, tuple, const-view, and read-only-descendant wrappers. A zero-length array has no element storage. Slice, map, pointer, and interface elements are separate values with their own instantiations and do not count toward the container. [T-205]
 
-A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, the field facts `f.Name`, `f.Index`, `f.Exported` and `f.Tag.Get(k)` with a constant `k`, the type identity `comptime.TypeOf[X]() == comptime.TypeOf[Y]()`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
+The three size, alignment, and pointer intrinsics MUST equal what `unsafe.Sizeof`, `unsafe.Alignof`, and the garbage collector pointer map give for the Go type that the lowering emits for `T` on the target. That holds for every LoGOs type form: an option that the lowering keeps bare or wraps, a const view, a tuple, a closed union, and any struct, array, or option that holds them. [T-205]
+
+A `const if` inside a comptime generic or a `const for` body MUST evaluate per instantiation or per field over `true`, `false`, constants, `comptime.IsStruct[X]()` with `X` a type argument, a type parameter or `f.Type`, the field facts `f.Name`, `f.Index`, `f.Exported` and `f.Tag.Get(k)` with a constant `k`, `comptime.IsInterface[X]()` over the same type forms, the type identity `comptime.TypeOf[X]() == comptime.TypeOf[Y]()`, and the connectives `!`, `&&`, `||`, `==`, `!=`. [T-205]
 
 Any other non-constant condition MUST fail with `[comptime::not_constant]`, including a condition on the `const for` index variable. [T-205]
 
 A `const for` in a dead `const if` branch MUST NOT fail with `[comptime::const_for_fields]`. [T-205]
 
-`comptime.Fields[T]()`, `f.Type` used as a value, `comptime.IsStruct[T]()`, `comptime.TypeOf[X]()`, and `comptime.Error(msg)` MUST be compile-time only. `val.[f]`, `f.Name`, and `f.Tag.Get(k)` inside a `const for` body expand to per-field code; outside the body they are scope or projection errors, not run-time uses. [T-205]
+`comptime.Fields[T]()`, `f.Type` used as a value, `comptime.IsStruct[T]()`, `comptime.IsInterface[T]()`, `comptime.TypeOf[X]()`, and `comptime.Error(msg)` MUST be compile-time only. `val.[f]`, `f.Name`, and `f.Tag.Get(k)` inside a `const for` body expand to per-field code; outside the body they are scope or projection errors, not run-time uses. [T-205]
 
 Any run-time use of those compile-time-only forms MUST fail with `[comptime::runtime_use]`. A use of `val.[f]`, `f.Name`, or `f.Tag` outside a `const for` body fails with the scope or projection diagnostic. [T-205]
 
@@ -1260,7 +1270,7 @@ An assignment to it MUST fail with `[comptime::const_for_assign]`. [T-205]
 
 `f.Tag.Get(k)` MUST constant-fold when `k` is a compile-time constant: a literal, a named constant, an imported constant, or a constant expression. A run-time `k` cannot fold and stays an ordinary call. [T-205]
 
-A `comptime.Error(msg)` that is not const-dead MUST fail compilation with `msg`. Termination-dead code is not const-dead. [T-205]
+A `comptime.Error` is live except when it is const-dead, and except when it is a switch-tail error in an instance outside a `const for` iteration: it shares its statement list (a block or a switch, select, or `const switch` clause body) with a `const switch` whose selected case terminates, with no labeled statement between them. Such a switch-tail error is termination-dead and not live. A live `comptime.Error(msg)` MUST fail compilation with `msg`. Termination-dead code is not const-dead. [T-205]
 
 Const-dead code is code that a compile-time choice removes. It is the branch of a `const if` that a boolean constant condition does not select, in any function. In an instance of a comptime generic and in a field iteration of a `const for`, it is also a `const if` branch or a `const switch` case that the instance or the iteration does not take. [T-205]
 
@@ -1270,11 +1280,13 @@ A `const switch` whose tag is a type parameter of a generic function that is not
 
 Termination-dead code is code that is not const-dead and that control flow cannot reach. A statement is termination-dead when an earlier statement of the same statement list is terminating and no labeled statement stands after that earlier statement, up to and including this statement. A field iteration of a `const for` is termination-dead when it comes after the first iteration whose body is terminating. A statement is terminating by the Go rules for terminating statements, with these changes: a `const if` counts only the branch that it takes, a `const switch` terminates only when it takes a case at compile time and that case body terminates, and a `const for` follows the termination rule above. [T-205]
 
-The compiler MUST type-check termination-dead code as it type-checks live code, in a plain function and in an instance, and a `comptime.Error` in termination-dead code MUST fail compilation. Lowering MAY omit termination-dead code, as unrolling omits the iterations after the first terminating field, but the compiler MUST NOT omit the check of that code. [T-205]
+The compiler MUST type-check termination-dead code as it type-checks live code, in a plain function and in an instance, and a `comptime.Error` in termination-dead code MUST fail compilation, except the switch-tail error defined above, which stays silent while the tail is still type-checked for other errors. Lowering MAY omit termination-dead code, as unrolling omits the iterations after the first terminating field, but the compiler MUST NOT omit the check of that code. [T-205]
 
 The declaration check of a comptime generic MUST leave the statements after a statement that holds a `const switch` to each instantiation, because the declaration cannot decide if that statement completes normally. When one of those statements is a labeled statement, the declaration check MUST check them itself, because a jump can reach them. A comptime generic with no instantiation therefore does not check the statements that it leaves; they are not termination-dead, because no check decides the termination of the `const switch`. [T-205]
 
 `comptime.Error(msg)` MUST take a constant string. [T-205]
+
+After checking a silenced `comptime.Error` message, lowering MUST retain only the uses of enclosing local variables needed by the prepared check. It MUST NOT retain package dependencies or variables declared inside the discarded message expression. [T-205]
 
 A non-constant `msg` MUST fail with `[comptime::error_not_constant]`. [T-205]
 
@@ -1304,11 +1316,9 @@ A call of a comptime generic without explicit type arguments inside an expansion
 
 An exported forwarding function MUST fail with `[comptime::exported_forwarder]` at its first instantiation that forwards a type parameter, because a caller in another package cannot instantiate it. The message MUST name the function and the type parameter. The rule applies to every package that can be imported; `main` is exempt because it cannot be imported. `logos eject` MUST refuse such a package with the same diagnostic. [T-205]
 
-A method of a generic type MUST NOT be a comptime generic. [T-205]
+A method with type parameters MAY be a comptime generic. Each instance is keyed by the receiver type arguments followed by the method type arguments, and it is checked in the defining package. Only a direct call with concrete type arguments instantiates it; a method value or method expression of a comptime generic method MUST fail with `[comptime::method_value]`, and so MUST a conversion or type assertion that would place a value whose type provides such a method behind an interface requiring it. An instance of a method defined in another package is checked from that package's exported template. [T-205]
 
-A method of a generic type that uses `const for` over a type parameter MUST fail with `[comptime::generic_method]`. [T-205]
-
-An expansion above the selected `max_comptime_ast_nodes` limit with default 4,096 nodes MUST fail with `[comptime::node_limit]`. [T-205][T-102]
+Each comptime instantiation carries the node budget of its whole instance chain: the body nodes of every active instance plus the const for iterations checked under them count together against the selected node limit with default 4,096 nodes. An instance chain above the limit MUST fail with `[comptime::node_limit]`. Every comptime error MUST carry one `instantiated here` note per active instance, outermost first. [T-205][T-102]
 
 A stack trace MUST print the base name without the instance suffix `.logosct.<id>`. [T-205]
 
@@ -1328,7 +1338,7 @@ A `const switch` tag that is not a type MUST fail with `[comptime::switch_not_ty
 
 A `const switch` case that is not a type MUST fail with `[comptime::case_not_type]`. [T-205]
 
-A `const switch` case MUST name exactly one type. A `default` arm and a list of types MUST be syntax errors. [T-205]
+A `const switch` case names one type or a comma-separated list of types; each listed type may carry its own `~`. Cases evaluate top-down in first-match order across the types of each case. A case whose every type is covered by earlier cases MUST fail with `[comptime::unreachable_case]`; a partially covered case stays live for the rest. A `default` arm matches every tag at its position and never rebinds; a `default` arm covered by an earlier `default` or an empty-interface case MUST fail with `[comptime::unreachable_case]`. [T-205]
 
 An unlabeled `break` or `continue` directly in a `const switch` case MUST fail with `[comptime::const_switch_jump]`, because the cases lower into generated switches. [T-205]
 
@@ -2037,8 +2047,8 @@ deny fails the build unless a logos allow directive for the rule precedes the st
 warn prints a diagnostic. [T-102]
 allow stays silent. [T-102]
 `--pedantic` and `--pedantic=true` override the pedantic key for logos build and logos lint, but they MUST NOT lower a stricter configured severity. [T-Sec8]
-The lints.thresholds table of `logos.toml` holds six integer keys. [T-Sec8]
-Defaults MUST be 3 for max_nesting_depth, 15 for max_cognitive_complexity, 60 for max_function_lines, 4 for max_function_params, 4096 for max_comptime_ast_nodes, and 100000 for max_ctfe_steps. [T-Sec8][T-102]
+The lints.thresholds table of `logos.toml` holds five integer keys. [T-Sec8]
+Defaults MUST be 3 for max_nesting_depth, 15 for max_cognitive_complexity, 60 for max_function_lines, 4 for max_function_params, and 100000 for max_ctfe_steps. [T-Sec8][T-102]
 Third-party modules of either kind get no code lints. [T-102][R-U1]
 
 ## 9. End-to-end example

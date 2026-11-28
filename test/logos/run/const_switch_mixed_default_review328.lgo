@@ -1,0 +1,33 @@
+// run
+
+package main
+
+import "fmt"
+
+type NamedInt int
+type Greeting string
+
+func (g Greeting) String() string { return string(g) }
+
+func classify[T any](value T) string {
+	_ = value
+	const switch T {
+	case fmt.Stringer:
+		return "interface"
+	case string:
+		return "exact"
+	case ~int:
+		return "underlying"
+	default:
+		return "default"
+	}
+	return "unreachable"
+}
+
+func main() {
+	fmt.Println(classify(Greeting("hi")))
+	fmt.Println(classify("hi"))
+	fmt.Println(classify(int(1)))
+	fmt.Println(classify(NamedInt(1)))
+	fmt.Println(classify(false))
+}

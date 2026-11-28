@@ -63,84 +63,192 @@ func TestTwinForeignHiddenRoundTrip(t *testing.T) {
 	}
 }
 
-// mixedMiddle and mixedLeading are foreign to logos/binary and mix
-// exported with hidden fixed-size fields: comptime.Fields omits the
-// hidden ones, so the fast path sizes, encodes and decodes only the
-// exported remainder. These tests lock in that truncation. If a
-// hidden-field predicate lands and the twin delegates such layouts to
-// the original, they must flip to assert equality with the original.
-type mixedMiddle struct {
-	Kind     uint8
-	sequence uint16
-	Flags    uint8
+// mixedVisibility is foreign to logos/binary and hides one field
+// between two visible ones: the visible layout alone would drop two
+// bytes and read After from the wrong offset. The twin must take the
+// original path instead.
+type mixedVisibility struct {
+	Before uint16
+	hidden uint16
+	After  uint16
 }
 
-type mixedLeading struct {
-	tag uint32
-	A   uint16
-	B   uint8
-}
-
-func TestTwinForeignMixedMiddleTruncation(t *testing.T) {
-	v := mixedMiddle{Kind: 0x11, sequence: 0x2233, Flags: 0x44}
-	if got, want := binary.Size(v), 2; got != want {
-		t.Fatalf("twin Size = %d, want truncated %d", got, want)
-	}
-	if got, want := obinary.Size(v), 4; got != want {
-		t.Fatalf("original Size = %d, want %d", got, want)
+func TestTwinForeignMixedRoundTrip(t *testing.T) {
+	v := mixedVisibility{Before: 1, hidden: 2, After: 3}
+	if got, want := binary.Size(v), obinary.Size(v); got != want {
+		t.Fatalf("Size = %d, want original %d", got, want)
 	}
 	tb, terr := binary.Append(nil, binary.LittleEndian, v)
 	if terr != nil {
 		t.Fatalf("twin Append: %v", terr)
 	}
-	if want := []byte{0x11, 0x44}; !bytes.Equal(tb, want) {
-		t.Fatalf("twin bytes %x, want truncated %x", tb, want)
-	}
-	ob, oerr := obinary.Append(nil, obinary.LittleEndian, v)
+	ob, oerr := obinary.Append(nil, binary.LittleEndian, v)
 	if oerr != nil {
 		t.Fatalf("original Append: %v", oerr)
 	}
-	if want := []byte{0x11, 0x33, 0x22, 0x44}; !bytes.Equal(ob, want) {
-		t.Fatalf("original bytes %x, want %x", ob, want)
+	if !bytes.Equal(tb, ob) {
+		t.Fatalf("twin bytes %x, original %x: hidden bytes dropped", tb, ob)
 	}
-	var back mixedMiddle
-	n, derr := binary.Decode(ob, binary.LittleEndian, &back)
-	if derr != nil {
-		t.Fatalf("twin Decode: %v", derr)
+	// Decoding the original six-byte record must panic exactly like the
+	// original: the partial layout consumed four bytes and misread After.
+	tpanicked, opanicked := false, false
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				tpanicked = true
+			}
+		}()
+		var b1 mixedVisibility
+		_, _ = binary.Decode(ob, binary.LittleEndian, &b1)
+	}()
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				opanicked = true
+			}
+		}()
+		var b2 mixedVisibility
+		_, _ = obinary.Decode(ob, binary.LittleEndian, &b2)
+	}()
+	if tpanicked != opanicked {
+		t.Fatalf("twin panicked = %v, original panicked = %v", tpanicked, opanicked)
+		return
 	}
-	if n != 2 || back.Kind != 0x11 || back.Flags != 0x33 || back.sequence != 0 {
-		t.Fatalf("twin Decode consumed %d into %+v, want 2 into {Kind:17 Flags:51}", n, back)
+	if !tpanicked {
+		t.Fatalf("twin decoded original bytes without panicking")
+		return
 	}
 }
 
-func TestTwinForeignMixedLeadingTruncation(t *testing.T) {
-	v := mixedLeading{tag: 0x11223344, A: 0x5566, B: 0x77}
-	if got, want := binary.Size(v), 3; got != want {
-		t.Fatalf("twin Size = %d, want truncated %d", got, want)
-	}
-	if got, want := obinary.Size(v), 7; got != want {
-		t.Fatalf("original Size = %d, want %d", got, want)
-	}
-	tb, terr := binary.Append(nil, binary.LittleEndian, v)
-	if terr != nil {
-		t.Fatalf("twin Append: %v", terr)
-	}
-	if want := []byte{0x66, 0x55, 0x77}; !bytes.Equal(tb, want) {
-		t.Fatalf("twin bytes %x, want truncated %x", tb, want)
-	}
-	ob, oerr := obinary.Append(nil, obinary.LittleEndian, v)
-	if oerr != nil {
-		t.Fatalf("original Append: %v", oerr)
-	}
-	if want := []byte{0x44, 0x33, 0x22, 0x11, 0x66, 0x55, 0x77}; !bytes.Equal(ob, want) {
-		t.Fatalf("original bytes %x, want %x", ob, want)
-	}
-	var back mixedLeading
-	n, derr := binary.Decode(ob, binary.LittleEndian, &back)
-	if derr != nil {
-		t.Fatalf("twin Decode: %v", derr)
-	}
-	if n != 3 || back.A != 0x3344 || back.B != 0x22 || back.tag != 0 {
-		t.Fatalf("twin Decode consumed %d into %+v, want 3 into {A:13124 B:34}", n, back)
+// blankPad is foreign to logos/binary and pads with a blank word:
+// a blank field adds its size to the layout, encodes as zero bytes,
+// and is skipped on decode. The twin takes the original path, so the
+// bytes match encoding/binary exactly.
+type blankPad struct {
+	A int32
+	_ int32
+	B int32
+}
+
+// blankMixed is foreign to logos/binary and pads with a blank array.
+type blankMixed struct {
+	A int32
+	_ [3]byte
+	C int16
+}
+
+func TestTwinForeignBlankFields(t *testing.T) {
+	orders := []binary.Order{binary.BigEndian, binary.LittleEndian}
+	for _, order := range orders {
+		v := blankPad{A: 1, B: 3}
+		ob, oerr := obinary.Append(nil, order, v)
+		if oerr != nil {
+			t.Fatalf("blank: original append: %v", oerr)
+			return
+		}
+		tb, terr := binary.Append(nil, order, v)
+		if terr != nil {
+			t.Fatalf("blank %v: twin append: %v", order, terr)
+			return
+		}
+		if !bytes.Equal(tb, ob) {
+			t.Fatalf("blank %v: twin bytes %x, original %x", order, tb, ob)
+		}
+		if got, want := binary.Size(v), obinary.Size(v); got != want {
+			t.Fatalf("blank %v: Size = %d, want original %d", order, got, want)
+		}
+		if got := binary.Size(v); got != len(ob) {
+			t.Fatalf("blank %v: Size = %d, append len %d", order, got, len(ob))
+		}
+		buf := make([]byte, binary.Size(v))
+		n, err := binary.Encode(buf, order, v)
+		if err != nil {
+			t.Fatalf("blank %v: twin encode: %v", order, err)
+			return
+		}
+		if n != len(ob) {
+			t.Fatalf("blank %v: Encode = %d, want %d", order, n, len(ob))
+		}
+		if !bytes.Equal(buf, ob) {
+			t.Fatalf("blank %v: Encode bytes differ from Append", order)
+		}
+		var tv blankPad
+		n, err = binary.Decode(tb, order, &tv)
+		if err != nil {
+			t.Fatalf("blank %v: twin decode: %v", order, err)
+			return
+		}
+		if n != len(tb) {
+			t.Fatalf("blank %v: Decode = %d, want %d", order, n, len(tb))
+		}
+		if tv.A != 1 || tv.B != 3 {
+			t.Fatalf("blank %v: decoded A=%d B=%d, want 1 3", order, tv.A, tv.B)
+		}
+		var ov blankPad
+		if _, err := obinary.Decode(ob, order, &ov); err != nil {
+			t.Fatalf("blank: original decode: %v", err)
+			return
+		}
+		if ov.A != 1 || ov.B != 3 {
+			t.Fatalf("blank %v: original decoded A=%d B=%d", order, ov.A, ov.B)
+		}
+		if tv != ov {
+			t.Fatalf("blank %v: twin and original decoded values differ", order)
+		}
+		vm := blankMixed{A: 7, C: 9}
+		obm, oerr := obinary.Append(nil, order, vm)
+		if oerr != nil {
+			t.Fatalf("mixed: original append: %v", oerr)
+			return
+		}
+		tbm, terr := binary.Append(nil, order, vm)
+		if terr != nil {
+			t.Fatalf("mixed %v: twin append: %v", order, terr)
+			return
+		}
+		if !bytes.Equal(tbm, obm) {
+			t.Fatalf("mixed %v: twin bytes %x, original %x", order, tbm, obm)
+		}
+		if got, want := binary.Size(vm), obinary.Size(vm); got != want {
+			t.Fatalf("mixed %v: Size = %d, want original %d", order, got, want)
+		}
+		if got := binary.Size(vm); got != len(obm) {
+			t.Fatalf("mixed %v: Size = %d, append len %d", order, got, len(obm))
+		}
+		bufm := make([]byte, binary.Size(vm))
+		nm, err := binary.Encode(bufm, order, vm)
+		if err != nil {
+			t.Fatalf("mixed %v: twin encode: %v", order, err)
+			return
+		}
+		if nm != len(obm) {
+			t.Fatalf("mixed %v: Encode = %d, want %d", order, nm, len(obm))
+		}
+		if !bytes.Equal(bufm, obm) {
+			t.Fatalf("mixed %v: Encode bytes differ from Append", order)
+		}
+		var tvm blankMixed
+		nm, err = binary.Decode(tbm, order, &tvm)
+		if err != nil {
+			t.Fatalf("mixed %v: twin decode: %v", order, err)
+			return
+		}
+		if nm != len(tbm) {
+			t.Fatalf("mixed %v: Decode = %d, want %d", order, nm, len(tbm))
+		}
+		if tvm.A != 7 || tvm.C != 9 {
+			t.Fatalf("mixed %v: decoded A=%d C=%d, want 7 9", order, tvm.A, tvm.C)
+		}
+		var ovm blankMixed
+		if _, err := obinary.Decode(obm, order, &ovm); err != nil {
+			t.Fatalf("mixed: original decode: %v", err)
+			return
+		}
+		if ovm.A != 7 || ovm.C != 9 {
+			t.Fatalf("mixed %v: original decoded A=%d C=%d", order, ovm.A, ovm.C)
+		}
+		if tvm != ovm {
+			t.Fatalf("mixed %v: twin and original decoded values differ", order)
+		}
 	}
 }

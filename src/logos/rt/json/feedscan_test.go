@@ -334,19 +334,31 @@ func TestLoneSurrogateCoerced(t *testing.T) {
 			}
 		}
 	}
-	stillInvalid := []string{
-		`"a\uD800\u004"`,
-		`"a\uD800\u"`,
-		`"a\uD800\xb"`,
-		`"a\uD800\"`,
-		`"a\uD8"`,
+	truncated := []struct {
+		doc  string
+		want error
+	}{
+		{`"a\uD800\u004"`, rtjson.ErrSyntax},
+		{`"a\uD800\u"`, rtjson.ErrSyntax},
+		{`"a\uD800\xb"`, rtjson.ErrSyntax},
+		{`"a\uD800\"`, rtjson.ErrUnexpectedEnd},
+		{`"a\uD8"`, rtjson.ErrSyntax},
+		{`"a\uD800`, rtjson.ErrUnexpectedEnd},
+		{`"a\uD800\uD8`, rtjson.ErrUnexpectedEnd},
 	}
-	for _, d := range stillInvalid {
-		if scanValid(d) {
-			t.Errorf("invalid accepted: %q", d)
+	for _, tc := range truncated {
+		if scanValid(tc.doc) {
+			t.Errorf("invalid accepted: %q", tc.doc)
 		}
-		if stdjson.Valid([]byte(d)) {
-			t.Errorf("oracle accepts invalid: %q", d)
+		if stdjson.Valid([]byte(tc.doc)) {
+			t.Errorf("oracle accepts invalid: %q", tc.doc)
+		}
+		data := []byte(tc.doc)
+		for k := 0; k <= len(data); k++ {
+			_, err := collect([][]byte{data[:k], data[k:]})
+			if err != tc.want {
+				t.Errorf("split %q at %d: error %v, want %v", tc.doc, k, err, tc.want)
+			}
 		}
 	}
 }

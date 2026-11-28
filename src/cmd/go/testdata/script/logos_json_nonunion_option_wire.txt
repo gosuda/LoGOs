@@ -54,11 +54,11 @@ type Wire struct {
 
 type wireMirror struct {
 	SO [](int64?)          `json:"so"`
-	OS ([]int64)?          `json:"os"`
+	OS *[]int64?           `json:"os"`
 	MO map[string](int64?) `json:"mo"`
-	OM (map[string]int64)? `json:"om"`
+	OM *map[string]int64?  `json:"om"`
 	AO [2](string?)        `json:"ao"`
-	OA ([2]string)?        `json:"oa"`
+	OA *[2]string?         `json:"oa"`
 	ST [](Stamp?)          `json:"st"`
 	NoGen any              `json:"-"`
 }
@@ -69,7 +69,20 @@ type Lit struct {
 }
 
 func mirror(w Wire) wireMirror {
-	return wireMirror{SO: w.SO, OS: w.OS, MO: w.MO, OM: w.OM, AO: w.AO, OA: w.OA, ST: w.ST}
+	m := wireMirror{SO: w.SO, MO: w.MO, AO: w.AO, ST: w.ST}
+	if w.OS != nil {
+		x := w.OS ?? []int64{}
+		m.OS = &x
+	}
+	if w.OM != nil {
+		x := w.OM ?? map[string]int64{}
+		m.OM = &x
+	}
+	if w.OA != nil {
+		x := w.OA ?? [2]string{}
+		m.OA = &x
+	}
+	return m
 }
 
 var cases = []struct {
@@ -131,8 +144,8 @@ func checkLiteral() {
 		v    Lit
 		wire string
 	}{
-		{"present", Lit{SO: [](int64?){7, nil}, OS: []int64{1, 2}}, `{"so":[{"Value":7,"Present":true},{"Value":0,"Present":false}],"os":{"Value":[1,2],"Present":true}}`},
-		{"absent", Lit{}, `{"so":null,"os":{"Value":null,"Present":false}}`},
+		{"present", Lit{SO: [](int64?){7, nil}, OS: []int64{1, 2}}, `{"so":[{"Value":7,"Present":true},{"Value":0,"Present":false}],"os":[1,2]}`},
+		{"absent", Lit{}, `{"so":null,"os":null}`},
 	} {
 		got, err := json.Marshal(c.v)
 		if err != nil { panic(fmt.Sprintf("%s: %v", c.name, err)) }

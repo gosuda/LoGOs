@@ -1,0 +1,25 @@
+// run
+
+package main
+
+import "fmt"
+
+func Pick[T any](v T) string {
+	_ = v
+	const switch T {
+	case int, string:
+		var z T = v
+		_ = z
+		return "int-or-string"
+	case bool:
+		return "bool"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(Pick(1))
+	fmt.Println(Pick("x"))
+	fmt.Println(Pick(true))
+	fmt.Println(Pick(1.5))
+}

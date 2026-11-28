@@ -1,0 +1,734 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+# Trigger: LoGOs sources with no module marker. Plain go meets
+# main.lgo and re-executes as logos.
+cd nomark
+go run .
+stdout '^auto-detect$'
+go build -o $WORK/nomark$GOEXE .
+exec $WORK/nomark$GOEXE
+stdout '^auto-detect$'
+go list all
+stdout 'example\.com/nomark'
+go build -o $WORK/nomarkx$GOEXE .
+exec $WORK/nomarkx$GOEXE
+stdout '^auto-detect$'
+
+# A LoGOs-only flag does not block source detection: it reaches the
+# directory check before the flag parser can reject it.
+go build -pedantic -o $WORK/nomark-ped$GOEXE .
+exec $WORK/nomark-ped$GOEXE
+stdout '^auto-detect$'
+go build -json-diagnostics -o $WORK/nomark-json$GOEXE .
+exec $WORK/nomark-json$GOEXE
+stdout '^auto-detect$'
+
+# Flag values never name packages: -run, -count, and -p take values, so
+# the working-directory rule still fires with no explicit package.
+go test -run TestNomark
+stdout '^ok\s+example\.com/nomark'
+go test -count=1 -run TestNomark .
+stdout '^ok\s+example\.com/nomark'
+go build -p 4 -o $WORK/nomark-p4$GOEXE .
+exec $WORK/nomark-p4$GOEXE
+stdout '^auto-detect$'
+
+# An exact import path maps onto its main-module directory: the
+# LoGOs-only flag reaches the directory check instead of failing.
+go build -pedantic -o $WORK/nomark-path$GOEXE example.com/nomark
+exec $WORK/nomark-path$GOEXE
+stdout '^auto-detect$'
+go build -pedantic example.com/nomark/sub
+cd ..
+
+# Trigger: a ./... walk meets the LoGOs directory, which plain go
+# would skip silently.
+cd nomark
+go list ./...
+stdout 'example\.com/nomark'
+cd ..
+
+# A wildcard matches by import-path prefix with a bounded descent: only a
+# directory the full pattern names counts.
+cd nomark
+go list ./cmd...
+stdout 'example\.com/nomark/cmdtool'
+go list ./api...
+stdout 'example\.com/nomark/apiclient'
+# A suffix after ... filters: only directories the full pattern names count.
+! go build -pedantic ./sub/.../zzz
+stderr 'flag provided but not defined'
+cd ..
+
+# Trigger: the module marker. logos.toml beside go.mod re-executes
+# before any package loads, so the .lgo test runs under go test.
+# The marker fires before the builder starts: one WORK line proves
+# the re-execution happened exactly once.
+cd marked
+go build -x -o $WORK/markedx$GOEXE .
+stderr -count=1 '(?m)^WORK='
+exec $WORK/markedx$GOEXE
+stdout '^marked$'
+go test ./...
+stdout '^ok\s+example\.com/marked/sub'
+go test ./... -test.v
+stdout '=== RUN   TestHello'
+stdout '--- PASS: TestHello'
+cd ..
+
+# Trigger: a LoGOs-only subcommand.
+cd marked
+go lint ./...
+! stderr .
+! stdout .
+# Toolchain selection does not bypass detection: even a GOTOOLCHAIN naming
+# an unavailable stock release re-executes before any switch.
+env GOTOOLCHAIN=go1.999.0
+go lint ./...
+! stderr .
+! stdout .
+go help lint
+stdout '^usage: logos lint'
+! stderr .
+go build -o $WORK/marked-tc$GOEXE .
+exec $WORK/marked-tc$GOEXE
+stdout '^marked$'
+# In logos mode the command never switches to a stock toolchain.
+logos build -o $WORK/marked-tc-logos$GOEXE .
+exec $WORK/marked-tc-logos$GOEXE
+stdout '^marked$'
+env GOTOOLCHAIN=local
+cd ..
+
+# Trigger: a Go package importing a LoGOs package of its workspace.
+# Each module keeps one kind, so the logos build succeeds.
+cd ws/g
+go build ./...
+go run .
+stdout '^from-logos$'
+go fmt -n main.go
+stdout 'gofmt'
+cd ../..
+
+# At an unmarked workspace root outside every member, a ...-style pattern
+# unions the members instead of rejecting the prefix.
+cd ws
+go build ./...
+cd ..
+
+# Excluded commands keep upstream text inside a LoGOs module.
+cd marked
+go version
+stdout '^go version go'
+go env GOROOT
+cp stdout $WORK/go-goroot.txt
+logos env GOROOT
+cp stdout $WORK/logos-goroot.txt
+cmp $WORK/go-goroot.txt $WORK/logos-goroot.txt
+go fmt ./...
+! stderr 'unknown command'
+go help lint
+stdout '^usage: logos lint'
+! stderr .
+cd ..
+
+# A pure Go module is untouched.
+cd pure
+go run .
+stdout '^pure-go$'
+go version
+stdout '^go version go'
+go env GOROOT
+! stderr .
+# A LoGOs-only flag with no marker or source trigger stays an upstream error.
+! go build -pedantic .
+stderr 'flag provided but not defined'
+cd ..
+
+# The standard library still builds inside a LoGOs module.
+cd marked
+go build fmt
+go list fmt
+stdout '^fmt$'
+cd ..
+
+# A Go module that depends on a LoGOs module served by a file proxy.
+# Plain go finds the module but no Go package in it, and re-executes.
+go run genproxy.go $WORK/proxy
+cd dep
+env GOPROXY=file://$WORK/proxy
+env GOSUMDB=off
+go get example.com/l/lib
+go mod tidy
+go build ./...
+# The import-triggered relaunch also uses the startup environment: the
+# binary records the LoGOs CPU default, not the plain-go default.
+env GOARCH=amd64
+go build -o $WORK/dep$GOEXE .
+go version -m $WORK/dep$GOEXE
+stdout 'GOAMD64=v3'
+env GOARCH=
+go run .
+stdout '^from-logos$'
+cd ..
+
+# A Go import with a Go provider in a dependency keeps plain go even when
+# another module holds only LoGOs sources at the same path.
+cd amb
+go build ./...
+go run .
+stdout '^go$'
+cd ..
+
+# `go mod tidy` loads "all": in an unmarked module whose only package is a
+# LoGOs subpackage, tidy keeps the dependency instead of dropping it.
+cd tidy
+env GOPROXY=off
+go mod tidy
+go list -m example.com/dep
+stdout '^example\.com/dep\s+v1\.0\.0'
+cd ..
+
+# Vendor trees and go.mod ignore exclusions never trigger a re-execution:
+# the only LoGOs sources here sit where no requested build looks.
+cd excl
+! go build -pedantic -o $WORK/excl$GOEXE ./...
+stderr 'flag provided but not defined'
+go build -o $WORK/excl$GOEXE ./...
+exec $WORK/excl$GOEXE
+stdout '^ok$'
+cd ..
+
+# A wildcard that matches no package reports the miss instead of looping:
+# the pattern names nothing, so no candidate re-executes the command.
+cd getmiss
+env GOPROXY=off
+! go get example.com/app/nonexistent...
+stderr 'nonexistent'
+cd ..
+
+cd ov
+# Without the overlay the disk workspace lists only the unmarked member.
+go list -m all
+stdout 'example\.com/ovg'
+! stdout 'example\.com/ovm'
+go list -overlay=overlay-add.json -m all
+stdout 'example\.com/ovm'
+[cgo] ! go build -overlay=overlay-add.json -o $WORK/ov-m$GOEXE ./m/sub
+[cgo] stderr 'cgo_usage'
+! logos build -overlay=overlay-add.json -o $WORK/ov-m-logos$GOEXE ./m/sub
+stderr 'cgo_usage'
+cd ..
+
+# Removing a marked member through the overlay removes the marker: the
+# build runs as plain go, with no logos experiment suffix.
+cd ovrm
+go build -overlay=overlay-rm.json -o $WORK/ovrm-g$GOEXE ./g
+go version -m $WORK/ovrm-g$GOEXE
+! stdout 'logosarena'
+cd ..
+
+# A module needing a newer Go reports the upstream message under both
+# spellings.
+cd toonew
+! go build .
+stderr 'go\.mod requires go >= 9\.99'
+! logos build .
+stderr 'go\.mod requires go >= 9\.99'
+cd ..
+
+# A directory-triggered build agrees with an explicit logos build: the
+# startup environment applies, not the injected plain defaults.
+cd cpu
+env GOARCH=amd64
+env CGO_ENABLED=0
+env GOAMD64=
+go build -o $WORK/cpu-go$GOEXE .
+go version -m $WORK/cpu-go$GOEXE
+stdout 'GOAMD64=v3'
+logos build -o $WORK/cpu-logos$GOEXE .
+go version -m $WORK/cpu-logos$GOEXE
+stdout 'GOAMD64=v3'
+env GOARCH=
+env CGO_ENABLED=
+env GOAMD64=
+cd ..
+
+# The directory trigger fires before the builder starts: one WORK line
+# proves the re-execution happened exactly once.
+cd nomark
+go build -x -o $WORK/nomark-x$GOEXE .
+stderr -count=1 '(?m)^WORK='
+exec $WORK/nomark-x$GOEXE
+stdout '^auto-detect$'
+cd ..
+
+# In an unmarked cgo module both spellings deny cgo by policy.
+cd cgounmarked
+env CGO_ENABLED=
+[cgo] ! go build -o $WORK/cgounmarked-go$GOEXE .
+[cgo] stderr 'cgo_usage'
+! logos build -o $WORK/cgounmarked-logos$GOEXE .
+stderr 'cgo_usage'
+cd ..
+
+-- tidy/go.mod --
+module example.com/tidy
+
+go 1.27
+
+require example.com/dep v1.0.0
+
+replace example.com/dep => ./dep
+
+-- tidy/dep/go.mod --
+module example.com/dep
+
+go 1.27
+
+-- tidy/dep/dep.go --
+package dep
+
+func Msg() string { return "dep" }
+
+-- tidy/cmd/app/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/dep"
+)
+
+func main() { fmt.Println(dep.Msg()) }
+
+-- nomark/cmdtool/c.lgo --
+package cmdtool
+
+func Tool() string { return "tool" }
+
+-- nomark/apiclient/a.lgo --
+package apiclient
+
+func Client() string { return "client" }
+
+-- excl/go.mod --
+module example.com/excl
+
+go 1.27
+
+ignore ./scratch
+
+-- excl/cmd/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("ok") }
+
+-- excl/scratch/s.lgo --
+package scratch
+
+func Scratch() string { return "scratch" }
+
+-- excl/vendor/v/v.lgo --
+package v
+
+func V() string { return "v" }
+
+-- getmiss/go.mod --
+module example.com/app
+
+go 1.27
+
+-- getmiss/app.lgo --
+package main
+
+func main() {}
+
+-- dep/go.mod --
+module example.com/g
+
+go 1.27
+
+-- dep/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/l/lib"
+)
+
+func main() { fmt.Println(lib.Msg()) }
+
+-- genproxy.go --
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package main
+
+import (
+	"archive/zip"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+func writeFile(path, body string) {
+	if err := os.WriteFile(path, []byte(body), 0o666); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func writeModule(proxy, path, version string, files map[string]string) {
+	dir := filepath.Join(proxy, path, "@v")
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	writeFile(filepath.Join(dir, version+".info"), `{"Version":"`+version+`"}`)
+	writeFile(filepath.Join(dir, "list"), version+"\n")
+	mod := "module " + path + "\n\ngo 1.27\n"
+	writeFile(filepath.Join(dir, version+".mod"), mod)
+	zf, err := os.Create(filepath.Join(dir, version+".zip"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	w := zip.NewWriter(zf)
+	add := func(entry, content string) {
+		f, err := w.Create(entry)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if _, err := f.Write([]byte(content)); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	for name, content := range files {
+		add(path+"@"+version+"/"+name, content)
+	}
+	add(path+"@"+version+"/go.mod", mod)
+	if err := w.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := zf.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Println("wrote", path, version)
+}
+
+func main() {
+	proxy := os.Args[1]
+	writeModule(proxy, "example.com/l", "v1.0.0", map[string]string{
+		"lib/lib.lgo": "package lib\n\nfunc Msg() string { return \"from-logos\" }\n",
+	})
+}
+
+-- nomark/go.mod --
+module example.com/nomark
+
+go 1.27
+
+-- nomark/main.lgo --
+package main
+
+import "fmt"
+
+func hello() string {
+	return "auto-detect"
+}
+
+func main() {
+	fmt.Println(hello())
+}
+
+-- nomark/main_test.lgo --
+package main
+
+import "testing"
+
+func TestNomark(t *testing.T) {
+	if hello() != "auto-detect" {
+		t.Fatalf("hello() = %q", hello())
+	}
+}
+
+-- nomark/sub/sub.lgo --
+package sub
+
+func Sub() string { return "sub" }
+
+-- marked/go.mod --
+module example.com/marked
+go 1.27
+
+-- marked/logos.toml --
+[project]
+
+-- marked/main.lgo --
+package main
+
+import "fmt"
+
+func hello() string {
+	return "marked"
+}
+
+func main() {
+	fmt.Println(hello())
+}
+
+-- marked/sub/sub.lgo --
+package sub
+
+func Hello() string {
+	return "marked sub"
+}
+
+-- marked/sub/sub_test.lgo --
+package sub
+
+import "testing"
+
+func TestHello(t *testing.T) {
+	if got := Hello(); got != "marked sub" {
+		t.Fatalf("Hello() = %q", got)
+	}
+}
+
+-- ws/go.work --
+go 1.27
+
+use (
+	./g
+	./l
+)
+
+-- ws/g/go.mod --
+module example.com/g
+
+go 1.27
+
+-- ws/g/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/l/lib"
+)
+
+func main() { fmt.Println(lib.Msg()) }
+
+-- ws/l/go.mod --
+module example.com/l
+
+go 1.27
+
+-- ws/l/lib/lib.lgo --
+package lib
+
+func Msg() string { return "from-logos" }
+
+-- pure/go.mod --
+module example.com/pure
+
+go 1.27
+
+-- pure/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("pure-go") }
+
+-- toonew/go.mod --
+module example.com/toonew
+
+go 9.99
+
+-- toonew/logos.toml --
+[project]
+
+-- toonew/main.lgo --
+package main
+
+func main() {}
+
+-- ov/go.work --
+go 1.27
+
+use ./g
+
+-- ov/go.work.overlay --
+go 1.27
+
+use (
+	./g
+	./m
+)
+
+-- ov/overlay-add.json --
+{"Replace": {"go.work": "go.work.overlay"}}
+
+-- ov/g/go.mod --
+module example.com/ovg
+
+go 1.27
+
+-- ov/g/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("g") }
+
+-- ov/m/go.mod --
+module example.com/ovm
+
+go 1.27
+
+-- ov/m/logos.toml --
+[build]
+cgo = "forbid"
+
+-- ov/m/marker.lgo --
+package m
+
+func Mark() string { return "m" }
+
+-- ov/m/sub/main.go --
+package main
+
+/*
+int answer() { return 7; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println(C.answer()) }
+
+-- ovrm/go.work --
+go 1.27
+
+use (
+	./g
+	./m
+)
+
+-- ovrm/go.work.min --
+go 1.27
+
+use ./g
+
+-- ovrm/overlay-rm.json --
+{"Replace": {"go.work": "go.work.min"}}
+
+-- ovrm/g/go.mod --
+module example.com/ovrmg
+
+go 1.27
+
+-- ovrm/g/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("g") }
+
+-- ovrm/m/go.mod --
+module example.com/ovrm
+
+go 1.27
+
+-- ovrm/m/logos.toml --
+[project]
+
+-- ovrm/m/main.lgo --
+package m
+
+func Mark() string { return "m" }
+
+-- cpu/go.mod --
+module example.com/cpu
+
+go 1.27
+
+-- cpu/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("hello") }
+
+-- cgounmarked/go.mod --
+module example.com/cgounmarked
+
+go 1.27
+
+-- cgounmarked/main.lgo --
+package main
+
+/*
+int answer() { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println(C.answer()) }
+
+-- amb/go.mod --
+module example.com/amb
+
+go 1.27
+
+require (
+	example.com/m v1.0.0
+	example.com/m/sub v1.0.0
+)
+
+replace example.com/m => ./m
+
+replace example.com/m/sub => ./sub
+
+-- amb/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/sub"
+)
+
+func main() { fmt.Println(sub.X()) }
+
+-- amb/m/go.mod --
+module example.com/m
+
+go 1.27
+
+-- amb/m/sub/lib.lgo --
+package sub
+
+func X() string { return "logos" }
+
+-- amb/sub/go.mod --
+module example.com/m/sub
+
+go 1.27
+
+-- amb/sub/lib.go --
+package sub
+
+func X() string { return "go" }

@@ -17,6 +17,12 @@ printf 'initial\n' > README.md
 git add .
 git commit -qm initial
 initial=$(git rev-parse HEAD)
+# A cgo file the later move case deletes: it must exist in the base
+# commit so the push range reports its deletion.
+mkdir -p misc/cgo
+printf 'package cgo_probe\n' > misc/cgo/cgo_probe
+git add .
+git commit -qm cgo-file
 printf 'package runtime\n' > src/runtime/routing_probe.go
 git add .
 git commit -qm code
@@ -39,11 +45,20 @@ expect() {
     exit 1
   fi
 }
-
 # A docs-only final commit cannot hide the earlier code change in one push.
 run_push "$initial" "$tip"
 expect core=true
 expect regression=true
+expect cgo=true
+
+# A push that moves a cgo file out of its watched path must still run
+# the cgo suite: the deleted path is reported, not hidden by rename
+# detection.
+mkdir -p docs/moved
+git mv misc/cgo/cgo_probe docs/moved/cgo_probe
+git commit -qm move-cgo-file
+move_tip=$(git rev-parse HEAD)
+run_push "$code" "$move_tip"
 expect cgo=true
 
 # A push containing only the documentation edit can still skip core work.

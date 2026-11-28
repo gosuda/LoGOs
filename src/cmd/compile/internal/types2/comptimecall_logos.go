@@ -13,7 +13,7 @@ import (
 // LoGo/s M7-S2/M7-S3 comptime call positions (SPEC Sec 2.5, T-205).
 // callExpr calls in through one hook line. Values of the virtual
 // package exist only at compile time: Fields serves const-for ranges
-// (checked by the const-for checker, never here), IsStruct serves
+// (checked by the const-for checker, never here), type-kind predicates serve
 // `const if` conditions (folded here), and every other call position
 // reports [comptime::runtime_use], except a live comptime.Error, which
 // fails compilation with its message.
@@ -27,7 +27,7 @@ type logosPredState struct {
 }
 
 // logosComptimeCall vets one call for compile-time-only placement. It
-// reports whether it answered the call itself: an IsStruct predicate in
+// reports whether it answered the call itself: a type-kind predicate in
 // a `const if` condition becomes a constant (or a deferred value inside
 // a comptime generic). Every other call keeps the normal check, so the
 // arguments and results are still typed; Error messages go out through a
@@ -54,14 +54,15 @@ func (check *Checker) logosComptimeCall(x *operand, call *syntax.CallExpr) bool 
 		}
 	}
 	switch {
-	case fname == "IsStruct" && check.logosPred.depth > 0 && check.logosIsStruct(x, call):
+	case (fname == "IsStruct" || fname == "IsInterface") && check.logosPred.depth > 0 && check.logosTypeKind(x, call, fname):
 		return true
 	case isLogosLayoutName(fname) && check.logosLayoutCall(x, call, fname):
 		return true
 	case fname == "TypeOf" && check.logosTypeOfCall(x, call):
 		return true
-	case fname == "Fields", fname == "IsStruct", fname == "TypeOf",
-		fname == "SizeOf", fname == "AlignOf", fname == "HasPointers":
+	case fname == "Fields", fname == "IsStruct", fname == "IsInterface", fname == "TypeOf",
+		fname == "SizeOf", fname == "AlignOf", fname == "HasPointers",
+		fname == "HasUnexported":
 		check.errorf(syntax.StartPos(call), InvalidPkgUse, "[comptime::runtime_use] comptime.%s is compile-time only", fname)
 	// Invariant (deferred error): Error messages go out through a
 	// deferred check reading the checked constant, keeping per-line matching.
@@ -79,14 +80,14 @@ func (check *Checker) logosComptimeValueUse(e *syntax.SelectorExpr, obj Object) 
 	check.errorf(syntax.StartPos(e), InvalidPkgUse, "[comptime::runtime_use] comptime.%s is compile-time only", fname)
 }
 
-// logosIsStruct answers comptime.IsStruct[X]() in a `const if`
-// condition. A concrete X gives an untyped boolean constant, true when
-// its underlying type is a struct. A type parameter X, and the field
+// logosTypeKind answers IsStruct and IsInterface in a const-if condition.
+// A concrete X gives an untyped boolean constant. A type parameter X,
+// even under transparent const-view or read-only wrappers, and the field
 // type of a const for over one, give a boolean value that is not a
 // constant: the answer is per instantiation, so the condition is
 // deferred to the copies. It reports false for any other call shape,
 // which the normal check then rejects.
-func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
+func (check *Checker) logosTypeKind(x *operand, call *syntax.CallExpr, name string) bool {
 	idx, ok := call.Fun.(*syntax.IndexExpr)
 	if !ok || len(call.ArgList) != 0 {
 		return false
@@ -96,16 +97,28 @@ func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
 		return false
 	}
 	targ := check.varType(targs[0])
+	// A read-only view names its element: `const T` depends on the
+	// parameter T, so a predicate on it waits for instantiation like a
+	// bare T does. Deciding on the wrapper would fold the constraint
+	// interface for IsInterface, or miss the struct for IsStruct, before
+	// any copy sees a concrete type.
+	for {
+		u := Unalias(targ)
+		if cv, ok := u.(*ConstView); ok {
+			targ = cv.Elem
+			continue
+		}
+		if rd, ok := u.(*ReadonlyDescendants); ok {
+			targ = rd.Elem
+			continue
+		}
+		break
+	}
 	x.expr = call
 	switch {
 	case !isValid(targ):
 		x.invalidate()
-	case check.logosCtSubst != nil && !isTypeParam(targ) && !check.logosGenericFieldType(targs[0]):
-		_, isStruct := targ.Underlying().(*Struct)
-		x.mode_ = constant_
-		x.typ_ = Typ[UntypedBool]
-		x.val = constant.MakeBool(isStruct)
-	case isTypeParam(targ) || check.logosGenericFieldType(targs[0]):
+	case isTypeParam(logosTypeKindBase(targ)) || check.logosGenericFieldType(targs[0]):
 		x.mode_ = value
 		x.typ_ = Typ[Bool]
 		if check.logosPred.calls == nil {
@@ -113,13 +126,65 @@ func (check *Checker) logosIsStruct(x *operand, call *syntax.CallExpr) bool {
 		}
 		check.logosPred.calls[call] = true
 	default:
-		_, isStruct := targ.Underlying().(*Struct)
+		matches := false
+		switch name {
+		case "IsStruct":
+			_, matches = targ.Underlying().(*Struct)
+		case "IsInterface":
+			matches = logosInterfaceType(targ)
+		default:
+			panic("unexpected comptime type-kind predicate")
+		}
 		x.mode_ = constant_
 		x.typ_ = Typ[UntypedBool]
-		x.val = constant.MakeBool(isStruct)
+		x.val = constant.MakeBool(matches)
 	}
 	return true
 }
+
+// logosTypeKindBase strips the transparent wrappers a type-kind predicate
+// sees through — const views, read-only descendants, and options — to the
+// type that decides whether the verdict waits for an instantiation. A type
+// parameter under those wrappers still defers, so the verdict follows the
+// instantiated type argument instead of folding against its constraint.
+func logosTypeKindBase(t Type) Type {
+	for {
+		switch u := Unalias(t).(type) {
+		case *ConstView:
+			t = u.Elem
+		case *ReadonlyDescendants:
+			t = u.Elem
+		case *Option:
+			t = u.Elem
+		default:
+			return t
+		}
+	}
+}
+
+// Read-only wrappers change access, not the interface value's dynamic type. An
+// option the lowering keeps bare erases to its payload, so the predicate
+// answers for the payload; a wrapped option is a struct, not an interface.
+func logosInterfaceType(t Type) bool {
+	for {
+		switch u := Unalias(t).Underlying().(type) {
+		case *ConstView:
+			t = u.Elem
+		case *ReadonlyDescendants:
+			t = u.Elem
+		case *Option:
+			if !LogosOptionIsBare(u.Elem) {
+				return false
+			}
+			t = u.Elem
+		case *Interface:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
 func (check *Checker) logosTypeOfCall(x *operand, call *syntax.CallExpr) bool {
 	if !check.logosComptimeInGeneric() && check.logosCtSubst == nil {
 		return false
@@ -275,9 +340,22 @@ func (check *Checker) logosComptimeError(call *syntax.CallExpr) {
 	// Invariant (dead silence): M7-S1 dead-branch membership is the
 	// first-check Info proof, shared with lowered rechecks.
 	dead := check.logosDead(check.logosCurStmt) || check.logosCtDeclCheck
+	// Invariant (switch-tail silence): in an instance outside a const-for
+	// iteration, an Error after a const switch whose selected case
+	// terminates cannot be reached, so it stays silent while the tail
+	// itself is still type-checked for other errors. The verdict is
+	// recorded for lowering, which erases exactly the calls the
+	// instance check silenced instead of redoing termination analysis.
+	switchTail := check.logosErrorAfterTerminatingSwitch()
 	var arg syntax.Expr
 	if len(call.ArgList) == 1 {
 		arg = call.ArgList[0]
+	}
+	if switchTail && arg != nil && !generic && !dead {
+		if check.Info.LogosCtSilentError == nil {
+			check.Info.LogosCtSilentError = make(map[*syntax.CallExpr]bool)
+		}
+		check.Info.LogosCtSilentError[call] = true
 	}
 	check.later(func() {
 		// Invariant (no double report): malformed, generic-deferred,
@@ -292,9 +370,15 @@ func (check *Checker) logosComptimeError(call *syntax.CallExpr) {
 			return
 		}
 		// Invariant (constant obligation): a live non-constant message
-		// fails as not constant without weakening the text.
+		// fails as not constant without weakening the text. The tail
+		// rule silences only the requested message, never this check.
 		if val == nil || val.Kind() != constant.String {
 			check.error(arg.Pos(), InvalidConstInit, "[comptime::error_not_constant] comptime.Error needs a constant message")
+			return
+		}
+		// Invariant (switch-tail silence): a constant message after a
+		// terminating const switch stays silent.
+		if switchTail {
 			return
 		}
 		// Invariant (live error): a live constant message fails with its text.
@@ -306,4 +390,88 @@ func (check *Checker) logosComptimeError(call *syntax.CallExpr) {
 		}
 		check.errorf(at, InvalidConstInit, "[comptime::error] %s", constant.StringVal(val))
 	}).describef(call, "comptime.Error %s", call.Pos())
+}
+
+// logosErrorAfterTerminatingSwitch reports whether the Error call under
+// check sits after a const switch whose selected case terminates, in an
+// instance outside a const-for iteration. The switch and the Error share
+// one statement list: a block or a switch, select, or const-switch clause
+// body. The tail itself is still type-checked for other errors; only the
+// Error is silent. Labels between the switch and the Error keep it live,
+// since a jump can reach it.
+func (check *Checker) logosErrorAfterTerminatingSwitch() bool {
+	if check.logosCtSubst == nil || check.logosCtDeclCheck || check.logosFieldBind != nil {
+		return false
+	}
+	fdecl := check.logosCtFuncDecl
+	cur := check.logosCurStmt
+	if fdecl == nil || cur == nil || fdecl.Body == nil {
+		return false
+	}
+	var list []syntax.Stmt
+	var found bool
+	at := func(stmts []syntax.Stmt) {
+		if found {
+			return
+		}
+		for _, s := range stmts {
+			if s == cur {
+				list = stmts
+				found = true
+				return
+			}
+		}
+	}
+	syntax.Inspect(fdecl.Body, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		switch t := n.(type) {
+		case *syntax.BlockStmt:
+			at(t.List)
+		case *syntax.CaseClause:
+			at(t.Body)
+		case *syntax.CommClause:
+			at(t.Body)
+		case *syntax.ConstSwitchStmt:
+			for _, c := range t.Cases {
+				at(c.Body)
+			}
+		}
+		return !found
+	})
+	if !found {
+		return false
+	}
+	idx := -1
+	for i, s := range list {
+		if s == cur {
+			idx = i
+			break
+		}
+	}
+	if idx <= 0 {
+		return false
+	}
+	for i := idx - 1; i >= 0; i-- {
+		if _, ok := list[i].(*syntax.LabeledStmt); ok {
+			return false
+		}
+		if cs, ok := list[i].(*syntax.ConstSwitchStmt); ok {
+			// An earlier terminating switch already keeps control from
+			// reaching the tail, so a nearer switch that does not
+			// terminate must not erase it. Keep scanning past it.
+			if check.logosTerminatingConstSwitch(cs) {
+				return true
+			}
+			continue
+		}
+		if check.isTerminating(list[i], "") {
+			// An ordinary terminator also keeps control from reaching
+			// the tail, so keep scanning past it for an earlier
+			// terminating switch. Labels still end the scan above.
+			continue
+		}
+	}
+	return false
 }

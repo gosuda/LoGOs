@@ -106,6 +106,11 @@ func main() {
 	handleChdirFlag()
 	if cfg.Logos {
 		logos.ConfigureCommand(base.Go)
+	} else {
+		// Decide every re-execution trigger that arguments and files can
+		// settle before any toolchain selection: a stock toolchain cannot
+		// build LoGOs sources, so selecting one first would bypass logos.
+		cfg.MaybeRelaunchEarly()
 	}
 	toolchain.Select()
 
@@ -124,6 +129,8 @@ func main() {
 
 	cfg.CmdName = args[0] // for error messages
 	if args[0] == "help" {
+		// A LoGOs-only help topic re-executes before toolchain selection
+		// in cfg.MaybeRelaunchEarly instead of here.
 		counter.Inc("go/subcommand:" + strings.Join(append([]string{"help"}, args[1:]...), "-"))
 		help.Help(os.Stdout, args[1:])
 		return
@@ -184,7 +191,9 @@ func main() {
 			}
 		}
 	}
-
+	// Re-execution triggers were decided before toolchain selection in
+	// cfg.MaybeRelaunchEarly; only the import trigger still runs later,
+	// during package loading.
 	cmd, used := lookupCmd(args)
 	cfg.CmdName = strings.Join(args[:used], " ")
 	if len(cmd.Commands) > 0 {

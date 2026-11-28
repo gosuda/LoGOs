@@ -116,6 +116,7 @@ func (check *Checker) conversion(x *operand, T Type) {
 		check.updateExprType(x.expr, final, true)
 	}
 
+	check.logosCtDeferInterfaceFormation(x.Pos(), x.typ(), T)
 	x.typ_ = T
 }
 

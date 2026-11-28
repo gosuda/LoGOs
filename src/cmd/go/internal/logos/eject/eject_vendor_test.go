@@ -1,0 +1,234 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package eject
+
+import (
+	"bytes"
+	"go/build/constraint"
+	"go/parser"
+	"go/token"
+	"testing"
+)
+
+func parseEjectedGuard(t *testing.T, line string) constraint.Expr {
+	t.Helper()
+	expr, err := constraint.Parse(line)
+	if err != nil {
+		t.Fatalf("parse %q: %v", line, err)
+	}
+	return expr
+}
+
+// A native-only guard stays rejected no matter how many other tags share
+// the line: the solver decides satisfiability without enumerating tags,
+// so no cutoff can admit it.
+func TestEjectedSelectedRejectsNativeOnly(t *testing.T) {
+	cases := []struct {
+		line string
+		want bool
+	}{
+		{"//go:build logosejected", true},
+		{"//go:build !logosejected", false},
+		{"//go:build !windows", true},
+		{"//go:build windows", true},
+		{"//go:build !ejecttestjsonoff", true},
+		{"//go:build !logosejected || !windows", true},
+		{"//go:build logosejected && windows", true},
+		{"//go:build !logosejected && t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 && t11", false},
+		{"//go:build logosejected && t1 && t2 && t3 && t4 && t5 && t6 && t7 && t8 && t9 && t10 && t11", true},
+		// A late ejected-mode tag still decides after the solver walks the
+		// earlier disjunctions: rejection backtracks across every branch
+		// instead of admitting the file or hanging on the open tags.
+		{"//go:build (t1 || t2) && !logosejected", false},
+		{"//go:build (t1 || t2) && (t3 || t4) && !logosejected", false},
+		{"//go:build (t1 || t2) && logosejected", true},
+	}
+	for _, tc := range cases {
+		if got := ejectedSelected(parseEjectedGuard(t, tc.line)); got != tc.want {
+			t.Errorf("ejectedSelected(%q) = %v, want %v", tc.line, got, tc.want)
+		}
+	}
+	if !ejectedSelected(nil) {
+		t.Errorf("ejectedSelected(nil) = false, want true")
+	}
+}
+
+// Specializing the emitted guard must preserve plain-Go selection: the
+// residual drops only ejected-mode tags, and a constantly-false residual
+// excludes the file instead of emitting dead code.
+func TestFoldEjectedGuardSpecializes(t *testing.T) {
+	cases := []struct {
+		line     string
+		residual string // "" means nil (unconditional)
+		excluded bool
+	}{
+		{"//go:build !logosejected || !windows", "!windows", false},
+		{"//go:build logosejected", "", false},
+		{"//go:build !logosejected", "", true},
+		{"//go:build windows", "windows", false},
+		{"//go:build logosejected && windows", "windows", false},
+		{"//go:build !logosconc", "", false},
+		{"//go:build logosconc", "", true},
+		{"//go:build !ejecttestjsonoff", "!ejecttestjsonoff", false},
+		// A folded release tag would pin the file to that Go version's
+		// semantics, so a versionless file keeps the folded residual and
+		// drops the implied version with a never-selected disjunct (no tag
+		// set satisfies it, not even -tags ignore), while a versioned file
+		// keeps the original structure with version-neutral mode tags instead.
+		{"//go:build !logosejected || go1.21", "go1.21 || (ignore && !ignore)", false},
+		{"//go:build !logosconc || go1.21", "", false},
+		// The original already implies this version, so the folded tag
+		// stays: no structure is needed to preserve it.
+		{"//go:build logosejected && go1.21", "go1.21", false},
+	}
+	for _, tc := range cases {
+		expr := parseEjectedGuard(t, tc.line)
+		guard, excluded := foldEjectedGuard(expr, constraint.GoVersion(expr))
+		if excluded != tc.excluded {
+			t.Errorf("foldEjectedGuard(%q) excluded = %v, want %v", tc.line, excluded, tc.excluded)
+			continue
+		}
+		got := ""
+		if guard != nil {
+			got = guard.String()
+		}
+		if got != tc.residual {
+			t.Errorf("foldEjectedGuard(%q) = %q, want %q", tc.line, got, tc.residual)
+		}
+	}
+}
+
+// The residual must imply the same Go version as the original guard: a
+// folded release tag would pin the emitted file to older language
+// semantics while the original left the package default in force.
+func TestFoldEjectedGuardPreservesGoVersion(t *testing.T) {
+	lines := []string{
+		"//go:build !logosejected || !windows",
+		"//go:build logosejected",
+		"//go:build windows",
+		"//go:build logosejected && windows",
+		"//go:build !logosconc",
+		"//go:build !ejecttestjsonoff",
+		"//go:build !logosejected || go1.21",
+		"//go:build !logosconc || go1.21",
+		"//go:build logosejected && go1.21",
+		"//go:build logosejected || go1.21",
+		"//go:build (!logosejected || windows) && go1.24",
+	}
+	for _, line := range lines {
+		expr := parseEjectedGuard(t, line)
+		guard, excluded := foldEjectedGuard(expr, constraint.GoVersion(expr))
+		if excluded {
+			continue
+		}
+		var got string
+		if guard != nil {
+			got = constraint.GoVersion(guard)
+		}
+		if want := constraint.GoVersion(expr); got != want {
+			t.Errorf("foldEjectedGuard(%q) implies Go version %q, want %q (residual %v)", line, got, want, guard)
+		}
+	}
+}
+
+// A neutralized residual must parse: the support copy reparses the
+// emitted header, and a doubly-negated mode tag would otherwise leave a
+// consecutive negation the constraint parser rejects. Collapsing the two
+// negations keeps the truth value and the implied version: the min-version
+// analysis cancels a double sign flip exactly as truth does.
+func TestNeutralizeEjectedGuardCollapsesNegation(t *testing.T) {
+	expr := parseEjectedGuard(t, "//go:build !(!logosconc) || go1.21")
+	got := neutralizeEjectedGuard(expr).String()
+	if want := "ignore || go1.21"; got != want {
+		t.Errorf("neutralizeEjectedGuard = %q, want %q", got, want)
+	}
+	if _, err := constraint.Parse("//go:build " + got); err != nil {
+		t.Errorf("reparse neutralized guard %q: %v", got, err)
+	}
+	if got, want := constraint.GoVersion(parseEjectedGuard(t, "//go:build "+got)), constraint.GoVersion(expr); got != want {
+		t.Errorf("neutralized guard implies Go version %q, want %q", got, want)
+	}
+}
+
+// A legacy-only guard never set the file's language version: the compiler
+// reads per-file versions from //go:build lines alone. A residual that
+// names a release tag must therefore stay versionless, keeping the
+// selection with a version-neutral, never-selected disjunct instead of
+// restoring the lower version the legacy selection expression implies.
+func TestFoldEjectedGuardLegacyGuardStaysVersionless(t *testing.T) {
+	cases := []struct {
+		line     string
+		residual string
+		excluded bool
+	}{
+		{"// +build !logosejected,go1.21 go1.27", "go1.27 || (ignore && !ignore)", false},
+		{"// +build logosejected", "", false},
+		{"// +build !logosejected", "", true},
+		{"// +build !logosconc", "", false},
+		{"//go:build !(!logosconc) || go1.21", "go1.21 || (ignore && !ignore)", false},
+	}
+	for _, tc := range cases {
+		expr := parseEjectedGuard(t, tc.line)
+		guard, excluded := foldEjectedGuard(expr, "")
+		if excluded != tc.excluded {
+			t.Errorf("foldEjectedGuard(%q) excluded = %v, want %v", tc.line, excluded, tc.excluded)
+			continue
+		}
+		got := ""
+		if guard != nil {
+			got = guard.String()
+		}
+		if got != tc.residual {
+			t.Errorf("foldEjectedGuard(%q) = %q, want %q", tc.line, got, tc.residual)
+		}
+		if guard != nil {
+			if _, err := constraint.Parse("//go:build " + got); err != nil {
+				t.Errorf("reparse residual %q: %v", got, err)
+			}
+			if v := constraint.GoVersion(guard); v != "" {
+				t.Errorf("foldEjectedGuard(%q) implies Go version %q, want versionless", tc.line, v)
+			}
+		}
+	}
+}
+
+// A UTF-8 BOM before the build line must not duplicate it: the guard
+// line is dropped with its BOM and the residual is emitted once, so the
+// exported package still builds.
+func TestRewriteEjectedGuardDropsBOMGuard(t *testing.T) {
+	guard := parseEjectedGuard(t, "//go:build !windows")
+	data := []byte("\ufeff//go:build !windows\n\npackage p\n")
+	out := rewriteEjectedGuard(data, guard)
+	if n := bytes.Count(out, []byte("//go:build")); n != 1 {
+		t.Fatalf("rewrote BOM header to %d build lines, want 1:\n%s", n, out)
+	}
+	if !bytes.Contains(out, []byte("//go:build !windows\n")) {
+		t.Errorf("rewrote BOM header without the residual:\n%s", out)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "", out, parser.PackageClauseOnly); err != nil {
+		t.Errorf("rewrote BOM header to unparsable Go: %v\n%s", err, out)
+	}
+}
+
+// An explicitly enabled ignore tag must not newly select a versionless
+// file: the version-neutral disjunct stays unsatisfiable under every tag
+// set while the residual still selects its platform.
+func TestFoldEjectedGuardIgnoreTagNotSelectable(t *testing.T) {
+	const line = "//go:build linux && go1.21"
+	expr := parseEjectedGuard(t, line)
+	guard, excluded := foldEjectedGuard(expr, "")
+	if excluded {
+		t.Fatalf("foldEjectedGuard(%q) excluded = true, want false", line)
+	}
+	if guard == nil {
+		t.Fatalf("foldEjectedGuard(%q) = nil, want a residual guard", line)
+	}
+	if guard.Eval(func(tag string) bool { return tag == "ignore" }) {
+		t.Errorf("versionless residual %q selects with -tags ignore", guard.String())
+	}
+	if !guard.Eval(func(tag string) bool { return tag == "linux" || tag == "go1.21" }) {
+		t.Errorf("versionless residual %q drops its platform selection", guard.String())
+	}
+}

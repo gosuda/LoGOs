@@ -11,6 +11,10 @@ exists out/main.go
 exists out/plat_linux.go
 exists out/plat_windows.go
 exists out/plat_windows_arm64.go
+exists out/main.go.edits
+exists out/plat_linux.go.edits
+exists out/plat_windows.go.edits
+exists out/plat_windows_arm64.go.edits
 ! exists out/main.lgo
 ! exists out/plat_linux.lgo
 ! exists out/plat_windows.lgo

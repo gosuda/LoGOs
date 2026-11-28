@@ -72,8 +72,11 @@ logos lint --pedantic ./...
 cd ..
 
 cd union
-! go build --pedantic .
-stderr '^flag provided but not defined: -pedantic'
+# A LoGOs-only flag with a source trigger re-executes instead of failing
+# to parse: the build runs as logos build --pedantic.
+go build --pedantic -o $WORK/bin/union-go$GOEXE .
+stderr 'main\.lgo:15:2: warning: \[pedantic::exhaustive_union_switch\]'
+exists $WORK/bin/union-go$GOEXE
 cd ..
 
 -- union/go.mod --

@@ -1,0 +1,47 @@
+// run
+
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+)
+
+func classify[T any](value T) string {
+	const switch T {
+	case int:
+		return "integer"
+	case int, string:
+		return value + "!"
+	default:
+		return "other"
+	}
+	return "unreachable"
+}
+
+func interfaces[T any](value T) string {
+	_ = value
+	const switch T {
+	case io.Reader:
+		return "reader"
+	case io.Reader, io.Writer:
+		return "writer"
+	default:
+		return "other"
+	}
+	return "unreachable"
+}
+
+type Writer struct{}
+
+func (w Writer) Write(data []byte) (int, error) { return len(data), nil }
+
+func main() {
+	fmt.Println(classify(1))
+	fmt.Println(classify("value"))
+	fmt.Println(classify(false))
+	fmt.Println(interfaces(&bytes.Buffer{}))
+	fmt.Println(interfaces(Writer{}))
+	fmt.Println(interfaces(1))
+}

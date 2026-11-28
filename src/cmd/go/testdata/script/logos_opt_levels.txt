@@ -140,24 +140,28 @@ stderr '-p main .*-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4
 stderr '-p example\.com/optlevels/pkgdepdep/godep .*-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096|-d=inlbudget=400,inlrecursivebudget=80,variablemakethreshold=4096.*-p example\.com/optlevels/pkgdepdep/godep '
 cd ..
 
+# A marked module re-executes go as logos, so plain go and logos agree
+# on the default stack buffer of 256 bytes here. The plain-go checks
+# run in stackbuf-plain, the same package without logos.toml.
 cd stackbuf
-env WANT_STACKBUF=32
+env WANT_STACKBUF=256
 go test -count=1 .
+stdout '^ok'
+logos test -count=1 .
+stdout '^ok'
+env WANT_STACKBUF=32
+! go test -count=1 .
+stdout 'FAIL'
+logos test -count=1 -O=1 .
 stdout '^ok'
 go test -count=1 -O=1 .
 stdout '^ok'
-logos test -count=1 -O=1 .
-stdout '^ok'
-go test -count=1 -run TestCompiledStackBuffer -O=0 .
-stdout '^ok'
 logos test -count=1 -run TestCompiledStackBuffer -O=0 .
 stdout '^ok'
-! go test -count=1 -gcflags=all='-N -l' .
-stdout 'want the stack buffer of 32 bytes to decide'
 env WANT_STACKBUF=256
+! go test -count=1 -gcflags=all='-N -l' .
+stdout 'want the stack buffer of 256 bytes to decide'
 go test -count=1 -O=2 .
-stdout '^ok'
-logos test -count=1 .
 stdout '^ok'
 logos test -count=1 -O=2 .
 stdout '^ok'
@@ -166,16 +170,43 @@ go test -count=1 -O=3 .
 stdout '^ok'
 logos test -count=1 -O=3 .
 stdout '^ok'
-
 env WANT_STACKBUF=32
 go test -count=1 -O=3 -gcflags=all=-d=variablemakethreshold=32 .
 stdout '^ok'
-
 env WANT_STACKBUF=4096
 ! go test -count=1 -O=3 -gcflags=all=-d=variablemakethreshold=32 .
 stdout 'FAIL'
+env WANT_STACKBUF=
+
+# The same package without logos.toml keeps plain go: the stack buffer
+# of the Go build is 32 bytes by default, 256 at -O=2 and 4096 at -O=3.
+cd ..
+mkdir $WORK/stackbuf-plain
+cp stackbuf/stackbuf.go stackbuf-plain/stackbuf.go
+cp stackbuf/stackbuf_test.go stackbuf-plain/stackbuf_test.go
+cd stackbuf-plain
+env WANT_STACKBUF=32
+go test -count=1 .
+stdout '^ok'
+go test -count=1 -O=1 .
+stdout '^ok'
+go test -count=1 -run TestCompiledStackBuffer -O=0 .
+stdout '^ok'
+! go test -count=1 -gcflags=all='-N -l' .
+stdout 'want the stack buffer of 32 bytes to decide'
 env WANT_STACKBUF=256
+go test -count=1 -O=2 .
+stdout '^ok'
 ! go test -count=1 .
+stdout 'FAIL'
+env WANT_STACKBUF=4096
+go test -count=1 -O=3 .
+stdout '^ok'
+env WANT_STACKBUF=32
+go test -count=1 -O=3 -gcflags=all=-d=variablemakethreshold=32 .
+stdout '^ok'
+env WANT_STACKBUF=4096
+! go test -count=1 -O=3 -gcflags=all=-d=variablemakethreshold=32 .
 stdout 'FAIL'
 env WANT_STACKBUF=
 cd ..
@@ -191,6 +222,11 @@ go 1.27
 -- stackbuf/logos.toml --
 [build]
 arena = false
+
+-- stackbuf-plain/go.mod --
+module example.com/optlevels/stackbuf
+
+go 1.27
 
 -- stackbuf/stackbuf.go --
 package stackbuf

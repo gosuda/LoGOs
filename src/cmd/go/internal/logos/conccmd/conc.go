@@ -51,7 +51,7 @@ var CmdConc = &base.Command{
 	UsageLine: "logos conc",
 	Short:     "watch a running program for concurrency faults",
 	Long: `
-Conc runs a loGo/s program, or the tests of loGo/s packages, in a build
+Conc runs a LoGOs program, or the tests of LoGOs packages, in a build
 that carries a monitor, and reports concurrency faults while the program
 runs. It reports faults that 'logos lint' and 'logos test -race' do not
 see, because no memory is raced and nothing has failed yet.

@@ -326,6 +326,7 @@ func importFromModules(ld *Loader, ctx context.Context, path string, rs *Require
 	// Everything must be in the main modules or the main module's or workspace's vendor directory.
 	if cfg.BuildMod == "vendor" {
 		var mainErr error
+		var logos logosCandidates
 		for _, mainModule := range ld.MainModules.Versions() {
 			modRoot := ld.MainModules.ModRoot(mainModule)
 			if modRoot != "" {
@@ -337,6 +338,8 @@ func importFromModules(ld *Loader, ctx context.Context, path string, rs *Require
 					mods = append(mods, mainModule)
 					dirs = append(dirs, dir)
 					roots = append(roots, modRoot)
+				} else if cfg.LogosOnlyDir(dir) {
+					logos.add(dir)
 				}
 			}
 		}
@@ -361,6 +364,8 @@ func importFromModules(ld *Loader, ctx context.Context, path string, rs *Require
 					}
 					fmt.Fprintf(os.Stderr, "go: ignoring package %s which exists in the vendor directory but is missing from vendor/modules.txt. To sync the vendor directory run go %s vendor.\n", path, subCommand)
 				}
+			} else if cfg.LogosOnlyDir(dir) {
+				logos.add(dir)
 			}
 		}
 
@@ -373,6 +378,9 @@ func importFromModules(ld *Loader, ctx context.Context, path string, rs *Require
 		}
 
 		if len(mods) == 0 {
+			if _, ok := logos.single(); ok {
+				cfg.RelaunchAsLogosLate("import resolves to LoGOs sources")
+			}
 			return module.Version{}, "", "", nil, &ImportMissingError{
 				Path:                      path,
 				modContainingCWD:          ld.MainModules.ModContainingCWD(),
@@ -396,6 +404,7 @@ func importFromModules(ld *Loader, ctx context.Context, path string, rs *Require
 	// its root requirements. If that does not identify the package, or if mg is
 	// already non-nil, then we attempt to load the package using the full
 	// requirements in mg.
+	var logos logosCandidates
 	for {
 		var sumErrMods, altMods []module.Version
 		for prefix := path; prefix != "."; prefix = pathpkg.Dir(prefix) {
@@ -444,6 +453,9 @@ func importFromModules(ld *Loader, ctx context.Context, path string, rs *Require
 				dirs = append(dirs, dir)
 			} else {
 				altMods = append(altMods, m)
+				if cfg.LogosOnlyDir(dir) {
+					logos.add(dir)
+				}
 			}
 		}
 
@@ -490,7 +502,11 @@ func importFromModules(ld *Loader, ctx context.Context, path string, rs *Require
 
 		if mg != nil {
 			// We checked the full module graph and still didn't find the
-			// requested package.
+			// requested package. With no Go provider anywhere and exactly
+			// one LoGOs-only candidate, the import trigger re-executes.
+			if _, ok := logos.single(); ok {
+				cfg.RelaunchAsLogosLate("import resolves to LoGOs sources")
+			}
 			var queryErr error
 			if !ld.HasModRoot() {
 				queryErr = NewNoMainModulesError(ld)
@@ -778,7 +794,10 @@ func dirInModule(path, mpath, mdir string, isLocal bool) (dir string, haveGoFile
 		}
 		return fsys.IsGoDir(dir)
 	})
-
+	// dirInModule stays free of relaunch side effects: the caller records
+	// LoGOs-only directories with cfg.LogosOnlyDir and re-executes only
+	// when the resolver found no Go provider and exactly one candidate
+	// does.
 	return dir, haveGoFiles, err
 }
 

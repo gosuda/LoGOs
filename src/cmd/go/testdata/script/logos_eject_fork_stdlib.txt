@@ -2,17 +2,49 @@ env GOPROXY=off
 env GOTOOLCHAIN=local
 
 cd m
-# An escaping fork-only method value has no upstream spelling. Only
-# direct calls have the explicit extended-CONNECT rewrite.
+# A fork-only standard-library selector has no upstream spelling
+# (SPEC T-0.3): logos build accepts it, but logos eject must refuse it
+# at its source location instead of reporting a successful eject.
+# The direct EnableHTTP2ExtendedConnect call is exempt: eject rewrites it
+# to the ejectedhttp.RequireExtendedConnect helper form
+# (see logos_eject_h2extendedconnect). This case keeps a method value,
+# which no rewrite covers, so eject must still refuse it here.
 logos build ./...
 ! logos eject -o out
 stderr 'server\.lgo:6.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
 ! exists out
 
 cd ../expression
+# A method expression likewise has no upstream spelling and no rewrite.
 logos build ./...
 ! logos eject -o out
 stderr 'server\.lgo:5.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
+! exists out
+
+cd ../wrapper
+# A file that defines the method itself is skipped by the text rewrite,
+# so its delegate call to the real method must not be exempted either:
+# approving it would emit code upstream Go rejects. Eject fails here
+# instead of writing the unrewritten call.
+logos build ./...
+! logos eject -o out
+stderr 'server\.lgo:10.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
+! exists out
+
+cd ../rawimport
+# A raw net/http import literal names the same path the decoded emitter
+# accepts, so the direct call keeps its exemption and ejects.
+logos build ./...
+logos eject -o out
+exists out/server.go
+! grep 'EnableHTTP2ExtendedConnect' out/server.go
+cd ../samename
+# A file that declares the method name itself is skipped by the eject
+# rewrite, so verification must refuse even the genuine server call in
+# it instead of exempting it by type.
+logos build ./...
+! logos eject -o out
+stderr 'server\.lgo:.*fork_stdlib_api.*EnableHTTP2ExtendedConnect'
 ! exists out
 
 cd ../ok
@@ -31,21 +63,10 @@ package h2portability
 
 import "net/http"
 
-func Enable(s *http.Server) func() {
-	return s.EnableHTTP2ExtendedConnect
+func Enable(s *http.Server) {
+	f := s.EnableHTTP2ExtendedConnect
+	_ = f
 }
-
--- expression/go.mod --
-module example.com/h2expression
-
-go 1.27
-
--- expression/server.lgo --
-package h2expression
-
-import "net/http"
-
-var Enable = (*http.Server).EnableHTTP2ExtendedConnect
 
 -- ok/go.mod --
 module example.com/h2ok
@@ -59,4 +80,67 @@ import "net/http"
 
 func KeepAlive(s *http.Server) {
 	s.SetKeepAlivesEnabled(true)
+}
+
+-- wrapper/go.mod --
+module example.com/h2wrapper
+
+go 1.27
+
+-- wrapper/server.lgo --
+package h2wrapper
+
+import "net/http"
+
+type Server struct {
+	*http.Server
+}
+
+func (s *Server) EnableHTTP2ExtendedConnect() {
+	s.Server.EnableHTTP2ExtendedConnect()
+}
+
+-- rawimport/go.mod --
+module example.com/h2rawimport
+
+go 1.27
+
+-- rawimport/server.lgo --
+package h2rawimport
+
+import `net/http`
+
+func Enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+}
+-- expression/go.mod --
+module example.com/h2expression
+
+go 1.27
+
+-- expression/server.lgo --
+package h2expression
+
+import "net/http"
+
+var Enable = (*http.Server).EnableHTTP2ExtendedConnect
+
+-- samename/go.mod --
+module example.com/h2samename
+
+go 1.27
+
+-- samename/server.lgo --
+package h2samename
+
+import "net/http"
+
+type Mine struct{}
+
+func (Mine) EnableHTTP2ExtendedConnect() {}
+
+func Enable(s *http.Server) {
+	s.EnableHTTP2ExtendedConnect()
+	var m Mine
+	m.EnableHTTP2ExtendedConnect()
 }

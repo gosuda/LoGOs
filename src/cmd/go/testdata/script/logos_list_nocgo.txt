@@ -3,8 +3,13 @@
 env GOPROXY=off
 env GOTOOLCHAIN=local
 env CGO_ENABLED=0
+env GOCACHE=$WORK/gocache
 env CC=review-missing-c-compiler
 env PATH=$WORK/no-compiler
+# Scope the cache to this test: the clean-cache lines below must not
+# wipe the shared GOCACHE that parallel script tests use.
+[!GOOS:windows] env GOCACHE=$WORK/gocache
+[GOOS:windows] env GOCACHE=$WORK\gocache
 cd plain
 go list -export -f '{{if .Error}}{{.Error.Err}}{{else}}{{.ImportPath}} export={{if .Export}}yes{{else}}no{{end}}{{end}}' .
 stdout '^example.com/plain export=yes$'

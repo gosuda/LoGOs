@@ -24,8 +24,16 @@ stderr '-> unsafe'
 cd ../..
 
 cd c/main
-go build -o $WORK/bin/d$GOEXE ./cmd
+! go build -o $WORK/bin/d$GOEXE ./cmd
+stderr 'ERROR \[capabilities::unauthorized_unsafe\]: Transitive dependency ''example\.com/cdep'' imports ''unsafe'''
+cd ../..
+
+# A module without logos.toml keeps plain go: no capabilities audit.
+cd u/main
+go build -o $WORK/bin/u$GOEXE ./cmd
 ! stderr 'capabilities::'
+exec $WORK/bin/u$GOEXE
+stdout '^42$'
 cd ../..
 
 cd e/main
@@ -509,6 +517,44 @@ go 1.27
 
 -- r/dep/dep.go --
 package mylib
+
+import (
+	"strconv"
+	"unsafe"
+)
+
+func Msg() string {
+	var x = 42
+	return strconv.Itoa(*(*int)(unsafe.Pointer(&x)))
+}
+
+-- u/main/go.mod --
+module example.com/umain
+
+go 1.27
+
+require example.com/udep v0.0.0
+
+replace example.com/udep => ../dep
+
+-- u/main/cmd/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/udep"
+)
+
+func main() { fmt.Println(dep.Msg()) }
+
+-- u/dep/go.mod --
+module example.com/udep
+
+go 1.27
+
+-- u/dep/dep.go --
+package dep
 
 import (
 	"strconv"

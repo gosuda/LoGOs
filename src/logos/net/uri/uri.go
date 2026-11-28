@@ -66,8 +66,12 @@ func (c Component) Decoded() string {
 	return string(appendDecoded(nil, c.Text))
 }
 
-// AppendDecoded appends the percent-decoded text to dst.
+// AppendDecoded appends the percent-decoded text to dst. Raw text is
+// already decoded, so only encoded text passes through the decoder.
 func (c Component) AppendDecoded(dst []byte) []byte {
+	if !c.Encoded {
+		return append(dst, c.Text...)
+	}
 	return appendDecoded(dst, c.Text)
 }
 
@@ -95,8 +99,12 @@ type URI struct {
 	HasPassword bool
 	HasHost     bool
 	HasPort     bool
-	HasQuery    bool
-	HasFragment bool
+	// HasAuthority records a parsed "//" even when the host is empty,
+	// so resolving "///path" replaces the base authority instead of
+	// inheriting it, and rendering keeps the empty authority.
+	HasAuthority bool
+	HasQuery     bool
+	HasFragment  bool
 }
 
 // Parse splits s into scheme and the remaining components. Every component
@@ -123,7 +131,7 @@ func (u URI) String() string {
 func (u URI) AppendString(dst []byte) []byte {
 	dst = append(dst, u.Scheme...)
 	dst = append(dst, ':')
-	if u.HasHost || u.HasUser || u.HasPassword || u.HasPort {
+	if u.HasAuthority || u.HasHost || u.HasUser || u.HasPassword || u.HasPort {
 		dst = append(dst, '/', '/')
 		if u.HasUser {
 			dst = appendComponent(dst, u.User, isUserChar)
@@ -139,6 +147,12 @@ func (u URI) AppendString(dst []byte) []byte {
 		if u.HasPort {
 			dst = append(dst, ':')
 			dst = appendPort(dst, u.Port)
+		}
+		// A bare authority with an empty path would render as "scheme://",
+		// which the parser rejects: an empty authority needs its slash.
+		// The slash keeps the empty authority and the rendering reparses.
+		if u.Path.Text == "" && u.HasAuthority && !u.HasHost && !u.HasUser && !u.HasPassword && !u.HasPort {
+			dst = append(dst, '/')
 		}
 	}
 	dst = appendComponent(dst, u.Path, isPathChar)
@@ -170,6 +184,7 @@ func parseAfterScheme(scheme, text string) (URI, error) {
 	u.Path = Component{Encoded: true}
 	i := 0
 	if len(text) >= 2 && text[0] == '/' && text[1] == '/' {
+		u.HasAuthority = true
 		end := indexAuthorityEnd(text)
 		auth := text[2:end]
 		i = end
@@ -364,38 +379,40 @@ func schemeEnd(s string) int {
 func (b URI) resolveParsed(r URI) URI {
 	if r.Scheme != "" {
 		return slashForAuthority(URI{
-			Scheme:      r.Scheme,
-			User:        r.User,
-			Password:    r.Password,
-			Host:        r.Host,
-			Port:        r.Port,
-			Path:        Encoded(removeDotSegments(renderEncoded(r.Path, isPathChar))),
-			Query:       r.Query,
-			Fragment:    r.Fragment,
-			HasUser:     r.HasUser,
-			HasPassword: r.HasPassword,
-			HasHost:     r.HasHost,
-			HasPort:     r.HasPort,
-			HasQuery:    r.HasQuery,
-			HasFragment: r.HasFragment,
+			Scheme:       r.Scheme,
+			User:         r.User,
+			Password:     r.Password,
+			Host:         r.Host,
+			Port:         r.Port,
+			Path:         Encoded(removeDotSegments(renderEncoded(r.Path, isPathChar))),
+			Query:        r.Query,
+			Fragment:     r.Fragment,
+			HasUser:      r.HasUser,
+			HasPassword:  r.HasPassword,
+			HasHost:      r.HasHost,
+			HasPort:      r.HasPort,
+			HasAuthority: r.HasAuthority,
+			HasQuery:     r.HasQuery,
+			HasFragment:  r.HasFragment,
 		})
 	}
-	if r.HasHost || r.HasUser || r.HasPassword || r.HasPort {
+	if r.HasAuthority || r.HasHost || r.HasUser || r.HasPassword || r.HasPort {
 		return slashForAuthority(URI{
-			Scheme:      b.Scheme,
-			User:        r.User,
-			Password:    r.Password,
-			Host:        r.Host,
-			Port:        r.Port,
-			Path:        Encoded(removeDotSegments(renderEncoded(r.Path, isPathChar))),
-			Query:       r.Query,
-			Fragment:    r.Fragment,
-			HasUser:     r.HasUser,
-			HasPassword: r.HasPassword,
-			HasHost:     r.HasHost,
-			HasPort:     r.HasPort,
-			HasQuery:    r.HasQuery,
-			HasFragment: r.HasFragment,
+			Scheme:       b.Scheme,
+			User:         r.User,
+			Password:     r.Password,
+			Host:         r.Host,
+			Port:         r.Port,
+			Path:         Encoded(removeDotSegments(renderEncoded(r.Path, isPathChar))),
+			Query:        r.Query,
+			Fragment:     r.Fragment,
+			HasUser:      r.HasUser,
+			HasPassword:  r.HasPassword,
+			HasHost:      r.HasHost,
+			HasPort:      r.HasPort,
+			HasAuthority: r.HasAuthority,
+			HasQuery:     r.HasQuery,
+			HasFragment:  r.HasFragment,
 		})
 	}
 	return slashForAuthority(b.resolveMerge(r))
@@ -412,6 +429,7 @@ func (b URI) resolveMerge(r URI) URI {
 	out.HasPassword = b.HasPassword
 	out.HasHost = b.HasHost
 	out.HasPort = b.HasPort
+	out.HasAuthority = b.HasAuthority
 	if r.Path.Text == "" {
 		out.Path = b.Path
 		if r.HasQuery {
@@ -426,7 +444,11 @@ func (b URI) resolveMerge(r URI) URI {
 		out.Query = r.Query
 		out.HasQuery = r.HasQuery
 	} else {
-		out.Path = Encoded(removeDotSegments(mergePaths(renderEncoded(b.Path, isPathChar), renderEncoded(r.Path, isPathChar))))
+		basePath := renderEncoded(b.Path, isPathChar)
+		if basePath == "" && (b.HasAuthority || b.HasHost || b.HasUser || b.HasPassword || b.HasPort) {
+			basePath = "/"
+		}
+		out.Path = Encoded(removeDotSegments(mergePaths(basePath, renderEncoded(r.Path, isPathChar))))
 		out.Query = r.Query
 		out.HasQuery = r.HasQuery
 	}
@@ -436,7 +458,7 @@ func (b URI) resolveMerge(r URI) URI {
 }
 
 func slashForAuthority(u URI) URI {
-	if u.Path.Text == "" && (u.HasHost || u.HasUser || u.HasPassword || u.HasPort) {
+	if u.Path.Text == "" && (u.HasAuthority || u.HasHost || u.HasUser || u.HasPassword || u.HasPort) {
 		u.Path = Encoded("/")
 	}
 	return u

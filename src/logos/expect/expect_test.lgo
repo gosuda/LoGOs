@@ -7,6 +7,8 @@ package expect_test
 import (
 	"fmt"
 	"logos/expect"
+	unitsa "logos/expect/internal/unitsa"
+	unitsb "logos/expect/internal/unitsb"
 	"strings"
 	"testing"
 )
@@ -156,5 +158,106 @@ func TestEqualAmbiguousLeafType(t *testing.T) {
 	expect.Equal(same, wantAny, wantAny)
 	if same.msg != "" {
 		t.Errorf("identical ambiguous values failed:\n got %q", same.msg)
+	}
+}
+func TestEqualStructFieldTypes(t *testing.T) {
+	// Planted fault: the struct branch compares rendered text, so an
+	// any field changing from int(7) to uint(7) passes silently.
+	type holder struct {
+		V any
+	}
+	same := &recorder{}
+	expect.Equal(same, holder{V: 7}, holder{V: 7})
+	if same.msg != "" {
+		t.Errorf("identical struct fields failed:\n got %q", same.msg)
+	}
+	r := &recorder{}
+	expect.Equal(r, holder{V: int(7)}, holder{V: uint(7)})
+	if !strings.Contains(r.msg, "differ in type") {
+		t.Errorf("int-to-uint field change passed:\n got %q", r.msg)
+	}
+}
+
+func TestEqualStructSameNameTypes(t *testing.T) {
+	// Planted fault: interface fields holding distinct types with the
+	// same %T display name and rendered value compare equal, so a
+	// cross-package type swap passes silently.
+	type holder struct {
+		V any
+	}
+	same := &recorder{}
+	expect.Equal(same, holder{V: unitsa.Count(7)}, holder{V: unitsa.Count(7)})
+	if same.msg != "" {
+		t.Errorf("identical same-name values failed:\n got %q", same.msg)
+	}
+	r := &recorder{}
+	expect.Equal(r, holder{V: unitsa.Count(7)}, holder{V: unitsb.Count(7)})
+	if !strings.Contains(r.msg, "differ in type") {
+		t.Errorf("same-name type swap passed:\n got %q", r.msg)
+	}
+	if !strings.Contains(r.msg, "internal/unitsa") || !strings.Contains(r.msg, "internal/unitsb") {
+		t.Errorf("diff does not disambiguate the packages:\n got %q", r.msg)
+	}
+}
+
+type value344 interface{ int | string }
+
+func TestEqualOptionalUnionMemberMismatch(t *testing.T) {
+	// Planted fault: Equal skips the type comparison for optional
+	// unions lowered to bare interfaces, so int(1) and string("1")
+	// compare equal through their rendered text.
+	var want value344? = 1
+	var got value344? = "1"
+	r := &recorder{}
+	expect.Equal(r, want, got)
+	if !strings.Contains(r.msg, "differ in type") {
+		t.Errorf("optional union int-to-string change passed:\n got %q", r.msg)
+	}
+}
+
+func TestEqualOptionalUnionSameMember(t *testing.T) {
+	// Positive control: two optional unions holding the same member
+	// type stay equal, so the type check adds no false positive.
+	var want value344? = 1
+	var other value344? = 1
+	same := &recorder{}
+	expect.Equal(same, want, other)
+	if same.msg != "" {
+		t.Errorf("identical optional unions failed:\n got %q", same.msg)
+	}
+}
+type text344 string
+type fvalue344 interface{ int | text344 }
+
+func TestEqualOptionalUnionFieldMismatch(t *testing.T) {
+	// Planted fault: the struct branch skips the type comparison for
+	// an optional-union field, so a member change hides behind the text.
+	// The union uses a named string member so both sides render as 1.
+	type holder struct {
+		V fvalue344?
+	}
+	var want fvalue344? = 1
+	var got fvalue344? = text344("1")
+	r := &recorder{}
+	expect.Equal(r, holder{V: want}, holder{V: got})
+	if !strings.Contains(r.msg, "differ in type") {
+		t.Errorf("optional-union field change passed:\n got %q", r.msg)
+	}
+	same := &recorder{}
+	var other fvalue344? = 1
+	expect.Equal(same, holder{V: want}, holder{V: other})
+	if same.msg != "" {
+		t.Errorf("identical optional-union fields failed:\n got %q", same.msg)
+	}
+}
+
+func TestEqualOptionalIntStaysEqual(t *testing.T) {
+	// Positive control: two optional ints with equal text stay equal.
+	var a int? = 1
+	var b int? = 1
+	s := &recorder{}
+	expect.Equal(s, a, b)
+	if s.msg != "" {
+		t.Errorf("identical optional ints failed:\n got %q", s.msg)
 	}
 }

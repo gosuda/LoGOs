@@ -54,6 +54,7 @@ type pkgReader struct {
 	logosCtGraph       map[string][]string
 	logosCtMapFuncs    map[index]bool
 	logosCtConstMaps   index
+	logosCtMethods     map[logosCtMethodOrigin]index
 
 	// offset for rewriting the given (absolute!) index into the output,
 	// but bitwise inverted so we can detect if we're missing the entry
@@ -759,10 +760,10 @@ func (r *reader) readLogosCtObjects() {
 	for range r.Len() {
 		r.p.addLogosCtMapFunc(r.Reloc(pkgbits.SectionObj))
 	}
-	if r.Data.Len() != 0 {
+	if r.Bool() {
 		r.p.logosCtConstMaps = r.Reloc(pkgbits.SectionMeta)
-		assert(r.p.logosCtConstMaps != 0 && r.Data.Len() == 0)
 	}
+	assert(r.Data.Len() == 0)
 }
 
 func (r *reader) readLogosCtGraph() {

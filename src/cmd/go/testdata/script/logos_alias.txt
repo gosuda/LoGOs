@@ -62,8 +62,10 @@ logos run ./deferq
 stdout '^deferq true \[body deferred\]$'
 stderr -count=1 'portability::alias_extension'
 
-! go build ./scroll
-stderr 'no Go files in '
+# Plain go detects the alias source and re-executes as logos.
+go build -o $WORK/bin/scroll-plain$GOEXE ./scroll
+stderr -count=1 'portability::alias_extension'
+exists $WORK/bin/scroll-plain$GOEXE
 
 logos build ./dupok
 stderr -count=1 'portability::alias_extension'

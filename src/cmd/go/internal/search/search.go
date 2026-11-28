@@ -411,6 +411,9 @@ func (m *Match) MatchDirs(modRoots []string) {
 				// The package does not actually exist, so record neither the package
 				// nor the error. A cgo-only loGo/s package is the exception: its
 				// files sit in IgnoredGoFiles until loading denies it, so keep it.
+				// A directory the command names, or a ...-style pattern walk
+				// that meets LoGOs sources, re-executes before toolchain
+				// selection in cfg.MaybeRelaunchEarly instead of here.
 				if !logosKeepCgoOnly(p) {
 					return nil
 				}
