@@ -726,7 +726,11 @@ func TestSupportCopyKeepsUserCallShadowedByServerBlock(t *testing.T) {
 // A method receiver counts as a declaration of its function: a call on
 // the receiver resolves to the receiver type, so a same-named user
 // method stays untouched and never refuses as ambiguous. A
-// package-level server of the same name does not steal the call.
+// package-level server of the same name does not steal the call. The
+// fixture withholds the called method's declaration on purpose: a file
+// that defines the name never reaches the receiver filter, so only
+// undeclared calls prove resolution. Declarations themselves stay
+// legal: no method is declared on the non-local meter type.
 func TestSupportCopyResolvesMethodReceiver(t *testing.T) {
 	src := t.TempDir()
 	pkg := filepath.Join(src, "logos", "ejecttestrecv")
@@ -734,7 +738,7 @@ func TestSupportCopyResolvesMethodReceiver(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"recv.go": "package ejecttestrecv\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nvar s = &http.Server{}\n\ntype Holder struct{}\n\nfunc (s *Holder) Enable() {\n\ts.EnableHTTP2ExtendedConnect()\n}\n\nfunc (m *meter.Meter) Measure() {\n\tm.EnableHTTP2ExtendedConnect()\n}\n",
+		"recv.go": "package ejecttestrecv\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nvar s = &http.Server{}\n\ntype Holder struct{}\n\nfunc (s *Holder) Enable() {\n\ts.EnableHTTP2ExtendedConnect()\n}\n\ntype Local struct {\n\tmeter.Meter\n}\n\nfunc (m *Local) Measure() {\n\tm.EnableHTTP2ExtendedConnect()\n}\n",
 	}
 	for name, source := range files {
 		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
@@ -926,5 +930,156 @@ func TestSupportCopyCaseExprIgnoresClauseBodyShadow(t *testing.T) {
 	}
 	if !strings.Contains(got, "RequireExtendedConnect") {
 		t.Errorf("support copy missing guard delegation for the case expression:\n%s", got)
+	}
+}
+
+// A type alias declared in a sibling file resolves through the
+// declaring file: a call on a variable of the aliased server type is
+// genuine and must be rewritten, not left as a fork-only call.
+func TestSupportCopyRewritesSiblingTypeAliasServer(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttesttypealias")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"decl.go": "package ejecttesttypealias\n\nimport h \"net/http\"\n\ntype ServerAlias = h.Server\n",
+		"call.go": "package ejecttesttypealias\n\nimport \"net/http\"\n\nvar (\n\tsrv ServerAlias\n\t_ = http.Get\n)\n\nfunc Enable() {\n\tsrv.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttesttypealias", dst: "rt/logos/ejecttesttypealias"}
+	if _, _, err := c.copyPackageGo(p, "call.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttesttypealias", "call.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "srv.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("fork-only call survives a sibling type alias:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation:\n%s", got)
+	}
+}
+
+// An explicit method on a type that embeds *http.Server shadows the
+// promoted fork method: the call is a user method and must survive,
+// not be rewritten to the guard.
+func TestSupportCopyKeepsExplicitMethodOverEmbeddedServer(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestexplicitmethod")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"holder.go": "package ejecttestexplicitmethod\n\nimport \"net/http\"\n\ntype Holder struct {\n\t*http.Server\n\tHits int\n}\n\nfunc (h *Holder) EnableHTTP2ExtendedConnect() {\n\th.Hits++\n}\n",
+		"call.go":   "package ejecttestexplicitmethod\n\nimport \"net/http\"\n\nvar _ = http.Get\n\nfunc Enable(h Holder) {\n\th.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestexplicitmethod", dst: "rt/logos/ejecttestexplicitmethod"}
+	if _, _, err := c.copyPackageGo(p, "call.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestexplicitmethod", "call.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("explicit user method was rewritten through an embedded server:\n%s", got)
+	}
+	if !strings.Contains(got, "h.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("explicit user method call did not survive:\n%s", got)
+	}
+}
+
+// A case clause holding only a block still scopes the block's
+// declarations to the block: a call inside resolves against the block
+// shadowing, while a genuine call outside still rewrites.
+func TestSupportCopyBlockScopeInSingleBlockCase(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestcaseblock")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	const source = "package ejecttestcaseblock\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nfunc Enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n\tswitch {\n\tdefault:\n\t\t{\n\t\t\ts := &meter.Meter{}\n\t\t\ts.EnableHTTP2ExtendedConnect()\n\t\t\t_ = s\n\t\t}\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "h2.go"), []byte(source), 0666); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestcaseblock", dst: "rt/logos/ejecttestcaseblock"}
+	if _, _, err := c.copyPackageGo(p, "h2.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestcaseblock", "h2.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Count(got, "RequireExtendedConnect") != 1 {
+		t.Errorf("want exactly one guard delegation, got:\n%s", got)
+	}
+	if strings.Count(got, "s.EnableHTTP2ExtendedConnect()") != 1 {
+		t.Errorf("want the block-shadowed call to survive, got:\n%s", got)
 	}
 }
