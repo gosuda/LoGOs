@@ -723,37 +723,6 @@ func PkgIsInLocalModule(pkgpath, modpath, modroot string) bool {
 	return err == nil && haveGoFiles
 }
 
-// logosCandidates collects directories that hold LoGOs sources and no Go
-// files while the resolver looks for a Go provider. dirInModule stays free
-// of relaunch side effects; the import trigger fires only when the resolver
-// found no Go provider and exactly one such directory.
-type logosCandidates struct {
-	seen map[string]bool
-	dirs []string
-}
-
-// add records dir once.
-func (c *logosCandidates) add(dir string) {
-	if dir == "" {
-		return
-	}
-	if c.seen == nil {
-		c.seen = make(map[string]bool)
-	}
-	if !c.seen[dir] {
-		c.seen[dir] = true
-		c.dirs = append(c.dirs, dir)
-	}
-}
-
-// single reports the one LoGOs-only directory when exactly one exists.
-func (c *logosCandidates) single() (string, bool) {
-	if len(c.dirs) == 1 {
-		return c.dirs[0], true
-	}
-	return "", false
-}
-
 // dirInModule locates the directory that would hold the package named by the given path,
 // if it were in the module with module path mpath and root mdir.
 // If path is syntactically not within mpath,

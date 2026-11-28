@@ -23,6 +23,23 @@ stdout '^auto-detect$'
 go build -json-diagnostics -o $WORK/nomark-json$GOEXE .
 exec $WORK/nomark-json$GOEXE
 stdout '^auto-detect$'
+
+# Flag values never name packages: -run, -count, and -p take values, so
+# the working-directory rule still fires with no explicit package.
+go test -run TestNomark
+stdout '^ok\s+example\.com/nomark'
+go test -count=1 -run TestNomark .
+stdout '^ok\s+example\.com/nomark'
+go build -p 4 -o $WORK/nomark-p4$GOEXE .
+exec $WORK/nomark-p4$GOEXE
+stdout '^auto-detect$'
+
+# An exact import path maps onto its main-module directory: the
+# LoGOs-only flag reaches the directory check instead of failing.
+go build -pedantic -o $WORK/nomark-path$GOEXE example.com/nomark
+exec $WORK/nomark-path$GOEXE
+stdout '^auto-detect$'
+go build -pedantic example.com/nomark/sub
 cd ..
 
 # Trigger: a ./... walk meets the LoGOs directory, which plain go
@@ -30,6 +47,18 @@ cd ..
 cd nomark
 go list ./...
 stdout 'example\.com/nomark'
+cd ..
+
+# A wildcard matches by import-path prefix with a bounded descent: only a
+# directory the full pattern names counts.
+cd nomark
+go list ./cmd...
+stdout 'example\.com/nomark/cmdtool'
+go list ./api...
+stdout 'example\.com/nomark/apiclient'
+# A suffix after ... filters: only directories the full pattern names count.
+! go build -pedantic ./sub/.../zzz
+stderr 'flag provided but not defined'
 cd ..
 
 # Trigger: the module marker. logos.toml beside go.mod re-executes
@@ -152,6 +181,33 @@ go run .
 stdout '^go$'
 cd ..
 
+# `go mod tidy` loads "all": in an unmarked module whose only package is a
+# LoGOs subpackage, tidy keeps the dependency instead of dropping it.
+cd tidy
+env GOPROXY=off
+go mod tidy
+go list -m example.com/dep
+stdout '^example\.com/dep\s+v1\.0\.0'
+cd ..
+
+# Vendor trees and go.mod ignore exclusions never trigger a re-execution:
+# the only LoGOs sources here sit where no requested build looks.
+cd excl
+! go build -pedantic -o $WORK/excl$GOEXE ./...
+stderr 'flag provided but not defined'
+go build -o $WORK/excl$GOEXE ./...
+exec $WORK/excl$GOEXE
+stdout '^ok$'
+cd ..
+
+# A wildcard that matches no package reports the miss instead of looping:
+# the pattern names nothing, so no candidate re-executes the command.
+cd getmiss
+env GOPROXY=off
+! go get example.com/app/nonexistent...
+stderr 'nonexistent'
+cd ..
+
 cd ov
 # Without the overlay the disk workspace lists only the unmarked member.
 go list -m all
@@ -216,6 +272,80 @@ env CGO_ENABLED=
 ! logos build -o $WORK/cgounmarked-logos$GOEXE .
 stderr 'cgo_usage'
 cd ..
+
+-- tidy/go.mod --
+module example.com/tidy
+
+go 1.27
+
+require example.com/dep v1.0.0
+
+replace example.com/dep => ./dep
+
+-- tidy/dep/go.mod --
+module example.com/dep
+
+go 1.27
+
+-- tidy/dep/dep.go --
+package dep
+
+func Msg() string { return "dep" }
+
+-- tidy/cmd/app/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/dep"
+)
+
+func main() { fmt.Println(dep.Msg()) }
+
+-- nomark/cmdtool/c.lgo --
+package cmdtool
+
+func Tool() string { return "tool" }
+
+-- nomark/apiclient/a.lgo --
+package apiclient
+
+func Client() string { return "client" }
+
+-- excl/go.mod --
+module example.com/excl
+
+go 1.27
+
+ignore ./scratch
+
+-- excl/cmd/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("ok") }
+
+-- excl/scratch/s.lgo --
+package scratch
+
+func Scratch() string { return "scratch" }
+
+-- excl/vendor/v/v.lgo --
+package v
+
+func V() string { return "v" }
+
+-- getmiss/go.mod --
+module example.com/app
+
+go 1.27
+
+-- getmiss/app.lgo --
+package main
+
+func main() {}
 
 -- dep/go.mod --
 module example.com/g
@@ -321,9 +451,24 @@ func main() {
 	fmt.Println(hello())
 }
 
+-- nomark/main_test.lgo --
+package main
+
+import "testing"
+
+func TestNomark(t *testing.T) {
+	if hello() != "auto-detect" {
+		t.Fatalf("hello() = %q", hello())
+	}
+}
+
+-- nomark/sub/sub.lgo --
+package sub
+
+func Sub() string { return "sub" }
+
 -- marked/go.mod --
 module example.com/marked
-
 go 1.27
 
 -- marked/logos.toml --
