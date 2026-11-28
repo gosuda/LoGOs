@@ -487,3 +487,41 @@ func probeRecoverSkippedReturn(verbose bool) {
 	use(h.stats)
 }
 
+// A cleanup that saves a lambda, rebinds its variable, then calls the
+// replacement runs only the replacement: the saved lambda keeps
+// ordinary mode and stays silent.
+func probeSavedRebound() func() int {
+	var saved func() int
+	defer func() {
+		var cb func() int = () => func() int { n, _ := fetch(); return n }()
+		saved = cb
+		cb = func() int { return 0 }
+		use(cb())
+	}()
+	return saved
+}
+
+// A cleanup that calls a variable before rebinding it to a lambda calls
+// the old value: the saved replacement keeps ordinary mode and stays
+// silent.
+func probeSavedAfterCall() func() int {
+	var saved func() int
+	defer func() {
+		cb := func() int { return 0 }
+		use(cb())
+		cb = () => func() int { n, _ := fetch(); return n }()
+		saved = cb
+	}()
+	return saved
+}
+
+// Control: a cleanup that calls the replacement value runs it under the
+// cleanup, so its discarded-error read fails.
+func probeCleanupLocalCallValue() {
+	defer func() {
+		cb := func() int { return 0 }
+		cb = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }()
+		use(cb())
+	}()
+}
+
