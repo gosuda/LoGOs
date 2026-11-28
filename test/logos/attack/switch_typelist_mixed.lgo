@@ -1,0 +1,31 @@
+// run
+
+package main
+
+import (
+	"fmt"
+)
+
+type UserID int
+
+type greeting string
+
+func (g greeting) String() string { return string(g) }
+
+func mixed[T any](v T) string {
+	_ = v
+	const switch T {
+	case ~int, string:
+		return "intish"
+	case fmt.Stringer:
+		return "stringer"
+	}
+	return "other"
+}
+
+func main() {
+	fmt.Println(mixed(UserID(7)))
+	fmt.Println(mixed("x"))
+	fmt.Println(mixed(greeting("hi")))
+	fmt.Println(mixed(1.5))
+}

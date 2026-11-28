@@ -467,6 +467,14 @@ func readPackage(pr *pkgReader, importpkg *types.Pkg, localStub bool, ct *logosC
 
 		r.Sync(pkgbits.SyncEOF)
 		r.readLogosCtObjects()
+		if ct != nil && len(pr.logosCtMethods) != 0 {
+			if ct.methods == nil {
+				ct.methods = make(map[logosCtMethodOrigin]logosCtImportObject)
+			}
+			for key, idx := range pr.logosCtMethods {
+				ct.methods[key] = logosCtImportObject{pr: pr, idx: idx}
+			}
+		}
 		if ct != nil && pr.logosCtConstMaps != 0 {
 			if ct.constMaps == nil {
 				ct.constMaps = make(map[string]logosCtImportObject)

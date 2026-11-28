@@ -1,0 +1,60 @@
+// errorcheck
+
+package p
+
+import "comptime"
+
+func pickClause[F any](x int) int {
+	switch x {
+	case 0:
+		return 0
+	default:
+		const switch F {
+		case int:
+			return 1
+		}
+		comptime.Error("clause unsupported")
+		return 0
+	}
+}
+
+// For pickClause[int] the comptime.Error below the const switch is dead:
+// the selected case returns, so no instantiation path reaches it. For
+// pickClause[string] no case matches, the switch falls through, and the
+// error fires.
+var _ = pickClause[int](0)
+var _ = pickClause[string](0) // ERROR "\[comptime::error\] clause unsupported"
+
+func selClause[F any](ch chan int) int {
+	select {
+	case <-ch:
+		return 0
+	default:
+		const switch F {
+		case int:
+			return 1
+		}
+		comptime.Error("select unsupported")
+		return 0
+	}
+}
+
+var _ = selClause[int](nil)
+var _ = selClause[string](nil) // ERROR "\[comptime::error\] select unsupported"
+
+func outerClause[F any]() int {
+	const switch F {
+	case int:
+		const switch F {
+		case int:
+			return 1
+		}
+		comptime.Error("inner unsupported")
+		return 0
+	}
+	comptime.Error("outer unsupported")
+	return 0
+}
+
+var _ = outerClause[int]()
+var _ = outerClause[string]() // ERROR "\[comptime::error\] outer unsupported"

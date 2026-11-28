@@ -21,12 +21,11 @@ type Thresholds struct {
 	MaxCognitiveComplexity int
 	MaxFunctionLines       int
 	MaxFunctionParams      int
-	MaxComptimeASTNodes    int
 	MaxCTFESteps           int
 }
 
 // Policy is the resolved logos.toml [lints] table: one severity per group
-// and the six thresholds.
+// and the five thresholds.
 type Policy struct {
 	groups     map[Group]Severity
 	Thresholds Thresholds
@@ -41,7 +40,6 @@ func DefaultPolicy() *Policy {
 			MaxCognitiveComplexity: 15,
 			MaxFunctionLines:       60,
 			MaxFunctionParams:      4,
-			MaxComptimeASTNodes:    4096,
 			MaxCTFESteps:           100000,
 		},
 	}
@@ -125,8 +123,6 @@ func (p *Policy) thresholdField(name string) *int {
 		return &p.Thresholds.MaxFunctionLines
 	case "max_function_params":
 		return &p.Thresholds.MaxFunctionParams
-	case "max_comptime_ast_nodes":
-		return &p.Thresholds.MaxComptimeASTNodes
 	case "max_ctfe_steps":
 		return &p.Thresholds.MaxCTFESteps
 	}

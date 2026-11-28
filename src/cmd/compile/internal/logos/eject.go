@@ -687,7 +687,7 @@ func unionSplices(ud *unionDecl, data []byte) ([]splice, bool) {
 	}
 	end := stmtEnd(data, off(ud.decl.Pos()))
 	end = extendPastLineComment(data, end)
-	comment := "\n// loGo/s union: " + strings.Join(terms, "; ")
+	comment := "\n// LoGOs union: " + strings.Join(terms, "; ")
 	return append(splices, splice{start: end, end: end, text: comment}), true
 }
 

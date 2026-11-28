@@ -9,10 +9,12 @@ func Pick[T any]() string {
 	case int:
 		return "int"
 	}
-	var s struct{ X int }
-	_ = s.NoSuch // ERROR "NoSuch"
-	comptime.Error("unsupported")
-	return ""
+var s struct{ X int }
+_ = s.NoSuch // ERROR "NoSuch"
+comptime.Error("unsupported")
+return ""
 }
 
-var _ = Pick[int]() // ERROR "\[comptime::error\] unsupported"
+// For Pick[int] the trailing Error is silent (unreachable after the
+// terminating case), but the tail is still type-checked, so NoSuch fires.
+var _ = Pick[int]()

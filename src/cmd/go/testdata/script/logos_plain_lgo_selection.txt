@@ -4,12 +4,17 @@ env GOEXPERIMENT=
 
 go run ./plain
 stderr '^selection-ok$'
+# Plain go detects LoGOs sources and re-executes as logos, which
+# reports the module's real problem instead of "no Go files".
 ! go build ./only
-stderr 'no Go files in .*only'
+! stderr 'no Go files'
+stderr 'ignored\.lgo'
 ! go build ./importer
-stderr 'example.com/selection/only'
+! stderr 'no Go files'
+stderr 'ignored\.lgo'
 ! go build ./...
-stderr 'example.com/selection/only'
+! stderr 'no Go files'
+stderr 'ignored\.lgo'
 
 -- go.mod --
 module example.com/selection

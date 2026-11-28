@@ -176,17 +176,7 @@ func Main(archInit func(*ssagen.ArchInfo)) {
 		symABIs.ReadSymABIs(base.Flag.SymABIs)
 	}
 
-	// Remember the requested sanitizer mode before the NoInstrument
-	// exemption below clears the flags for runtime packages. Generated
-	// equality payloads are shared across every package, so they key
-	// their explicit operand checks off the requested mode.
-	base.Flag.Cfg.ASanRequested = base.Flag.ASan
-	base.Flag.Cfg.MSanRequested = base.Flag.MSan
-	if objabi.LookupPkgSpecial(base.Ctxt.Pkgpath).NoInstrument {
-		base.Flag.Race = false
-		base.Flag.MSan = false
-		base.Flag.ASan = false
-	}
+	rememberSanitizerRequests()
 
 	ssagen.Arch.LinkArch.Init(base.Ctxt)
 	startProfile()

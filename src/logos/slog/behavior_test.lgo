@@ -524,6 +524,16 @@ func TestTwinEmptiedGroupRestoresPath(t *testing.T) {
 			if !strings.Contains(twinBuf.String(), tc.want) {
 				t.Errorf("sibling after emptied group lost: %q lacks %q", twinBuf.String(), tc.want)
 			}
+			var seen2 [][]string
+			plain := slog.NewRecord(twinTestTime, slog.LevelInfo, "m", 0)
+			plain.AddAttrs(slog.Int("status", 200))
+			var wantBuf bytes.Buffer
+			if err := tc.newTwin(&seen2)(&wantBuf).Handle(context.Background(), plain); err != nil {
+				t.Fatal(err)
+			}
+			if twinBuf.String() != wantBuf.String() {
+				t.Errorf("dropped-group output %q differs from group-free output %q", twinBuf.String(), wantBuf.String())
+			}
 			debugPaths := 0
 			for _, groups := range seen {
 				if len(groups) == 1 && groups[0] == "debug" {

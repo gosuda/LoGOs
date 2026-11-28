@@ -46,7 +46,7 @@ func logosConfigureCgoEject(conf *types2.Config, files []*syntax.File) {
 		}
 	}
 	if !hasC || !conf.LogosUnions {
-		base.Errorf("logos.cgoeject requires original loGo/s cgo sources")
+		base.Errorf("logos.cgoeject requires original LoGOs cgo sources")
 		base.ErrorExit()
 	}
 	types2.LogosEnableCgo(conf)

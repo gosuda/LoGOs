@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"go/token"
 	"maps"
 	"reflect"
 	"slices"
@@ -18,6 +19,32 @@ import (
 	"cmd/compile/internal/types2"
 	"cmd/internal/logosowned"
 )
+
+// ctCallArgsEnd returns the offset just past the argument list whose
+// opening paren follows funEnd. A call's EndPos stops at the last
+// argument (or the callee for an empty list), so the closing paren is
+// found by scanning forward for the balanced close.
+func ctCallArgsEnd(ctx cfCtx, funEnd int) int {
+	end := funEnd
+	depth := 0
+	scanSegment(ctx.buf.b, funEnd, len(ctx.buf.b), func(t tok) bool {
+		if t.comment {
+			return true
+		}
+		switch t.kind {
+		case token.LPAREN:
+			depth++
+		case token.RPAREN:
+			depth--
+			if depth == 0 {
+				end = t.end
+				return false
+			}
+		}
+		return true
+	})
+	return end
+}
 
 // ctEjectInfix joins a comptime generic's name and the suffix that tells
 // its instances apart in ejected source (see ctEjectNames).
@@ -214,12 +241,242 @@ func (fl *fileLower) ejectCtSites() {
 		return
 	}
 	parents := cfParents(fl.file)
+	methods := ctMethodSiteNames(fl.pkg.info)
+	if len(methods) != 0 {
+		fl.ejectCtMethodSites(methods, parents)
+	}
 	syntax.Inspect(fl.file, func(n syntax.Node) bool {
 		if name, ok := n.(*syntax.Name); ok {
+			if _, ok := methods[name]; ok {
+				return true
+			}
 			fl.ejectCtSite(name, parents)
 		}
 		return true
 	})
+}
+
+// ctMethodSiteNames returns the site keys that select a comptime generic
+// method, by selector name. Only a direct MethodVal call carries such a
+// key; method values and interface calls never instantiate.
+func ctMethodSiteNames(info *types2.Info) map[*syntax.Name]string {
+	ids := make(map[string]bool)
+	for _, rec := range info.LogosCtInst {
+		if rec.Origin.Signature().Recv() != nil {
+			ids[rec.ID] = true
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make(map[*syntax.Name]string)
+	for name, id := range info.LogosCtSiteKeys {
+		if ids[id] {
+			out[name] = id
+		}
+	}
+	return out
+}
+
+// ctInstByID returns the pre-check instance record with the given ID.
+func ctInstByID(info *types2.Info, id string) *types2.LogosCtInst {
+	for _, rec := range info.LogosCtInst {
+		if rec.ID == id {
+			return rec
+		}
+	}
+	return nil
+}
+
+// ctMethodSite is one direct comptime-method call found by selector key.
+type ctMethodSite struct {
+	call       *syntax.CallExpr
+	sel        *syntax.SelectorExpr
+	targs      syntax.Expr
+	id         string
+	start, end int
+	methodExpr bool
+}
+
+// ejectCtMethodSites rewrites, in the ejected text only, every direct
+// comptime-method call to its instance: recv.M(args) becomes
+// Origin_logosct_N(recv, args). Only maximal calls take an edit; nested
+// calls compose into the enclosing text so no splices overlap.
+func (fl *fileLower) ejectCtMethodSites(methods map[*syntax.Name]string, parents map[syntax.Node]syntax.Node) {
+	info := fl.pkg.info
+	ctx := cfCtx{buf: fl.srcMap, starts: fl.start}
+	var sites []*ctMethodSite
+	for name, id := range methods {
+		sel, ok := parents[name].(*syntax.SelectorExpr)
+		if !ok || sel.Sel != name {
+			continue
+		}
+		target := syntax.Node(sel)
+		var targs syntax.Expr
+		cur := syntax.Node(sel)
+		for {
+			p, ok := parents[cur]
+			if !ok {
+				break
+			}
+			if par, ok := p.(*syntax.ParenExpr); ok {
+				cur = par
+				continue
+			}
+			if idx, ok := p.(*syntax.IndexExpr); ok && syntax.Unparen(idx.X) == target {
+				targs = idx.Index
+				target = idx
+				cur = idx
+				continue
+			}
+			break
+		}
+		call, ok := parents[cur].(*syntax.CallExpr)
+		if !ok || syntax.Unparen(call.Fun) != target {
+			continue
+		}
+		selection, ok := info.Selections[sel]
+		if !ok {
+			continue
+		}
+		methodExpr := selection.Kind() == types2.MethodExpr
+		if !methodExpr && selection.Kind() != types2.MethodVal {
+			continue
+		}
+		if ctInstByID(info, id) == nil {
+			continue
+		}
+		sites = append(sites, &ctMethodSite{call: call, sel: sel, targs: targs, id: id, start: fl.off(syntax.StartPos(call)), end: ctCallArgsEnd(ctx, cfExactEnd(ctx, call.Fun)), methodExpr: methodExpr})
+	}
+	if len(sites) == 0 {
+		return
+	}
+	for _, s := range sites {
+		contained := false
+		for _, other := range sites {
+			if other != s && other.start <= s.start && s.end <= other.end && (other.start != s.start || other.end != s.end) {
+				contained = true
+				break
+			}
+		}
+		if contained {
+			continue
+		}
+		fl.add(s.start, s.end, fl.ejectMethodText(s, sites, ctx))
+		fl.markEjectSite(s.sel.Sel)
+		if s.targs != nil {
+			fl.markEjectSite(s.targs)
+		}
+		fl.changed = true
+	}
+}
+
+// ejectMethodText renders one method call as its instance call, composing
+// nested method calls inside the receiver and arguments.
+func (fl *fileLower) ejectMethodText(s *ctMethodSite, sites []*ctMethodSite, ctx cfCtx) string {
+	info := fl.pkg.info
+	eject := fl.pkg.ctEjectNames()[s.id]
+	// A method expression already passes the receiver explicitly, so
+	// the whole argument list carries over; a method value call
+	// prepends the selector's receiver instead.
+	args := s.call.ArgList
+	recvExpr := syntax.Expr(nil)
+	if s.methodExpr {
+		if len(args) == 0 {
+			return eject + "()"
+		}
+		recvExpr = args[0]
+		args = args[1:]
+	} else {
+		recvExpr = s.sel.X
+	}
+	recv := fl.ejectMethodOperand(recvExpr, sites, ctx)
+	recvTyp := info.TypeOf(recvExpr)
+	sel := s.sel
+	{
+		if selection, ok := info.Selections[sel]; ok && selection != nil && len(selection.Index()) >= 2 {
+			if rec := ctInstByID(info, s.id); rec != nil {
+				if prom, _, ok := types2.LogosCtPromotedRecv(recvTyp, selection, rec.Origin); ok && prom != nil {
+					curTyp := recvTyp
+					for _, fi := range selection.Index()[:len(selection.Index())-1] {
+						curUn := types2.Unalias(curTyp)
+						if ptr, ok := curUn.(*types2.Pointer); ok {
+							curUn = types2.Unalias(ptr.Elem())
+						}
+						if named, ok := curUn.(*types2.Named); ok {
+							curUn = named.Underlying()
+						}
+						st, ok := curUn.(*types2.Struct)
+						if !ok || fi < 0 || fi >= st.NumFields() {
+							break
+						}
+						recv += "." + st.Field(fi).Name()
+						curTyp = st.Field(fi).Type()
+					}
+					recvTyp = prom
+				}
+			}
+		}
+	}
+	if rec := ctInstByID(info, s.id); rec != nil && rec.Sig != nil && rec.Sig.Params().Len() > 0 {
+		if got := recvTyp; got != nil {
+			switch ctMethodRecvAdjust(rec.Sig.Params().At(0).Type(), got) {
+			case 1:
+				recv = "&" + recv
+			case -1:
+				recv = "*" + recv
+			}
+		}
+	}
+	var b strings.Builder
+	b.WriteString(eject)
+	b.WriteByte('(')
+	b.WriteString(recv)
+	for _, arg := range args {
+		b.WriteString(", ")
+		b.WriteString(fl.ejectMethodOperand(arg, sites, ctx))
+	}
+	if s.call.HasDots {
+		b.WriteString("...")
+	}
+	b.WriteByte(')')
+	return b.String()
+}
+
+// ejectMethodOperand renders one receiver or argument, substituting the
+// text of any method call nested inside it.
+func (fl *fileLower) ejectMethodOperand(e syntax.Expr, sites []*ctMethodSite, ctx cfCtx) string {
+	start, end := fl.off(syntax.StartPos(e)), cfExactEnd(ctx, e)
+	var inner []*ctMethodSite
+	for _, s := range sites {
+		if start <= s.start && s.end <= end && (start != s.start || end != s.end) {
+			inner = append(inner, s)
+		}
+	}
+	if len(inner) == 0 {
+		return string(fl.src[start:end])
+	}
+	slices.SortFunc(inner, func(a, b *ctMethodSite) int { return cmp.Compare(a.start, b.start) })
+	var b strings.Builder
+	pos := start
+	for _, s := range inner {
+		if s.start < pos {
+			continue
+		}
+		b.WriteString(string(fl.src[pos:s.start]))
+		b.WriteString(fl.ejectMethodText(s, sites, ctx))
+		pos = s.end
+	}
+	b.WriteString(string(fl.src[pos:end]))
+	return b.String()
+}
+
+// markEjectSite records one node whose text vanishes in ejected output.
+func (fl *fileLower) markEjectSite(n syntax.Node) {
+	if fl.ejectSites == nil {
+		fl.ejectSites = make(map[syntax.Node]bool)
+	}
+	fl.ejectSites[n] = true
 }
 
 // ejectCtSite renames one keyed site, with its type arguments, to the

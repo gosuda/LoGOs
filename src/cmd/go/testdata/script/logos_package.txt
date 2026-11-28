@@ -6,8 +6,10 @@ stdout '^hello$'
 
 logos build .
 
-! go build .
-stderr 'no Go files'
+# Plain go detects the LoGOs module and re-executes as logos.
+go build .
+go run .
+stdout '^hello$'
 
 -- go.mod --
 module example.com/hello

@@ -24,12 +24,13 @@ func logosEjectGcflags(p *Package) []string {
 		return nil
 	}
 	if !p.IsLogos() {
-		// Plain Go packages in the main module are copied verbatim, so
-		// a fork-only method value would reach upstream Go unrejected.
-		// Verify their portability without enabling source emission:
-		// the check flag runs only the verifier, and compilation is
-		// otherwise native.
-		if !p.Standard && p.Module != nil && p.Module.Main {
+		// Plain Go packages are copied verbatim: the main module tree
+		// and every copied dependency module land in the output
+		// without lowering, so a fork-only method value would reach
+		// upstream Go unrejected. Verify their portability without
+		// enabling source emission: the check flag runs only the
+		// verifier, and compilation is otherwise native.
+		if !p.Standard && p.Module != nil {
 			return []string{"-logos.eject_check"}
 		}
 		return nil

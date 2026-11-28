@@ -43,7 +43,15 @@ type cfExpander struct {
 	byObj    map[*types2.Func]*cfGenericDef
 	byDecl   map[*syntax.FuncDecl]*cfGenericDef
 	pkgs     map[string]*types2.Package
-	switches map[*syntax.ConstSwitchStmt]*syntax.ConstSwitchCase
+	switches map[*syntax.ConstSwitchStmt]ctSwitchSel
+}
+
+// ctSwitchSel records one const switch's compile-time selection: the
+// selected case and element, or nil with elem -1 when nothing matches.
+// The default arm selects with elem -1.
+type ctSwitchSel struct {
+	sel  *syntax.ConstSwitchCase
+	elem int
 }
 
 func newCfExpander(shared *packageLower, files []*syntax.File, src map[*syntax.File][]byte) {
@@ -87,7 +95,14 @@ func (fl *fileLower) cfCollectGenerics() []*cfGenericDef {
 	var out []*cfGenericDef
 	for _, decl := range fl.file.DeclList {
 		fn, ok := decl.(*syntax.FuncDecl)
-		if !ok || fn.Body == nil || len(fn.TParamList) == 0 || !types2.LogosUsesComptime(fn, fl.pkg.info.Scopes[fl.file]) {
+		if !ok || fn.Body == nil || !types2.LogosUsesComptime(fn, fl.pkg.info.Scopes[fl.file]) {
+			continue
+		}
+		// A plain function needs type parameters to be generic. A
+		// method is generic when it declares its own type parameters
+		// or its receiver instantiates a generic type; either shape
+		// is admitted by the types2 drain, so both retire here.
+		if len(fn.TParamList) == 0 && (fn.Recv == nil || !ctRecvGeneric(fn.Recv)) {
 			continue
 		}
 		var obj *types2.Func
@@ -97,6 +112,21 @@ func (fl *fileLower) cfCollectGenerics() []*cfGenericDef {
 		out = append(out, &cfGenericDef{decl: fn, obj: obj, file: fl.file})
 	}
 	return out
+}
+
+// ctRecvGeneric reports whether a method receiver instantiates a generic
+// type: after stripping parentheses and one pointer indirection the type
+// is an index expression (Box[T] or Box[T, U]).
+func ctRecvGeneric(recv *syntax.Field) bool {
+	if recv == nil {
+		return false
+	}
+	t := syntax.Unparen(recv.Type)
+	if op, ok := t.(*syntax.Operation); ok && op.Op == syntax.Mul && op.Y == nil {
+		t = syntax.Unparen(op.X)
+	}
+	_, ok := t.(*syntax.IndexExpr)
+	return ok
 }
 
 func (fl *fileLower) cfCollectForwarders() []*cfGenericDef {
@@ -381,10 +411,24 @@ func (fl *fileLower) cfKnownPackage(path string) *types2.Package {
 // one; a forwarding function keeps its body natively.
 func (fl *fileLower) cfRetireDef(def *cfGenericDef) {
 	fn := def.decl
-	call := "panic(" + strconv.Quote("logos: comptime generic "+fn.Name.Value+" runs only through loGo/s instantiation") + ")"
-	runtime := base.LogosEject != "" && !def.forward && def.obj != nil && def.obj.Exported() && fl.cfRuntimeBody(fn)
+	call := "panic(" + strconv.Quote("logos: comptime generic "+fn.Name.Value+" runs only through LoGOs instantiation") + ")"
+	runtime := base.LogosEject != "" && !def.forward && def.obj != nil && def.obj.Exported() && fn.Recv == nil && fl.cfRuntimeBody(fn)
 	if !def.forward {
 		fn.Body.List = fl.reparseStmts(call, fn.Pos())
+	}
+	if fn.Recv != nil && len(fn.TParamList) != 0 && base.LogosEject != "" {
+		// A generic method has no upstream spelling: drop it from
+		// ejected text. Instances print separately and method call
+		// sites are renamed to them.
+		s := fl.cfDeclSpan(fn)
+		fl.add(s.start, s.end, "")
+		fl.ejectRetired = append(fl.ejectRetired, fn)
+		if fl.ejectSites == nil {
+			fl.ejectSites = make(map[syntax.Node]bool)
+		}
+		fl.ejectSites[fn] = true
+		fl.changed = true
+		return
 	}
 	switch {
 	case base.LogosEject != "" && (def.obj == nil || !def.obj.Exported()):
@@ -602,7 +646,7 @@ func (fl *fileLower) reduceComptimeInstance(rec *types2.LogosCtInst) (*syntax.Fu
 	name := nameOf(rec.Decl.Name.Pos(), rec.Sym)
 	fn := types2.NewFunc(name.Pos(), rec.Pkg, rec.Sym, rec.Sig)
 	info.Defs[name] = fn
-	r := ctReducer{fl: fl, owner: rec.Pkg, info: info, binders: make(map[types2.Object]types2.Type, len(rec.Decl.TParamList))}
+	r := ctReducer{fl: fl, owner: rec.Pkg, info: info, binders: make(map[types2.Object]types2.Type, len(rec.Decl.TParamList)), decl: rec.Decl}
 	for i, param := range rec.Decl.TParamList {
 		if binder := fn.Scope().Lookup(param.Name.Value); binder != nil && i < len(rec.Targs) {
 			r.binders[binder] = rec.Targs[i]
@@ -632,6 +676,7 @@ type ctReducer struct {
 	binders   map[types2.Object]types2.Type
 	nextLabel int
 	err       error
+	decl      *syntax.FuncDecl
 }
 
 type ctFrame struct {
@@ -743,10 +788,17 @@ func (r *ctReducer) clone(n syntax.Node, f *ctFrame) syntax.Node {
 				f.keepCalls = make(map[*syntax.CallExpr]bool)
 			}
 			f.keepCalls[call] = true
+		} else if call, ok := syntax.Unparen(n.Call).(*syntax.CallExpr); ok && cfComptimeCall(call, f.info) == "Error" && f.info.LogosCtSilentError[call] {
+			// A deferred silenced Error never runs: the selected case
+			// terminates, so the defer never registers. Replace it like
+			// a plain silenced Error, keeping message uses alive.
+			out = r.silentErrorStmt(n.Pos(), call, f)
 		}
 	case *syntax.ExprStmt:
 		if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && f.info.LogosTagGet[call].Value != nil {
 			out = assignOf(n.Pos(), []syntax.Expr{nameOf(n.Pos(), "_")}, []syntax.Expr{r.clone(call, f).(syntax.Expr)})
+		} else if call, ok := syntax.Unparen(n.X).(*syntax.CallExpr); ok && cfComptimeCall(call, f.info) == "Error" && f.info.LogosCtSilentError[call] {
+			out = r.silentErrorStmt(n.Pos(), call, f)
 		}
 	}
 	if out == nil {
@@ -936,9 +988,9 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 				return r.constant(e.Pos(), tv.Value)
 			}
 		}
-		if selected := f.info.LogosConstSel[e]; selected != nil {
+		if selected := f.info.LogosConstSel[e]; selected.Case != nil {
 			pos := e.Pos()
-			typ := f.caseType(selected)
+			typ := f.caseType(selected.Case, selected.Elem)
 			if typ == nil {
 				r.invalid(e, "missing concrete interface case type")
 				return nil
@@ -957,6 +1009,9 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 		switch cfComptimeCall(e, f.info) {
 		case "Error":
 			if len(e.ArgList) == 1 {
+				if f.info.LogosCtSilentError[e] {
+					return nil
+				}
 				if msg, ok := cfComptimeErrorMsg(f.info, e.ArgList[0]); ok {
 					r.invalid(e, "[comptime::error] "+msg)
 				} else {
@@ -975,16 +1030,65 @@ func (r *ctReducer) reduceExpr(e syntax.Expr, f *ctFrame) syntax.Expr {
 	return nil
 }
 
-func (f *ctFrame) caseType(c *syntax.ConstSwitchCase) types2.Type {
+// silentErrorStmt replaces a comptime.Error call the instance check silenced
+// with blank uses of the outer local variables its message mentions. The
+// prepared check still needs those uses, but the dead message must not retain
+// private package dependencies in an instance ejected into another package.
+// Variables declared inside the message belong to the discarded expression.
+func (r *ctReducer) silentErrorStmt(pos syntax.Pos, call *syntax.CallExpr, f *ctFrame) syntax.Node {
+	if len(call.ArgList) != 1 {
+		return at(&syntax.EmptyStmt{}, pos)
+	}
+	msg := call.ArgList[0]
+	declared := make(map[types2.Object]bool)
+	syntax.Inspect(msg, func(n syntax.Node) bool {
+		if obj := f.info.Implicits[n]; obj != nil {
+			declared[obj] = true
+		}
+		if name, ok := n.(*syntax.Name); ok {
+			if obj := f.info.Defs[name]; obj != nil {
+				declared[obj] = true
+			}
+		}
+		return true
+	})
+	var lhs, rhs []syntax.Expr
+	seen := make(map[*types2.Var]bool)
+	syntax.Inspect(msg, func(n syntax.Node) bool {
+		name, ok := n.(*syntax.Name)
+		if !ok {
+			return true
+		}
+		obj, ok := f.info.Uses[name].(*types2.Var)
+		if !ok || obj.IsField() || declared[obj] || seen[obj] {
+			return true
+		}
+		if pkg := obj.Pkg(); pkg != nil && obj.Parent() == pkg.Scope() {
+			return true
+		}
+		seen[obj] = true
+		lhs = append(lhs, nameOf(name.Pos(), "_"))
+		rhs = append(rhs, r.clone(name, f).(syntax.Expr))
+		return true
+	})
+	if len(rhs) == 0 {
+		return at(&syntax.EmptyStmt{}, pos)
+	}
+	return assignOf(pos, lhs, rhs)
+}
+
+func (f *ctFrame) caseType(c *syntax.ConstSwitchCase, elem int) types2.Type {
+	if elem < 0 || elem >= len(c.Elems) {
+		return nil
+	}
 	for f != nil {
-		if typ := f.info.TypeOf(c.Type); typ != nil {
+		if typ := f.info.TypeOf(c.Elems[elem].Type); typ != nil {
 			return typ
 		}
 		f = f.outer
 	}
 	return nil
 }
-
 func (r *ctReducer) constant(pos syntax.Pos, v constant.Value) syntax.Expr {
 	switch v.Kind() {
 	case constant.Int:
@@ -1101,11 +1205,19 @@ type ctPreparedPackage struct {
 	instances []ctPreparedInstance
 	sites     ctTraceSites
 	localDefs map[*syntax.Name]*types2.TypeName
+	files     []*syntax.File
 }
 
-func stageCtPreparedPackage(pkg *types2.Package, info *types2.Info) (*ctPreparedPackage, error) {
-	p := &ctPreparedPackage{instances: make([]ctPreparedInstance, 0, len(info.LogosCtInst))}
-	var files map[*types2.Scope]*ctPreparedFile
+// ctMethodTarget is the checked instance a direct comptime-method call
+// rewrites to: a plain function whose first parameter is the receiver.
+type ctMethodTarget struct {
+	fn  *types2.Func
+	rec *types2.LogosCtInst
+}
+
+func stageCtPreparedPackage(pkg *types2.Package, info *types2.Info, files []*syntax.File) (*ctPreparedPackage, error) {
+	p := &ctPreparedPackage{instances: make([]ctPreparedInstance, 0, len(info.LogosCtInst)), files: files}
+	var byScope map[*types2.Scope]*ctPreparedFile
 	for _, key := range slices.Sorted(maps.Keys(info.LogosCtInst)) {
 		record := info.LogosCtInst[key]
 		var file *ctPreparedFile
@@ -1114,13 +1226,13 @@ func stageCtPreparedPackage(pkg *types2.Package, info *types2.Info) (*ctPrepared
 			if scope == nil {
 				return nil, fmt.Errorf("logos: missing defining scope for comptime function %s", record.Origin)
 			}
-			file = files[scope]
+			file = byScope[scope]
 			if file == nil {
-				if files == nil {
-					files = make(map[*types2.Scope]*ctPreparedFile)
+				if byScope == nil {
+					byScope = make(map[*types2.Scope]*ctPreparedFile)
 				}
 				file = &ctPreparedFile{initial: scope}
-				files[scope] = file
+				byScope[scope] = file
 			}
 		}
 		unit, err := stageCtPreparedUnit(record, &p.sites, pkg)
@@ -1179,9 +1291,256 @@ func (p *ctPreparedPackage) finalize(pkg *types2.Package, info *types2.Info, con
 		}
 	}
 	info.LogosCtPrepared = records
+	p.rewriteMethodSites(info, records)
 	info.LogosCtImports = slices.Sorted(maps.Keys(imports))
 	info.LogosCtFinish = nil
 	return nil
+}
+
+// rewriteMethodSites redirects every direct call of a comptime generic
+// method in the compiled files and in every checked instance body to
+// its checked instance. The instance is a plain function whose first
+// parameter is the receiver, so the call recv.M(args) becomes
+// Origin_logosct_<id>(recv, args). Calls inside instance bodies resolve
+// through the body's own facts, and the fresh name is keyed there too,
+// so logos eject prints the instance's ejected name. Method values and
+// interface calls are out of scope: only a direct call carries a site
+// key the drain produced.
+func (p *ctPreparedPackage) rewriteMethodSites(info *types2.Info, records map[*types2.Func]*types2.LogosCtInst) {
+	byID := make(map[string]ctMethodTarget, len(records))
+	for fn, rec := range records {
+		if rec.Origin.Signature().Recv() == nil {
+			continue
+		}
+		byID[rec.ID] = ctMethodTarget{fn: fn, rec: rec}
+	}
+	if len(byID) == 0 {
+		return
+	}
+	for _, file := range p.files {
+		syntax.Inspect(file, func(n syntax.Node) bool {
+			call, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			rewriteMethodCall(info, call, byID)
+			return true
+		})
+	}
+	for _, rec := range records {
+		if rec.Info == nil || rec.Decl == nil {
+			continue
+		}
+		syntax.Inspect(rec.Decl, func(n syntax.Node) bool {
+			call, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			if fresh, id := rewriteMethodCall(rec.Info, call, byID); fresh != nil {
+				if rec.Info.LogosCtSiteKeys == nil {
+					rec.Info.LogosCtSiteKeys = make(map[*syntax.Name]string)
+				}
+				rec.Info.LogosCtSiteKeys[fresh] = id
+			}
+			return true
+		})
+	}
+}
+
+// rewriteMethodCall rewrites one direct comptime-method call to its
+// instance. A pointer receiver wraps an addressable-by-construction
+// value argument in &, mirroring Go's automatic addressing; a value
+// receiver dereferences a pointer argument symmetrically.
+func rewriteMethodCall(info *types2.Info, call *syntax.CallExpr, byID map[string]ctMethodTarget) (*syntax.Name, string) {
+	fun := syntax.Unparen(call.Fun)
+	if idx, ok := fun.(*syntax.IndexExpr); ok {
+		fun = syntax.Unparen(idx.X)
+	}
+	sel, ok := fun.(*syntax.SelectorExpr)
+	if !ok {
+		return nil, ""
+	}
+	id := info.LogosCtSiteKeys[sel.Sel]
+	if id == "" {
+		if fn, ok := info.Uses[sel.Sel].(*types2.Func); ok && fn.Signature().Recv() != nil {
+			if recvTyp := info.TypeOf(syntax.Unparen(sel.X)); recvTyp != nil {
+				recvTyp = types2.LogosCtNormalizedRecv(call.Pos(), fn.Origin(), recvTyp)
+				var targs []types2.Type
+				targs = append(targs, recvTyp)
+				if nparams := fn.Signature().TypeParams().Len(); nparams != 0 {
+					if inst, found := info.Instances[sel.Sel]; found && nparams == inst.TypeArgs.Len() {
+						targs = append(targs, typeArgsOf(inst.TypeArgs)...)
+					} else {
+						targs = nil
+					}
+				}
+				if targs != nil {
+					if key := types2.LogosCtKey(fn.Origin(), targs); key != "" {
+						for candID, tgt := range byID {
+							if types2.LogosCtKey(tgt.fn.Origin(), tgt.rec.Targs) == key {
+								id = candID
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+		if id == "" {
+			return nil, ""
+		}
+	}
+	target, ok := byID[id]
+	if !ok {
+		return nil, ""
+	}
+	selection, ok := info.Selections[sel]
+	if !ok {
+		return nil, ""
+	}
+	methodExpr := selection.Kind() == types2.MethodExpr
+	if !methodExpr && selection.Kind() != types2.MethodVal {
+		return nil, ""
+	}
+	sig := target.fn.Signature()
+	if sig.Params().Len() == 0 {
+		return nil, ""
+	}
+	// A method expression already passes the receiver explicitly;
+	// a method value call prepends the selector's receiver.
+	recvExpr := syntax.Expr(sel.X)
+	newArgs := call.ArgList
+	if methodExpr {
+		if len(newArgs) == 0 {
+			return nil, ""
+		}
+		recvExpr = newArgs[0]
+	} else {
+		newArgs = append([]syntax.Expr{syntax.Expr(syntax.Unparen(sel.X))}, call.ArgList...)
+	}
+	var projTyp types2.Type
+	if got := info.TypeOf(recvExpr); got != nil {
+		methodOrigin := target.fn.Origin()
+		if dfn, ok := info.Uses[sel.Sel].(*types2.Func); ok && dfn.Signature().Recv() != nil {
+			methodOrigin = dfn.Origin()
+		}
+		if proj, ptyp := ctPromotedProject(recvExpr, got, sel, info, methodOrigin); ptyp != nil {
+			recvExpr = proj
+			projTyp = ptyp
+			if !methodExpr {
+				newArgs[0] = proj
+			} else if len(newArgs) != 0 {
+				newArgs[0] = proj
+			}
+		}
+	}
+	recv := syntax.Unparen(recvExpr)
+	arg := syntax.Expr(recv)
+	var got types2.Type = info.TypeOf(recvExpr)
+	if projTyp != nil {
+		got = projTyp
+	}
+	if got != nil {
+		switch ctMethodRecvAdjust(sig.Params().At(0).Type(), got) {
+		case 1:
+			arg = addrOf(recv.Pos(), recv)
+			tvArg := syntax.TypeAndValue{Type: sig.Params().At(0).Type()}
+			tvArg.SetIsValue()
+			arg.SetTypeInfo(tvArg)
+		case -1:
+			arg = at(&syntax.Operation{Op: syntax.Mul, X: recv}, recv.Pos())
+			tvArg := syntax.TypeAndValue{Type: sig.Params().At(0).Type()}
+			tvArg.SetIsValue()
+			arg.SetTypeInfo(tvArg)
+		}
+	}
+	if !methodExpr {
+		newArgs[0] = arg
+	} else if len(newArgs) != 0 {
+		if _, ok := arg.(*syntax.Operation); ok {
+			adjusted := append([]syntax.Expr{arg}, newArgs[1:]...)
+			newArgs = adjusted
+		}
+	}
+	name := nameOf(sel.Sel.Pos(), target.rec.Origin.Name()+"_logosct_"+id)
+	tv := syntax.TypeAndValue{Type: sig}
+	tv.SetIsValue()
+	name.SetTypeInfo(tv)
+	call.Fun = name
+	call.ArgList = newArgs
+	if info.Uses == nil {
+		info.Uses = make(map[*syntax.Name]types2.Object)
+	}
+	info.Uses[name] = target.fn
+	// Instance functions check in a preparation scope, so they are not
+	// package-scoped globals the backend resolves by itself. Mark the
+	// reference the way exact generated-name bindings are marked, so the
+	// writer emits a plain global reference to the emitted instance.
+	if info.LogosCtGlobalRefs == nil {
+		info.LogosCtGlobalRefs = make(map[types2.Object]bool)
+	}
+	info.LogosCtGlobalRefs[target.fn] = true
+	return name, id
+}
+
+// ctPromotedProject rewrites a promoted comptime-method receiver to the
+// embedded field that declares the method, following the checked
+// selection's embedding path. It returns the projected expression and
+// its type, or the original pair when the call is not promoted.
+func ctPromotedProject(recvExpr syntax.Expr, recvTyp types2.Type, sel *syntax.SelectorExpr, info *types2.Info, origin *types2.Func) (syntax.Expr, types2.Type) {
+	s, ok := info.Selections[sel]
+	if !ok || s == nil || len(s.Index()) < 2 || recvTyp == nil {
+		return recvExpr, recvTyp
+	}
+	if _, _, ok := types2.LogosCtPromotedRecv(recvTyp, s, origin); !ok {
+		return recvExpr, recvTyp
+	}
+	curTyp := recvTyp
+	proj := syntax.Unparen(recvExpr)
+	for _, fi := range s.Index()[:len(s.Index())-1] {
+		curUn := types2.Unalias(curTyp)
+		if ptr, ok := curUn.(*types2.Pointer); ok {
+			curUn = types2.Unalias(ptr.Elem())
+		}
+		if named, ok := curUn.(*types2.Named); ok {
+			curUn = named.Underlying()
+		}
+		st, ok := curUn.(*types2.Struct)
+		if !ok || fi < 0 || fi >= st.NumFields() {
+			return recvExpr, recvTyp
+		}
+		fld := st.Field(fi)
+		name := nameOf(sel.Sel.Pos(), fld.Name())
+		selNew := &syntax.SelectorExpr{X: proj, Sel: name}
+		at(selNew, proj.Pos())
+		tvFld := syntax.TypeAndValue{Type: fld.Type()}
+		tvFld.SetIsValue()
+		selNew.SetTypeInfo(tvFld)
+		if fsel, ok := types2.LookupSelection(curTyp, true, origin.Pkg(), fld.Name()); ok {
+			info.Selections[selNew] = &fsel
+			info.Uses[name] = fsel.Obj()
+		}
+		proj = selNew
+		curTyp = fld.Type()
+	}
+	return proj, curTyp
+}
+
+// ctMethodRecvAdjust reports how a method-call receiver argument must be
+// adjusted for an instance whose first parameter wants a different
+// indirection: 1 means wrap in &, -1 means dereference, 0 means as is.
+func ctMethodRecvAdjust(want, got types2.Type) int {
+	want, got = types2.Unalias(want), types2.Unalias(got)
+	if ptr, ok := want.(*types2.Pointer); ok {
+		if _, ok := got.(*types2.Pointer); !ok && types2.Identical(types2.Unalias(ptr.Elem()), got) {
+			return 1
+		}
+		return 0
+	}
+	if ptr, ok := got.(*types2.Pointer); ok && types2.Identical(want, types2.Unalias(ptr.Elem())) {
+		return -1
+	}
+	return 0
 }
 
 func (inst ctPreparedInstance) check(consumer *types2.Package, info *types2.Info, conf *types2.Config, locals map[*types2.TypeName]*types2.TypeName) (*types2.Func, *types2.LogosCtInst, error) {
@@ -1226,6 +1585,23 @@ func (inst ctPreparedInstance) check(consumer *types2.Package, info *types2.Info
 	return fn, &result, nil
 }
 
+// ctMethodReceiverBase returns the name of the defined receiver base type
+// of a comptime generic method origin.
+func ctMethodReceiverBase(origin *types2.Func) (string, bool) {
+	recv := origin.Signature().Recv()
+	if recv == nil {
+		return "", false
+	}
+	t := types2.Unalias(recv.Type())
+	if ptr, ok := t.(*types2.Pointer); ok {
+		t = types2.Unalias(ptr.Elem())
+	}
+	named, ok := t.(*types2.Named)
+	if !ok || named.Obj() == nil {
+		return "", false
+	}
+	return named.Obj().Name(), true
+}
 func (inst ctPreparedInstance) ownerScope(info *types2.Info) (*types2.Scope, error) {
 	ct := inst.unit.context
 	if inst.file != nil {
@@ -1241,8 +1617,30 @@ func (inst ctPreparedInstance) ownerScope(info *types2.Info) (*types2.Scope, err
 		return nil, fmt.Errorf("no complete canonical comptime owner for %q", path)
 	}
 	ct.owner = owner
-	origin, ok := owner.Scope().Lookup(inst.record.Origin.Name()).(*types2.Func)
-	if !ok || info.LogosCtImport == nil {
+	origin := inst.record.Origin
+	if origin.Signature().Recv() != nil {
+		recvBase, ok := ctMethodReceiverBase(origin)
+		if !ok {
+			return nil, fmt.Errorf("missing canonical comptime receiver for %s", inst.record.Origin)
+		}
+		typeName, ok := owner.Scope().Lookup(recvBase).(*types2.TypeName)
+		if !ok {
+			return nil, fmt.Errorf("missing canonical comptime receiver %s for %s", recvBase, inst.record.Origin)
+		}
+		canonical, _, _ := types2.LookupFieldOrMethod(typeName.Type(), false, owner, origin.Name())
+		fn, ok := canonical.(*types2.Func)
+		if !ok {
+			return nil, fmt.Errorf("missing canonical comptime origin %s", inst.record.Origin)
+		}
+		origin = fn.Origin()
+	} else {
+		fn, ok := owner.Scope().Lookup(origin.Name()).(*types2.Func)
+		if !ok {
+			return nil, fmt.Errorf("missing canonical comptime origin %s", inst.record.Origin)
+		}
+		origin = fn
+	}
+	if info.LogosCtImport == nil {
 		return nil, fmt.Errorf("missing canonical comptime origin %s", inst.record.Origin)
 	}
 	generic, ok := info.LogosCtImport(origin)

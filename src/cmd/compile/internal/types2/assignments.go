@@ -145,7 +145,9 @@ func (check *Checker) assignOperand(x *operand, T Type, context string, result r
 			check.errorf(x, code, "cannot use %s as %s value in %s", x, T, context)
 		}
 		x.invalidate()
+		return
 	}
+	check.logosCtDeferInterfaceFormation(x.Pos(), x.typ(), T)
 }
 
 func (check *Checker) initConst(lhs *Const, x *operand) {

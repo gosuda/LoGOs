@@ -154,7 +154,7 @@ func (p *logosEFPass) dropCleanupSeeds(before, seeded, out *logosEFState) *logos
 	if mout == nil {
 		return out
 	}
-	return &logosEFState{m: mout, may: out.may, mayErr: out.mayErr, mayAlt: out.mayAlt, mayBroke: out.mayBroke, cleanups: out.cleanups}
+	return &logosEFState{m: mout, may: out.may, mayErr: out.mayErr, mayAlt: out.mayAlt, mayBroke: out.mayBroke, brokeHere: out.brokeHere, cleanups: out.cleanups}
 }
 
 // finishCleanups consumes only calls whose boundary is being crossed.
@@ -184,6 +184,12 @@ func (p *logosEFPass) finishCleanups(st *logosEFState, crosses func(logosEFDefer
 					panicked = false
 				} else {
 					st = next
+					if node.call.lit.Body != nil && cleanupRecoversOnAllPaths(p, node.call.lit.Body) {
+						// A callback that recovers on every normal path and
+						// completes ends unwinding: an earlier panic no
+						// longer discards the return path.
+						panicked = false
+					}
 				}
 			} else {
 				keep = append(keep, logosEFCleanup{call: node.call})

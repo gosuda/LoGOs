@@ -52,6 +52,7 @@ type linker struct {
 	logosCtGraph     map[string][]string
 	logosCtMapFuncs  map[index]bool
 	logosCtConstMaps index
+	logosCtMethods   map[logosCtMethodOrigin]index
 }
 
 // relocAll ensures that all elements specified by pr and relocs are
@@ -110,7 +111,7 @@ func (l *linker) relocLogosCtTargets(pr *pkgReader) {
 	if l.logosCtReaders[pr] {
 		return
 	}
-	if len(pr.logosCtExact) == 0 && len(pr.logosCtGraph) == 0 && len(pr.logosCtHelpers) == 0 && len(pr.logosCtMapFuncs) == 0 {
+	if len(pr.logosCtExact) == 0 && len(pr.logosCtGraph) == 0 && len(pr.logosCtHelpers) == 0 && len(pr.logosCtMapFuncs) == 0 && len(pr.logosCtMethods) == 0 {
 		return
 	}
 	if l.logosCtReaders == nil {
@@ -161,7 +162,7 @@ func (l *linker) relocLogosCtTargets(pr *pkgReader) {
 }
 
 func (l *linker) writeLogosCtTargets(w *pkgbits.Encoder) {
-	if len(l.logosCtExact) == 0 && len(l.logosCtGraph) == 0 && len(l.logosCtHelpers) == 0 && len(l.logosCtMapFuncs) == 0 {
+	if len(l.logosCtExact) == 0 && len(l.logosCtGraph) == 0 && len(l.logosCtHelpers) == 0 && len(l.logosCtMapFuncs) == 0 && len(l.logosCtMethods) == 0 {
 		return
 	}
 	w.Len(len(l.logosCtExact))
@@ -174,18 +175,19 @@ func (l *linker) writeLogosCtTargets(w *pkgbits.Encoder) {
 		w.String(id)
 		w.Strings(l.logosCtGraph[id])
 	}
-	if len(l.logosCtHelpers) != 0 || len(l.logosCtMapFuncs) != 0 {
+	if len(l.logosCtHelpers) != 0 || len(l.logosCtMapFuncs) != 0 || l.logosCtConstMaps != 0 || len(l.logosCtMethods) != 0 {
 		w.Len(len(l.logosCtHelpers))
 		for _, idx := range slices.Sorted(maps.Keys(l.logosCtHelpers)) {
 			w.Reloc(pkgbits.SectionObj, idx)
 			w.Bool(l.logosCtHelpers[idx])
 		}
 	}
-	if len(l.logosCtMapFuncs) != 0 {
+	if len(l.logosCtMapFuncs) != 0 || l.logosCtConstMaps != 0 || len(l.logosCtMethods) != 0 {
 		w.Len(len(l.logosCtMapFuncs))
 		for _, idx := range slices.Sorted(maps.Keys(l.logosCtMapFuncs)) {
 			w.Reloc(pkgbits.SectionObj, idx)
 		}
+		w.Bool(l.logosCtConstMaps != 0)
 		if l.logosCtConstMaps != 0 {
 			w.Reloc(pkgbits.SectionMeta, l.logosCtConstMaps)
 		}

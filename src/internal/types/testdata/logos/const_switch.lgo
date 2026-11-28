@@ -167,15 +167,70 @@ func tildeComposite[T any](v T) {
 func caseList[T any](v T) {
 	_ = v
 	const switch T {
-	case int, /* ERROR "const switch case takes a single type, not a list" */ string :
+	case int, string:
+		var z T = v
+		_ = z
 	}
 }
 
-func caseDefault[T any](v T) {
+func caseListShadowed[T any](v T) {
 	_ = v
 	const switch T {
-	default /* ERROR "expected case or }" */ :
+	case int:
+		return
+	case int, string:
+		return
 	}
+	return
+}
+
+func caseListCovered[T any](v T) {
+	_ = v
+	const switch T {
+	case int:
+		return
+	case string:
+		return
+	case int /* ERROR "comptime::unreachable_case" */, string:
+		return
+	}
+	return
+}
+
+func caseDefault[T any](v T) string {
+	_ = v
+	out := ""
+	const switch T {
+	case int:
+		out = "int"
+	default:
+		out = "other"
+	}
+	return out
+}
+
+func caseDefaultShadowed[T any](v T) string {
+	_ = v
+	out := ""
+	const switch T {
+	default:
+		out = "d"
+	case string /* ERROR "comptime::unreachable_case" */ :
+		out = "s"
+	}
+	return out
+}
+
+func caseDefaultCovered[T any](v T) string {
+	_ = v
+	out := ""
+	const switch T {
+	case any:
+		out = "any"
+	default /* ERROR "comptime::unreachable_case" */ :
+		out = "d"
+	}
+	return out
 }
 
 func breakInCase[T any](v T) {
@@ -236,5 +291,22 @@ func filesNeverRebind(items []*os.File) {
 	case io.Writer:
 		var ws []io.Writer = items // ERROR "cannot use items"
 		_ = ws
+	}
+}
+
+func tildeOption[T any](v T) {
+	_ = v
+	const switch T {
+	case ~ /* ERROR "comptime::tilde_not_basic" */ int64? :
+	}
+}
+
+func duplicateOption[T any](v T) {
+	_ = v
+	const switch T {
+	case int64?:
+		return
+	case int64 /* ERROR "comptime::unreachable_case" */ ? :
+		return
 	}
 }

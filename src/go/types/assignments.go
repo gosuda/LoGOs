@@ -118,6 +118,7 @@ func (check *Checker) assignOperand(x *operand, T Type, context string) {
 			check.errorf(x, code, "cannot use %s as %s value in %s", x, T, context)
 		}
 		x.invalidate()
+		return
 	}
 }
 

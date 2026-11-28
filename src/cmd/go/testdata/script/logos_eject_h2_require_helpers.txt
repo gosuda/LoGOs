@@ -1,0 +1,54 @@
+# A source caller of the ejected helpers keeps one name in both builds:
+# RequireExtendedConnect and RequireExtendedConnectFunc exist natively
+# too. Natively they enable the per-server opt-in; ejected they require
+# the process-startup GODEBUG setting and fail fast without it.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd helper
+logos run .
+stdout '^helper ready$'
+logos eject -o out
+grep 'RequireExtendedConnect' out/main.go
+! grep 'EnableHTTP2ExtendedConnect()' out/main.go
+cd out
+go build ./...
+env GODEBUG=http2xconnect=1
+go run .
+stdout '^helper ready$'
+env GODEBUG=
+! exec go run .
+stderr 'needs GODEBUG=http2xconnect=1'
+stderr 'on server "srv"'
+env GODEBUG=http2xconnect=1
+exec go run .
+stdout '^helper ready$'
+exists $UPROOT1272/bin/go
+exec $UPROOT1272/bin/go version
+stdout '^go version go1\.27\.2 '
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+cd ..
+
+-- helper/go.mod --
+module example.com/h2require
+
+go 1.27
+
+-- helper/main.lgo --
+package main
+
+import (
+	"fmt"
+	"net/http"
+
+	logohttp "logos/net/http"
+)
+
+func main() {
+	srv := &http.Server{Addr: "127.0.0.1:0"}
+	logohttp.RequireExtendedConnect("srv", srv)
+	f := logohttp.RequireExtendedConnectFunc("srv", srv)
+	f()
+	fmt.Println("helper ready")
+}

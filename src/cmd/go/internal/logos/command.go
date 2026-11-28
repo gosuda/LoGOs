@@ -20,7 +20,7 @@ import (
 
 func ConfigureCommand(cmd *base.Command) {
 	cmd.UsageLine = "logos"
-	cmd.Long = "Logos is a tool for managing loGo/s source code."
+	cmd.Long = "Logos is a tool for managing LoGOs source code."
 	dropFmt(cmd)
 	for _, sub := range cmd.Commands {
 		rebrandUsageLine(sub)

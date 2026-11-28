@@ -570,36 +570,48 @@ func h2PackageReserved(dirs ...string) map[string]bool {
 			if !e.Type().IsRegular() || !strings.HasSuffix(name, ".go") {
 				continue
 			}
-			fset := token.NewFileSet()
-			f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+			data, err := os.ReadFile(filepath.Join(dir, name))
 			if err != nil {
 				continue
 			}
-			for _, decl := range f.Decls {
-				switch d := decl.(type) {
-				case *ast.FuncDecl:
-					used[d.Name.Name] = true
-				case *ast.GenDecl:
-					for _, spec := range d.Specs {
-						switch s := spec.(type) {
-						case *ast.TypeSpec:
-							used[s.Name.Name] = true
-						case *ast.ValueSpec:
-							for _, id := range s.Names {
-								used[id.Name] = true
-							}
-						}
+			h2ReserveGoNames(used, filepath.Join(dir, name), data)
+		}
+	}
+	return used
+}
+
+// h2ReserveGoNames records the top-level declared names and local import
+// names of one Go source. Files that fail to parse record nothing; the
+// importing file's own identifiers still reserve its name through the
+// rewrite's file-local decision.
+func h2ReserveGoNames(used map[string]bool, filename string, data []byte) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filename, data, 0)
+	if err != nil {
+		return
+	}
+	for _, decl := range f.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			used[d.Name.Name] = true
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					used[s.Name.Name] = true
+				case *ast.ValueSpec:
+					for _, id := range s.Names {
+						used[id.Name] = true
 					}
-				}
-			}
-			for _, imp := range f.Imports {
-				if imp.Name != nil {
-					used[imp.Name.Name] = true
 				}
 			}
 		}
 	}
-	return used
+	for _, imp := range f.Imports {
+		if imp.Name != nil {
+			used[imp.Name.Name] = true
+		}
+	}
 }
 
 // h2PackageReservedFor returns the package-wide reserved names for the

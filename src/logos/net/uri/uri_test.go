@@ -34,6 +34,9 @@ func equalURI(a, b uri.URI) bool {
 	if a.HasHost != b.HasHost || a.HasPort != b.HasPort {
 		return false
 	}
+	if a.HasAuthority != b.HasAuthority {
+		return false
+	}
 	if a.HasQuery != b.HasQuery || a.HasFragment != b.HasFragment {
 		return false
 	}
@@ -434,4 +437,68 @@ func FuzzParse(f *testing.F) {
 		_ = u.Fragment.Decoded()
 		_ = u.Host.Decoded()
 	})
+}
+
+func TestAppendDecodedRaw(t *testing.T) {
+	if got := uri.Raw("100%25").AppendDecoded(nil); string(got) != "100%25" {
+		t.Errorf("raw AppendDecoded = %q, want %q", got, "100%25")
+	}
+	if got := uri.Encoded("%41%42").AppendDecoded(nil); string(got) != "AB" {
+		t.Errorf("encoded AppendDecoded = %q, want %q", got, "AB")
+	}
+	if got := uri.Raw("100%25").Decoded(); got != "100%25" {
+		t.Errorf("raw Decoded = %q, want %q", got, "100%25")
+	}
+}
+
+func TestResolveBareOrigin(t *testing.T) {
+	base := mustParse(t, "https://example.com")
+	got, err := base.Resolve("child")
+	if err != nil {
+		t.Fatalf("Resolve = %v", err)
+	}
+	if got.String() != "https://example.com/child" {
+		t.Errorf("Resolve(child) = %q, want %q", got.String(), "https://example.com/child")
+	}
+	hostless := mustParse(t, "urn:example:animal")
+	got, err = hostless.Resolve("child")
+	if err != nil {
+		t.Fatalf("Resolve = %v", err)
+	}
+	if got.String() != "urn:child" {
+		t.Errorf("hostless Resolve(child) = %q, want %q", got.String(), "urn:child")
+	}
+}
+
+func TestResolveEmptyAuthority(t *testing.T) {
+	base := mustParse(t, "file://workstation/docs/index")
+	got, err := base.Resolve("///local/path")
+	if err != nil {
+		t.Fatalf("Resolve = %v", err)
+	}
+	if got.String() != "file:///local/path" {
+		t.Errorf("Resolve(///local/path) = %q, want %q", got.String(), "file:///local/path")
+	}
+	const round = "file:////server/share"
+	u := mustParse(t, round)
+	if u.String() != round {
+		t.Errorf("round trip %q = %q", round, u.String())
+	}
+}
+
+func TestRenderBareAuthorityEmptyPath(t *testing.T) {
+	u := uri.URI{Scheme: "file", HasAuthority: true}
+	if got := u.String(); got != "file:///" {
+		t.Fatalf("String = %q, want %q", got, "file:///")
+	}
+	if v := mustParse(t, "file:///"); v.String() != u.String() {
+		t.Fatalf("round trip = %q, want %q", v.String(), u.String())
+	}
+	q := uri.URI{Scheme: "file", HasAuthority: true, Query: uri.Raw("q"), HasQuery: true}
+	if got := q.String(); got != "file:///?q" {
+		t.Fatalf("String = %q, want %q", got, "file:///?q")
+	}
+	if r := mustParse(t, q.String()); r.String() != q.String() {
+		t.Fatalf("round trip = %q, want %q", r.String(), q.String())
+	}
 }

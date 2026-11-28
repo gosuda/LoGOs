@@ -1,0 +1,52 @@
+// Copyright 2026 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package p
+
+func fetch345() (int, error) { return 1, nil }
+func use345(n int) {}
+
+// The first cleanup returns before it reaches recover when stop holds,
+// so the panic path never resumes: the trailing read is unreachable and
+// stays silent. The syntactic scan treated any recover mention as a
+// recovery and reported the read.
+func skippedRecoveryResumesNothing345(stop bool) error {
+	n, err := fetch345()
+	_ = err
+	func() {
+		if stop {
+			defer func() {
+				if stop {
+					return
+				}
+				_ = recover()
+			}()
+			defer func() { panic("stop") }()
+			return
+		}
+		n = 0
+	}()
+	use345(n)
+	return nil
+}
+
+// The same skipped recovery with no reset on the normal path: the
+// stop=false path returns with the result unchecked, so the read must
+// still fail.
+func skippedRecoveryNormalPath345(stop bool) {
+	n, err := fetch345()
+	_ = err
+	func() {
+		defer func() {
+			if stop {
+				return
+			}
+			_ = recover()
+		}()
+		if stop {
+			panic("stop")
+		}
+	}()
+	use345(n /* ERROR "[correctness::result_before_error_check]" */)
+}

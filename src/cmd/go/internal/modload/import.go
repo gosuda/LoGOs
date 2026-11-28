@@ -779,6 +779,15 @@ func dirInModule(path, mpath, mdir string, isLocal bool) (dir string, haveGoFile
 		return fsys.IsGoDir(dir)
 	})
 
+	// A directory that plain go rejects but that holds LoGOs sources
+	// re-executes as logos before the missing-package error, wherever
+	// it lies: a main module, a directory replace, the module cache,
+	// or the vendor tree. The standard library never triggers:
+	// UnderGoRoot inside MaybeRelaunchForDir already guards it.
+	if err == nil && !haveGoFiles {
+		cfg.MaybeRelaunchForDir(dir, true, "import resolves to LoGOs sources")
+	}
+
 	return dir, haveGoFiles, err
 }
 

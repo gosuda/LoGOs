@@ -20,12 +20,12 @@ var CmdLint = &base.Command{
 	Long: `
 Lint type-checks the named packages of the main module, runs the compiler
 lints through escape analysis, and stops before code generation, so it
-writes no binary. It lints loGo/s packages with every rule and Go packages
+writes no binary. It lints LoGOs packages with every rule and Go packages
 with the language-neutral rules only. Severities come from the [lints]
 table of logos.toml; a lint that is an error fails the command.
 
 The //logos:allow(<rule>) comment before a statement or declaration
-silences a deny or warn rule. A forbid rule ignores it in a loGo/s package,
+silences a deny or warn rule. A forbid rule ignores it in a LoGOs package,
 and the directive itself is then an error. Go packages run a forbid rule
 at deny, so the directive silences it there.
 

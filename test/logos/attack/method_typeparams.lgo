@@ -1,0 +1,36 @@
+// run
+
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Wrap[T any] struct {
+	V T
+}
+
+func (w Wrap[T]) Describe[U any](u U) string {
+	out := ""
+	const for _, f := range comptime.Fields[U]() {
+		out += f.Name + ";"
+	}
+	_ = w.V
+	_ = u
+	return out
+}
+
+type Pair struct {
+	A int
+	B string
+}
+
+type Single struct {
+	X int
+}
+
+func main() {
+	fmt.Println(Wrap[int]{}.Describe(Pair{}))
+	fmt.Println(Wrap[int]{}.Describe(Single{}))
+}

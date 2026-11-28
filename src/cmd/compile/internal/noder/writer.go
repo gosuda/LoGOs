@@ -103,14 +103,15 @@ type pkgWriter struct {
 	// passed through to cmd/link.
 	cgoPragmas [][]string
 
-	logosCtDefs     map[*types2.Func]*types2.LogosCtInst
-	logosCtOrder    []*types2.Func
-	logosCtHelpers  map[types2.Object]*types2.LogosCtInst
-	logosCtUnits    []logosCtHelperUnit
-	logosCtObjects  map[string]*types2.Func
-	logosCtGenerics map[logosCtOrigin]types2.LogosCtGeneric
-	logosCtOwner    *types2.Package
-	logosCtInfo     *types2.Info
+	logosCtDefs           map[*types2.Func]*types2.LogosCtInst
+	logosCtOrder          []*types2.Func
+	logosCtHelpers        map[types2.Object]*types2.LogosCtInst
+	logosCtUnits          []logosCtHelperUnit
+	logosCtObjects        map[string]*types2.Func
+	logosCtGenerics       map[logosCtOrigin]types2.LogosCtGeneric
+	logosCtMethodGenerics map[logosCtMethodOrigin]types2.LogosCtGeneric
+	logosCtOwner          *types2.Package
+	logosCtInfo           *types2.Info
 }
 
 type logosCtHelperUnit struct {
@@ -121,6 +122,33 @@ type logosCtHelperUnit struct {
 type logosCtOrigin struct {
 	path string
 	name string
+}
+
+// logosCtMethodOrigin identifies a comptime generic method by its
+// receiver named type and method name. Package-level keys cannot hold
+// methods: two named types may declare the same method name.
+type logosCtMethodOrigin struct {
+	recvPath string
+	recvName string
+	name     string
+}
+
+// logosCtMethodKeyOf returns the export key of a comptime generic
+// method origin, or false when the receiver is not a defined type.
+func logosCtMethodKeyOf(fn *types2.Func) (logosCtMethodOrigin, bool) {
+	recv := fn.Signature().Recv()
+	if recv == nil {
+		return logosCtMethodOrigin{}, false
+	}
+	t := types2.Unalias(recv.Type())
+	if ptr, isPtr := t.(*types2.Pointer); isPtr {
+		t = types2.Unalias(ptr.Elem())
+	}
+	named, _ := t.(*types2.Named)
+	if named == nil || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return logosCtMethodOrigin{}, false
+	}
+	return logosCtMethodOrigin{recvPath: named.Obj().Pkg().Path(), recvName: named.Obj().Name(), name: fn.Name()}, true
 }
 
 // The normal dynamic instance form cannot contain this subdictionary index.
@@ -2508,7 +2536,28 @@ func (pw *pkgWriter) logosCtOrigin(obj *types2.Func) bool {
 }
 
 func (pw *pkgWriter) logosCtGeneric(obj *types2.Func) types2.LogosCtGeneric {
-	if pw.logosCtInfo == nil || obj.Pkg() == nil || obj.Signature().Recv() != nil || obj.Signature().TypeParams().Len() == 0 {
+	if pw.logosCtInfo == nil || obj.Pkg() == nil {
+		return types2.LogosCtGeneric{}
+	}
+	if obj.Signature().Recv() != nil {
+		if obj.Signature().RecvTypeParams().Len()+obj.Signature().TypeParams().Len() == 0 {
+			return types2.LogosCtGeneric{}
+		}
+		key, ok := logosCtMethodKeyOf(obj.Origin())
+		if !ok {
+			return types2.LogosCtGeneric{}
+		}
+		if generic, ok := pw.logosCtMethodGenerics[key]; ok {
+			return generic
+		}
+		var generic types2.LogosCtGeneric
+		if obj.Pkg().Path() != pw.curpkg.Path() && pw.logosCtInfo.LogosCtImport != nil {
+			generic, _ = pw.logosCtInfo.LogosCtImport(obj.Origin())
+		}
+		pw.logosCtMethodGenerics[key] = generic
+		return generic
+	}
+	if obj.Signature().TypeParams().Len() == 0 {
 		return types2.LogosCtGeneric{}
 	}
 	key := logosCtOrigin{obj.Pkg().Path(), obj.Name()}
@@ -3157,7 +3206,14 @@ func (pw *pkgWriter) collectDecls(noders []*noder) {
 	pw.logosCtDefs = pw.info.LogosCtPrepared
 	pw.logosCtObjects = make(map[string]*types2.Func, len(pw.logosCtDefs))
 	pw.logosCtGenerics = make(map[logosCtOrigin]types2.LogosCtGeneric)
+	pw.logosCtMethodGenerics = make(map[logosCtMethodOrigin]types2.LogosCtGeneric)
 	for obj, generic := range pw.info.LogosCtGenerics {
+		if obj.Signature().Recv() != nil {
+			if key, ok := logosCtMethodKeyOf(obj.Origin()); ok {
+				pw.logosCtMethodGenerics[key] = generic
+			}
+			continue
+		}
 		pw.logosCtGenerics[logosCtOrigin{obj.Pkg().Path(), obj.Name()}] = generic
 	}
 	for obj, inst := range pw.logosCtDefs {

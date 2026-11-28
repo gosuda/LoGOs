@@ -108,8 +108,11 @@ logos lint ./...
 cd ..
 
 cd clean
-! go lint ./...
-stderr 'go lint: unknown command'
+# Plain go re-executes as logos for the lint subcommand. A logos-only
+# build flag still fails before any package loads in an unmarked module.
+go lint ./...
+! stderr .
+! stdout .
 ! go build --json-diagnostics ./...
 stderr 'flag provided but not defined: -json-diagnostics'
 go help build

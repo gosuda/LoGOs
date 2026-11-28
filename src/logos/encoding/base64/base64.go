@@ -204,7 +204,7 @@ func (e Encoding) gather(src []byte, i int) ([4]byte, int, int, int, int, error)
 			continue
 		}
 		if c == '=' {
-			if e.raw {
+			if e.raw || sig < 2 {
 				return v, 0, 0, 0, 0, CorruptInputError(i)
 			}
 			if padAt < 0 {

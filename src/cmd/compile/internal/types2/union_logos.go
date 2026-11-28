@@ -569,6 +569,159 @@ func logosAccessibleAlias(t Type, pkg *Package) (*TypeName, bool) {
 	}
 }
 
+// logosWrittenPointedElem returns the element of a pointer reached through
+// aliases as written, without consulting the alias expansion cache: type
+// checking may already have expanded an alias elsewhere, which would hide
+// an accessible middle spelling. A nil right-hand side or a non-pointer
+// shape reports false.
+func logosWrittenPointedElem(t Type) (Type, bool) {
+	for {
+		if a, ok := t.(*Alias); ok {
+			rhs := a.Rhs()
+			if rhs == nil {
+				return nil, false
+			}
+			t = rhs
+			continue
+		}
+		if cv, ok := t.(*ConstView); ok {
+			t = cv.Elem
+			continue
+		}
+		if p, ok := t.(*Pointer); ok {
+			return p.Elem(), true
+		}
+		return nil, false
+	}
+}
+
+// logosNameAccessible reports whether the holder package can name obj: a
+// nil holder or a nil package accepts, otherwise the name must be declared
+// in the holder's own package or exported.
+func logosNameAccessible(obj *TypeName, pkg *Package) bool {
+	if obj == nil {
+		return false
+	}
+	op := obj.Pkg()
+	if op == nil || pkg == nil {
+		return true
+	}
+	if op.Path() == pkg.Path() {
+		return true
+	}
+	return obj.Exported()
+}
+
+// logosSpellableInPkg reports whether the holder package can spell t. An
+// alias counts by its own accessible name, a defined type by its exported
+// or same-package name, and both require every type argument to be
+// spellable, mirroring spellableType in the decoder generator. Composite
+// types are walked so an unexported name nested in an argument is still
+// rejected. Anything else keeps the conservative answer true so only a
+// clearly unspellable element is ever rejected.
+func logosSpellableInPkg(t Type, pkg *Package) bool {
+	seen := make(map[Type]bool)
+	return logosSpellableWalk(t, pkg, seen)
+}
+
+func logosSpellableWalk(t Type, pkg *Package, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return true
+	}
+	seen[t] = true
+	switch t := t.(type) {
+	case *Basic, *TypeParam:
+		return true
+	case *Alias:
+		if !logosNameAccessible(t.Obj(), pkg) {
+			return false
+		}
+		if args := t.TypeArgs(); args != nil {
+			for i := range args.Len() {
+				if !logosSpellableWalk(args.At(i), pkg, seen) {
+					return false
+				}
+			}
+		}
+		return true
+	case *Named:
+		if !logosNameAccessible(t.Obj(), pkg) {
+			return false
+		}
+		if args := t.TypeArgs(); args != nil {
+			for i := range args.Len() {
+				if !logosSpellableWalk(args.At(i), pkg, seen) {
+					return false
+				}
+			}
+		}
+		return true
+	case *Pointer:
+		return logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Slice:
+		return logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Array:
+		return logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Map:
+		return logosSpellableWalk(t.Key(), pkg, seen) && logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Chan:
+		return logosSpellableWalk(t.Elem(), pkg, seen)
+	case *Signature:
+		return logosSpellableTuple(t.Params(), pkg, seen) && logosSpellableTuple(t.Results(), pkg, seen)
+	case *Tuple:
+		return logosSpellableTuple(t, pkg, seen)
+	case *Interface:
+		for i := range t.NumMethods() {
+			if !logosSpellableWalk(t.Method(i).Type(), pkg, seen) {
+				return false
+			}
+		}
+		for i := range t.NumEmbeddeds() {
+			if !logosSpellableWalk(t.EmbeddedType(i), pkg, seen) {
+				return false
+			}
+		}
+		return true
+	case *Struct:
+		for i := range t.NumFields() {
+			if !logosSpellableWalk(t.Field(i).Type(), pkg, seen) {
+				return false
+			}
+		}
+		return true
+	default:
+		return true
+	}
+}
+
+func logosSpellableTuple(t *Tuple, pkg *Package, seen map[Type]bool) bool {
+	if t == nil {
+		return true
+	}
+	for i := range t.Len() {
+		if !logosSpellableWalk(t.At(i).Type(), pkg, seen) {
+			return false
+		}
+	}
+	return true
+}
+
+// logosUnionPointerAllocSpellable reports whether the trial allocation for
+// a pointer union member can be spelled by holder: the written pointed
+// element when the holder can name it, else the unaliased element. It
+// mirrors the trial's allocation choice in json_unmarshal, so validation
+// and the generated decoder agree.
+func logosUnionPointerAllocSpellable(term Type, pkg *Package) bool {
+	elem, ok := logosWrittenPointedElem(term)
+	if !ok {
+		return true
+	}
+	if logosSpellableInPkg(elem, pkg) {
+		return true
+	}
+	return logosSpellableInPkg(Unalias(elem), pkg)
+}
+
 func logosAppendImportedMembers(name logosForeignName, out *[]LogosUnionMember, seen, visited map[string]bool) {
 	key := name.pkgPath + "." + name.typeName
 	if visited[key] {

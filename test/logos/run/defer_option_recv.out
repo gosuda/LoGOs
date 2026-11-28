@@ -1,9 +1,12 @@
 ok box-err
 ok box-ran
 ok box-absent-err
+ok box-absent-skip
 ok item-err
 ok item-ran
 ok item-absent-err
+ok item-absent-skip
 ok value-err
 ok value-saw-registration
 ok value-absent-err
+ok value-absent-skip

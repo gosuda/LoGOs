@@ -84,7 +84,7 @@ func logosAliasDirective(path string) token.Position {
 }
 
 func reportLogosAlias(name, level string, allow token.Position) []error {
-	text := fmt.Sprintf("[%s] %s: loGo/s alias extension file; rename to .lgo before publishing", logosAliasRule, name)
+	text := fmt.Sprintf("[%s] %s: LoGOs alias extension file; rename to .lgo before publishing", logosAliasRule, name)
 	switch {
 	case level == "allow":
 		return nil

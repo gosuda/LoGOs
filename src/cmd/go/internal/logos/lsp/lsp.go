@@ -22,8 +22,8 @@ var CmdLSP = &base.Command{
 	Short:     "serve the language server protocol over stdio",
 	Long: `
 Lsp runs a Language Server Protocol server on standard input and output
-for loGo/s and Go files. It starts gopls (which must be on PATH) and sits
-between it and the client: loGo/s sources reach gopls as lowered Go
+for LoGOs and Go files. It starts gopls (which must be on PATH) and sits
+between it and the client: LoGOs sources reach gopls as lowered Go
 documents kept in memory, positions and URIs are mapped both ways, and the
 compiler diagnostics are merged into the diagnostics gopls publishes.
 Nothing is written into the workspace.
