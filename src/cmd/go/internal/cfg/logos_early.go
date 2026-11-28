@@ -6,10 +6,12 @@ package cfg
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"cmd/go/internal/fsys"
+	"cmd/internal/pkgpattern"
 	"golang.org/x/mod/modfile"
 )
 
@@ -480,6 +482,11 @@ func scopeFromWorkFile(workFile string) logosScope {
 		return s
 	}
 	s.workDir = filepath.Dir(workFile)
+	if !filepath.IsAbs(s.workDir) {
+		if cwd, err := os.Getwd(); err == nil {
+			s.workDir = filepath.Join(cwd, s.workDir)
+		}
+	}
 	for _, u := range wf.Use {
 		mdir := u.Path
 		if !filepath.IsAbs(mdir) {
@@ -508,19 +515,170 @@ func goModPath(dir string) string {
 }
 
 // scopeHoldsLogos reports whether any scope member tree holds a directory
-// with LoGOs sources and no .go files.
+// with LoGOs sources and no .go files. Eligibility mirrors the package
+// walker: vendor trees, go.mod ignore exclusions, nested modules outside
+// the scope, and dot, underscore, and testdata trees never count.
 func scopeHoldsLogos() bool {
 	s := discoverLogosScope()
 	if len(s.members) == 0 {
 		return false
 	}
-	roots := memberRootSet(s)
+	always := func(string) bool { return true }
+	return walkScopeLogos(s, always, always)
+}
+
+// walkScopeLogos walks every scope member and reports whether a directory
+// whose import path matches match holds LoGOs sources and no .go files.
+// treeCanMatch prunes subtrees the pattern cannot match.
+func walkScopeLogos(s logosScope, match, treeCanMatch func(string) bool) bool {
+	ignores := make(map[string]*logosIgnorePatterns, len(s.members))
 	for _, m := range s.members {
-		if treeHoldsLogosOnly(m.root, roots) {
+		if m.path == "" {
+			continue
+		}
+		if !treeCanMatch(m.path) {
+			continue
+		}
+		ignore, ok := ignores[m.root]
+		if !ok {
+			ignore = parseLogosIgnorePatterns(m.root)
+			ignores[m.root] = ignore
+		}
+		if walkMemberLogos(m, match, treeCanMatch, ignore) {
 			return true
 		}
 	}
 	return false
+}
+
+// walkMemberLogos walks the member root and reports whether a directory
+// whose import path (the member path joined with the slash-separated path
+// relative to the root) matches match holds LoGOs sources and no .go
+// files. Eligibility mirrors the package walker: dot, underscore, and
+// testdata trees are skipped, vendor subtrees are pruned, nested modules
+// are skipped (they get their own walk when they are scope members),
+// go.mod ignore rules apply, and subtrees the pattern cannot match are
+// pruned.
+func walkMemberLogos(m logosScopeModule, match, treeCanMatch func(string) bool, ignore *logosIgnorePatterns) bool {
+	root := m.root
+	stack := []string{root}
+	for len(stack) > 0 {
+		d := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		relSlash := ""
+		if d != root {
+			rel, err := filepath.Rel(root, d)
+			if err != nil {
+				continue
+			}
+			relSlash = filepath.ToSlash(rel)
+			_, elem := filepath.Split(d)
+			if skipDirElem(elem) || elem == "vendor" {
+				continue
+			}
+			if st, err := fsys.Stat(filepath.Join(d, "go.mod")); err == nil && !st.IsDir() {
+				continue
+			}
+		}
+		name := m.path
+		if relSlash != "" {
+			name = path.Join(m.path, relSlash)
+		}
+		if !treeCanMatch(name) {
+			continue
+		}
+		if ignore.shouldIgnore(relSlash) {
+			continue
+		}
+		fis, err := fsys.ReadDir(d)
+		if err != nil {
+			continue
+		}
+		if match(name) && dirEntriesHoldOnlyLogosSources(fis, d) {
+			return true
+		}
+		for _, fi := range fis {
+			if fi.IsDir() {
+				stack = append(stack, filepath.Join(d, fi.Name()))
+			}
+		}
+	}
+	return false
+}
+
+// logosIgnorePatterns holds a module's go.mod ignore rules in the form
+// package discovery uses: a "./x" rule pins the module-rooted path x,
+// while a bare name matches at any depth. Wildcards are not supported.
+type logosIgnorePatterns struct {
+	relative []string
+	any      []string
+}
+
+// parseLogosIgnorePatterns reads the ignore rules from the go.mod in
+// modRoot through the overlay-aware file system. It returns nil when the
+// file cannot be read or names no rules.
+func parseLogosIgnorePatterns(modRoot string) *logosIgnorePatterns {
+	data, err := fsys.ReadFile(filepath.Join(modRoot, "go.mod"))
+	if err != nil {
+		return nil
+	}
+	f, err := modfile.Parse("go.mod", data, nil)
+	if err != nil || f == nil {
+		return nil
+	}
+	var p *logosIgnorePatterns
+	for _, ig := range f.Ignore {
+		rule, relative := strings.CutPrefix(ig.Path, "./")
+		rule = filepath.ToSlash(rule)
+		if !strings.HasPrefix(rule, "/") {
+			rule = "/" + rule
+		}
+		if !strings.HasSuffix(rule, "/") {
+			rule += "/"
+		}
+		if p == nil {
+			p = &logosIgnorePatterns{}
+		}
+		if relative {
+			p.relative = append(p.relative, rule)
+		} else {
+			p.any = append(p.any, rule)
+		}
+	}
+	return p
+}
+
+// shouldIgnore reports whether the slash-separated module-relative dir is
+// ignored by these rules. A nil receiver ignores nothing.
+func (p *logosIgnorePatterns) shouldIgnore(dir string) bool {
+	if p == nil || dir == "" {
+		return false
+	}
+	dir = "/" + dir + "/"
+	for _, pattern := range p.relative {
+		if strings.HasPrefix(dir, pattern) {
+			return true
+		}
+	}
+	for _, pattern := range p.any {
+		if strings.Contains(dir, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// skipDirElem reports whether the package walk never descends into a
+// directory with this base name: dot, underscore, and testdata trees.
+// The names "." and ".." are walk roots, not hidden trees.
+func skipDirElem(elem string) bool {
+	return (strings.HasPrefix(elem, ".") && elem != "." && elem != "..") || strings.HasPrefix(elem, "_") || elem == "testdata"
+}
+
+// inDir reports whether path lies inside dir, lexically.
+func inDir(path, dir string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // findUpFile walks up from dir and reports the nearest directory holding
@@ -539,39 +697,177 @@ func findUpFile(dir, name string) string {
 }
 
 // patternMeetsLogos reports whether a ...-style pattern's walk would meet a
-// directory with LoGOs sources and no .go files. A workspace-root pattern
-// unions the workspace members, mirroring matchLogosWorkspaceRoot.
+// directory with LoGOs sources and no .go files. Only a directory the full
+// pattern matches counts; vendor trees and go.mod ignore exclusions never
+// do. A workspace-root pattern unions the workspace members, mirroring
+// matchLogosWorkspaceRoot.
 func patternMeetsLogos(p string) bool {
-	if dir, ok := patternLocalDir(p); ok {
-		s := discoverLogosScope()
-		if s.workDir != "" && dir == s.workDir {
-			roots := memberRootSet(s)
-			for _, m := range s.members {
-				if treeHoldsLogosOnly(m.root, roots) {
-					return true
-				}
-			}
-			return false
-		}
-		return treeHoldsLogosOnly(dir, memberRootSet(s))
+	if isLocalPattern(p) {
+		return localPatternMeetsLogos(p)
 	}
 	s := discoverLogosScope()
 	if len(s.members) == 0 {
 		return false
 	}
-	roots := memberRootSet(s)
+	return walkScopeLogos(s, pkgpattern.MatchPattern(p), pkgpattern.TreeCanMatchPattern(p))
+}
+
+// isLocalPattern reports whether p names the file system: a relative ./
+// or ../ path or an absolute one, mirroring search.Match.IsLocal.
+func isLocalPattern(p string) bool {
+	return p == "." || p == ".." || strings.HasPrefix(p, "./") || strings.HasPrefix(p, "../") || filepath.IsAbs(p)
+}
+
+// localPatternMeetsLogos reports whether the local ...-style pattern p
+// matches a directory holding LoGOs sources and no .go files. The walk
+// root and the match predicate mirror package discovery: the root is the
+// directory part of the text before "..." (so ./cmd... starts at "." and
+// ./services/.../cmd starts at ./services), and the full pattern, ./
+// prefix included, decides every candidate (so ./services/.../cmd never
+// counts services/experimental).
+func localPatternMeetsLogos(p string) bool {
+	cleanPattern := filepath.Clean(p)
+	prefix := ""
+	if cleanPattern != "." && strings.HasPrefix(p, "./") {
+		prefix = "./"
+		cleanPattern = "." + string(filepath.Separator) + cleanPattern
+	}
+	i := strings.Index(cleanPattern, "...")
+	if i < 0 {
+		return false
+	}
+	// Walk root exactly as package discovery computes it: the directory
+	// part of the text before "..." (so ./cmd... starts at "." and
+	// ./services/.../cmd starts at ./services).
+	dir, _ := filepath.Split(cleanPattern[:i])
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	abs := dir
+	if !filepath.IsAbs(dir) {
+		abs = filepath.Join(cwd, dir)
+	}
+	s := discoverLogosScope()
+	var ignore *logosIgnorePatterns
+	ownerRoot := ""
+	if len(s.members) != 0 {
+		if s.workDir != "" && filepath.Clean(abs) == filepath.Clean(s.workDir) {
+			return workspacePatternMeetsLogos(s, p)
+		}
+		// Mirror the loader guard: a local wildcard outside the main
+		// modules matches nothing.
+		inside := false
+		for _, m := range s.members {
+			if inDir(abs, m.root) {
+				inside = true
+				break
+			}
+		}
+		if !inside {
+			return false
+		}
+		for _, m := range s.members {
+			if inDir(abs, m.root) && len(m.root) >= len(ownerRoot) {
+				ownerRoot = m.root
+			}
+		}
+		if ownerRoot != "" {
+			ignore = parseLogosIgnorePatterns(ownerRoot)
+		}
+	}
+	// Predicate exactly as package discovery builds it: "..." means any
+	// string, and a wildcard element never matches a vendor element
+	// unless the pattern names that vendor path.
+	slashPattern := filepath.ToSlash(cleanPattern)
+	match := pkgpattern.MatchPattern(slashPattern)
+	return walkLocalLogos(dir, cwd, prefix, filepath.IsAbs(p), match, ignore, ownerRoot)
+}
+
+// workspacePatternMeetsLogos unions the workspace members for a ...-style
+// pattern issued from the go.work directory itself, mirroring
+// matchLogosWorkspaceRoot: each member is walked with the member-rooted
+// form of the pattern.
+func workspacePatternMeetsLogos(s logosScope, p string) bool {
+	_, suffix, _ := strings.Cut(p, "...")
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
 	for _, m := range s.members {
-		if m.path == "" {
+		root := m.root
+		if !filepath.IsAbs(root) {
+			root = filepath.Join(cwd, root)
+		}
+		if localPatternMeetsLogos(root + "/..." + suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// walkLocalLogos walks dir and reports whether a directory the full
+// pattern matches holds LoGOs sources and no .go files. Names are built
+// exactly as package discovery builds them: for a relative pattern the
+// ./ prefix plus the slash-separated path relative to the working
+// directory, for an absolute pattern the absolute slash-separated path.
+// Eligibility mirrors search.MatchDirs: dot, underscore, and testdata
+// trees are skipped, nested modules are skipped, and the owning module's
+// go.mod ignore rules apply. Vendor subtrees are walked but the
+// predicate decides them, so explicitly named vendor patterns still
+// match.
+func walkLocalLogos(dir, cwd, prefix string, absolute bool, match func(string) bool, ignore *logosIgnorePatterns, ownerRoot string) bool {
+	top := filepath.Clean(dir)
+	stack := []string{dir}
+	for len(stack) > 0 {
+		d := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		dc := filepath.Clean(d)
+		_, elem := filepath.Split(dc)
+		if skipDirElem(elem) {
 			continue
 		}
-		if p == m.path+"/..." {
-			return treeHoldsLogosOnly(m.root, roots)
-		}
-		if rest, ok := strings.CutPrefix(p, m.path+"/"); ok {
-			if i := strings.Index(rest, "..."); i >= 0 {
-				return treeHoldsLogosOnly(filepath.Join(m.root, filepath.FromSlash(rest[:i])), roots)
+		isTop := dc == top
+		// A go.mod below the walk root marks another module, whose
+		// packages this pattern never names. It gets its own walk when
+		// it is itself a scope member.
+		if !isTop {
+			if st, err := fsys.Stat(filepath.Join(dc, "go.mod")); err == nil && !st.IsDir() {
+				continue
 			}
-			return false
+		}
+		dAbs := dc
+		if !filepath.IsAbs(dc) {
+			dAbs = filepath.Join(cwd, dc)
+		}
+		var name string
+		if absolute {
+			name = filepath.ToSlash(dAbs)
+		} else {
+			rel, err := filepath.Rel(cwd, dAbs)
+			if err != nil {
+				continue
+			}
+			name = prefix + filepath.ToSlash(rel)
+		}
+		if ownerRoot != "" {
+			if modRel, err := filepath.Rel(ownerRoot, dAbs); err == nil {
+				if ignore.shouldIgnore(filepath.ToSlash(modRel)) {
+					continue
+				}
+			}
+		}
+		fis, err := fsys.ReadDir(dc)
+		if err != nil {
+			continue
+		}
+		if match(name) && dirEntriesHoldOnlyLogosSources(fis, dc) {
+			return true
+		}
+		for _, fi := range fis {
+			if fi.IsDir() {
+				stack = append(stack, filepath.Join(dc, fi.Name()))
+			}
 		}
 	}
 	return false
@@ -582,24 +878,6 @@ func patternMeetsLogos(p string) bool {
 // rule with the early walk.
 func TreeHoldsLogosOnly(root string) bool {
 	return treeHoldsLogosOnly(root, nil)
-}
-
-// patternLocalDir resolves the directory part of a ...-style pattern when
-// it names a local directory.
-func patternLocalDir(p string) (string, bool) {
-	i := strings.Index(p, "...")
-	if i < 0 {
-		return "", false
-	}
-	abs, err := filepath.Abs(p[:i])
-	if err != nil {
-		return "", false
-	}
-	abs = filepath.Clean(abs)
-	if st, err := fsys.Stat(abs); err != nil || !st.IsDir() {
-		return "", false
-	}
-	return abs, true
 }
 
 // memberRootSet maps every scope member root for nested-module skipping.

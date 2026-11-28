@@ -427,3 +427,94 @@ func TestExactModuleDirGoPackageSuppressesFallback(t *testing.T) {
 		t.Errorf("namedLogosTarget(build LoGOs import path) = false, want true")
 	}
 }
+
+func TestPatternPartialComponent(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/p\n\ngo 1.27\n")
+	writeFile(t, filepath.Join(root, "cmdtool", "c.lgo"), "package cmdtool\n")
+	t.Chdir(root)
+	// The wildcard starts inside a path component: ./cmd... names cmdtool
+	// even though no cmd directory exists.
+	if !patternMeetsLogos("./cmd...") {
+		t.Errorf("patternMeetsLogos(./cmd...) = false, want true")
+	}
+	if patternMeetsLogos("./other...") {
+		t.Errorf("patternMeetsLogos(./other...) = true, want false")
+	}
+}
+
+func TestPatternSuffixFilters(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/s\n\ngo 1.27\n")
+	writeFile(t, filepath.Join(root, "services", "web", "cmd", "main.go"), "package main\n")
+	writeFile(t, filepath.Join(root, "services", "experimental", "z.lgo"), "package experimental\n")
+	t.Chdir(root)
+	// The suffix after ... decides: only .../cmd directories count, so
+	// the LoGOs sibling outside the suffix must not trigger.
+	if patternMeetsLogos("./services/.../cmd") {
+		t.Errorf("patternMeetsLogos(./services/.../cmd) = true, want false")
+	}
+	if !patternMeetsLogos("./services/...") {
+		t.Errorf("patternMeetsLogos(./services/...) = false, want true")
+	}
+}
+
+func TestPatternVendorExcluded(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/v\n\ngo 1.27\n")
+	writeFile(t, filepath.Join(root, "cmd", "main.go"), "package main\n")
+	writeFile(t, filepath.Join(root, "vendor", "v", "u.lgo"), "package v\n")
+	t.Chdir(root)
+	if patternMeetsLogos("./...") {
+		t.Errorf("patternMeetsLogos(./...) with only vendored LoGOs = true, want false")
+	}
+	if scopeHoldsLogos() {
+		t.Errorf("scopeHoldsLogos with only vendored LoGOs = true, want false")
+	}
+	// An explicitly named vendor pattern still walks: the LoGOs package
+	// it names counts.
+	if !patternMeetsLogos("./vendor/...") {
+		t.Errorf("patternMeetsLogos(./vendor/...) = false, want true")
+	}
+}
+
+func TestPatternIgnoreExcluded(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/i\n\ngo 1.27\n\nignore ./scratch\n")
+	writeFile(t, filepath.Join(root, "cmd", "main.go"), "package main\n")
+	writeFile(t, filepath.Join(root, "scratch", "s.lgo"), "package scratch\n")
+	t.Chdir(root)
+	if patternMeetsLogos("./...") {
+		t.Errorf("patternMeetsLogos(./...) with only ignored LoGOs = true, want false")
+	}
+	if scopeHoldsLogos() {
+		t.Errorf("scopeHoldsLogos with only ignored LoGOs = true, want false")
+	}
+}
+
+func TestPatternNestedModuleSkipped(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/n\n\ngo 1.27\n")
+	writeFile(t, filepath.Join(root, "cmd", "main.go"), "package main\n")
+	writeFile(t, filepath.Join(root, "sub", "go.mod"), "module example.com/sub\n\ngo 1.27\n")
+	writeFile(t, filepath.Join(root, "sub", "pkg", "x.lgo"), "package pkg\n")
+	t.Chdir(root)
+	if patternMeetsLogos("./...") {
+		t.Errorf("patternMeetsLogos(./...) with only nested LoGOs = true, want false")
+	}
+}
+
+func TestImportPatternPrefix(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/m\n\ngo 1.27\n")
+	writeFile(t, filepath.Join(root, "foobar", "lib.lgo"), "package foobar\n")
+	t.Chdir(root)
+	// The ... need not start at a component boundary: the full pattern
+	// decides, so example.com/m/foo... names foobar.
+	if !patternMeetsLogos("example.com/m/foo...") {
+		t.Errorf("patternMeetsLogos(example.com/m/foo...) = false, want true")
+	}
+	if patternMeetsLogos("example.com/other/...") {
+		t.Errorf("patternMeetsLogos(example.com/other/...) = true, want false")
+	}
+}
