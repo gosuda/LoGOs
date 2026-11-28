@@ -24,6 +24,7 @@ type ctTupleCall struct {
 	pre        []syntax.Expr // plain arguments before the tuple, excluding the receiver
 	tup        syntax.Expr   // the multi-result argument
 	arity      int           // tuple length
+	recvAddr   bool          // temporary holds &recv so pointer methods mutate the caller
 }
 
 // ctTupleSiteOf reports whether call is a direct comptime-method call with
@@ -44,10 +45,12 @@ func ctTupleSiteOf(info *types2.Info, call *syntax.CallExpr) (*ctTupleCall, bool
 		return nil, false
 	}
 	method := false
+	var origin *types2.Func
 	if id := info.LogosCtSiteKeys[sel.Sel]; id != "" {
 		for _, rec := range info.LogosCtInst {
 			if rec.ID == id && rec.Origin.Signature().Recv() != nil {
 				method = true
+				origin = rec.Origin
 				break
 			}
 		}
@@ -56,10 +59,11 @@ func ctTupleSiteOf(info *types2.Info, call *syntax.CallExpr) (*ctTupleCall, bool
 		if fn, ok := info.Uses[sel.Sel].(*types2.Func); ok && fn.Signature().Recv() != nil {
 			if _, ok := info.LogosCtGenerics[fn.Origin()]; ok {
 				method = true
+				origin = fn.Origin()
 			}
 		}
 	}
-	if !method {
+	if !method || origin == nil {
 		return nil, false
 	}
 	selection, ok := info.Selections[sel]
@@ -105,7 +109,49 @@ func ctTupleSiteOf(info *types2.Info, call *syntax.CallExpr) (*ctTupleCall, bool
 	if tupIdx < 0 {
 		return nil, false
 	}
+	site.pre = rest[:tupIdx:tupIdx]
+	if recv := origin.Signature().Recv(); recv != nil {
+		if _, wantPtr := types2.Unalias(recv.Type()).(*types2.Pointer); wantPtr {
+			if _, isPtr := types2.Unalias(info.TypeOf(site.recv)).(*types2.Pointer); !isPtr {
+				// A pointer method must reach the caller's variable, so
+				// the temporary holds its address. Anything else keeps
+				// the checker's pointer-method error.
+				if !ctTupleAddressable(info, site.recv) {
+					return nil, false
+				}
+				site.recvAddr = true
+			}
+		}
+	}
 	return site, true
+}
+
+// ctTupleAddressable reports whether e can take & in Go: a variable, a
+// selection or index into addressable storage (never a map index), or a
+// pointer dereference. Anything else keeps the checker's pointer-method
+// error instead of a temporary.
+func ctTupleAddressable(info *types2.Info, e syntax.Expr) bool {
+	switch e := syntax.Unparen(e).(type) {
+	case *syntax.Name:
+		if e.Value == "_" {
+			return false
+		}
+		_, ok := info.Uses[e].(*types2.Var)
+		return ok
+	case *syntax.SelectorExpr:
+		return ctTupleAddressable(info, e.X)
+	case *syntax.IndexExpr:
+		if t := info.TypeOf(e.X); t != nil {
+			if _, ok := types2.Unalias(t).(*types2.Map); ok {
+				return false
+			}
+		}
+		return ctTupleAddressable(info, e.X)
+	case *syntax.Operation:
+		return e.Op == syntax.Mul && e.Y == nil
+	default:
+		return false
+	}
 }
 
 // ctTupleNamer mints temporary names for one instance body, where no file
@@ -186,7 +232,11 @@ func ctTupleRewrite(site *ctTupleCall, parents map[syntax.Node]syntax.Node, fres
 	}
 	pos := site.call.Pos()
 	recvName := nameOf(pos, fresh("mtuprecv"))
-	temps := []syntax.Stmt{defineOf(pos, []syntax.Expr{recvName}, []syntax.Expr{site.recv})}
+	recvRHS := site.recv
+	if site.recvAddr {
+		recvRHS = addrOf(pos, site.recv)
+	}
+	temps := []syntax.Stmt{defineOf(pos, []syntax.Expr{recvName}, []syntax.Expr{recvRHS})}
 	newArgs := []syntax.Expr{recvName}
 	for _, arg := range site.pre {
 		name := nameOf(pos, fresh("mtup"))
