@@ -153,6 +153,33 @@ func TestScopeHoldsLogosWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRootMemberPatternMeetsLogos(t *testing.T) {
+	t.Setenv("GOWORK", "auto")
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.work"), "go 1.27\n\nuse (\n\t.\n\t./l\n)\n")
+	writeGoModule(t, root, "example.com/root")
+	writeLogosModule(t, filepath.Join(root, "l"), "example.com/l")
+	t.Chdir(root)
+	if !patternMeetsLogos("./...") {
+		t.Errorf("patternMeetsLogos(./...) = false with the go.work directory as a member, want true")
+	}
+	if _, ok := argTargetHoldsLogos("all"); !ok {
+		t.Errorf("argTargetHoldsLogos(all) = false with the go.work directory as a member, want true")
+	}
+
+	pure := t.TempDir()
+	writeFile(t, filepath.Join(pure, "go.work"), "go 1.27\n\nuse (\n\t.\n\t./g\n)\n")
+	writeGoModule(t, pure, "example.com/pure")
+	writeGoModule(t, filepath.Join(pure, "g"), "example.com/g")
+	t.Chdir(pure)
+	if patternMeetsLogos("./...") {
+		t.Errorf("patternMeetsLogos(./...) = true with go-only members, want false")
+	}
+	if scopeHoldsLogos() {
+		t.Errorf("scopeHoldsLogos() = true with go-only members, want false")
+	}
+}
+
 func TestScopeIgnoredUnderGoworkOff(t *testing.T) {
 	t.Setenv("GOWORK", "off")
 	root := t.TempDir()

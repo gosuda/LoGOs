@@ -787,7 +787,8 @@ func localPatternMeetsLogos(p string) bool {
 // workspacePatternMeetsLogos unions the workspace members for a ...-style
 // pattern issued from the go.work directory itself, mirroring
 // matchLogosWorkspaceRoot: each member is walked with the member-rooted
-// form of the pattern.
+// form of the pattern. The walk of a member never enters this union
+// again, so a member whose root is the go.work directory ends the walk.
 func workspacePatternMeetsLogos(s logosScope, p string) bool {
 	_, suffix, _ := strings.Cut(p, "...")
 	cwd, err := os.Getwd()
@@ -799,11 +800,19 @@ func workspacePatternMeetsLogos(s logosScope, p string) bool {
 		if !filepath.IsAbs(root) {
 			root = filepath.Join(cwd, root)
 		}
-		if localPatternMeetsLogos(root + "/..." + suffix) {
+		if memberTreeMeetsLogos(root, suffix) {
 			return true
 		}
 	}
 	return false
+}
+
+// memberTreeMeetsLogos walks one workspace member with the member-rooted
+// form of a ... pattern, under the ignore rules of the member's go.mod.
+func memberTreeMeetsLogos(root, suffix string) bool {
+	pattern := filepath.ToSlash(filepath.Clean(root)) + "/..." + suffix
+	match := pkgpattern.MatchPattern(pattern)
+	return walkLocalLogos(root, "", "", true, match, parseLogosIgnorePatterns(root), root)
 }
 
 // walkLocalLogos walks dir and reports whether a directory the full

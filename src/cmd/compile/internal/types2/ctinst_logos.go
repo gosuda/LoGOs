@@ -360,6 +360,13 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 	}
 	children := make([]string, len(generic.Edges))
 	check.logosCtNotes = append(check.logosCtNotes, pos)
+	// A plain generic pushes no chain frame of its own, but reusing it
+	// must still count the comptime descendants it leads to. Record the
+	// largest child charge so a cached wrapper validates the same
+	// budget the live walk saw. The key comes from the substituted
+	// edge: the template edges still hold type parameters, which map
+	// to no charge.
+	maxChild := 0
 	for slot, edge := range generic.Edges {
 		var concrete []Type
 		for i, t := range edge.Targs {
@@ -375,6 +382,17 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 			edge.Targs = concrete
 		}
 		children[slot] = w.visit(edge, pos)
+		if child := LogosCtKey(edge.Origin, edge.Targs); child != "" {
+			if c, ok := check.logosCtCharge[child]; ok && c > maxChild {
+				maxChild = c
+			}
+		}
+	}
+	if maxChild != 0 {
+		if check.logosCtCharge == nil {
+			check.logosCtCharge = make(map[string]int)
+		}
+		check.logosCtCharge[key] = maxChild
 	}
 	check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 	w.graph[id] = children

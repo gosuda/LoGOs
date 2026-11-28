@@ -276,7 +276,7 @@ Rules:
 | `comptime::unreachable_case` | Remove or reorder shadowed cases in `const switch`. |
 | `comptime::viewas_not_pod` | Use a plain POD struct without padding, bools, pointers, interfaces, slices, maps, or strings in `comptime.ViewAs`. |
 | `comptime::runtime_use` | Restrict `comptime` types and values to compile-time expressions. |
-| `comptime::node_limit` | Reduce comptime AST unrolling or raise `-logos.comptime_nodes` (the `max_comptime_ast_nodes` TOML key was removed). |
+| `comptime::node_limit` | Reduce comptime AST unrolling or raise the limit with `logos build -gcflags=all=-logos.comptime_nodes=N ./...` (the `max_comptime_ast_nodes` TOML key was removed; a file that still holds it fails with `unknown key`). |
 | `correctness::arena_pointer_escape` | Keep tracked pointers instead of reconstructing saved integer addresses. Use `unsafe.Slice` or `unsafe.String` instead of fabricating reflection headers. This check runs only under `logos lint`. |
 | `correctness::infinite_recursion` | Terminate recursive call chains with a base case. |
 | `correctness::typed_nil_return` | Return untyped nil instead of typed nil pointer to interface result. |
