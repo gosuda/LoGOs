@@ -1005,6 +1005,7 @@ func (fl *fileLower) lowerFile() {
 	fl.finalizeConstFor()
 	fl.remapRegions()
 	fl.finishConstMapEjectText()
+	fl.desugarCtTupleCalls() // tuple-argument comptime calls to statement temporaries, last: ejected text already holds the original shape and no later pass disturbs the anchors.
 }
 
 // genImports tracks synthesized and reused imports for one file being lowered.

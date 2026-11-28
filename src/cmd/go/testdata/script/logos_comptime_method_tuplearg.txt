@@ -1,0 +1,48 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos run .
+stdout '^8$'
+stdout '^17$'
+cp stdout $WORK/native.txt
+
+-- w/go.mod --
+module example.com/methodtuple
+
+go 1.27
+
+-- w/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+type Box[T any] struct {
+	V int
+}
+
+func (b Box[T]) Add(x, y int) int {
+	n := 0
+	const for _, f := range comptime.Fields[T]() {
+		_ = f.Name
+		n++
+	}
+	return x + y + n + b.V
+}
+
+type Pair struct {
+	A int
+	B string
+}
+
+func pair() (int, int) {
+	return 2, 3
+}
+
+func main() {
+	fmt.Println(Box[Pair]{V: 1}.Add(pair()))
+	defer fmt.Println(Box[Pair]{V: 10}.Add(pair()))
+}
