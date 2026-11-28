@@ -122,8 +122,6 @@ func TestArgTargetHoldsLogos(t *testing.T) {
 }
 
 func TestScopeHoldsLogosWorkspace(t *testing.T) {
-	// The workspace union needs workspace mode: pin it, so the test does
-	// not depend on the ambient GOWORK.
 	t.Setenv("GOWORK", "auto")
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.work"), "go 1.27\n\nuse (\n\t./g\n\t./l\n)\n")
@@ -178,14 +176,45 @@ func TestScopeIgnoredUnderGoworkOff(t *testing.T) {
 
 func TestInitOverlayFromArgsBad(t *testing.T) {
 	saved := fsys.OverlayFile
-	initOverlayFromArgs([]string{"build", "-overlay=" + filepath.Join(t.TempDir(), "nosuch.json"), "."})
+	if initOverlayFromArgs([]string{"build", "-overlay=" + filepath.Join(t.TempDir(), "nosuch.json"), "."}, "build") {
+		t.Errorf("initOverlayFromArgs with a bad overlay reported success")
+	}
 	if got := fsys.OverlayFile; got != saved {
 		t.Errorf("initOverlayFromArgs with a bad overlay left OverlayFile = %q, want %q", got, saved)
 	}
-	initOverlayFromArgs([]string{"build", "."})
+	if initOverlayFromArgs([]string{"build", "."}, "build") {
+		t.Errorf("initOverlayFromArgs without -overlay reported success")
+	}
 	if got := fsys.OverlayFile; got != saved {
 		t.Errorf("initOverlayFromArgs without -overlay left OverlayFile = %q, want %q", got, saved)
 	}
+}
+
+func TestInitOverlayFromArgsStopsAtProgram(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "overlay.json"), `{"Replace": {}}`)
+	t.Chdir(dir)
+	defer func() {
+		fsys.OverlayFile = ""
+		fsys.ResetOverlay()
+	}()
+	// A build flag before the package still counts.
+	fsys.OverlayFile = ""
+	if !initOverlayFromArgs([]string{"-overlay", "overlay.json", "."}, "run") {
+		t.Errorf("initOverlayFromArgs missed a build -overlay before the package")
+	}
+	fsys.ResetOverlay()
+	fsys.OverlayFile = ""
+	// A program argument after the package does not.
+	if initOverlayFromArgs([]string{".", "-overlay=overlay.json"}, "run") {
+		t.Errorf("initOverlayFromArgs took the program -overlay as a build overlay")
+	}
+	fsys.OverlayFile = ""
+	// Test flags after -args belong to the test binary.
+	if initOverlayFromArgs([]string{"test", "-args", "-overlay=overlay.json"}, "test") {
+		t.Errorf("initOverlayFromArgs took the -args -overlay as a build overlay")
+	}
+	fsys.OverlayFile = ""
 }
 
 func TestFirstNonFlagArg(t *testing.T) {
