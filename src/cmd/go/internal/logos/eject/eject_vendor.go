@@ -962,6 +962,31 @@ func h2EmbedsHTTPServer(origins []*h2TypeOrigin, name string, seen map[string]bo
 	return false
 }
 
+// h2DeclaresMethod reports whether any file of the package declares a
+// method with the given name on the named type. An explicit method
+// shadows a promoted one, so a call on such a type is a user method
+// even when the type embeds a server.
+func h2DeclaresMethod(origins []*h2TypeOrigin, typeName, method string) bool {
+	for _, o := range origins {
+		for _, decl := range o.file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != method || fn.Recv == nil {
+				continue
+			}
+			for _, field := range fn.Recv.List {
+				recv := field.Type
+				if star, ok := recv.(*ast.StarExpr); ok {
+					recv = star.X
+				}
+				if id, ok := recv.(*ast.Ident); ok && id.Name == typeName {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // h2TypeDecl returns the type declaration of name in one file, or nil
 // when the file does not declare it.
 func h2TypeDecl(f *ast.File, name string) *ast.TypeSpec {
@@ -1272,12 +1297,16 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 		}
 		return true
 	})
+	// Segments are recorded parents before children, so on identical
+	// spans the later segment is the deeper scope: a case clause that
+	// holds only a block shares the block's span, and the call inside
+	// resolves against the block's declarations, not the clause's.
 	enclosing := func(offset int) *h2Scope {
 		best := pkgScope
 		bestSize := -1
 		for _, sg := range segs {
 			if sg.start <= offset && offset <= sg.end {
-				if size := sg.end - sg.start; bestSize < 0 || size < bestSize {
+				if size := sg.end - sg.start; bestSize < 0 || size <= bestSize {
 					best, bestSize = sg.scope, size
 				}
 			}
@@ -1301,16 +1330,20 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 		return nil, h2Binding{}, nil, false
 	}
 	resolve := func(typ ast.Expr, origin *h2TypeOrigin) (ast.Expr, h2Binding) {
-		seen := map[string]bool{}
+		// Cycles are tracked on aliases actually followed, keyed by
+		// the declaring file: switching to a sibling origin to find
+		// the alias must not count as a visit, or the target is never
+		// read and a cross-file alias hides a genuine server call.
+		type followedAlias struct {
+			file *ast.File
+			name string
+		}
+		seen := map[followedAlias]bool{}
 		for {
 			id, ok := typ.(*ast.Ident)
 			if !ok {
 				return typ, origin.bind
 			}
-			if seen[id.Name] {
-				return typ, origin.bind
-			}
-			seen[id.Name] = true
 			target, ok := origin.aliases[id.Name]
 			if !ok {
 				next := h2AliasOrigin(origins, origin, id.Name)
@@ -1320,6 +1353,11 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 				origin = next
 				continue
 			}
+			ref := followedAlias{file: origin.file, name: id.Name}
+			if seen[ref] {
+				return typ, origin.bind
+			}
+			seen[ref] = true
 			typ = target
 		}
 	}
@@ -1350,6 +1388,9 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 			return h2ReceiverHTTP
 		}
 		if name, ok := typ.(*ast.Ident); ok && h2EmbedsHTTPServer(origins, name.Name, map[string]bool{}) {
+			if h2DeclaresMethod(origins, name.Name, h2extendedConnectMethod) {
+				return h2ReceiverUser
+			}
 			return h2ReceiverHTTP
 		}
 		return h2ReceiverUser

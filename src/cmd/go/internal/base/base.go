@@ -254,6 +254,7 @@ func RunStdinWithExitCode(cmdline []string) {
 func runStdin(cmdline []string) error {
 	env := slices.Clip(cfg.OrigEnv)
 	env = AppendPATH(env)
+	env = append(env, cfg.LogosOptLevelEnv()...)
 	for try := range 3 {
 		cmd := exec.Command(cmdline[0], cmdline[1:]...)
 		cmd.Stdin = os.Stdin

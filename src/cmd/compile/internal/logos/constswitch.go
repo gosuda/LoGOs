@@ -345,14 +345,24 @@ func (c *cswLower) lowerRuntimeHost() []syntax.Stmt {
 	var arms []cswHostArm
 	for _, syn := range c.stmt.Cases {
 		if syn.Default {
-			arms = append(arms, c.lowerHostArm(syn, -1))
+			arms = append(arms, c.lowerHostArm(syn, -1, ""))
 			continue
 		}
+		// Arms of one case share one body, so a label defined in it
+		// would be defined once per live type. Rename arm-local labels
+		// per arm when several types stay live.
+		var live []int
 		for i := range syn.Elems {
-			if !c.info.LogosConstCases[types2.LogosConstCaseKey{Case: syn, Elem: i}].Live {
-				continue
+			if c.info.LogosConstCases[types2.LogosConstCaseKey{Case: syn, Elem: i}].Live {
+				live = append(live, i)
 			}
-			arms = append(arms, c.lowerHostArm(syn, i))
+		}
+		for k, i := range live {
+			tag := ""
+			if len(live) > 1 {
+				tag = strconv.Itoa(k)
+			}
+			arms = append(arms, c.lowerHostArm(syn, i, tag))
 		}
 	}
 	// Nodes assemble now: an if-chain over the lowered arms. The default
@@ -418,7 +428,7 @@ func (c *cswLower) composeHostSwitch(arms []cswHostArm) otext {
 // region: the body text is reparsed from the transformed source, checked
 // under the arm's bindings, adopted into a fresh region, and lowered
 // there, so per-element spellings never share spans.
-func (c *cswLower) lowerHostArm(syn *syntax.ConstSwitchCase, elem int) cswHostArm {
+func (c *cswLower) lowerHostArm(syn *syntax.ConstSwitchCase, elem int, armTag string) cswHostArm {
 	fl := c.fl
 	if syn.Default {
 		bodyText := c.hostBodyText(syn)
@@ -439,6 +449,11 @@ func (c *cswLower) lowerHostArm(syn *syntax.ConstSwitchCase, elem int) cswHostAr
 		kind = cswIface
 	}
 	bodyText := c.hostBodyText(syn)
+	if armTag != "" {
+		if renamed, ok := renameCswLabels(bodyText.s, armTag); ok {
+			bodyText = gen(renamed)
+		}
+	}
 	fnBody, fbase := reparseCswBody(bodyText.s, e.Type.Pos())
 	c.miniCheckCopy(fnBody, syn, elem, typ, kind == cswIface)
 	region := fl.adoptRegion(bodyText, syn.Case, fbase, 3, []syntax.Node{fnBody})
@@ -504,6 +519,111 @@ func (c *cswLower) hostBodyText(syn *syntax.ConstSwitchCase) otext {
 	text := c.fl.textOf(span{c.fl.off(syn.Colon) + 1, c.armEnd(syn)})
 	c.hostTexts[syn] = text
 	return text
+}
+
+// cswReparsePrefix wraps a case body for reparsing, matching
+// reparseCswBody. Offsets into the parsed text subtract its length.
+const cswReparsePrefix = "package cswparse\nfunc cswparse() {\n"
+
+// renameCswLabels gives the labels defined in one runtime const-switch
+// arm unique names so the copies emitted per live type do not declare
+// duplicate labels in one function. Branches bound to those labels move
+// with them; jumps to labels outside the arm are untouched. Function
+// literals keep their own scope, so labels inside them are left alone.
+// It reports whether it renamed anything.
+func renameCswLabels(text, tag string) (string, bool) {
+	fbase := syntax.NewFileBase("csw-rename")
+	full := cswReparsePrefix + text + "\n}"
+	f, err := syntax.Parse(fbase, strings.NewReader(full), nil, nil, syntax.LogosMode)
+	if err != nil || f == nil {
+		return text, false
+	}
+	var body *syntax.BlockStmt
+	for _, decl := range f.DeclList {
+		if fn, ok := decl.(*syntax.FuncDecl); ok && fn.Body != nil {
+			body = fn.Body
+			break
+		}
+	}
+	if body == nil {
+		return text, false
+	}
+	defs := make(map[string]bool)
+	var defPos []syntax.Pos
+	var defName []string
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.LabeledStmt:
+			defs[n.Label.Value] = true
+			defPos = append(defPos, n.Label.Pos())
+			defName = append(defName, n.Label.Value)
+		}
+		return true
+	})
+	if len(defs) == 0 {
+		return text, false
+	}
+	type use struct {
+		name string
+		pos  syntax.Pos
+	}
+	var uses []use
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.BranchStmt:
+			if n.Label != nil && defs[n.Label.Value] {
+				uses = append(uses, use{n.Label.Value, n.Label.Pos()})
+			}
+		}
+		return true
+	})
+	lines := lineStarts([]byte(full))
+	offAt := func(p syntax.Pos) (int, bool) {
+		if p.Line() < 1 || int(p.Line()) > len(lines) {
+			return 0, false
+		}
+		off := lines[p.Line()-1] + int(p.Col()) - 1 - len(cswReparsePrefix)
+		if off < 0 || off > len(text) {
+			return 0, false
+		}
+		return off, true
+	}
+	type edit struct {
+		off, ln int
+		to      string
+	}
+	var edits []edit
+	fresh := func(name string) string { return name + "_logosct_arm" + tag }
+	for i, name := range defName {
+		start, ok := offAt(defPos[i])
+		if !ok {
+			return text, false
+		}
+		edits = append(edits, edit{start, len(name), fresh(name)})
+	}
+	for _, u := range uses {
+		start, ok := offAt(u.pos)
+		if !ok {
+			return text, false
+		}
+		edits = append(edits, edit{start, len(u.name), fresh(u.name)})
+	}
+	if len(edits) == 0 {
+		return text, false
+	}
+	slices.SortFunc(edits, func(a, b edit) int { return b.off - a.off })
+	out := text
+	for _, e := range edits {
+		if e.off+e.ln > len(out) || out[e.off:e.off+e.ln] != text[e.off:e.off+e.ln] {
+			return text, false
+		}
+		out = out[:e.off] + e.to + out[e.off+e.ln:]
+	}
+	return out, true
 }
 
 // miniCheckCopy checks one freshly parsed arm body under that arm's
