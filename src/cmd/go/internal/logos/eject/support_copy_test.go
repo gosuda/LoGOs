@@ -626,3 +626,257 @@ func TestSupportCopyIgnoresSiblingParameter(t *testing.T) {
 		t.Errorf("support copy missing guard delegation:\n%s", got)
 	}
 }
+
+// A server parameter shadowed by a nested block keeps its type at the
+// call site: the filter resolves each call against the declarations
+// visible at its position, so the genuine opt-in still delegates to
+// the guard instead of surviving as a fork-only call.
+func TestSupportCopyKeepsServerCallShadowedInLaterBlock(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestlatershadow")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	const source = "package ejecttestlatershadow\n\nimport \"net/http\"\n\nfunc Enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n\t{\n\t\ts := struct{}{}\n\t\t_ = s\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "h2.go"), []byte(source), 0666); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestlatershadow", dst: "rt/logos/ejecttestlatershadow"}
+	if _, _, err := c.copyPackageGo(p, "h2.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestlatershadow", "h2.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "s.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("fork-only call survives a later block shadowing its receiver:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation:\n%s", got)
+	}
+}
+
+// A user-method call keeps its spelling when a nested block reuses the
+// parameter name for a server: the call outside the block resolves to
+// the parameter type, while the genuine call inside the block still
+// delegates to the guard.
+func TestSupportCopyKeepsUserCallShadowedByServerBlock(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestusershadow")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	const source = "package ejecttestusershadow\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nfunc Enable(s *meter.Meter) {\n\ts.EnableHTTP2ExtendedConnect()\n\t{\n\t\ts := &http.Server{}\n\t\ts.EnableHTTP2ExtendedConnect()\n\t\t_ = s\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "user.go"), []byte(source), 0666); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestusershadow", dst: "rt/logos/ejecttestusershadow"}
+	if _, _, err := c.copyPackageGo(p, "user.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestusershadow", "user.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Count(got, "RequireExtendedConnect") != 1 {
+		t.Errorf("want exactly one guard delegation, got:\n%s", got)
+	}
+	if !strings.Contains(got, "s.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("user method call was stolen by the block-local server type:\n%s", got)
+	}
+}
+
+// A method receiver counts as a declaration of its function: a call on
+// the receiver resolves to the receiver type, so a same-named user
+// method stays untouched and never refuses as ambiguous. A
+// package-level server of the same name does not steal the call.
+func TestSupportCopyResolvesMethodReceiver(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestrecv")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"recv.go": "package ejecttestrecv\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nvar s = &http.Server{}\n\ntype Holder struct{}\n\nfunc (s *Holder) Enable() {\n\ts.EnableHTTP2ExtendedConnect()\n}\n\nfunc (m *meter.Meter) Measure() {\n\tm.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestrecv", dst: "rt/logos/ejecttestrecv"}
+	if _, _, err := c.copyPackageGo(p, "recv.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestrecv", "recv.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("receiver user calls were rewritten through a package-level server:\n%s", got)
+	}
+	if !strings.Contains(got, "s.EnableHTTP2ExtendedConnect()") || !strings.Contains(got, "m.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("user method calls did not survive method receivers:\n%s", got)
+	}
+}
+
+// A server declared in a sibling file keeps the import binding of its
+// own file: a different net/http alias at the call site still resolves
+// the genuine opt-in, so the rewrite applies instead of leaving a
+// fork-only call in the export.
+func TestSupportCopyRewritesCrossFileAliasServer(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestalias")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"decl.go": "package ejecttestalias\n\nimport stdhttp \"net/http\"\n\nvar srv = &stdhttp.Server{}\n",
+		"call.go": "package ejecttestalias\n\nimport \"net/http\"\n\nvar _ = http.Get\n\nfunc Enable() {\n\tsrv.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestalias", dst: "rt/logos/ejecttestalias"}
+	if _, _, err := c.copyPackageGo(p, "call.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestalias", "call.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "srv.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("fork-only call survives a cross-file alias mismatch:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation:\n%s", got)
+	}
+}
+
+// A server declared with an explicit type in a sibling file resolves
+// the same way as an inferred one: the declaration's own file binding
+// proves (*net/http.Server) even when the call site imports net/http
+// under its default name.
+func TestSupportCopyRewritesCrossFileExplicitServer(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestexplicit")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"decl.go": "package ejecttestexplicit\n\nimport std \"net/http\"\n\nvar srv *std.Server\n",
+		"call.go": "package ejecttestexplicit\n\nimport \"net/http\"\n\nvar _ = http.Get\n\nfunc Enable() {\n\tsrv.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestexplicit", dst: "rt/logos/ejecttestexplicit"}
+	if _, _, err := c.copyPackageGo(p, "call.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestexplicit", "call.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "srv.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("fork-only call survives a cross-file explicit type:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation:\n%s", got)
+	}
+}

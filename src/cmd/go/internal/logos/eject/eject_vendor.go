@@ -18,6 +18,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -718,21 +719,32 @@ type h2CallSite struct {
 	text       string
 }
 
+// h2Binding is the net/http import binding of one file: the local name
+// bound to net/http, or a dot import. Type expressions resolve against
+// the binding of the file that declares them, not the file holding the
+// call site, so a server declared under one alias still proves when the
+// call site imports net/http under another.
+type h2Binding struct {
+	local string
+	dot   bool
+}
+
 // h2Scope maps visible value names to their declared type expressions. A
 // nil expression means the name is declared but its type cannot be read
 // from the declaration.
 type h2Scope struct {
 	parent *h2Scope
 	types  map[string]ast.Expr
+	bind   h2Binding
 }
 
-func (s *h2Scope) lookup(name string) (ast.Expr, bool) {
+func (s *h2Scope) lookup(name string) (ast.Expr, h2Binding, bool) {
 	for sc := s; sc != nil; sc = sc.parent {
 		if typ, ok := sc.types[name]; ok {
-			return typ, true
+			return typ, sc.bind, true
 		}
 	}
-	return nil, false
+	return nil, h2Binding{}, false
 }
 
 // h2ScopeAddValue records one value declaration: an explicit type wins,
@@ -828,16 +840,28 @@ func h2HTTPBinding(f *ast.File) (local string, dot bool) {
 	return "", false
 }
 
-// siblingValueScope returns the package-level value declarations of the
-// sibling Go files of one support package, read through the effective
-// filesystem so overlay replacements govern exactly as they govern the
-// copy. Test files are out: the copy never emits them.
-func (c *supportCopy) siblingValueScope(p supportSourcePackage, name string) (*h2Scope, map[string]ast.Expr) {
-	scope := &h2Scope{types: map[string]ast.Expr{}}
-	aliases := map[string]ast.Expr{}
+// h2FileDecls is one file's package-level picture: the value declarations
+// sibling files contribute, with the import binding and type aliases of
+// the file that declares them. A type expression resolves where it was
+// written, so a server declared under one net/http alias still proves
+// when the call site imports net/http under another.
+type h2FileDecls struct {
+	name    string
+	file    *ast.File
+	values  *h2Scope
+	aliases map[string]ast.Expr
+	bind    h2Binding
+}
+
+// siblingFileDecls returns the package-level declarations of the sibling
+// Go files of one support package in filename order, read through the
+// effective filesystem so overlay replacements govern exactly as they
+// govern the copy. Test files are out: the copy never emits them.
+func (c *supportCopy) siblingFileDecls(p supportSourcePackage, name string) []*h2FileDecls {
+	var out []*h2FileDecls
 	entries, err := c.readDir(p)
 	if err != nil {
-		return scope, aliases
+		return nil
 	}
 	for _, entry := range entries {
 		other := entry.Name()
@@ -852,12 +876,22 @@ func (c *supportCopy) siblingValueScope(p supportSourcePackage, name string) (*h
 		if err != nil {
 			continue
 		}
-		for _, decl := range f.Decls {
-			h2AddGenDecl(scope, decl)
-			h2AddAlias(aliases, decl)
+		httpLocal, dotHTTP := h2HTTPBinding(f)
+		decls := &h2FileDecls{
+			name:    other,
+			file:    f,
+			values:  &h2Scope{types: map[string]ast.Expr{}, bind: h2Binding{local: httpLocal, dot: dotHTTP}},
+			aliases: map[string]ast.Expr{},
+			bind:    h2Binding{local: httpLocal, dot: dotHTTP},
 		}
+		for _, decl := range f.Decls {
+			h2AddGenDecl(decls.values, decl)
+			h2AddAlias(decls.aliases, decl)
+		}
+		out = append(out, decls)
 	}
-	return scope, aliases
+	slices.SortFunc(out, func(a, b *h2FileDecls) int { return strings.Compare(a.name, b.name) })
+	return out
 }
 
 // h2AddAlias records one type alias declaration.
@@ -875,14 +909,62 @@ func h2AddAlias(aliases map[string]ast.Expr, decl ast.Decl) {
 	}
 }
 
+// h2TypeOrigin is one file's contribution to type resolution: its type
+// aliases with the import binding of the file that declares them.
+type h2TypeOrigin struct {
+	file    *ast.File
+	aliases map[string]ast.Expr
+	bind    h2Binding
+}
+
 // h2EmbedsHTTPServer reports whether the named type declares an embedded
 // *net/http.Server field, so a value of that type carries the fork
-// method exactly as the type-checked exemption allows.
-func h2EmbedsHTTPServer(f *ast.File, aliases map[string]ast.Expr, httpLocal string, dotHTTP bool, name string, seen map[string]bool) bool {
+// method exactly as the type-checked exemption allows. The check runs
+// in the file that declares the type, so an embedding written under one
+// net/http alias still proves when the call site uses another. Alias
+// hops cross into the file that declares each target.
+func h2EmbedsHTTPServer(origins []*h2TypeOrigin, name string, seen map[string]bool) bool {
 	if seen[name] {
 		return false
 	}
 	seen[name] = true
+	for _, o := range origins {
+		ts := h2TypeDecl(o.file, name)
+		if ts == nil {
+			continue
+		}
+		st, ok := ts.Type.(*ast.StructType)
+		if !ok {
+			return false
+		}
+		for _, field := range st.Fields.List {
+			if len(field.Names) != 0 {
+				continue
+			}
+			typ := field.Type
+			if star, ok := typ.(*ast.StarExpr); ok {
+				typ = star.X
+			}
+			if h2IsHTTPServerType(typ, o.bind.local, o.bind.dot) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, o := range origins {
+		if target, ok := o.aliases[name]; ok {
+			if id, ok := target.(*ast.Ident); ok {
+				return h2EmbedsHTTPServer(origins, id.Name, seen)
+			}
+			return false
+		}
+	}
+	return false
+}
+
+// h2TypeDecl returns the type declaration of name in one file, or nil
+// when the file does not declare it.
+func h2TypeDecl(f *ast.File, name string) *ast.TypeSpec {
 	for _, decl := range f.Decls {
 		gd, ok := decl.(*ast.GenDecl)
 		if !ok || gd.Tok != token.TYPE {
@@ -893,43 +975,132 @@ func h2EmbedsHTTPServer(f *ast.File, aliases map[string]ast.Expr, httpLocal stri
 			if !ok || ts.Name.Name != name {
 				continue
 			}
-			st, ok := ts.Type.(*ast.StructType)
-			if !ok {
-				return false
-			}
-			for _, field := range st.Fields.List {
-				if len(field.Names) != 0 {
-					continue
-				}
-				typ := field.Type
-				if star, ok := typ.(*ast.StarExpr); ok {
-					typ = star.X
-				}
-				if h2IsHTTPServerType(typ, httpLocal, dotHTTP) {
-					return true
-				}
-			}
-			return false
+			return ts
 		}
 	}
-	if target, ok := aliases[name]; ok {
-		if id, ok := target.(*ast.Ident); ok {
-			return h2EmbedsHTTPServer(f, aliases, httpLocal, dotHTTP, id.Name, seen)
+	return nil
+}
+
+// h2ScopeAt pairs one lexical scope with the byte span it governs, so a
+// call site resolves against the declarations visible at its position. A
+// short declaration in a nested block never retypes the same name for
+// the whole function.
+type h2ScopeAt struct {
+	start, end int
+	scope      *h2Scope
+}
+
+// h2ScopeBuilder walks one function body maintaining the lexical scope
+// stack. Statements with header declarations govern them; blocks and
+// case and communication clauses govern their bodies. Function literals
+// are never entered: declarations inside one never reach the enclosing
+// scopes, and the shadows pass judges call sites inside one separately.
+type h2ScopeBuilder struct {
+	stack []*h2Scope
+	segs  []h2ScopeAt
+	span  func(ast.Node) (int, int, bool)
+	bind  h2Binding
+}
+
+// h2AliasOrigin returns the first origin aliasing name, skipping except.
+// Alias targets resolve where they were written, so a name the declaring
+// file does not alias may still name an alias in another file of the
+// same package.
+func h2AliasOrigin(origins []*h2TypeOrigin, except *h2TypeOrigin, name string) *h2TypeOrigin {
+	for _, o := range origins {
+		if o == except {
+			continue
 		}
+		if _, ok := o.aliases[name]; ok {
+			return o
+		}
+	}
+	return nil
+}
+
+func (b *h2ScopeBuilder) Visit(n ast.Node) ast.Visitor {
+	if n == nil {
+		b.stack = b.stack[:len(b.stack)-1]
+		return nil
+	}
+	if _, ok := n.(*ast.FuncLit); ok {
+		return nil
+	}
+	top := b.stack[len(b.stack)-1]
+	if h2OpensScope(n) {
+		child := &h2Scope{parent: top, types: map[string]ast.Expr{}, bind: b.bind}
+		if start, end, ok := b.span(n); ok {
+			b.segs = append(b.segs, h2ScopeAt{start: start, end: end, scope: child})
+		}
+		b.stack = append(b.stack, child)
+	} else {
+		b.stack = append(b.stack, top)
+	}
+	b.record(n)
+	return b
+}
+
+// h2OpensScope reports whether n governs declarations in a scope of its
+// own: any block, a statement with header declarations, or a case or
+// communication clause body.
+func h2OpensScope(n ast.Node) bool {
+	switch n.(type) {
+	case *ast.BlockStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt, *ast.CaseClause, *ast.CommClause:
+		return true
+	case *ast.IfStmt:
+		return n.(*ast.IfStmt).Init != nil
+	case *ast.ForStmt:
+		return n.(*ast.ForStmt).Init != nil
 	}
 	return false
 }
 
+// record adds the declarations of one node to the innermost scope.
+// Declarations in one scope cannot change type after their position in
+// code that compiles, so recording in visit order is exact, and every
+// call site in that scope resolves to the same map.
+func (b *h2ScopeBuilder) record(n ast.Node) {
+	scope := b.stack[len(b.stack)-1]
+	switch s := n.(type) {
+	case *ast.DeclStmt:
+		h2AddGenDecl(scope, s.Decl)
+	case *ast.AssignStmt:
+		if s.Tok == token.DEFINE {
+			if len(s.Lhs) == 1 && len(s.Rhs) == 1 {
+				if id, ok := s.Lhs[0].(*ast.Ident); ok {
+					h2ScopeAddValue(scope, []*ast.Ident{id}, nil, s.Rhs)
+				}
+			} else {
+				for _, lhs := range s.Lhs {
+					if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
+						scope.types[id.Name] = nil
+					}
+				}
+			}
+		}
+	case *ast.RangeStmt:
+		for _, e := range []ast.Expr{s.Key, s.Value} {
+			if id, ok := e.(*ast.Ident); ok && id.Name != "_" {
+				scope.types[id.Name] = nil
+			}
+		}
+	}
+}
+
 // filterH2EditsToGenuine keeps only h2 edits whose selector resolves to
-// the net/http method: a receiver the visible declarations prove is
-// (*net/http.Server), directly or through an embedded field declared in
-// the same file. A call on a proven user type stays untouched, and a
-// receiver no declaration proves is refused instead of rewritten, so
-// eject cannot steal a user method by spelling.
+// the net/http method: a receiver the declarations visible at the call
+// site prove is (*net/http.Server), directly or through an embedded field
+// declared in the file that declares the type. Scopes honor block
+// boundaries, so a short declaration in a nested block never retypes the
+// same name outside it; sibling declarations resolve against the import
+// binding of the file that declares them. A call on a proven user type
+// stays untouched, and a receiver no declaration proves is refused
+// instead of rewritten, so eject cannot steal a user method by spelling.
 func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string, fset *token.FileSet, data []byte, f *ast.File, h2edits []textEdit, h2uses bool) ([]textEdit, bool, error) {
 	httpLocal, dotHTTP := h2HTTPBinding(f)
-	sibScope, sibAliases := c.siblingValueScope(p, name)
-	pkgScope := &h2Scope{parent: sibScope, types: map[string]ast.Expr{}}
+	fileBind := h2Binding{local: httpLocal, dot: dotHTTP}
+	sibs := c.siblingFileDecls(p, name)
+	pkgScope := &h2Scope{types: map[string]ast.Expr{}, bind: fileBind}
 	aliases := map[string]ast.Expr{}
 	for _, imp := range f.Imports {
 		if imp.Name != nil && imp.Name.Name != "_" && imp.Name.Name != "." && imp.Name.Name != "" {
@@ -940,16 +1111,34 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 		h2AddGenDecl(pkgScope, decl)
 		h2AddAlias(aliases, decl)
 	}
-	for alias, target := range sibAliases {
-		aliases[alias] = target
+	origins := []*h2TypeOrigin{{file: f, aliases: aliases, bind: fileBind}}
+	for _, sib := range sibs {
+		origins = append(origins, &h2TypeOrigin{file: sib.file, aliases: sib.aliases, bind: sib.bind})
 	}
-	fnScopes := map[*ast.FuncDecl]*h2Scope{}
+	span := func(n ast.Node) (int, int, bool) {
+		start := fset.Position(n.Pos()).Offset
+		end := fset.Position(n.End()).Offset
+		if start < 0 || end < start || end > len(data) {
+			return 0, 0, false
+		}
+		return start, end, true
+	}
+	var segs []h2ScopeAt
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Body == nil {
 			continue
 		}
-		scope := &h2Scope{parent: pkgScope, types: map[string]ast.Expr{}}
+		scope := &h2Scope{parent: pkgScope, types: map[string]ast.Expr{}, bind: fileBind}
+		// The receiver is a declaration of its function: a call on the
+		// receiver name resolves to the receiver type, so a method on a
+		// user type never refuses as ambiguous and never rewrites
+		// through a same-named package-level server.
+		if fn.Recv != nil {
+			for _, field := range fn.Recv.List {
+				h2ScopeAddValue(scope, field.Names, field.Type, nil)
+			}
+		}
 		if fn.Type != nil {
 			if fn.Type.Params != nil {
 				for _, field := range fn.Type.Params.List {
@@ -962,36 +1151,14 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 				}
 			}
 		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			switch s := n.(type) {
-			case *ast.FuncLit:
-				return false
-			case *ast.DeclStmt:
-				h2AddGenDecl(scope, s.Decl)
-			case *ast.AssignStmt:
-				if s.Tok == token.DEFINE {
-					if len(s.Lhs) == 1 && len(s.Rhs) == 1 {
-						if id, ok := s.Lhs[0].(*ast.Ident); ok {
-							h2ScopeAddValue(scope, []*ast.Ident{id}, nil, s.Rhs)
-						}
-					} else {
-						for _, lhs := range s.Lhs {
-							if id, ok := lhs.(*ast.Ident); ok && id.Name != "_" {
-								scope.types[id.Name] = nil
-							}
-						}
-					}
-				}
-			case *ast.RangeStmt:
-				for _, e := range []ast.Expr{s.Key, s.Value} {
-					if id, ok := e.(*ast.Ident); ok && id.Name != "_" {
-						scope.types[id.Name] = nil
-					}
-				}
-			}
-			return true
-		})
-		fnScopes[fn] = scope
+		b := &h2ScopeBuilder{stack: []*h2Scope{scope}, span: span, bind: fileBind}
+		if start, end, ok := span(fn.Body); ok {
+			b.segs = append(b.segs, h2ScopeAt{start: start, end: end, scope: scope})
+		}
+		for _, stmt := range fn.Body.List {
+			ast.Walk(b, stmt)
+		}
+		segs = append(segs, b.segs...)
 	}
 	type litShadow struct {
 		start, end int
@@ -1050,14 +1217,6 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 		})
 		return true
 	})
-	span := func(n ast.Node) (int, int, bool) {
-		start := fset.Position(n.Pos()).Offset
-		end := fset.Position(n.End()).Offset
-		if start < 0 || end < start || end > len(data) {
-			return 0, 0, false
-		}
-		return start, end, true
-	}
 	var sites []h2CallSite
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch x := n.(type) {
@@ -1092,33 +1251,53 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 		return true
 	})
 	enclosing := func(offset int) *h2Scope {
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			start, end, ok := span(fn.Body)
-			if !ok {
-				continue
-			}
-			if start <= offset && offset <= end {
-				return fnScopes[fn]
+		best := pkgScope
+		bestSize := -1
+		for _, sg := range segs {
+			if sg.start <= offset && offset <= sg.end {
+				if size := sg.end - sg.start; bestSize < 0 || size < bestSize {
+					best, bestSize = sg.scope, size
+				}
 			}
 		}
-		return pkgScope
+		return best
 	}
-	resolve := func(typ ast.Expr) ast.Expr {
+	// resolveName finds the declaration of name visible at offset: the
+	// innermost block scope first, then the current file's package scope,
+	// then each sibling file's package scope in filename order. It returns
+	// the declared type, the binding of the file that declares it, and the
+	// origin that alias resolution starts from.
+	resolveName := func(offset int, name string) (ast.Expr, h2Binding, *h2TypeOrigin, bool) {
+		if typ, bind, ok := enclosing(offset).lookup(name); ok {
+			return typ, bind, origins[0], true
+		}
+		for i, sib := range sibs {
+			if typ, ok := sib.values.types[name]; ok {
+				return typ, sib.bind, origins[i+1], true
+			}
+		}
+		return nil, h2Binding{}, nil, false
+	}
+	resolve := func(typ ast.Expr, origin *h2TypeOrigin) (ast.Expr, h2Binding) {
 		seen := map[string]bool{}
 		for {
 			id, ok := typ.(*ast.Ident)
 			if !ok {
-				return typ
+				return typ, origin.bind
 			}
-			target, ok := aliases[id.Name]
-			if !ok || seen[id.Name] {
-				return typ
+			if seen[id.Name] {
+				return typ, origin.bind
 			}
 			seen[id.Name] = true
+			target, ok := origin.aliases[id.Name]
+			if !ok {
+				next := h2AliasOrigin(origins, origin, id.Name)
+				if next == nil {
+					return typ, origin.bind
+				}
+				origin = next
+				continue
+			}
 			typ = target
 		}
 	}
@@ -1140,15 +1319,15 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 				return h2ReceiverUnknown
 			}
 		}
-		typ, declared := enclosing(site.start).lookup(id.Name)
+		typ, bind, origin, declared := resolveName(site.start, id.Name)
 		if !declared || typ == nil {
 			return h2ReceiverUnknown
 		}
-		typ = resolve(typ)
-		if h2IsHTTPServerType(typ, httpLocal, dotHTTP) {
+		typ, bind = resolve(typ, origin)
+		if h2IsHTTPServerType(typ, bind.local, bind.dot) {
 			return h2ReceiverHTTP
 		}
-		if name, ok := typ.(*ast.Ident); ok && h2EmbedsHTTPServer(f, aliases, httpLocal, dotHTTP, name.Name, map[string]bool{}) {
+		if name, ok := typ.(*ast.Ident); ok && h2EmbedsHTTPServer(origins, name.Name, map[string]bool{}) {
 			return h2ReceiverHTTP
 		}
 		return h2ReceiverUser
