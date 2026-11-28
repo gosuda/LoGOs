@@ -10,9 +10,9 @@
   },
   "new_tests": [
     {
-      "bytes": 3516,
+      "bytes": 4608,
       "path": "src/cmd/go/testdata/script/logos_cap_inline_context.txt",
-      "sha256": "26feb66faaec2df343f6f531a85584dcc405a0800683f3732cf4c75c708b520f"
+      "sha256": "b4f5a013f2387447d619b05113e08260aec7f5816988841be4c67b797f7014d3"
     }
   ],
   "observed_ci_head": "c47c4cfc56fc8bfa916d170ed51040195b567dc9",
