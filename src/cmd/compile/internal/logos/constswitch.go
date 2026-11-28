@@ -450,8 +450,8 @@ func (c *cswLower) lowerHostArm(syn *syntax.ConstSwitchCase, elem int, armTag st
 	}
 	bodyText := c.hostBodyText(syn)
 	if armTag != "" {
-		if renamed, ok := renameCswLabels(bodyText.s, armTag); ok {
-			bodyText = gen(renamed)
+		if renamed, ok := renameCswLabels(bodyText, armTag); ok {
+			bodyText = renamed
 		}
 	}
 	fnBody, fbase := reparseCswBody(bodyText.s, e.Type.Pos())
@@ -530,10 +530,16 @@ const cswReparsePrefix = "package cswparse\nfunc cswparse() {\n"
 // duplicate labels in one function. Branches bound to those labels move
 // with them; jumps to labels outside the arm are untouched. Function
 // literals keep their own scope, so labels inside them are left alone.
-// It reports whether it renamed anything.
-func renameCswLabels(text, tag string) (string, bool) {
+// A blank label stays blank: it needs no reference, so renaming it would
+// leave a named label that is never used and the export would fail.
+// It reports whether it renamed anything. A renamed arm keeps the
+// positions of its statements: every byte outside the label spans stays
+// mapped through the returned chunks, split and shifted by the length
+// change of every edit before it.
+func renameCswLabels(text otext, tag string) (otext, bool) {
+	s := text.s
 	fbase := syntax.NewFileBase("csw-rename")
-	full := cswReparsePrefix + text + "\n}"
+	full := cswReparsePrefix + s + "\n}"
 	f, err := syntax.Parse(fbase, strings.NewReader(full), nil, nil, syntax.LogosMode)
 	if err != nil || f == nil {
 		return text, false
@@ -556,6 +562,9 @@ func renameCswLabels(text, tag string) (string, bool) {
 		case *syntax.FuncLit, *syntax.LambdaExpr:
 			return false
 		case *syntax.LabeledStmt:
+			if n.Label.Value == "_" {
+				return true
+			}
 			defs[n.Label.Value] = true
 			defPos = append(defPos, n.Label.Pos())
 			defName = append(defName, n.Label.Value)
@@ -575,7 +584,7 @@ func renameCswLabels(text, tag string) (string, bool) {
 		case *syntax.FuncLit, *syntax.LambdaExpr:
 			return false
 		case *syntax.BranchStmt:
-			if n.Label != nil && defs[n.Label.Value] {
+			if n.Label != nil && n.Label.Value != "_" && defs[n.Label.Value] {
 				uses = append(uses, use{n.Label.Value, n.Label.Pos()})
 			}
 		}
@@ -587,7 +596,7 @@ func renameCswLabels(text, tag string) (string, bool) {
 			return 0, false
 		}
 		off := lines[p.Line()-1] + int(p.Col()) - 1 - len(cswReparsePrefix)
-		if off < 0 || off > len(text) {
+		if off < 0 || off > len(s) {
 			return 0, false
 		}
 		return off, true
@@ -616,14 +625,25 @@ func renameCswLabels(text, tag string) (string, bool) {
 		return text, false
 	}
 	slices.SortFunc(edits, func(a, b edit) int { return b.off - a.off })
-	out := text
+	out := s
 	for _, e := range edits {
-		if e.off+e.ln > len(out) || out[e.off:e.off+e.ln] != text[e.off:e.off+e.ln] {
+		if e.off+e.ln > len(out) || out[e.off:e.off+e.ln] != s[e.off:e.off+e.ln] {
 			return text, false
 		}
 		out = out[:e.off] + e.to + out[e.off+e.ln:]
 	}
-	return out, true
+	slices.SortFunc(edits, func(a, b edit) int { return a.off - b.off })
+	res := otext{}
+	pos := 0
+	for _, e := range edits {
+		res = cat(res, text.slice(pos, e.off), gen(e.to))
+		pos = e.off + e.ln
+	}
+	res = cat(res, text.slice(pos, len(s)))
+	if res.s != out {
+		return text, false
+	}
+	return res, true
 }
 
 // miniCheckCopy checks one freshly parsed arm body under that arm's
