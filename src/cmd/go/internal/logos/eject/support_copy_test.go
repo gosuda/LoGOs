@@ -928,3 +928,55 @@ func TestSupportCopyCaseExprIgnoresClauseBodyShadow(t *testing.T) {
 		t.Errorf("support copy missing guard delegation for the case expression:\n%s", got)
 	}
 }
+
+// A type alias declared in a sibling file resolves through the
+// declaring file: a call on a variable of the aliased server type is
+// genuine and must be rewritten, not left as a fork-only call.
+func TestSupportCopyRewritesSiblingTypeAliasServer(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttesttypealias")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"decl.go": "package ejecttesttypealias\n\nimport h \"net/http\"\n\ntype ServerAlias = h.Server\n",
+		"call.go": "package ejecttesttypealias\n\nimport \"net/http\"\n\nvar (\n\tsrv ServerAlias\n\t_ = http.Get\n)\n\nfunc Enable() {\n\tsrv.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttesttypealias", dst: "rt/logos/ejecttesttypealias"}
+	if _, _, err := c.copyPackageGo(p, "call.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttesttypealias", "call.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "srv.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("fork-only call survives a sibling type alias:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation:\n%s", got)
+	}
+}

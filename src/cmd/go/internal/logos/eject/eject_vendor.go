@@ -1301,16 +1301,20 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 		return nil, h2Binding{}, nil, false
 	}
 	resolve := func(typ ast.Expr, origin *h2TypeOrigin) (ast.Expr, h2Binding) {
-		seen := map[string]bool{}
+		// Cycles are tracked on aliases actually followed, keyed by
+		// the declaring file: switching to a sibling origin to find
+		// the alias must not count as a visit, or the target is never
+		// read and a cross-file alias hides a genuine server call.
+		type followedAlias struct {
+			file *ast.File
+			name string
+		}
+		seen := map[followedAlias]bool{}
 		for {
 			id, ok := typ.(*ast.Ident)
 			if !ok {
 				return typ, origin.bind
 			}
-			if seen[id.Name] {
-				return typ, origin.bind
-			}
-			seen[id.Name] = true
 			target, ok := origin.aliases[id.Name]
 			if !ok {
 				next := h2AliasOrigin(origins, origin, id.Name)
@@ -1320,6 +1324,11 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 				origin = next
 				continue
 			}
+			ref := followedAlias{file: origin.file, name: id.Name}
+			if seen[ref] {
+				return typ, origin.bind
+			}
+			seen[ref] = true
 			typ = target
 		}
 	}
