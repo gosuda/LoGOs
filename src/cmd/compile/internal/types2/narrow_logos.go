@@ -1655,8 +1655,11 @@ func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 // path even when an earlier break already recorded it, each seed an entry
 // no check can discharge. With no live pairing and no surviving veto or
 // break, every path discarded the latest store and ordinary reads stay
-// silent. Results never paired with a named error stay silent.
-func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *syntax.FuncLit, eff *logosEFEffects) *logosEFState {
+// silent. Results never paired with a named error stay silent. On a
+// recovered continuation every surviving live pairing projects: the
+// recovered exit still holds each unchecked result, and no normal path
+// exists that could have discharged it.
+func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *syntax.FuncLit, eff *logosEFEffects, recovered bool) *logosEFState {
 	if end == nil || len(end.may) == 0 {
 		return end
 	}
@@ -1696,7 +1699,7 @@ func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *synta
 				}
 				out[k] = logosEFEntry{name: name, pos: lit.Pos()}
 				continue
-			} else {
+			} else if !recovered {
 				continue
 			}
 		}
@@ -5510,16 +5513,17 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 	}
 	end := p.run(lit.Body, entry)
 	p.eff = saved
+	recovered := false
 	if end == nil {
 		// A panic the literal recovers lets the call return: keep the
 		// conservative continuation instead of marking the caller dead.
-		if p.litCanRecover(lit) {
-			return p.later(lit, lit.Body, st)
+		// The join below merges the recoverable panic exits so the
+		// projection marks the unchecked results they still hold. An
+		// opaque recovery with no joinable exit keeps later().
+		if !p.litCanRecover(lit) {
+			return nil
 		}
-		return nil
-	}
-	if eff.deferred != nil {
-		end = end.afterDeferred(eff.deferred)
+		recovered = true
 	}
 	// A recovered panic exits through the literal's cleanups with the
 	// pre-panic stores still visible: join those exits with the
@@ -5530,12 +5534,21 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 		if !p.panicCanRecover(pst, lit) {
 			continue
 		}
-		if r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true }); r != nil {
+		r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true })
+		if r != nil {
 			end = logosEFJoin(end, r.withCleanups(st.cleanups))
 		}
 	}
-	if len(eff.assigned) != 0 || len(eff.created) != 0 || eff.deferred != nil {
-		end = p.projectInvocationMay(st, end, lit, eff)
+	if end == nil {
+		return p.later(lit, lit.Body, st)
+	}
+	if eff.deferred != nil && !recovered {
+		// A recovered exit already ran its cleanups in the join above;
+		// running them again would model a second return.
+		end = end.afterDeferred(eff.deferred)
+	}
+	if recovered || len(eff.assigned) != 0 || len(eff.created) != 0 || eff.deferred != nil {
+		end = p.projectInvocationMay(st, end, lit, eff, recovered)
 	}
 	end = end.withoutLocals(inside)
 	// A nested call starts from an empty per-invocation set so its exit
@@ -5946,12 +5959,14 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 		return true, recovered || cleanupExprRecovers(p, s), true
 	case *syntax.IfStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Cond)
-		ct, _, ot := cleanupElseRecovers(p, s.Then, rec)
-		ce, _, oe := cleanupElseRecovers(p, s.Else, rec)
+		ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
+		ce, re, oe := cleanupElseRecovers(p, s.Else, rec)
 		if !ot || !oe {
 			return false, false, false
 		}
-		return ct || ce, rec, true
+		// Recovery inside a branch counts only on paths that continue
+		// through it; a branch that ends drops out of the merge.
+		return ct || ce, (!ct || rt) && (!ce || re), true
 	case *syntax.ForStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Cond)
 		return true, rec, rec
@@ -5976,12 +5991,12 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 		return true, recovered, true
 	case *syntax.ConstIfStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Cond)
-		ct, _, ot := cleanupElseRecovers(p, s.Then, rec)
-		ce, _, oe := cleanupElseRecovers(p, s.Else, rec)
+		ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
+		ce, re, oe := cleanupElseRecovers(p, s.Else, rec)
 		if !ot || !oe {
 			return false, false, false
 		}
-		return ct || ce, rec, true
+		return ct || ce, (!ct || rt) && (!ce || re), true
 	case *syntax.ConstSwitchStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Targ)
 		var bodies [][]syntax.Stmt
@@ -6016,7 +6031,9 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 
 func cleanupElseRecovers(p *logosEFPass, e syntax.Stmt, recovered bool) (cont, out, ok bool) {
 	if e == nil {
-		return true, recovered, recovered
+		// An absent branch falls through with the incoming recovery
+		// state: it neither recovers nor blocks a later recover.
+		return true, recovered, true
 	}
 	if b, isBlock := e.(*syntax.BlockStmt); isBlock {
 		if b == nil {

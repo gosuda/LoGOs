@@ -414,3 +414,76 @@ func probeRecoveredBreakSplit(cond bool, reset bool, stop bool) {
 	}()
 	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
 }
+
+// A deferred cleanup that logs conditionally before recovering still
+// recovers on every path: the caller read of the unchecked result fails.
+func probeRecoverMissingElse(verbose bool, fail bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if verbose {
+				_ = 1
+			}
+			_ = recover()
+		}()
+		if fail {
+			panic("fail")
+		}
+		h.stats = 0
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// Same with an unconditional panic after a conditional log: the defer
+// recovers for either value of verbose, so the read still fails.
+func probeRecoverConditionalLog(verbose bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if verbose {
+				println("recovering")
+			}
+			_ = recover()
+		}()
+		panic("fail")
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// Recovery in both branches of the deferred conditional counts: the
+// merged recovery state reaches the caller continuation, which fails.
+func probeRecoverBothBranches(verbose bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if verbose {
+				_ = recover()
+			} else {
+				_ = recover()
+			}
+		}()
+		panic("fail")
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// Control: an early return that skips the recovery leaves no recovered
+// continuation, so the call below stays unreachable and silent.
+func probeRecoverSkippedReturn(verbose bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if verbose {
+				return
+			}
+			_ = recover()
+		}()
+		panic("fail")
+	}()
+	use(h.stats)
+}
+
