@@ -6638,6 +6638,16 @@ func (w *logosEFBoundScan) assignsBound(s syntax.Stmt) bool {
 					return false
 				}
 			}
+		case *syntax.VarDecl:
+			// A `var` binding nested in a loop or clause body
+			// establishes the value for later calls the same way an
+			// assignment does.
+			for _, id := range n.NameList {
+				if v, _ := w.p.check.Defs[id].(*Var); v == w.bound {
+					hit = true
+					return false
+				}
+			}
 		}
 		return !hit
 	})

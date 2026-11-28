@@ -543,3 +543,28 @@ func probeNestedReplace(cond bool, reset bool) {
 	}()
 	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
 }
+
+// A var-bound lambda inside a loop body is called synchronously, so
+// its discarded-error read fails in cleanup mode.
+func probeCleanupLoopVar(xs []int) {
+	defer func() {
+		for i := 0; i < 1; i++ {
+			_ = i
+			_ = xs
+			var cb func() int = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }()
+			use(cb())
+		}
+	}()
+}
+
+// Same through a switch-clause body.
+func probeCleanupSwitchVar(mode int) {
+	defer func() {
+		switch mode {
+		case 0:
+			var cb func() int = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }()
+			use(cb())
+		default:
+		}
+	}()
+}
