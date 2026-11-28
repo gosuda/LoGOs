@@ -1000,6 +1000,7 @@ type h2ScopeBuilder struct {
 	segs  []h2ScopeAt
 	span  func(ast.Node) (int, int, bool)
 	bind  h2Binding
+	fset  *token.FileSet
 }
 
 // h2AliasOrigin returns the first origin aliasing name, skipping except.
@@ -1029,7 +1030,7 @@ func (b *h2ScopeBuilder) Visit(n ast.Node) ast.Visitor {
 	top := b.stack[len(b.stack)-1]
 	if h2OpensScope(n) {
 		child := &h2Scope{parent: top, types: map[string]ast.Expr{}, bind: b.bind}
-		if start, end, ok := b.span(n); ok {
+		if start, end, ok := b.h2ScopeSpan(n); ok {
 			b.segs = append(b.segs, h2ScopeAt{start: start, end: end, scope: child})
 		}
 		b.stack = append(b.stack, child)
@@ -1053,6 +1054,27 @@ func h2OpensScope(n ast.Node) bool {
 		return n.Init != nil
 	}
 	return false
+}
+
+// h2ScopeSpan reports the source range a scope governs. A case or
+// communication clause governs only its body: the clause expressions
+// and the communication itself evaluate in the enclosing scope, so a
+// call there must not see the body's declarations.
+func (b *h2ScopeBuilder) h2ScopeSpan(n ast.Node) (int, int, bool) {
+	switch c := n.(type) {
+	case *ast.CaseClause:
+		return h2ClauseBodySpan(b.fset, c.Body, c.End())
+	case *ast.CommClause:
+		return h2ClauseBodySpan(b.fset, c.Body, c.End())
+	}
+	return b.span(n)
+}
+
+func h2ClauseBodySpan(fset *token.FileSet, body []ast.Stmt, end token.Pos) (int, int, bool) {
+	if len(body) == 0 {
+		return 0, 0, false
+	}
+	return fset.Position(body[0].Pos()).Offset, fset.Position(end).Offset, true
 }
 
 // record adds the declarations of one node to the innermost scope.
@@ -1151,7 +1173,7 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 				}
 			}
 		}
-		b := &h2ScopeBuilder{stack: []*h2Scope{scope}, span: span, bind: fileBind}
+		b := &h2ScopeBuilder{stack: []*h2Scope{scope}, span: span, bind: fileBind, fset: fset}
 		if start, end, ok := span(fn.Body); ok {
 			b.segs = append(b.segs, h2ScopeAt{start: start, end: end, scope: scope})
 		}
