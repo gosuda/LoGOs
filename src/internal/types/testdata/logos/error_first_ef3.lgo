@@ -590,3 +590,40 @@ func probeCleanupIfInitReplace(enabled bool) {
 		}
 	}()
 }
+
+// A deferred switch whose clauses all recover still recovers: the
+// caller read of the unchecked result fails.
+func probeRecoverSwitch(mode int) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			switch mode {
+			case 0:
+				_ = recover()
+			default:
+				_ = recover()
+			}
+		}()
+		panic("fail")
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// Same through a select with a recovering default clause.
+func probeRecoverSelect(ch chan int) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			select {
+			case <-ch:
+				_ = recover()
+			default:
+				_ = recover()
+			}
+		}()
+		panic("fail")
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}

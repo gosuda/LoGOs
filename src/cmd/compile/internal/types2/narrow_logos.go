@@ -5982,13 +5982,7 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 			}
 			bodies = append(bodies, c.Body)
 		}
-		if !cleanupClausesRecover(p, bodies, recovered) {
-			return false, false, false
-		}
-		if !hasDefault && !recovered {
-			return false, false, false
-		}
-		return true, recovered, true
+		return cleanupClausesRecovers(p, bodies, hasDefault, recovered)
 	case *syntax.ConstIfStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Cond)
 		ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
@@ -6007,13 +6001,7 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 			}
 			bodies = append(bodies, c.Body)
 		}
-		if !cleanupClausesRecover(p, bodies, rec) {
-			return false, false, false
-		}
-		if !hasDefault && !rec {
-			return false, false, false
-		}
-		return true, rec, true
+		return cleanupClausesRecovers(p, bodies, hasDefault, rec)
 	case *syntax.ConstForStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Range)
 		return true, rec, rec
@@ -6053,23 +6041,28 @@ func cleanupSwitchRecovers(p *logosEFPass, clauses []*syntax.CaseClause, recover
 		}
 		bodies = append(bodies, c.Body)
 	}
-	if !cleanupClausesRecover(p, bodies, recovered) {
-		return false, false, false
-	}
+	return cleanupClausesRecovers(p, bodies, hasDefault, recovered)
+}
+
+// cleanupClausesRecovers merges the recovery result of every clause that
+// continues: a clause that ends drops out of the merge. An unmatched path
+// with no incoming recovery recovers nothing.
+func cleanupClausesRecovers(p *logosEFPass, bodies [][]syntax.Stmt, hasDefault bool, recovered bool) (cont, out, ok bool) {
 	if !hasDefault && !recovered {
 		return false, false, false
 	}
-	return true, recovered, true
-}
-
-func cleanupClausesRecover(p *logosEFPass, bodies [][]syntax.Stmt, recovered bool) bool {
+	out = hasDefault || recovered
 	for _, body := range bodies {
 		cc, rc, oc := cleanupSeqRecovers(p, body, recovered)
-		if !oc || (cc && !rc) {
-			return false
+		if !oc {
+			return false, false, false
+		}
+		cont = cont || cc
+		if cc {
+			out = out && rc
 		}
 	}
-	return true
+	return cont, out, true
 }
 
 func cleanupExprRecovers(p *logosEFPass, e syntax.Node) bool {
