@@ -23,6 +23,16 @@ stdout '^auto-detect$'
 go build -json-diagnostics -o $WORK/nomark-json$GOEXE .
 exec $WORK/nomark-json$GOEXE
 stdout '^auto-detect$'
+
+# Flag values never name packages: -run, -count, and -p take values, so
+# the working-directory rule still fires with no explicit package.
+go test -run TestNomark
+stdout '^ok\s+example\.com/nomark'
+go test -count=1 -run TestNomark .
+stdout '^ok\s+example\.com/nomark'
+go build -p 4 -o $WORK/nomark-p4$GOEXE .
+exec $WORK/nomark-p4$GOEXE
+stdout '^auto-detect$'
 cd ..
 
 # Trigger: a ./... walk meets the LoGOs directory, which plain go
@@ -319,6 +329,17 @@ func hello() string {
 
 func main() {
 	fmt.Println(hello())
+}
+
+-- nomark/main_test.lgo --
+package main
+
+import "testing"
+
+func TestNomark(t *testing.T) {
+	if hello() != "auto-detect" {
+		t.Fatalf("hello() = %q", hello())
+	}
 }
 
 -- marked/go.mod --

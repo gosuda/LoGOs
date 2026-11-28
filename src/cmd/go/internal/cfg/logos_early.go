@@ -69,7 +69,7 @@ func MaybeRelaunchEarly() {
 		RelaunchAsLogos("logos.toml beside go.mod")
 		return
 	}
-	if reason, ok := namedLogosTarget(rest); ok {
+	if reason, ok := namedLogosTarget(cmd, rest); ok {
 		RelaunchAsLogos(reason)
 		return
 	}
@@ -100,32 +100,96 @@ func firstNonFlagArg(args []string) string {
 }
 
 // valueFlags names bare flags whose next argument is a value, so the early
-// directory scan skips that value instead of mistaking it for a path.
+// target scan skips that value instead of mistaking it for a package path.
 // Flags spelled with "=" need no entry: the value never stands alone.
+// The set is the union of the value-taking build, cover, test, list, run,
+// and mod flags. Bool flags take no entry even when they accept an
+// "=value" form (for example -v): a bare word after one is a package
+// argument, exactly as the flag parser leaves it.
 var valueFlags = map[string]bool{
-	"-o": true, "--o": true,
-	"-mod": true, "--mod": true,
-	"-modfile": true, "--modfile": true,
-	"-overlay": true, "--overlay": true,
-	"-C": true, "--C": true,
-	"-tags": true, "--tags": true,
-	"-ldflags": true, "--ldflags": true,
-	"-gcflags": true, "--gcflags": true,
-	"-asmflags": true, "--asmflags": true,
-	"-coverpkg": true, "--coverpkg": true,
-	"-toolexec": true, "--toolexec": true,
-	"-buildmode": true, "--buildmode": true,
-	"-compiler": true, "--compiler": true,
-	"-installsuffix": true, "--installsuffix": true,
-	"-coverprofile": true, "--coverprofile": true,
-	"-covermode": true, "--covermode": true,
-	"-exec": true, "--exec": true,
+	"-o":                    true,
+	"-mod":                  true,
+	"-modfile":              true,
+	"-overlay":              true,
+	"-C":                    true,
+	"-tags":                 true,
+	"-ldflags":              true,
+	"-gcflags":              true,
+	"-asmflags":             true,
+	"-gccgoflags":           true,
+	"-coverpkg":             true,
+	"-toolexec":             true,
+	"-exec":                 true,
+	"-buildmode":            true,
+	"-compiler":             true,
+	"-installsuffix":        true,
+	"-coverprofile":         true,
+	"-covermode":            true,
+	"-p":                    true,
+	"-pkgdir":               true,
+	"-pgo":                  true,
+	"-vettool":              true,
+	"-debug-actiongraph":    true,
+	"-debug-runtime-trace":  true,
+	"-debug-trace":          true,
+	"-bench":                true,
+	"-benchtime":            true,
+	"-blockprofile":         true,
+	"-blockprofilerate":     true,
+	"-count":                true,
+	"-cpu":                  true,
+	"-cpuprofile":           true,
+	"-fuzz":                 true,
+	"-fuzzminimizetime":     true,
+	"-fuzztime":             true,
+	"-list":                 true,
+	"-memprofile":           true,
+	"-memprofilerate":       true,
+	"-mutexprofile":         true,
+	"-mutexprofilefraction": true,
+	"-outputdir":            true,
+	"-parallel":             true,
+	"-run":                  true,
+	"-skip":                 true,
+	"-timeout":              true,
+	"-trace":                true,
+	"-shuffle":              true,
+	"-vet":                  true,
+	"-f":                    true,
+	"-reuse":                true,
+	"-go":                   true,
+	"-compat":               true,
+	"-toolchain":            true,
+	"-module":               true,
+}
+
+// takesValue reports whether a bare flag consumes the next argument as its
+// value. Both the one-dash and the two-dash spellings count.
+func takesValue(flag string) bool {
+	if valueFlags[flag] {
+		return true
+	}
+	if strings.HasPrefix(flag, "--") {
+		return valueFlags["-"+flag[2:]]
+	}
+	return false
 }
 
 // namedLogosTarget reports whether the command's remaining arguments name a
 // directory or pattern that holds LoGOs sources and no .go files.
-// With no path-like arguments the command targets the working directory.
-func namedLogosTarget(args []string) (string, bool) {
+// A bare word that names no path is no target: flag values are skipped,
+// version queries are skipped, and words the file system does not resolve
+// fall back to the working-directory rule below.
+func namedLogosTarget(cmd string, args []string) (string, bool) {
+	if cmd == "mod" && firstNonFlagArg(args) == "tidy" {
+		// `go mod tidy` takes no package arguments and loads "all":
+		// without this branch the word "tidy" would read as a package
+		// and plain go would drop dependencies its LoGOs packages need.
+		if scopeHoldsLogos() {
+			return "all pattern meets LoGOs sources", true
+		}
+		return "", false
+	}
 	var paths []string
 	skipNext := false
 	for _, a := range args {
@@ -133,8 +197,16 @@ func namedLogosTarget(args []string) (string, bool) {
 			skipNext = false
 			continue
 		}
+		if a == "--" {
+			continue
+		}
+		if a == "-args" {
+			// Words after -args belong to the test binary or the
+			// program, never to the go command.
+			break
+		}
 		if a == "" || a[0] == '-' {
-			if !strings.Contains(a, "=") && valueFlags[a] {
+			if !strings.Contains(a, "=") && takesValue(a) {
 				skipNext = true
 			}
 			continue
@@ -144,18 +216,52 @@ func namedLogosTarget(args []string) (string, bool) {
 		}
 		paths = append(paths, a)
 	}
-	if len(paths) == 0 {
-		if dirTargetHoldsLogos(".") {
-			return "command names LoGOs sources", true
-		}
-		return "", false
+	if cmd == "run" {
+		paths = runPackageArgs(paths)
 	}
 	for _, p := range paths {
 		if reason, ok := argTargetHoldsLogos(p); ok {
 			return reason, true
 		}
 	}
+	if !anyTargetResolves(paths) && dirTargetHoldsLogos(".") {
+		return "command names LoGOs sources", true
+	}
 	return "", false
+}
+
+// runPackageArgs truncates words to the package position of `go run`:
+// leading existing files form the file list and one more word is the
+// package; the rest are program arguments and name no package.
+func runPackageArgs(paths []string) []string {
+	if len(paths) == 0 {
+		return paths
+	}
+	if isFile(paths[0]) {
+		n := 0
+		for n < len(paths) && isFile(paths[n]) {
+			n++
+		}
+		return paths[:n]
+	}
+	return paths[:1]
+}
+
+// anyTargetResolves reports whether any collected word names a package:
+// an existing file or directory, the "all" pattern, or a wildcard pattern.
+// Words that resolve to nothing name no package, so the caller falls back
+// to the working directory instead of skipping its check. The exact
+// import-path mapping extends this test when it lands.
+func anyTargetResolves(paths []string) bool {
+	for _, p := range paths {
+		if p == "all" || strings.Contains(p, "...") {
+			return true
+		}
+		if _, err := fsys.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // argTargetHoldsLogos reports whether one command argument names a local
