@@ -685,6 +685,15 @@ func QueryPattern(ld *Loader, ctx context.Context, pattern, query string, curren
 
 	var match func(mod module.Version, roots []string, isLocal bool) *search.Match
 	matchPattern := pkgpattern.MatchPattern(pattern)
+	var logos logosCandidates
+	var logosMu sync.Mutex
+	recordLogos := func(dir string) {
+		if cfg.LogosOnlyDir(dir) {
+			logosMu.Lock()
+			logos.add(dir)
+			logosMu.Unlock()
+		}
+	}
 
 	if i := strings.Index(pattern, "..."); i >= 0 {
 		base = pathpkg.Dir(pattern[:i+3])
@@ -694,6 +703,15 @@ func QueryPattern(ld *Loader, ctx context.Context, pattern, query string, curren
 		match = func(mod module.Version, roots []string, isLocal bool) *search.Match {
 			m := search.NewMatch(pattern)
 			matchPackages(ld, ctx, m, imports.AnyTags(), omitStd, []module.Version{mod})
+			if len(m.Pkgs) == 0 && len(m.Errs) == 0 {
+				for _, root := range roots {
+					if cfg.TreeHoldsLogosOnly(root) {
+						logosMu.Lock()
+						logos.add(root)
+						logosMu.Unlock()
+					}
+				}
+			}
 			return m
 		}
 	} else {
@@ -704,10 +722,12 @@ func QueryPattern(ld *Loader, ctx context.Context, pattern, query string, curren
 				prefix = ld.MainModules.PathPrefix(module.Version{Path: mod.Path})
 			}
 			for _, root := range roots {
-				if _, ok, err := dirInModule(pattern, prefix, root, isLocal); err != nil {
+				if dir, ok, err := dirInModule(pattern, prefix, root, isLocal); err != nil {
 					m.AddError(err)
 				} else if ok {
 					m.Pkgs = []string{pattern}
+				} else {
+					recordLogos(dir)
 				}
 			}
 			return m
@@ -830,6 +850,11 @@ func QueryPattern(ld *Loader, ctx context.Context, pattern, query string, curren
 			Pattern:         pattern,
 			Query:           query,
 			PatternIsModule: ld.MainModules.Contains(pattern),
+		}
+	}
+	if len(results) == 0 {
+		if _, ok := logos.single(); ok {
+			cfg.RelaunchAsLogosLate("import resolves to LoGOs sources")
 		}
 	}
 	return slices.Clip(results), modOnly, err

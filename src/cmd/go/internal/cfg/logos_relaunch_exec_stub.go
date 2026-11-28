@@ -8,8 +8,8 @@ package cfg
 
 import "errors"
 
-// relaunchExec reports that re-execution is unsupported on this
+// relaunchExecCode reports that re-execution is unsupported on this
 // platform. The caller prints one line and returns.
-func relaunchExec(exe, argv0 string) error {
-	return errors.New("re-execution is not supported on this platform")
+func relaunchExecCode(exe, argv0 string) (int, bool, error) {
+	return 0, false, errors.New("re-execution is not supported on this platform")
 }

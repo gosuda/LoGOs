@@ -14,6 +14,15 @@ stdout 'example\.com/nomark'
 go build -o $WORK/nomarkx$GOEXE .
 exec $WORK/nomarkx$GOEXE
 stdout '^auto-detect$'
+
+# A LoGOs-only flag does not block source detection: it reaches the
+# directory check before the flag parser can reject it.
+go build -pedantic -o $WORK/nomark-ped$GOEXE .
+exec $WORK/nomark-ped$GOEXE
+stdout '^auto-detect$'
+go build -json-diagnostics -o $WORK/nomark-json$GOEXE .
+exec $WORK/nomark-json$GOEXE
+stdout '^auto-detect$'
 cd ..
 
 # Trigger: a ./... walk meets the LoGOs directory, which plain go
@@ -44,6 +53,23 @@ cd marked
 go lint ./...
 ! stderr .
 ! stdout .
+# Toolchain selection does not bypass detection: even a GOTOOLCHAIN naming
+# an unavailable stock release re-executes before any switch.
+env GOTOOLCHAIN=go1.999.0
+go lint ./...
+! stderr .
+! stdout .
+go help lint
+stdout '^usage: logos lint'
+! stderr .
+go build -o $WORK/marked-tc$GOEXE .
+exec $WORK/marked-tc$GOEXE
+stdout '^marked$'
+# In logos mode the command never switches to a stock toolchain.
+logos build -o $WORK/marked-tc-logos$GOEXE .
+exec $WORK/marked-tc-logos$GOEXE
+stdout '^marked$'
+env GOTOOLCHAIN=local
 cd ..
 
 # Trigger: a Go package importing a LoGOs package of its workspace.
@@ -55,6 +81,12 @@ stdout '^from-logos$'
 go fmt -n main.go
 stdout 'gofmt'
 cd ../..
+
+# At an unmarked workspace root outside every member, a ...-style pattern
+# unions the members instead of rejecting the prefix.
+cd ws
+go build ./...
+cd ..
 
 # Excluded commands keep upstream text inside a LoGOs module.
 cd marked
@@ -80,6 +112,9 @@ go version
 stdout '^go version go'
 go env GOROOT
 ! stderr .
+# A LoGOs-only flag with no marker or source trigger stays an upstream error.
+! go build -pedantic .
+stderr 'flag provided but not defined'
 cd ..
 
 # The standard library still builds inside a LoGOs module.
@@ -98,8 +133,88 @@ env GOSUMDB=off
 go get example.com/l/lib
 go mod tidy
 go build ./...
+# The import-triggered relaunch also uses the startup environment: the
+# binary records the LoGOs CPU default, not the plain-go default.
+env GOARCH=amd64
+go build -o $WORK/dep$GOEXE .
+go version -m $WORK/dep$GOEXE
+stdout 'GOAMD64=v3'
+env GOARCH=
 go run .
 stdout '^from-logos$'
+cd ..
+
+# A Go import with a Go provider in a dependency keeps plain go even when
+# another module holds only LoGOs sources at the same path.
+cd amb
+go build ./...
+go run .
+stdout '^go$'
+cd ..
+
+cd ov
+# Without the overlay the disk workspace lists only the unmarked member.
+go list -m all
+stdout 'example\.com/ovg'
+! stdout 'example\.com/ovm'
+go list -overlay=overlay-add.json -m all
+stdout 'example\.com/ovm'
+[cgo] ! go build -overlay=overlay-add.json -o $WORK/ov-m$GOEXE ./m/sub
+[cgo] stderr 'cgo_usage'
+! logos build -overlay=overlay-add.json -o $WORK/ov-m-logos$GOEXE ./m/sub
+stderr 'cgo_usage'
+cd ..
+
+# Removing a marked member through the overlay removes the marker: the
+# build runs as plain go, with no logos experiment suffix.
+cd ovrm
+go build -overlay=overlay-rm.json -o $WORK/ovrm-g$GOEXE ./g
+go version -m $WORK/ovrm-g$GOEXE
+! stdout 'logosarena'
+cd ..
+
+# A module needing a newer Go reports the upstream message under both
+# spellings.
+cd toonew
+! go build .
+stderr 'go\.mod requires go >= 9\.99'
+! logos build .
+stderr 'go\.mod requires go >= 9\.99'
+cd ..
+
+# A directory-triggered build agrees with an explicit logos build: the
+# startup environment applies, not the injected plain defaults.
+cd cpu
+env GOARCH=amd64
+env CGO_ENABLED=0
+env GOAMD64=
+go build -o $WORK/cpu-go$GOEXE .
+go version -m $WORK/cpu-go$GOEXE
+stdout 'GOAMD64=v3'
+logos build -o $WORK/cpu-logos$GOEXE .
+go version -m $WORK/cpu-logos$GOEXE
+stdout 'GOAMD64=v3'
+env GOARCH=
+env CGO_ENABLED=
+env GOAMD64=
+cd ..
+
+# The directory trigger fires before the builder starts: one WORK line
+# proves the re-execution happened exactly once.
+cd nomark
+go build -x -o $WORK/nomark-x$GOEXE .
+stderr -count=1 '(?m)^WORK='
+exec $WORK/nomark-x$GOEXE
+stdout '^auto-detect$'
+cd ..
+
+# In an unmarked cgo module both spellings deny cgo by policy.
+cd cgounmarked
+env CGO_ENABLED=
+[cgo] ! go build -o $WORK/cgounmarked-go$GOEXE .
+[cgo] stderr 'cgo_usage'
+! logos build -o $WORK/cgounmarked-logos$GOEXE .
+stderr 'cgo_usage'
 cd ..
 
 -- dep/go.mod --
@@ -290,3 +405,185 @@ package main
 import "fmt"
 
 func main() { fmt.Println("pure-go") }
+
+-- toonew/go.mod --
+module example.com/toonew
+
+go 9.99
+
+-- toonew/logos.toml --
+[project]
+
+-- toonew/main.lgo --
+package main
+
+func main() {}
+
+-- ov/go.work --
+go 1.27
+
+use ./g
+
+-- ov/go.work.overlay --
+go 1.27
+
+use (
+	./g
+	./m
+)
+
+-- ov/overlay-add.json --
+{"Replace": {"go.work": "go.work.overlay"}}
+
+-- ov/g/go.mod --
+module example.com/ovg
+
+go 1.27
+
+-- ov/g/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("g") }
+
+-- ov/m/go.mod --
+module example.com/ovm
+
+go 1.27
+
+-- ov/m/logos.toml --
+[build]
+cgo = "forbid"
+
+-- ov/m/marker.lgo --
+package m
+
+func Mark() string { return "m" }
+
+-- ov/m/sub/main.go --
+package main
+
+/*
+int answer() { return 7; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println(C.answer()) }
+
+-- ovrm/go.work --
+go 1.27
+
+use (
+	./g
+	./m
+)
+
+-- ovrm/go.work.min --
+go 1.27
+
+use ./g
+
+-- ovrm/overlay-rm.json --
+{"Replace": {"go.work": "go.work.min"}}
+
+-- ovrm/g/go.mod --
+module example.com/ovrmg
+
+go 1.27
+
+-- ovrm/g/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("g") }
+
+-- ovrm/m/go.mod --
+module example.com/ovrm
+
+go 1.27
+
+-- ovrm/m/logos.toml --
+[project]
+
+-- ovrm/m/main.lgo --
+package m
+
+func Mark() string { return "m" }
+
+-- cpu/go.mod --
+module example.com/cpu
+
+go 1.27
+
+-- cpu/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("hello") }
+
+-- cgounmarked/go.mod --
+module example.com/cgounmarked
+
+go 1.27
+
+-- cgounmarked/main.lgo --
+package main
+
+/*
+int answer() { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println(C.answer()) }
+
+-- amb/go.mod --
+module example.com/amb
+
+go 1.27
+
+require (
+	example.com/m v1.0.0
+	example.com/m/sub v1.0.0
+)
+
+replace example.com/m => ./m
+
+replace example.com/m/sub => ./sub
+
+-- amb/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/sub"
+)
+
+func main() { fmt.Println(sub.X()) }
+
+-- amb/m/go.mod --
+module example.com/m
+
+go 1.27
+
+-- amb/m/sub/lib.lgo --
+package sub
+
+func X() string { return "logos" }
+
+-- amb/sub/go.mod --
+module example.com/m/sub
+
+go 1.27
+
+-- amb/sub/lib.go --
+package sub
+
+func X() string { return "go" }
