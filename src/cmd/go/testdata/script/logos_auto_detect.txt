@@ -14,7 +14,15 @@ stdout 'example\.com/nomark'
 go build -o $WORK/nomarkx$GOEXE .
 exec $WORK/nomarkx$GOEXE
 stdout '^auto-detect$'
-cd ..
+
+# A LoGOs-only flag does not block source detection: it reaches the
+# directory check before the flag parser can reject it.
+go build -pedantic -o $WORK/nomark-ped$GOEXE .
+exec $WORK/nomark-ped$GOEXE
+stdout '^auto-detect$'
+go build -json-diagnostics -o $WORK/nomark-json$GOEXE .
+exec $WORK/nomark-json$GOEXE
+stdout '^auto-detect$'
 
 # Trigger: a ./... walk meets the LoGOs directory, which plain go
 # would skip silently.
@@ -44,6 +52,23 @@ cd marked
 go lint ./...
 ! stderr .
 ! stdout .
+# Toolchain selection does not bypass detection: even a GOTOOLCHAIN naming
+# an unavailable stock release re-executes before any switch.
+env GOTOOLCHAIN=go1.999.0
+go lint ./...
+! stderr .
+! stdout .
+go help lint
+stdout '^usage: logos lint'
+! stderr .
+go build -o $WORK/marked-tc$GOEXE .
+exec $WORK/marked-tc$GOEXE
+stdout '^marked$'
+# In logos mode the command never switches to a stock toolchain.
+logos build -o $WORK/marked-tc-logos$GOEXE .
+exec $WORK/marked-tc-logos$GOEXE
+stdout '^marked$'
+env GOTOOLCHAIN=local
 cd ..
 
 # Trigger: a Go package importing a LoGOs package of its workspace.
@@ -55,6 +80,12 @@ stdout '^from-logos$'
 go fmt -n main.go
 stdout 'gofmt'
 cd ../..
+
+# At an unmarked workspace root outside every member, a ...-style pattern
+# unions the members instead of rejecting the prefix.
+cd ws
+go build ./...
+cd ..
 
 # Excluded commands keep upstream text inside a LoGOs module.
 cd marked
@@ -80,6 +111,9 @@ go version
 stdout '^go version go'
 go env GOROOT
 ! stderr .
+# A LoGOs-only flag with no marker or source trigger stays an upstream error.
+! go build -pedantic .
+stderr 'flag provided but not defined'
 cd ..
 
 # The standard library still builds inside a LoGOs module.
@@ -100,6 +134,34 @@ go mod tidy
 go build ./...
 go run .
 stdout '^from-logos$'
+cd ..
+
+# An -overlay file that adds a marked member is honored: the overlaid
+# marker re-executes and the logos cgo policy denies the build.
+cd ov
+[cgo] ! go build -overlay=overlay-add.json -o $WORK/ov-m$GOEXE ./m/sub
+[cgo] stderr 'cgo_usage'
+! logos build -overlay=overlay-add.json -o $WORK/ov-m-logos$GOEXE ./m/sub
+stderr 'cgo_usage'
+# Without the overlay the disk workspace is unmarked and plain go builds.
+[cgo] go build -o $WORK/ov-m-plain$GOEXE ./m/sub
+cd ..
+
+# Removing a marked member through the overlay removes the marker: the
+# build runs as plain go, with no logos experiment suffix.
+cd ovrm
+go build -overlay=overlay-rm.json -o $WORK/ovrm-g$GOEXE ./g
+go version -m $WORK/ovrm-g$GOEXE
+! stdout 'logosarena'
+cd ..
+
+# A module needing a newer Go reports the upstream message under both
+# spellings.
+cd toonew
+! go build .
+stderr 'go\.mod requires go >= 9\.99'
+! logos build .
+stderr 'go\.mod requires go >= 9\.99'
 cd ..
 
 -- dep/go.mod --
@@ -290,3 +352,111 @@ package main
 import "fmt"
 
 func main() { fmt.Println("pure-go") }
+
+-- toonew/go.mod --
+module example.com/toonew
+
+go 9.99
+
+-- toonew/logos.toml --
+[project]
+
+-- toonew/main.lgo --
+package main
+
+func main() {}
+
+-- ov/go.work --
+go 1.27
+
+use ./g
+
+-- ov/go.work.overlay --
+go 1.27
+
+use (
+	./g
+	./m
+)
+
+-- ov/overlay-add.json --
+{"Replace": {"go.work": "go.work.overlay"}}
+
+-- ov/g/go.mod --
+module example.com/ovg
+
+go 1.27
+
+-- ov/g/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("g") }
+
+-- ov/m/go.mod --
+module example.com/ovm
+
+go 1.27
+
+-- ov/m/logos.toml --
+[build]
+cgo = "forbid"
+
+-- ov/m/marker.lgo --
+package m
+
+func Mark() string { return "m" }
+
+-- ov/m/sub/main.go --
+package main
+
+/*
+int answer() { return 7; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println(C.answer()) }
+
+-- ovrm/go.work --
+go 1.27
+
+use (
+	./g
+	./m
+)
+
+-- ovrm/go.work.min --
+go 1.27
+
+use ./g
+
+-- ovrm/overlay-rm.json --
+{"Replace": {"go.work": "go.work.min"}}
+
+-- ovrm/g/go.mod --
+module example.com/ovrmg
+
+go 1.27
+
+-- ovrm/g/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("g") }
+
+-- ovrm/m/go.mod --
+module example.com/ovrm
+
+go 1.27
+
+-- ovrm/m/logos.toml --
+[project]
+
+-- ovrm/m/main.lgo --
+package m
+
+func Mark() string { return "m" }

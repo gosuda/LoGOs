@@ -106,6 +106,11 @@ func main() {
 	handleChdirFlag()
 	if cfg.Logos {
 		logos.ConfigureCommand(base.Go)
+	} else {
+		// Decide every re-execution trigger that arguments and files can
+		// settle before any toolchain selection: a stock toolchain cannot
+		// build LoGOs sources, so selecting one first would bypass logos.
+		cfg.MaybeRelaunchEarly()
 	}
 	toolchain.Select()
 
@@ -189,11 +194,9 @@ func main() {
 			}
 		}
 	}
-	// A plain go in a LoGOs module re-executes as logos with the same
-	// arguments: a LoGOs-only subcommand, or a logos.toml beside go.mod.
-	if !cfg.Logos {
-		cfg.MaybeRelaunchForArgs(args)
-	}
+	// Re-execution triggers were decided before toolchain selection in
+	// cfg.MaybeRelaunchEarly; only the import trigger still runs later,
+	// during package loading.
 	cmd, used := lookupCmd(args)
 	cfg.CmdName = strings.Join(args[:used], " ")
 	if len(cmd.Commands) > 0 {

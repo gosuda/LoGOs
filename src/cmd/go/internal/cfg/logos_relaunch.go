@@ -7,6 +7,7 @@ package cfg
 import (
 	"fmt"
 	"internal/logosfile"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -44,6 +45,13 @@ func DirHoldsOnlyLogosSources(dir string) bool {
 	if err != nil {
 		return false
 	}
+	return dirEntriesHoldOnlyLogosSources(fis, dir)
+}
+
+// dirEntriesHoldOnlyLogosSources classifies already-read entries with the
+// same rule DirHoldsOnlyLogosSources applies, so the early tree walk shares
+// it instead of drifting.
+func dirEntriesHoldOnlyLogosSources(fis []fs.DirEntry, dir string) bool {
 	found := false
 	for _, d := range fis {
 		if d.IsDir() {
@@ -68,26 +76,6 @@ func DirHoldsOnlyLogosSources(dir string) bool {
 		}
 	}
 	return found
-}
-
-// MaybeRelaunchForArgs implements the first two re-execution triggers:
-// a LoGOs-only subcommand, and a logos.toml next to the go.mod of the
-// module that contains the working directory. Call after the command and
-// flags are known and before any package is loaded.
-func MaybeRelaunchForArgs(args []string) {
-	if Logos || len(args) == 0 || !relaunchAllowed() {
-		return
-	}
-	if IsLogosRelaunchExcluded(args[0]) {
-		return
-	}
-	if IsLogosOnlyCommand(args[0]) {
-		RelaunchAsLogos("logos-only command " + args[0])
-		return
-	}
-	if MainModuleMarkedByLogos() {
-		RelaunchAsLogos("logos.toml beside go.mod")
-	}
 }
 
 // MaybeRelaunchForHelpTopic re-executes as logos when the help topic
@@ -125,7 +113,9 @@ func MaybeRelaunchForDir(dir string, inMain bool, reason string) {
 
 // MainModuleMarkedByLogos reports whether the module that contains the
 // working directory carries a logos.toml next to its go.mod. When a
-// go.work is in effect it reports whether any workspace module does.
+// go.work is in effect it reports whether any workspace member does.
+// Every read goes through the overlay-aware file system, so an -overlay
+// file on the command line is honored. Call only after initOverlayFromArgs.
 func MainModuleMarkedByLogos() bool {
 	if work := Getenv("GOWORK"); work == "off" {
 		return moduleMarkedByLogos()
@@ -180,7 +170,7 @@ func moduleMarkedByLogos() bool {
 // workspaceMarkedByLogos reports whether any member of the workspace
 // named by workFile carries a logos.toml next to its go.mod.
 func workspaceMarkedByLogos(workFile string) bool {
-	data, err := os.ReadFile(workFile)
+	data, err := fsys.ReadFile(workFile)
 	if err != nil {
 		return false
 	}
@@ -262,8 +252,10 @@ func UnderGoRoot(dir string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
+// isFile reports whether path names a file in the overlay-aware file
+// system, so the marker check sees -overlay replacements and deletions.
 func isFile(path string) bool {
-	fi, err := os.Stat(path)
+	fi, err := fsys.Stat(path)
 	return err == nil && !fi.IsDir()
 }
 
