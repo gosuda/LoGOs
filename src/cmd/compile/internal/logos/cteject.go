@@ -447,16 +447,14 @@ func (fl *fileLower) ejectMethodText(s *ctMethodSite, sites []*ctMethodSite, ctx
 // text of any method call nested inside it.
 func (fl *fileLower) ejectMethodOperand(e syntax.Expr, sites []*ctMethodSite, ctx cfCtx) string {
 	start, end := fl.off(syntax.StartPos(e)), cfExactEnd(ctx, e)
-	// syntax.EndPos of a call stops at its last argument (or its
-	// function when it has none), so extend a call operand past its
-	// closing parenthesis. Without this a call nested anywhere in an
-	// operand renders without its argument list. Keep a wider node
-	// end (for example parentheses around the call) when it extends
-	// further.
+	// A call operand ends at its closing parenthesis, which
+	// syntax.EndPos does not reach: it stops at the last argument,
+	// at the function for an empty call, and inside the wrapper
+	// for a parenthesized call. Extend past the balanced close
+	// paren found from the callee, keeping whichever end is wider.
 	if call, ok := syntax.Unparen(e).(*syntax.CallExpr); ok {
-		end = ctCallArgsEnd(ctx, cfExactEnd(ctx, syntax.Unparen(call.Fun)))
-		if nodeEnd := fl.off(syntax.EndPos(e)); nodeEnd > end {
-			end = nodeEnd
+		if callEnd := ctCallArgsEnd(ctx, cfExactEnd(ctx, call.Fun)); callEnd > end {
+			end = callEnd
 		}
 	}
 	var inner []*ctMethodSite
