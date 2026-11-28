@@ -525,3 +525,21 @@ func probeCleanupLocalCallValue() {
 	}()
 }
 
+// An inner call that replaces the result drops the preserved break, but
+// the fresh unchecked pairing still fails the caller read.
+func probeNestedReplace(cond bool, reset bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if reset {
+		h.errA = nil
+	}
+	func() {
+		h.errA = nil
+		h.stats, h.errA = fetchHeld()
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
+}
