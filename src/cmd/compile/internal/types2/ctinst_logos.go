@@ -290,6 +290,15 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 		return w.seen[key]
 	}
 	if id, ok := w.seen[key]; ok {
+		// A reused instance skipped its subtree, so validate the
+		// cached charge against the remaining budget. Otherwise the
+		// verdict depends on which call site the drain visits first.
+		if ch, ok := check.logosCtCharge[key]; ok {
+			if sum := logosCtChainSum(check.logosCtChain) + ch; sum > check.logosNodeLimit() {
+				check.errorf(pos, InvalidRangeExpr, "[comptime::node_limit] comptime instantiation chain has %d nodes above the limit %d", sum, check.logosNodeLimit())
+				return ""
+			}
+		}
 		return id
 	}
 	comptime := generic.Decl != nil
@@ -318,6 +327,7 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 	if comptime {
 		rec := check.logosCtAnalyzeFunc(edge.Pos, origin, targs, id, subst, generic)
 		if rec == nil {
+			check.logosCtKeys = check.logosCtKeys[:len(check.logosCtKeys)-1]
 			return ""
 		}
 		if check.LogosCtInst == nil {
@@ -327,9 +337,23 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 		logosCtMarkDirectCalls(rec.Info, rec.Decl.Body)
 		check.logosCtRejectMethodValues(rec.Info)
 		check.logosCtNotes = append(check.logosCtNotes, pos)
-		for _, edge := range logosCtEdges(rec.Info, rec.Decl.Body, nil) {
+		edges := logosCtEdges(rec.Info, rec.Decl.Body, nil)
+		for _, edge := range edges {
 			w.bind(edge, pos)
 		}
+		// The instance kept its own charge plus its const-for
+		// accruals while the children bound; add the largest child
+		// chain so reuse validates the same budget the live walk saw.
+		maxChild := 0
+		for _, edge := range edges {
+			if child := LogosCtKey(edge.Origin, edge.Targs); child != "" {
+				if c, ok := check.logosCtCharge[child]; ok && c > maxChild {
+					maxChild = c
+				}
+			}
+		}
+		check.logosCtCharge[key] += maxChild
+		check.logosCtKeys = check.logosCtKeys[:len(check.logosCtKeys)-1]
 		check.logosCtChain = check.logosCtChain[:len(check.logosCtChain)-1]
 		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 		return id
@@ -620,6 +644,17 @@ func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []T
 	check.logosCtPos = append(check.logosCtPos, pos)
 	check.logosCtNotes = append(check.logosCtNotes, pos)
 	check.logosCtChain = append(check.logosCtChain, nodes+1)
+	// Record this frame's key and own charge now; const-for iterations
+	// accruing to it and the largest child chain join the same entry
+	// before visit pops the key, so a cache hit validates the budget
+	// the live walk saw. The key is popped in visit, which owns every
+	// return of this function.
+	key := LogosCtKey(origin, targs)
+	check.logosCtKeys = append(check.logosCtKeys, key)
+	if check.logosCtCharge == nil {
+		check.logosCtCharge = make(map[string]int)
+	}
+	check.logosCtCharge[key] = nodes + 1
 	if sum := logosCtChainSum(check.logosCtChain); sum > check.logosNodeLimit() {
 		check.errorf(pos, InvalidRangeExpr, "[comptime::node_limit] comptime instantiation chain has %d nodes above the limit %d", sum, check.logosNodeLimit())
 		check.logosCtSubst, check.pkg, check.version = savedSubst, savedPkg, savedVersion
