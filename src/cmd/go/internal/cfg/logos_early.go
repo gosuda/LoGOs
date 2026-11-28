@@ -248,10 +248,10 @@ func runPackageArgs(paths []string) []string {
 }
 
 // anyTargetResolves reports whether any collected word names a package:
-// an existing file or directory, the "all" pattern, or a wildcard pattern.
+// an existing file or directory, the "all" pattern, a wildcard pattern,
+// or a main-module directory through the exact import-path mapping.
 // Words that resolve to nothing name no package, so the caller falls back
-// to the working directory instead of skipping its check. The exact
-// import-path mapping extends this test when it lands.
+// to the working directory instead of skipping its check.
 func anyTargetResolves(paths []string) bool {
 	for _, p := range paths {
 		if p == "all" || strings.Contains(p, "...") {
@@ -260,14 +260,19 @@ func anyTargetResolves(paths []string) bool {
 		if _, err := fsys.Stat(p); err == nil {
 			return true
 		}
+		if _, ok := exactModuleDir(p); ok {
+			return true
+		}
 	}
 	return false
 }
 
 // argTargetHoldsLogos reports whether one command argument names a local
 // directory that needs logos, or a pattern whose walk would meet one.
-// Package paths without wildcards resolve during package loading, so only
-// the import trigger decides those.
+// An exact import path resolves here, against the module path of the
+// nearest go.mod, so a LoGOs-only flag does not reach the flag parser
+// before the directory check can see the sources. Anything subtler
+// resolves during package loading, where only the import trigger decides.
 func argTargetHoldsLogos(p string) (string, bool) {
 	if fi, err := fsys.Stat(p); err == nil {
 		if !fi.IsDir() {
@@ -291,6 +296,79 @@ func argTargetHoldsLogos(p string) (string, bool) {
 			return "walk meets LoGOs sources", true
 		}
 		return "", false
+	}
+	if dir, ok := exactModuleDir(p); ok {
+		if dirTargetHoldsLogos(dir) {
+			return "command names LoGOs sources", true
+		}
+		return "", false
+	}
+	return "", false
+}
+
+// exactModuleDir maps an exact import path onto a main-module directory.
+// It matches the argument against the module path of the nearest go.mod,
+// read through the overlay, on component boundaries: the path itself or
+// the path plus a slash maps the suffix onto the module root. The suffix
+// decides: a version query, a wildcard, an element no import can name
+// (vendor, testdata, dot and underscore trees), an escape above the root,
+// or a directory owned by a nested module outside the scope never maps.
+func exactModuleDir(p string) (string, bool) {
+	if strings.Contains(p, "@") || strings.Contains(p, "...") {
+		return "", false
+	}
+	s := discoverLogosScope()
+	if len(s.members) == 0 {
+		return "", false
+	}
+	roots := memberRootSet(s)
+	for _, m := range s.members {
+		if m.path == "" {
+			continue
+		}
+		var suffix string
+		if p == m.path {
+			suffix = ""
+		} else if rest, ok := strings.CutPrefix(p, m.path+"/"); ok {
+			suffix = rest
+		} else {
+			continue
+		}
+		dir := m.root
+		if suffix != "" {
+			for _, el := range strings.Split(suffix, "/") {
+				if el == "" || el == "." || el == ".." || el == "vendor" || el == "testdata" || strings.HasPrefix(el, ".") || strings.HasPrefix(el, "_") {
+					dir = ""
+					break
+				}
+			}
+			if dir == "" {
+				continue
+			}
+			dir = filepath.Join(m.root, filepath.FromSlash(suffix))
+			// A nested go.mod between the member root and the directory
+			// owns the package, unless it is itself a scope member.
+			nested := false
+			for d := dir; d != m.root; d = filepath.Dir(d) {
+				if isFile(filepath.Join(d, "go.mod")) && !roots[d] {
+					nested = true
+					break
+				}
+				if parent := filepath.Dir(d); parent == d {
+					break
+				}
+			}
+			if nested {
+				continue
+			}
+		}
+		if fi, err := fsys.Stat(dir); err != nil || !fi.IsDir() {
+			continue
+		}
+		if UnderGoRoot(dir) {
+			continue
+		}
+		return dir, true
 	}
 	return "", false
 }

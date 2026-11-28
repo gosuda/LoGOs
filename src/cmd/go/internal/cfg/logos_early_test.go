@@ -370,3 +370,60 @@ func TestNamedLogosTargetModTidyScope(t *testing.T) {
 		t.Errorf("namedLogosTarget(mod tidy) with a LoGOs subpackage = false, want true")
 	}
 }
+
+func TestExactModuleDir(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "m", "go.mod"), "module example.com/m\n\ngo 1.27\n")
+	writeFile(t, filepath.Join(root, "m", "lib", "lib.lgo"), "package lib\n")
+	writeGoModule(t, filepath.Join(root, "m", "g"), "example.com/m/g")
+	writeFile(t, filepath.Join(root, "m", "vendor", "v", "v.lgo"), "package v\n")
+	t.Chdir(filepath.Join(root, "m"))
+	cases := map[string]struct {
+		arg  string
+		want bool
+	}{
+		"root package":     {arg: "example.com/m", want: true},
+		"logos subpackage": {arg: "example.com/m/lib", want: true},
+		"nested module":    {arg: "example.com/m/g", want: false},
+		"missing dir":      {arg: "example.com/m/nope", want: false},
+		"other module":     {arg: "example.com/other/lib", want: false},
+		"escape":           {arg: "example.com/m/../evil", want: false},
+		"vendored":         {arg: "example.com/m/vendor/v", want: false},
+		"version query":    {arg: "example.com/m/lib@v1.0.0", want: false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, got := exactModuleDir(tc.arg)
+			if got != tc.want {
+				t.Errorf("exactModuleDir(%q) = %v, want %v", tc.arg, got, tc.want)
+			}
+		})
+	}
+	if _, ok := argTargetHoldsLogos("example.com/m/lib"); !ok {
+		t.Errorf("argTargetHoldsLogos(lib import path) = false, want true")
+	}
+	if _, ok := argTargetHoldsLogos("example.com/m"); ok {
+		t.Errorf("argTargetHoldsLogos(root import path) = true, want false (no sources at root)")
+	}
+	if _, ok := namedLogosTarget("build", []string{"example.com/m/lib"}); !ok {
+		t.Errorf("namedLogosTarget(build lib import path) = false, want true")
+	}
+}
+
+func TestExactModuleDirGoPackageSuppressesFallback(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("GOWORK", "auto")
+	writeLogosModule(t, filepath.Join(root, "l"), "example.com/l")
+	writeGoModule(t, filepath.Join(root, "g"), "example.com/g")
+	writeFile(t, filepath.Join(root, "go.work"), "go 1.27\n\nuse (\n\t./g\n\t./l\n)\n")
+	// The working directory is LoGOs-only, but the command names a Go
+	// package of another member: the exact mapping resolves it, so the
+	// working-directory fallback must not fire.
+	t.Chdir(filepath.Join(root, "l"))
+	if _, ok := namedLogosTarget("build", []string{"example.com/g"}); ok {
+		t.Errorf("namedLogosTarget(build Go import path) = true, want false")
+	}
+	if _, ok := namedLogosTarget("build", []string{"example.com/l"}); !ok {
+		t.Errorf("namedLogosTarget(build LoGOs import path) = false, want true")
+	}
+}

@@ -33,6 +33,13 @@ stdout '^ok\s+example\.com/nomark'
 go build -p 4 -o $WORK/nomark-p4$GOEXE .
 exec $WORK/nomark-p4$GOEXE
 stdout '^auto-detect$'
+
+# An exact import path maps onto its main-module directory: the
+# LoGOs-only flag reaches the directory check instead of failing.
+go build -pedantic -o $WORK/nomark-path$GOEXE example.com/nomark
+exec $WORK/nomark-path$GOEXE
+stdout '^auto-detect$'
+go build -pedantic example.com/nomark/sub
 cd ..
 
 # Trigger: a ./... walk meets the LoGOs directory, which plain go
@@ -342,9 +349,13 @@ func TestNomark(t *testing.T) {
 	}
 }
 
+-- nomark/sub/sub.lgo --
+package sub
+
+func Sub() string { return "sub" }
+
 -- marked/go.mod --
 module example.com/marked
-
 go 1.27
 
 -- marked/logos.toml --
