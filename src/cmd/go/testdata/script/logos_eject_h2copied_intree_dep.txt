@@ -1,0 +1,85 @@
+# A plain Go package kept by a dependency's own in-tree replace is
+# copied into the export through that dependency's tree, so its
+# same-named user calls need the full rewrite check: eject must refuse
+# the call as ambiguous instead of letting the spelling rewrite steal it.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd deepmain
+! logos eject -o out
+stderr 'ambiguous EnableHTTP2ExtendedConnect'
+! exists out
+cd ..
+
+-- deepmain/go.mod --
+module example.com/h2kddeep
+
+go 1.27
+
+require (
+	example.com/h2kddeepdep v0.0.0
+	example.com/h2kdsub v0.0.0 // indirect
+)
+
+replace example.com/h2kddeepdep => ../deepdep
+
+replace example.com/h2kdsub => ../deepdep/sub
+
+-- deepmain/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/h2kddeepdep"
+)
+
+func main() {
+	fmt.Println("deepmain ready:", deepdep.Serve())
+}
+
+-- deepdep/go.mod --
+module example.com/h2kddeepdep
+
+go 1.27
+
+require example.com/h2kdsub v0.0.0
+
+replace example.com/h2kdsub => ./sub
+
+-- deepdep/dep.lgo --
+package deepdep
+
+import "example.com/h2kdsub"
+
+func Serve() int {
+	return sub.Run()
+}
+
+-- deepdep/sub/go.mod --
+module example.com/h2kdsub
+
+go 1.27
+
+-- deepdep/sub/meter.go --
+package sub
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. The export copies this in-tree replacement
+// through its parent dependency, so the rewrite would steal the call
+// and the check must refuse it.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- deepdep/sub/sub.go --
+package sub
+
+import "net/http"
+
+func Run() int {
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect()
+	return len(http.MethodGet) + m.Hits
+}

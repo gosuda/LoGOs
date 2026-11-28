@@ -264,7 +264,7 @@ func ejectToDir(ctx context.Context, out string) {
 	// the rewrite-ambiguity check can stay exactly on those. Packages
 	// the export leaves behind keep the portability check only; the
 	// text rewrite never touches their files.
-	downgradeEjectCheckFlags(plan)
+	downgradeEjectCheckFlags(plan, out)
 	makeEjectStagingDirs(plan, staging, builds)
 	buildEjectRoots(moduleLoader, ctx, phaseOneRoots(plan))
 	if len(builds) > 0 {
@@ -504,14 +504,34 @@ func (plan *ejectPlan) addPackage(p *load.Package) {
 // check. Copied packages keep the full check, which is the only guard
 // for the unfiltered rewrites copyModuleTree applies to them. The plan
 // must be final: call only after test dependencies joined it.
-func downgradeEjectCheckFlags(plan *ejectPlan) {
-	copied := make(map[string]bool, len(plan.deps))
+func downgradeEjectCheckFlags(plan *ejectPlan, out string) {
+	absOut, err := filepath.Abs(out)
+	if err != nil {
+		base.Fatalf("logos eject: %s: %v", out, err)
+	}
+	var roots []copyRoot
+	addRoot := func(dir string) {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return
+		}
+		roots = append(roots, copyRoot{dir: abs, keep: localReplaceDirs(abs), skip: ejectSkipDir(dir, absOut, out)})
+	}
+	addRoot(plan.main.dir)
 	for _, m := range plan.deps {
-		copied[m.path] = true
+		addRoot(m.dir)
+	}
+	copied := func(dir string) bool {
+		for _, root := range roots {
+			if ejectCopiesDir(root, dir) {
+				return true
+			}
+		}
+		return false
 	}
 	for _, recs := range plan.provenance {
 		for _, p := range recs {
-			if p == nil || p.Module == nil || p.Module.Main || copied[p.Module.Path] {
+			if p == nil || p.Module == nil || p.Module.Main || p.Dir == "" || copied(p.Dir) {
 				continue
 			}
 			for i, flag := range p.Internal.Gcflags {
@@ -524,6 +544,41 @@ func downgradeEjectCheckFlags(plan *ejectPlan) {
 				break
 			}
 		}
+	}
+}
+
+// copyRoot is one module tree the export copies: its directory, the
+// nested module directories its local replaces keep, and the output
+// directory skipped when it lies inside the tree.
+type copyRoot struct {
+	dir  string
+	keep map[string]bool
+	skip string
+}
+
+// ejectCopiesDir reports whether the export copies dir when copying
+// the module rooted at root: the same module-boundary and
+// local-replacement rules as copyModuleTree. Nested modules kept by a
+// local replace travel inside the copy; other nested modules and the
+// skipped output directory stay out. A package whose files enter the
+// physical copy keeps the full rewrite check.
+func ejectCopiesDir(root copyRoot, dir string) bool {
+	rel, err := filepath.Rel(root.dir, dir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	if root.skip != "" && (rel == root.skip || strings.HasPrefix(rel, root.skip+string(filepath.Separator))) {
+		return false
+	}
+	for d := rel; ; {
+		if d != "." {
+			if fi, err := os.Stat(filepath.Join(root.dir, d, "go.mod")); err == nil && !fi.IsDir() {
+				return root.keep[filepath.Clean(d)]
+			}
+		} else {
+			return true
+		}
+		d = filepath.Dir(d)
 	}
 }
 
