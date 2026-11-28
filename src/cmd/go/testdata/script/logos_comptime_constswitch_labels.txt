@@ -1,0 +1,48 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos run .
+stdout '^11$'
+stdout '^9$'
+stdout '^-1$'
+cp stdout $WORK/native.txt
+
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $WORK/native.txt
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+
+-- w/go.mod --
+module example.com/constswitchlabels
+
+go 1.27
+
+-- w/main.lgo --
+package main
+
+import "fmt"
+
+func pick[T any](v T, skip bool) int {
+	_ = v
+	n := -1
+	const switch T {
+	case int, string:
+		if skip {
+			goto done
+		}
+		n = 1
+	done:
+		n += 10
+	}
+	return n
+}
+
+func main() {
+	fmt.Println(pick[int](0, false))
+	fmt.Println(pick[string]("s", true))
+	fmt.Println(pick[float64](0.0, false))
+}
