@@ -253,8 +253,8 @@ func discoverLogosScope() logosScope {
 	case work != "" && work != "auto":
 		return scopeFromWorkFile(work)
 	default:
-		if wf := findUpFile(cwd, "go.work"); wf != "" {
-			return scopeFromWorkFile(wf)
+		if dir := findUpFile(cwd, "go.work"); dir != "" {
+			return scopeFromWorkFile(filepath.Join(dir, "go.work"))
 		}
 	}
 	if dir := findUpFile(cwd, "go.mod"); dir != "" {
@@ -303,21 +303,6 @@ func goModPath(dir string) string {
 	return f.Module.Mod.Path
 }
 
-// findUpFile walks up from dir and reports the nearest directory holding
-// name, or "".
-func findUpFile(dir, name string) string {
-	for {
-		if st, err := fsys.Stat(filepath.Join(dir, name)); err == nil && !st.IsDir() {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
 // scopeHoldsLogos reports whether any scope member tree holds a directory
 // with LoGOs sources and no .go files.
 func scopeHoldsLogos() bool {
@@ -334,17 +319,29 @@ func scopeHoldsLogos() bool {
 	return false
 }
 
+// findUpFile walks up from dir and reports the nearest directory holding
+// name, or "".
+func findUpFile(dir, name string) string {
+	for {
+		if st, err := fsys.Stat(filepath.Join(dir, name)); err == nil && !st.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
 // patternMeetsLogos reports whether a ...-style pattern's walk would meet a
 // directory with LoGOs sources and no .go files. A workspace-root pattern
 // unions the workspace members, mirroring matchLogosWorkspaceRoot.
 func patternMeetsLogos(p string) bool {
-	s := discoverLogosScope()
-	if len(s.members) == 0 {
-		return false
-	}
-	roots := memberRootSet(s)
 	if dir, ok := patternLocalDir(p); ok {
+		s := discoverLogosScope()
 		if s.workDir != "" && dir == s.workDir {
+			roots := memberRootSet(s)
 			for _, m := range s.members {
 				if treeHoldsLogosOnly(m.root, roots) {
 					return true
@@ -352,8 +349,13 @@ func patternMeetsLogos(p string) bool {
 			}
 			return false
 		}
-		return treeHoldsLogosOnly(dir, roots)
+		return treeHoldsLogosOnly(dir, memberRootSet(s))
 	}
+	s := discoverLogosScope()
+	if len(s.members) == 0 {
+		return false
+	}
+	roots := memberRootSet(s)
 	for _, m := range s.members {
 		if m.path == "" {
 			continue

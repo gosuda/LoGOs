@@ -164,6 +164,41 @@ stderr 'go\.mod requires go >= 9\.99'
 stderr 'go\.mod requires go >= 9\.99'
 cd ..
 
+# A directory-triggered build agrees with an explicit logos build: the
+# startup environment applies, not the injected plain defaults.
+cd cpu
+env GOARCH=amd64
+env CGO_ENABLED=0
+env GOAMD64=
+go build -o $WORK/cpu-go$GOEXE .
+go version -m $WORK/cpu-go$GOEXE
+stdout 'GOAMD64=v3'
+logos build -o $WORK/cpu-logos$GOEXE .
+go version -m $WORK/cpu-logos$GOEXE
+stdout 'GOAMD64=v3'
+env GOARCH=
+env CGO_ENABLED=
+env GOAMD64=
+cd ..
+
+# The directory trigger fires before the builder starts: one WORK line
+# proves the re-execution happened exactly once.
+cd nomark
+go build -x -o $WORK/nomark-x$GOEXE .
+stderr -count=1 '(?m)^WORK='
+exec $WORK/nomark-x$GOEXE
+stdout '^auto-detect$'
+cd ..
+
+# In an unmarked cgo module both spellings deny cgo by policy.
+cd cgounmarked
+env CGO_ENABLED=
+[cgo] ! go build -o $WORK/cgounmarked-go$GOEXE .
+[cgo] stderr 'cgo_usage'
+! logos build -o $WORK/cgounmarked-logos$GOEXE .
+stderr 'cgo_usage'
+cd ..
+
 -- dep/go.mod --
 module example.com/g
 
@@ -460,3 +495,32 @@ go 1.27
 package m
 
 func Mark() string { return "m" }
+
+-- cpu/go.mod --
+module example.com/cpu
+
+go 1.27
+
+-- cpu/main.lgo --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("hello") }
+
+-- cgounmarked/go.mod --
+module example.com/cgounmarked
+
+go 1.27
+
+-- cgounmarked/main.lgo --
+package main
+
+/*
+int answer() { return 42; }
+*/
+import "C"
+
+import "fmt"
+
+func main() { fmt.Println(C.answer()) }

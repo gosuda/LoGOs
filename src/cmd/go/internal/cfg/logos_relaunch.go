@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"cmd/go/internal/fsys"
 	"golang.org/x/mod/modfile"
@@ -191,16 +192,105 @@ func workspaceMarkedByLogos(workFile string) bool {
 	return false
 }
 
+// RelaunchCleanup runs before a late re-execution replaces the process.
+// Commands that allocate a work directory before loading packages set it
+// after creating their builder, so the original builder is cleaned up
+// instead of leaking its work directory.
+var RelaunchCleanup func()
+
+// runRelaunchCleanup runs RelaunchCleanup once when set.
+func runRelaunchCleanup() {
+	if fn := RelaunchCleanup; fn != nil {
+		RelaunchCleanup = nil
+		fn()
+	}
+}
+
+// lateRelaunchGate gives a concurrent late re-execution exactly one owner.
+// On Unix the winner replaces the process, so losers vanish with it; on
+// Windows the winner waits for the child, so losers wait for the outcome
+// and exit with the child's status instead of starting their own child.
+type lateRelaunchGate struct {
+	mu      sync.Mutex
+	claimed bool
+	done    chan struct{}
+	ok      bool
+	code    int
+}
+
+func newLateRelaunchGate() *lateRelaunchGate {
+	return &lateRelaunchGate{done: make(chan struct{})}
+}
+
+// claim reports whether the caller owns the late re-execution.
+func (g *lateRelaunchGate) claim() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.claimed {
+		return false
+	}
+	g.claimed = true
+	return true
+}
+
+// finish publishes the winner's outcome and wakes the losers. ok is false
+// only when the child could not be started; the caller then reports the
+// error it would have reported before.
+func (g *lateRelaunchGate) finish(ok bool, code int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ok = ok
+	g.code = code
+	close(g.done)
+}
+
+// await waits for the winner's outcome.
+func (g *lateRelaunchGate) await() (bool, int) {
+	<-g.done
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.ok, g.code
+}
+
+var lateRelaunch = newLateRelaunchGate()
+
 // RelaunchAsLogos re-executes the current process as the logos command
 // with the same arguments, environment, and working directory. The child
 // runs as logos and never re-executes, so this happens exactly once. If
 // the execution fails, it prints one line and returns, and the caller
 // reports the error it would have reported before.
 func RelaunchAsLogos(reason string) {
+	runRelaunchCleanup()
 	exe, argv0 := logosExecutable()
-	if err := relaunchExec(exe, argv0); err != nil {
+	if code, started, err := relaunchExecCode(exe, argv0); err != nil {
 		fmt.Fprintf(os.Stderr, "go: cannot re-execute as logos (%s): %v\n", reason, err)
+	} else if started {
+		os.Exit(code)
 	}
+}
+
+// RelaunchAsLogosLate re-executes as logos from package loading, the only
+// trigger that still runs that late. It passes the environment as it was
+// when the process started, runs the work-directory cleanup of a builder
+// that already exists, and never returns on Windows: it exits with the
+// status of the child. It returns only when the child could not be
+// started, and the caller reports the error it would have reported before.
+func RelaunchAsLogosLate(reason string) {
+	if !lateRelaunch.claim() {
+		if ok, code := lateRelaunch.await(); ok {
+			os.Exit(code)
+		}
+		return
+	}
+	runRelaunchCleanup()
+	exe, argv0 := logosExecutable()
+	code, started, err := relaunchExecCode(exe, argv0)
+	if started {
+		lateRelaunch.finish(true, code)
+		os.Exit(code)
+	}
+	lateRelaunch.finish(false, 0)
+	fmt.Fprintf(os.Stderr, "go: cannot re-execute as logos (%s): %v\n", reason, err)
 }
 
 // logosExecutable selects the logos binary: $GOROOT/bin/logos when that

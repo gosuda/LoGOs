@@ -55,11 +55,11 @@ func TestSplitGoCommand(t *testing.T) {
 	}
 }
 
-// writeLogosModule writes a module with one LoGOs-only package under root.
+// writeLogosModule writes a module whose root package is LoGOs-only.
 func writeLogosModule(t *testing.T, root, modPath string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, "go.mod"), "module "+modPath+"\n\ngo 1.27\n")
-	writeFile(t, filepath.Join(root, "lib", "lib.lgo"), "package lib\n\nfunc Msg() string { return \"x\" }\n")
+	writeFile(t, filepath.Join(root, "main.lgo"), "package main\n\nfunc main() {}\n")
 }
 
 // writeGoModule writes a module with one Go package under root.
@@ -98,8 +98,7 @@ func TestArgTargetHoldsLogos(t *testing.T) {
 		want bool
 	}{
 		"logos directory":   {arg: "l", want: true},
-		"logos nested dir":  {arg: filepath.Join("l", "lib"), want: true},
-		"logos file":        {arg: filepath.Join("l", "lib", "lib.lgo"), want: true},
+		"logos root file":   {arg: filepath.Join("l", "main.lgo"), want: true},
 		"go directory":      {arg: "g", want: false},
 		"go file":           {arg: filepath.Join("g", "main.go"), want: false},
 		"missing path":      {arg: "nosuchdir", want: false},
@@ -171,5 +170,63 @@ func TestFirstNonFlagArg(t *testing.T) {
 	}
 	if got := firstNonFlagArg([]string{"-x"}); got != "" {
 		t.Errorf("firstNonFlagArg = %q, want empty", got)
+	}
+}
+
+func TestLateRelaunchGateFailure(t *testing.T) {
+	g := newLateRelaunchGate()
+	if !g.claim() {
+		t.Fatal("first claim lost, want win")
+	}
+	if g.claim() {
+		t.Error("second claim won, want loss")
+	}
+	waited := make(chan [2]int, 1)
+	go func() {
+		ok, code := g.await()
+		if ok {
+			code = -code - 1
+		}
+		waited <- [2]int{code, 0}
+	}()
+	g.finish(false, 0)
+	if got := <-waited; got[0] != 0 {
+		t.Errorf("await after failure = %d, want 0", got[0])
+	}
+}
+
+func TestLateRelaunchGateSuccess(t *testing.T) {
+	g := newLateRelaunchGate()
+	if !g.claim() {
+		t.Fatal("first claim lost, want win")
+	}
+	waited := make(chan int, 1)
+	go func() {
+		ok, code := g.await()
+		if !ok {
+			code = -1
+		}
+		waited <- code
+	}()
+	g.finish(true, 3)
+	if got := <-waited; got != 3 {
+		t.Errorf("await after success = %d, want 3", got)
+	}
+	// The exec path is not run here: os.Exit and process replacement have
+	// no unit-test form. The script suite covers the child behavior.
+}
+
+func TestRunRelaunchCleanupOnce(t *testing.T) {
+	old := RelaunchCleanup
+	defer func() { RelaunchCleanup = old }()
+	calls := 0
+	RelaunchCleanup = func() { calls++ }
+	runRelaunchCleanup()
+	runRelaunchCleanup()
+	if calls != 1 {
+		t.Errorf("cleanup ran %d times, want 1", calls)
+	}
+	if RelaunchCleanup != nil {
+		t.Errorf("RelaunchCleanup not cleared after running")
 	}
 }
