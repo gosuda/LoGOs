@@ -23,6 +23,7 @@ stdout '^auto-detect$'
 go build -json-diagnostics -o $WORK/nomark-json$GOEXE .
 exec $WORK/nomark-json$GOEXE
 stdout '^auto-detect$'
+cd ..
 
 # Trigger: a ./... walk meets the LoGOs directory, which plain go
 # would skip silently.
@@ -132,19 +133,36 @@ env GOSUMDB=off
 go get example.com/l/lib
 go mod tidy
 go build ./...
+# The import-triggered relaunch also uses the startup environment: the
+# binary records the LoGOs CPU default, not the plain-go default.
+env GOARCH=amd64
+go build -o $WORK/dep$GOEXE .
+go version -m $WORK/dep$GOEXE
+stdout 'GOAMD64=v3'
+env GOARCH=
 go run .
 stdout '^from-logos$'
 cd ..
 
-# An -overlay file that adds a marked member is honored: the overlaid
-# marker re-executes and the logos cgo policy denies the build.
+# A Go import with a Go provider in a dependency keeps plain go even when
+# another module holds only LoGOs sources at the same path.
+cd amb
+go build ./...
+go run .
+stdout '^go$'
+cd ..
+
 cd ov
+# Without the overlay the disk workspace lists only the unmarked member.
+go list -m all
+stdout 'example\.com/ovg'
+! stdout 'example\.com/ovm'
+go list -overlay=overlay-add.json -m all
+stdout 'example\.com/ovm'
 [cgo] ! go build -overlay=overlay-add.json -o $WORK/ov-m$GOEXE ./m/sub
 [cgo] stderr 'cgo_usage'
 ! logos build -overlay=overlay-add.json -o $WORK/ov-m-logos$GOEXE ./m/sub
 stderr 'cgo_usage'
-# Without the overlay the disk workspace is unmarked and plain go builds.
-[cgo] go build -o $WORK/ov-m-plain$GOEXE ./m/sub
 cd ..
 
 # Removing a marked member through the overlay removes the marker: the
@@ -524,3 +542,48 @@ import "C"
 import "fmt"
 
 func main() { fmt.Println(C.answer()) }
+
+-- amb/go.mod --
+module example.com/amb
+
+go 1.27
+
+require (
+	example.com/m v1.0.0
+	example.com/m/sub v1.0.0
+)
+
+replace example.com/m => ./m
+
+replace example.com/m/sub => ./sub
+
+-- amb/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/sub"
+)
+
+func main() { fmt.Println(sub.X()) }
+
+-- amb/m/go.mod --
+module example.com/m
+
+go 1.27
+
+-- amb/m/sub/lib.lgo --
+package sub
+
+func X() string { return "logos" }
+
+-- amb/sub/go.mod --
+module example.com/m/sub
+
+go 1.27
+
+-- amb/sub/lib.go --
+package sub
+
+func X() string { return "go" }

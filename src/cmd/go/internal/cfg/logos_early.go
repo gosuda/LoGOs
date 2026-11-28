@@ -373,6 +373,13 @@ func patternMeetsLogos(p string) bool {
 	return false
 }
 
+// TreeHoldsLogosOnly reports whether root or any directory below it holds
+// LoGOs sources and no .go files, skipping nested modules. It shares the
+// rule with the early walk.
+func TreeHoldsLogosOnly(root string) bool {
+	return treeHoldsLogosOnly(root, nil)
+}
+
 // patternLocalDir resolves the directory part of a ...-style pattern when
 // it names a local directory.
 func patternLocalDir(p string) (string, bool) {

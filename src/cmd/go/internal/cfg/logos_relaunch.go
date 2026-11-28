@@ -79,37 +79,22 @@ func dirEntriesHoldOnlyLogosSources(fis []fs.DirEntry, dir string) bool {
 	return found
 }
 
-// MaybeRelaunchForHelpTopic re-executes as logos when the help topic
-// names a LoGOs-only subcommand, so go help describes that command.
-// A go help with no LoGOs-only topic keeps the upstream text.
-func MaybeRelaunchForHelpTopic(topic string) {
-	if Logos || topic == "" || !relaunchAllowed() {
-		return
-	}
-	if IsLogosOnlyCommand(topic) {
-		RelaunchAsLogos("logos-only command " + topic)
-	}
-}
-
-// MaybeRelaunchForDir implements the last two re-execution triggers: a
-// main-module directory the command named, or an import inside the main
-// modules, that resolves to LoGOs sources and no .go files, and a
-// ./...-style walk that meets such a directory. Call only where plain go
-// already decided that dir is not a Go package, so a module without .lgo
-// sources pays nothing.
-func MaybeRelaunchForDir(dir string, inMain bool, reason string) {
-	if Logos || !inMain || !relaunchAllowed() {
-		return
+// LogosOnlyDir reports whether dir holds LoGOs sources and no .go files,
+// outside the standard library and outside excluded commands. It is the
+// side-effect-free probe behind the late import trigger: the resolver
+// records candidates with it and re-executes only when no Go provider
+// exists and exactly one candidate does.
+func LogosOnlyDir(dir string) bool {
+	if dir == "" || Logos || !relaunchAllowed() {
+		return false
 	}
 	if IsLogosRelaunchExcluded(CmdName) {
-		return
+		return false
 	}
 	if UnderGoRoot(dir) {
-		return
+		return false
 	}
-	if DirHoldsOnlyLogosSources(dir) {
-		RelaunchAsLogos(reason)
-	}
+	return DirHoldsOnlyLogosSources(dir)
 }
 
 // MainModuleMarkedByLogos reports whether the module that contains the
