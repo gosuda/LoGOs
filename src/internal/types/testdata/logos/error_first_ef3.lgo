@@ -568,3 +568,25 @@ func probeCleanupSwitchVar(mode int) {
 		}
 	}()
 }
+
+// A lambda introduced in an if initializer and called in the branch
+// runs during cleanup, so its discarded-error read fails.
+func probeCleanupIfInit(enabled bool) {
+	defer func() {
+		var cb func() int
+		if cb = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }(); enabled {
+			use(cb())
+		}
+	}()
+}
+
+// Same when the initializer replaces a previously bound lambda: the
+// replacement runs during cleanup.
+func probeCleanupIfInitReplace(enabled bool) {
+	defer func() {
+		cb := func() int { return 0 }
+		if cb = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }(); enabled {
+			use(cb())
+		}
+	}()
+}

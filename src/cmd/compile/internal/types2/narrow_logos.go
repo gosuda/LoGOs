@@ -6493,7 +6493,14 @@ func (w *logosEFBoundScan) scanStmt(s syntax.Stmt, live, maybe bool) (found, liv
 	case *syntax.LabeledStmt:
 		return w.scanStmt(s.Stmt, live, maybe)
 	case *syntax.IfStmt:
-		if w.scanCalls(s.Init, live, maybe) || w.scanCalls(s.Cond, live, maybe) {
+		var f bool
+		// An initializer runs before the condition and the branches,
+		// so a binding it establishes reaches calls inside them.
+		f, live, maybe = w.scanStmt(s.Init, live, maybe)
+		if f {
+			return true, live, maybe
+		}
+		if w.scanCalls(s.Cond, live, maybe) {
 			return true, live, maybe
 		}
 		ft, lt, mt := w.scanBranch(s.Then, live, maybe)
