@@ -1297,12 +1297,16 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 		}
 		return true
 	})
+	// Segments are recorded parents before children, so on identical
+	// spans the later segment is the deeper scope: a case clause that
+	// holds only a block shares the block's span, and the call inside
+	// resolves against the block's declarations, not the clause's.
 	enclosing := func(offset int) *h2Scope {
 		best := pkgScope
 		bestSize := -1
 		for _, sg := range segs {
 			if sg.start <= offset && offset <= sg.end {
-				if size := sg.end - sg.start; bestSize < 0 || size < bestSize {
+				if size := sg.end - sg.start; bestSize < 0 || size <= bestSize {
 					best, bestSize = sg.scope, size
 				}
 			}

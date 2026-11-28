@@ -1032,3 +1032,50 @@ func TestSupportCopyKeepsExplicitMethodOverEmbeddedServer(t *testing.T) {
 		t.Errorf("explicit user method call did not survive:\n%s", got)
 	}
 }
+
+// A case clause holding only a block still scopes the block's
+// declarations to the block: a call inside resolves against the block
+// shadowing, while a genuine call outside still rewrites.
+func TestSupportCopyBlockScopeInSingleBlockCase(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestcaseblock")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	const source = "package ejecttestcaseblock\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nfunc Enable(s *http.Server) {\n\ts.EnableHTTP2ExtendedConnect()\n\tswitch {\n\tdefault:\n\t\t{\n\t\t\ts := &meter.Meter{}\n\t\t\ts.EnableHTTP2ExtendedConnect()\n\t\t\t_ = s\n\t\t}\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "h2.go"), []byte(source), 0666); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestcaseblock", dst: "rt/logos/ejecttestcaseblock"}
+	if _, _, err := c.copyPackageGo(p, "h2.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestcaseblock", "h2.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Count(got, "RequireExtendedConnect") != 1 {
+		t.Errorf("want exactly one guard delegation, got:\n%s", got)
+	}
+	if strings.Count(got, "s.EnableHTTP2ExtendedConnect()") != 1 {
+		t.Errorf("want the block-shadowed call to survive, got:\n%s", got)
+	}
+}
