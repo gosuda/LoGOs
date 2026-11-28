@@ -16,7 +16,8 @@ func logosAppendTestEnv(env []string) []string {
 	if !cfg.Logos {
 		return env
 	}
-	return append(env, work.LogosTargetArchEnv()...)
+	env = append(env, work.LogosTargetArchEnv()...)
+	return append(env, cfg.LogosOptLevelEnv()...)
 }
 
 func logosInheritedTestEnv(name string) (string, bool) {

@@ -105,6 +105,29 @@ func TestLoadPrecedence(t *testing.T) {
 			experiment: "logosarena", arena: true, module: true,
 		},
 		{
+			name: "envBeatsFile", modRoot: o3,
+			flags: Flags{Logos: true, Env: Env{OptLevel: "1"}}, optLevel: "1",
+			amd64: "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
+		},
+		{
+			name: "flagBeatsEnv", modRoot: empty,
+			flags: Flags{Logos: true, Opt: "3", Env: Env{OptLevel: "1"}}, optLevel: "3",
+			amd64: "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
+		},
+		{
+			name: "invalidEnvLevel", modRoot: empty,
+			flags: Flags{Logos: true, Env: Env{OptLevel: "bad"}}, optLevel: "2",
+			amd64: "v3", arm: "v8.2",
+			experiment: "logosarena", arena: true, module: true,
+			wantErr: `logos build: invalid LOGOS_OPT_LEVEL "bad" (want 0, 1, 2, 3, s)`,
+		},
+		{
+			name: "plainGoIgnoresEnv", modRoot: o3,
+			flags: Flags{Env: Env{OptLevel: "0"}}, optLevel: "1", experiment: "",
+		},
+		{
 			name: "defaultO2", modRoot: empty,
 			flags: Flags{Logos: true}, optLevel: "2",
 			amd64: "v3", arm: "v8.2",
@@ -356,6 +379,25 @@ func TestTargetArchEnv(t *testing.T) {
 			got := s.TargetArchEnv(tt.goarch)
 			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
 				t.Errorf("TargetArchEnv(%q) = %q, want %q", tt.goarch, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOptLevelEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		level string
+		want  []string
+	}{
+		{"levelFlows", "1", []string{"LOGOS_OPT_LEVEL=1"}},
+		{"emptyContributesNothing", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Settings{OptLevel: tc.level}
+			got := s.OptLevelEnv()
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("OptLevelEnv() = %q, want %q", got, tc.want)
 			}
 		})
 	}
