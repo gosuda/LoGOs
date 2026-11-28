@@ -166,7 +166,7 @@ Proven by `test/logos/run/json_marshal_test.lgo`, `test/logos/run/json_binary_te
 | `comptime::unreachable_case` | Remove or reorder shadowed cases in `const switch`. |
 | `comptime::viewas_not_pod` | Use a plain POD struct without padding, bools, pointers, interfaces, slices, maps, or strings in `comptime.ViewAs`. |
 | `comptime::runtime_use` | Restrict `comptime` types and values to compile-time expressions. |
-| `comptime::node_limit` | Reduce comptime AST unrolling or raise `-logos.comptime_nodes` (the `max_comptime_ast_nodes` TOML key was removed). |
+| `comptime::node_limit` | Reduce comptime AST unrolling or raise the limit with `logos build -gcflags=all=-logos.comptime_nodes=N ./...` (the `max_comptime_ast_nodes` TOML key was removed; a file that still holds it fails with `unknown key`). |
 | `correctness::return_in_group_child` | Remove return statement; use ? or expression outcome to yield an error to the group. |
 | `correctness::child_outside_group` | Move the child go block inside an enclosing go group statement. |
 | `correctness::group_needs_error_result` | Add an error return type to the function enclosing the go group statement. |
