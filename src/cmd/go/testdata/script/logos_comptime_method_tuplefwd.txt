@@ -6,6 +6,14 @@ logos run .
 stdout '^12$'
 cp stdout $WORK/native.txt
 
+logos eject -o out
+exists out/main.go
+cd out
+go run .
+cmp stdout $WORK/native.txt
+exists $UPROOT1272/bin/go
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+
 -- w/go.mod --
 module example.com/methodtuplefwd
 

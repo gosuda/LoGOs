@@ -362,6 +362,22 @@ func (fl *fileLower) ejectCtMethodSites(methods map[*syntax.Name]string, parents
 		if contained {
 			continue
 		}
+		// A multi-result argument cannot stay beside the prepended
+		// receiver in ejected text. Under go or defer the temporaries
+		// hoist with the statement so the call still evaluates now;
+		// everywhere else an immediately invoked function holds them.
+		if _, _, _, _, ok := ejectTupleCallArg(info, s); ok {
+			if stmt, kind, ok := tupleHoistTarget(s, parents); ok {
+				start, end := fl.off(syntax.StartPos(stmt)), fl.off(syntax.EndPos(stmt))
+				fl.add(start, end, fl.ejectTupleHoist(s, sites, ctx, stmt, kind))
+				fl.markEjectSite(s.sel.Sel)
+				if s.targs != nil {
+					fl.markEjectSite(s.targs)
+				}
+				fl.changed = true
+				continue
+			}
+		}
 		fl.add(s.start, s.end, fl.ejectMethodText(s, sites, ctx))
 		fl.markEjectSite(s.sel.Sel)
 		if s.targs != nil {
@@ -390,8 +406,46 @@ func (fl *fileLower) ejectMethodText(s *ctMethodSite, sites []*ctMethodSite, ctx
 	} else {
 		recvExpr = s.sel.X
 	}
-	recv := fl.ejectMethodOperand(recvExpr, sites, ctx)
-	recvTyp := info.TypeOf(recvExpr)
+	recv, _ := fl.ejectMethodRecv(s, fl.ejectMethodOperand(recvExpr, sites, ctx), info.TypeOf(recvExpr))
+	// A single multi-result argument cannot sit beside the receiver in
+	// Go text. Capture both in evaluation order inside an immediately
+	// invoked function; go and defer statements hoist instead, in the
+	// sites loop above.
+	if tup, tupArg, pre, _, ok := ejectTupleCallArg(info, s); ok {
+		recvT := fl.cswName("mtuprecv")
+		vals := fl.cswName("mtup")
+		var psb strings.Builder
+		preNames := make([]string, 0, len(pre))
+		for _, arg := range pre {
+			name := fl.cswName("mtup")
+			preNames = append(preNames, name)
+			psb.WriteString(name + " := " + fl.ejectMethodOperand(arg, sites, ctx) + "; ")
+		}
+		if text, ok := ejectTupleText(eject, recv, preNames, fl.ejectMethodOperand(tupArg, sites, ctx), recvT, vals, psb.String(), tup.Len(), func(t types2.Type) string {
+			return fl.sourceTypeString(t, fl.genQualifier)
+		}, ctInstByID(info, s.id)); ok {
+			return text
+		}
+	}
+	var b strings.Builder
+	b.WriteString(eject)
+	b.WriteByte('(')
+	b.WriteString(recv)
+	for _, arg := range args {
+		b.WriteString(", ")
+		b.WriteString(fl.ejectMethodOperand(arg, sites, ctx))
+	}
+	if s.call.HasDots {
+		b.WriteString("...")
+	}
+	b.WriteByte(')')
+	return b.String()
+}
+
+// ejectMethodRecv applies promotion projection and receiver adjustment to
+// rendered receiver text, returning the text and the adjusted type.
+func (fl *fileLower) ejectMethodRecv(s *ctMethodSite, recv string, recvTyp types2.Type) (string, types2.Type) {
+	info := fl.pkg.info
 	sel := s.sel
 	{
 		if selection, ok := info.Selections[sel]; ok && selection != nil && len(selection.Index()) >= 2 {
@@ -428,19 +482,158 @@ func (fl *fileLower) ejectMethodText(s *ctMethodSite, sites []*ctMethodSite, ctx
 			}
 		}
 	}
-	var b strings.Builder
-	b.WriteString(eject)
-	b.WriteByte('(')
-	b.WriteString(recv)
-	for _, arg := range args {
-		b.WriteString(", ")
-		b.WriteString(fl.ejectMethodOperand(arg, sites, ctx))
-	}
+	return recv, recvTyp
+}
+
+// ejectTupleCallArg reports the single multi-result argument of a method
+// call, with the plain arguments before it. After the rewrite prepends the
+// receiver, such a call carries one tuple beside the receiver and needs a
+// desugar; in ejected source text the tuple is still the sole argument of
+// a method value call, or follows the receiver of a method expression.
+func ejectTupleCallArg(info *types2.Info, s *ctMethodSite) (tup *types2.Tuple, tupArg syntax.Expr, pre, rest []syntax.Expr, ok bool) {
 	if s.call.HasDots {
-		b.WriteString("...")
+		return nil, nil, nil, nil, false
 	}
-	b.WriteByte(')')
-	return b.String()
+	args := s.call.ArgList
+	if s.methodExpr {
+		if len(args) == 0 {
+			return nil, nil, nil, nil, false
+		}
+		args = args[1:]
+	}
+	idx := -1
+	for i, arg := range args {
+		t, isTup := info.TypeOf(arg).(*types2.Tuple)
+		if !isTup || t.Len() < 2 {
+			continue
+		}
+		// As in the native lowering, only a call result or a map
+		// receive unpacks; a tuple-typed variable keeps the direct call.
+		switch syntax.Unparen(arg).(type) {
+		case *syntax.CallExpr, *syntax.IndexExpr:
+		default:
+			continue
+		}
+		if idx >= 0 {
+			return nil, nil, nil, nil, false
+		}
+		idx = i
+		tup = t
+		tupArg = arg
+	}
+	if idx < 0 {
+		return nil, nil, nil, nil, false
+	}
+	return tup, tupArg, args[:idx:idx], args, true
+}
+
+// ejectTupleText renders the immediately invoked function capturing the
+// receiver, the plain arguments before the tuple, and one multi-result
+// argument in evaluation order. preDecls holds the plain-argument
+// temporaries as text. Spell renders each result type; a result with no Go
+// spelling degrades gracefully: one unspellable result becomes any, while
+// several fall back to plain rendering so upstream Go reports the call.
+func ejectTupleText(eject, recv string, preNames []string, tupText, recvT, vals, preDecls string, n int, spell func(types2.Type) string, rec *types2.LogosCtInst) (string, bool) {
+	var vsb strings.Builder
+	for k := 0; k < n; k++ {
+		if k != 0 {
+			vsb.WriteString(", ")
+		}
+		vsb.WriteString(vals + strconv.Itoa(k))
+	}
+	valsText := vsb.String()
+	var callb strings.Builder
+	callb.WriteString(eject)
+	callb.WriteByte('(')
+	callb.WriteString(recvT)
+	for _, name := range preNames {
+		callb.WriteString(", ")
+		callb.WriteString(name)
+	}
+	callb.WriteString(", " + valsText + ")")
+	if rec == nil || rec.Sig == nil || rec.Sig.Results().Len() == 0 {
+		return "func() { " + recvT + " := " + recv + "; " + preDecls + valsText + " := " + tupText + "; " + callb.String() + " }()", true
+	}
+	results := make([]string, 0, rec.Sig.Results().Len())
+	for i := 0; i < rec.Sig.Results().Len(); i++ {
+		t := rec.Sig.Results().At(i).Type()
+		s := spell(t)
+		if _, ok := parseExprAt(s, rec.Origin.Pos()); !ok {
+			if len(results) != 0 || rec.Sig.Results().Len() != 1 {
+				return "", false
+			}
+			results = append(results, "any")
+			continue
+		}
+		results = append(results, s)
+	}
+	return "func() (" + strings.Join(results, ", ") + ") { " + recvT + " := " + recv + "; " + preDecls + valsText + " := " + tupText + "; return " + callb.String() + " }()", true
+}
+
+// tupleHoistTarget returns the go or defer statement holding the call
+// directly, with its kind, when temporaries must evaluate now rather
+// than at the deferred moment.
+func tupleHoistTarget(s *ctMethodSite, parents map[syntax.Node]syntax.Node) (syntax.Node, string, bool) {
+	cur := syntax.Node(s.call)
+	for {
+		p, ok := parents[cur]
+		if !ok {
+			return nil, "", false
+		}
+		if _, ok := p.(*syntax.ParenExpr); ok {
+			cur = p
+			continue
+		}
+		if st, ok := p.(*syntax.CallStmt); ok && st.Call == cur {
+			if st.Tok == syntax.Go {
+				return p, "go ", true
+			}
+			if st.Tok == syntax.Defer {
+				return p, "defer ", true
+			}
+		}
+		return nil, "", false
+	}
+}
+
+// ejectTupleHoist replaces a whole go or defer statement whose call takes
+// a multi-result argument with a block evaluating the receiver and the
+// results now.
+func (fl *fileLower) ejectTupleHoist(s *ctMethodSite, sites []*ctMethodSite, ctx cfCtx, stmt syntax.Node, kind string) string {
+	info := fl.pkg.info
+	eject := fl.pkg.ctEjectNames()[s.id]
+	recvExpr := s.sel.X
+	if s.methodExpr && len(s.call.ArgList) != 0 {
+		recvExpr = s.call.ArgList[0]
+	}
+	recv, _ := fl.ejectMethodRecv(s, fl.ejectMethodOperand(recvExpr, sites, ctx), info.TypeOf(recvExpr))
+	_, tupArg, pre, _, ok := ejectTupleCallArg(info, s)
+	tup, isTup := info.TypeOf(tupArg).(*types2.Tuple)
+	if !ok || !isTup || tup.Len() < 2 {
+		return fl.ejectMethodText(s, sites, ctx)
+	}
+	recvT, vals := fl.cswName("mtuprecv"), fl.cswName("mtup")
+	var psb strings.Builder
+	var callb strings.Builder
+	callb.WriteString(eject)
+	callb.WriteByte('(')
+	callb.WriteString(recvT)
+	for _, arg := range pre {
+		name := fl.cswName("mtup")
+		psb.WriteString(name + " := " + fl.ejectMethodOperand(arg, sites, ctx) + "; ")
+		callb.WriteString(", ")
+		callb.WriteString(name)
+	}
+	var vsb strings.Builder
+	for k := 0; k < tup.Len(); k++ {
+		if k != 0 {
+			vsb.WriteString(", ")
+		}
+		vsb.WriteString(vals + strconv.Itoa(k))
+	}
+	valsText := vsb.String()
+	callb.WriteString(", " + valsText + ")")
+	return "{ " + recvT + " := " + recv + "; " + psb.String() + valsText + " := " + fl.ejectMethodOperand(tupArg, sites, ctx) + "; " + kind + callb.String() + " }"
 }
 
 // ejectMethodOperand renders one receiver or argument, substituting the
