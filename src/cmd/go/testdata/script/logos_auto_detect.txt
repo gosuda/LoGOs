@@ -169,6 +169,15 @@ go run .
 stdout '^go$'
 cd ..
 
+# `go mod tidy` loads "all": in an unmarked module whose only package is a
+# LoGOs subpackage, tidy keeps the dependency instead of dropping it.
+cd tidy
+env GOPROXY=off
+go mod tidy
+go list -m example.com/dep
+stdout '^example\.com/dep\s+v1\.0\.0'
+cd ..
+
 cd ov
 # Without the overlay the disk workspace lists only the unmarked member.
 go list -m all
@@ -233,6 +242,36 @@ env CGO_ENABLED=
 ! logos build -o $WORK/cgounmarked-logos$GOEXE .
 stderr 'cgo_usage'
 cd ..
+
+-- tidy/go.mod --
+module example.com/tidy
+
+go 1.27
+
+require example.com/dep v1.0.0
+
+replace example.com/dep => ./dep
+
+-- tidy/dep/go.mod --
+module example.com/dep
+
+go 1.27
+
+-- tidy/dep/dep.go --
+package dep
+
+func Msg() string { return "dep" }
+
+-- tidy/cmd/app/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/dep"
+)
+
+func main() { fmt.Println(dep.Msg()) }
 
 -- dep/go.mod --
 module example.com/g
