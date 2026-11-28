@@ -463,11 +463,21 @@ func (check *Checker) logosCtRejectInterfaceFormation(pos syntax.Pos, V, T Type)
 	if !isValid(V) || !isValid(T) {
 		return
 	}
+	// Unnamed receivers count too: an anonymous struct promotes the
+	// comptime methods of its embedded fields, and calling one through
+	// an interface would dispatch to the retired generic body. The
+	// method lookup below already follows promotion, and only a known
+	// comptime generic triggers the diagnostic.
 	base := Unalias(V)
 	if ptr, ok := base.(*Pointer); ok {
 		base = Unalias(ptr.Elem())
 	}
-	if _, ok := base.(*Named); !ok || logosContainsTypeParam(Unalias(V), nil) {
+	if _, ok := base.(*Named); !ok {
+		if _, ok := base.(*Struct); !ok {
+			return
+		}
+	}
+	if logosContainsTypeParam(Unalias(V), nil) {
 		return
 	}
 	iface, ok := Unalias(T).(*Interface)
@@ -621,6 +631,7 @@ func (check *Checker) logosCtAnalyzeFunc(pos syntax.Pos, origin *Func, targs []T
 	defer func() {
 		check.logosCtSubst, check.pkg, check.version = savedSubst, savedPkg, savedVersion
 		check.logosCtPos = check.logosCtPos[:len(check.logosCtPos)-1]
+		check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 	}()
 	decl = syntax.CloneLogosCtSyntax(decl)
 	if origin.Signature().Recv() != nil {
