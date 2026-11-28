@@ -49,6 +49,18 @@ go list ./...
 stdout 'example\.com/nomark'
 cd ..
 
+# A wildcard matches by import-path prefix with a bounded descent: only a
+# directory the full pattern names counts.
+cd nomark
+go list ./cmd...
+stdout 'example\.com/nomark/cmdtool'
+go list ./api...
+stdout 'example\.com/nomark/apiclient'
+# A suffix after ... filters: only directories the full pattern names count.
+! go build -pedantic ./sub/.../zzz
+stderr 'flag provided but not defined'
+cd ..
+
 # Trigger: the module marker. logos.toml beside go.mod re-executes
 # before any package loads, so the .lgo test runs under go test.
 # The marker fires before the builder starts: one WORK line proves
@@ -178,6 +190,24 @@ go list -m example.com/dep
 stdout '^example\.com/dep\s+v1\.0\.0'
 cd ..
 
+# Vendor trees and go.mod ignore exclusions never trigger a re-execution:
+# the only LoGOs sources here sit where no requested build looks.
+cd excl
+! go build -pedantic -o $WORK/excl$GOEXE ./...
+stderr 'flag provided but not defined'
+go build -o $WORK/excl$GOEXE ./...
+exec $WORK/excl$GOEXE
+stdout '^ok$'
+cd ..
+
+# A wildcard that matches no package reports the miss instead of looping:
+# the pattern names nothing, so no candidate re-executes the command.
+cd getmiss
+env GOPROXY=off
+! go get example.com/app/nonexistent...
+stderr 'nonexistent'
+cd ..
+
 cd ov
 # Without the overlay the disk workspace lists only the unmarked member.
 go list -m all
@@ -272,6 +302,50 @@ import (
 )
 
 func main() { fmt.Println(dep.Msg()) }
+
+-- nomark/cmdtool/c.lgo --
+package cmdtool
+
+func Tool() string { return "tool" }
+
+-- nomark/apiclient/a.lgo --
+package apiclient
+
+func Client() string { return "client" }
+
+-- excl/go.mod --
+module example.com/excl
+
+go 1.27
+
+ignore ./scratch
+
+-- excl/cmd/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("ok") }
+
+-- excl/scratch/s.lgo --
+package scratch
+
+func Scratch() string { return "scratch" }
+
+-- excl/vendor/v/v.lgo --
+package v
+
+func V() string { return "v" }
+
+-- getmiss/go.mod --
+module example.com/app
+
+go 1.27
+
+-- getmiss/app.lgo --
+package main
+
+func main() {}
 
 -- dep/go.mod --
 module example.com/g

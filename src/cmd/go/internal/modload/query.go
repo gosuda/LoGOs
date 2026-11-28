@@ -704,10 +704,15 @@ func QueryPattern(ld *Loader, ctx context.Context, pattern, query string, curren
 			m := search.NewMatch(pattern)
 			matchPackages(ld, ctx, m, imports.AnyTags(), omitStd, []module.Version{mod})
 			if len(m.Pkgs) == 0 && len(m.Errs) == 0 {
+				prefix := mod.Path
+				if ld.MainModules.Contains(mod.Path) {
+					prefix = ld.MainModules.PathPrefix(module.Version{Path: mod.Path})
+				}
+				ignores := parseIgnorePatterns(ld, ctx, pkgpattern.TreeCanMatchPattern(pattern), []module.Version{mod})
 				for _, root := range roots {
-					if cfg.TreeHoldsLogosOnly(root) {
+					for _, dir := range logosPatternDirs(root, prefix, pattern, ignores[root], isLocal) {
 						logosMu.Lock()
-						logos.add(root)
+						logos.add(dir)
 						logosMu.Unlock()
 					}
 				}

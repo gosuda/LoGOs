@@ -260,7 +260,11 @@ func RelaunchAsLogos(reason string) {
 // that already exists, and never returns on Windows: it exits with the
 // status of the child. It returns only when the child could not be
 // started, and the caller reports the error it would have reported before.
+// It is a no-op when the command already runs as logos.
 func RelaunchAsLogosLate(reason string) {
+	if Logos {
+		return
+	}
 	if !lateRelaunch.claim() {
 		if ok, code := lateRelaunch.await(); ok {
 			os.Exit(code)
