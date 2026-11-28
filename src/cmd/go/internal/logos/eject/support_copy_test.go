@@ -6,6 +6,8 @@ package eject
 
 import (
 	"encoding/json"
+	"go/parser"
+	"go/token"
 	"internal/testenv"
 	"io/fs"
 	"os"
@@ -1034,6 +1036,77 @@ func TestSupportCopyKeepsExplicitMethodOverEmbeddedServer(t *testing.T) {
 	}
 	if !strings.Contains(got, "h.EnableHTTP2ExtendedConnect()") {
 		t.Errorf("explicit user method call did not survive:\n%s", got)
+	}
+}
+
+// A method in a sibling file the export build does not select must not
+// shadow a genuine server call: the Windows-only method is absent from
+// the Linux export, so the call still delegates to the guard.
+func TestSupportCopyRewritesCallShadowedOnlyByInactiveSibling(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestinactiveshadow")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"holder.go":         "package ejecttestinactiveshadow\n\nimport \"net/http\"\n\ntype Holder struct {\n\t*http.Server\n}\n",
+		"holder_windows.go": "package ejecttestinactiveshadow\n\nfunc (h *Holder) EnableHTTP2ExtendedConnect() {}\n",
+		"call_linux.go":     "package ejecttestinactiveshadow\n\nimport \"net/http\"\n\nvar _ = http.Get\n\nfunc Enable(h Holder) {\n\th.EnableHTTP2ExtendedConnect()\n}\n",
+	}
+	for name, source := range files {
+		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestinactiveshadow", dst: "rt/logos/ejecttestinactiveshadow"}
+	if _, _, err := c.copyPackageGo(p, "call_linux.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestinactiveshadow", "call_linux.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "h.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("inactive sibling method blocked the rewrite of a genuine server call:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation for the genuine server call:\n%s", got)
+	}
+}
+
+// A generic receiver declaration shadows the promoted fork method
+// exactly like a bare receiver: Holder[T] names the same type as the
+// call-site instantiation.
+func TestH2DeclaresMethodRecognizesGenericReceiver(t *testing.T) {
+	const source = "package h2genericshadow\n\ntype Holder[T any] struct{}\n\nfunc (h *Holder[T]) EnableHTTP2ExtendedConnect() {}\n"
+	f, err := parser.ParseFile(token.NewFileSet(), "shadow.go", source, 0)
+	if err != nil {
+		t.Fatalf("parse shadow fixture: %v", err)
+	}
+	origins := []*h2TypeOrigin{{file: f}}
+	if !h2DeclaresMethod(origins, "Holder", h2extendedConnectMethod) {
+		t.Errorf("h2DeclaresMethod missed the generic receiver Holder[T] for %s", h2extendedConnectMethod)
+	}
+	if h2DeclaresMethod(origins, "Other", h2extendedConnectMethod) {
+		t.Errorf("h2DeclaresMethod matched the generic receiver against an unrelated type")
 	}
 }
 

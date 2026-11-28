@@ -14,6 +14,7 @@ import (
 	"go/scanner"
 	"go/token"
 	"internal/logosfile"
+	"internal/syslist"
 	"io/fs"
 	"os"
 	"path"
@@ -26,6 +27,7 @@ import (
 
 	"golang.org/x/mod/module"
 
+	"cmd/go/internal/cfg"
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/load"
 	"cmd/go/internal/search"
@@ -853,10 +855,70 @@ type h2FileDecls struct {
 	bind    h2Binding
 }
 
+// h2ExportTagSelected mirrors go/build's matchTag under the export's
+// build context, so a sibling condition evaluates exactly as the go tool
+// selects files for the exported package. A tag the host build does not
+// set stays false: the export builds with the host tag set, and a file
+// gated on another tag compiles in no export build.
+func h2ExportTagSelected(tag string) bool {
+	ctxt := cfg.BuildContext
+	if ctxt.CgoEnabled && tag == "cgo" {
+		return true
+	}
+	if tag == ctxt.GOOS || tag == ctxt.GOARCH || tag == ctxt.Compiler {
+		return true
+	}
+	if ctxt.GOOS == "android" && tag == "linux" {
+		return true
+	}
+	if ctxt.GOOS == "illumos" && tag == "solaris" {
+		return true
+	}
+	if ctxt.GOOS == "ios" && tag == "darwin" {
+		return true
+	}
+	if tag == "unix" && syslist.UnixOS[ctxt.GOOS] {
+		return true
+	}
+	if tag == "boringcrypto" {
+		tag = "goexperiment.boringcrypto"
+	}
+	return slices.Contains(ctxt.BuildTags, tag) || slices.Contains(ctxt.ToolTags, tag) ||
+		slices.Contains(ctxt.ReleaseTags, tag)
+}
+
+// h2FileSelectedByExport reports whether the export build selects a
+// sibling source: the same file filter the export applies to the
+// package, evaluated on the bytes the copy emits. The name check drops
+// test and runtime sources the copy never emits; the build condition
+// combines the header constraint, filename GOOS/GOARCH suffixes, and cgo
+// through ownedFileCondition, exactly as owned declarations do. An
+// unreadable or unparsable file counts as selected, so a declaration the
+// copy reads is never dropped on a read error.
+func h2FileSelectedByExport(name string, data []byte) bool {
+	if !isSupportCopyFile(name) {
+		return false
+	}
+	f, err := parser.ParseFile(token.NewFileSet(), name, data, parser.ImportsOnly|parser.ParseComments)
+	if err != nil {
+		return true
+	}
+	cond, err := ownedFileCondition(name, f)
+	if err != nil {
+		return true
+	}
+	if cond == nil {
+		return true
+	}
+	return cond.Eval(h2ExportTagSelected)
+}
+
 // siblingFileDecls returns the package-level declarations of the sibling
 // Go files of one support package in filename order, read through the
 // effective filesystem so overlay replacements govern exactly as they
-// govern the copy. Test files are out: the copy never emits them.
+// govern the copy. Test files are out: the copy never emits them. Files
+// the export build does not select are out too: a declaration in a
+// platform-muted sibling must not shadow a call the export keeps.
 func (c *supportCopy) siblingFileDecls(p supportSourcePackage, name string) []*h2FileDecls {
 	var out []*h2FileDecls
 	entries, err := c.readDir(p)
@@ -870,6 +932,17 @@ func (c *supportCopy) siblingFileDecls(p supportSourcePackage, name string) []*h
 		}
 		data, err := c.readOriginal(p, other)
 		if err != nil {
+			continue
+		}
+		// Judge the bytes the copy emits: ejected build lines strip out
+		// exactly as copyPackageGo strips them, so an ejected-only
+		// sibling still counts while a file no export build compiles
+		// contributes no shadowing declaration.
+		emitted := data
+		if !p.vendored {
+			emitted = stripEjectedBuildTag(data)
+		}
+		if !h2FileSelectedByExport(other, emitted) {
 			continue
 		}
 		f, err := parser.ParseFile(token.NewFileSet(), other, data, 0)
@@ -963,9 +1036,11 @@ func h2EmbedsHTTPServer(origins []*h2TypeOrigin, name string, seen map[string]bo
 }
 
 // h2DeclaresMethod reports whether any file of the package declares a
-// method with the given name on the named type. An explicit method
-// shadows a promoted one, so a call on such a type is a user method
-// even when the type embeds a server.
+// method with the given name on the named type. The origins hold only
+// files the export build selects, so an explicit method shadows a
+// promoted one exactly when the export compiles it: a call on such a
+// type is a user method even when the type embeds a server. A generic
+// receiver spells the type with arguments, so the base name decides.
 func h2DeclaresMethod(origins []*h2TypeOrigin, typeName, method string) bool {
 	for _, o := range origins {
 		for _, decl := range o.file.Decls {
@@ -978,13 +1053,37 @@ func h2DeclaresMethod(origins []*h2TypeOrigin, typeName, method string) bool {
 				if star, ok := recv.(*ast.StarExpr); ok {
 					recv = star.X
 				}
-				if id, ok := recv.(*ast.Ident); ok && id.Name == typeName {
+				if name, ok := h2NamedTypeBase(recv); ok && name == typeName {
 					return true
 				}
 			}
 		}
 	}
 	return false
+}
+
+// h2NamedTypeBase reports the declared type name of a receiver or value
+// type: a bare identifier or a generic instantiation of one. Pointer,
+// parenthesized, and all other shapes stay unproven exactly as before:
+// only instantiations newly resolve, so Holder[string] follows the
+// declared Holder without changing any existing verdict.
+func h2NamedTypeBase(typ ast.Expr) (string, bool) {
+	if id, ok := typ.(*ast.Ident); ok {
+		return id.Name, true
+	}
+	var base ast.Expr
+	switch t := typ.(type) {
+	case *ast.IndexExpr:
+		base = t.X
+	case *ast.IndexListExpr:
+		base = t.X
+	default:
+		return "", false
+	}
+	if id, ok := base.(*ast.Ident); ok {
+		return id.Name, true
+	}
+	return "", false
 }
 
 // h2TypeDecl returns the type declaration of name in one file, or nil
@@ -1387,8 +1486,8 @@ func (c *supportCopy) filterH2EditsToGenuine(p supportSourcePackage, name string
 		if h2IsHTTPServerType(typ, bind.local, bind.dot) {
 			return h2ReceiverHTTP
 		}
-		if name, ok := typ.(*ast.Ident); ok && h2EmbedsHTTPServer(origins, name.Name, map[string]bool{}) {
-			if h2DeclaresMethod(origins, name.Name, h2extendedConnectMethod) {
+		if name, ok := h2NamedTypeBase(typ); ok && h2EmbedsHTTPServer(origins, name, map[string]bool{}) {
+			if h2DeclaresMethod(origins, name, h2extendedConnectMethod) {
 				return h2ReceiverUser
 			}
 			return h2ReceiverHTTP
@@ -1534,11 +1633,12 @@ func h2DeclaresExtendedConnectFunc(f *ast.File) bool {
 }
 
 // packageDeclaresExtendedConnect reports whether any handwritten Go file
-// of the support source package other than name declares the extended
+// the export build selects, other than name, declares the extended
 // CONNECT method name. Lowered files carry the compiler's own ambiguity
 // verification, so only handwritten sources need this package-wide check:
 // the text rewrite cannot tell a genuine server opt-in from a same-named
-// user method in a sibling file.
+// user method in a sibling file. A file no export build compiles cannot
+// make the export ambiguous.
 func (c *supportCopy) packageDeclaresExtendedConnect(p supportSourcePackage, name string) bool {
 	entries, err := c.readDir(p)
 	if err != nil {
@@ -1551,6 +1651,13 @@ func (c *supportCopy) packageDeclaresExtendedConnect(p supportSourcePackage, nam
 		}
 		data, err := c.readOriginal(p, other)
 		if err != nil {
+			continue
+		}
+		emitted := data
+		if !p.vendored {
+			emitted = stripEjectedBuildTag(data)
+		}
+		if !h2FileSelectedByExport(other, emitted) {
 			continue
 		}
 		fset := token.NewFileSet()
