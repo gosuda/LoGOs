@@ -470,8 +470,9 @@ func probeRecoverBothBranches(verbose bool) {
 	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
 }
 
-// Control: an early return that skips the recovery leaves no recovered
-// continuation, so the call below stays unreachable and silent.
+// An early return that skips the recovery does not count as guaranteed
+// recovery for unwinding, but the path that falls through still recovers:
+// its exit joins the caller continuation, so the read fails.
 func probeRecoverSkippedReturn(verbose bool) {
 	h := heldField{}
 	h.stats, h.err = fetchHeld()
@@ -484,7 +485,7 @@ func probeRecoverSkippedReturn(verbose bool) {
 		}()
 		panic("fail")
 	}()
-	use(h.stats)
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
 }
 
 // A cleanup that saves a lambda, rebinds its variable, then calls the
@@ -620,6 +621,22 @@ func probeRecoverSelect(ch chan int) {
 			case <-ch:
 				_ = recover()
 			default:
+				_ = recover()
+			}
+		}()
+		panic("fail")
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// A deferred cleanup that recovers only conditionally still resumes the
+// caller on the recovering path: the read after the recovered exit fails.
+func probeRecoverConditional(resume bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if resume {
 				_ = recover()
 			}
 		}()
