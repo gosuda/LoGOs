@@ -467,7 +467,10 @@ func (check *Checker) logosErrorAfterTerminatingSwitch() bool {
 			continue
 		}
 		if check.isTerminating(list[i], "") {
-			return false
+			// An ordinary terminator also keeps control from reaching
+			// the tail, so keep scanning past it for an earlier
+			// terminating switch. Labels still end the scan above.
+			continue
 		}
 	}
 	return false

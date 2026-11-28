@@ -201,6 +201,8 @@ type Checker struct {
 	logosCtPos          []syntax.Pos       // logos comptime instantiation: call site of the current exact body check.
 	logosCtNotes        []syntax.Pos       // logos comptime instantiation: parent positions for instantiated-here notes; visit pushes parent, analyze pushes instance site.
 	logosCtChain        []int              // logos comptime instantiation: body-node frame per active instance; const-for iterations accrue to the top frame.
+	logosCtKeys         []string           // logos comptime instantiation: instance key per active analysis frame; visit pops each key when its instance completes.
+	logosCtCharge       map[string]int     // logos comptime instantiation: completed instances map to their own charge plus their maximum descendant chain, so cache hits validate the same budget.
 	logosCtIfaceSites   []logosCtIfaceSite // logos comptime instantiation: interface formations to recheck in drain when generics are known.
 	logosCtLocalDefs    map[*syntax.Name]*TypeName
 	logosTypeOfFact     map[syntax.Expr]Type     // logos comptime instantiation: concrete types of comptime.TypeOf calls.

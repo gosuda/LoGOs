@@ -1,0 +1,70 @@
+# A plain Go dependency the export does not copy keeps its same-named
+# user calls: the text rewrite never touches its files, so the eject
+# check verifies portability only and the export succeeds instead of
+# refusing the call as ambiguous.
+
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd kdmain
+logos run .
+stdout '^kdmain ready: 4$'
+logos eject -o out
+exists out/main.go
+! exists out/_logos_deps/example.com/h2kddep@v0.0.0
+cd out
+go build ./...
+exec env -u GOROOT $UPROOT1272/bin/go build ./...
+go run .
+stdout '^kdmain ready: 4$'
+exec env -u GOROOT $UPROOT1272/bin/go run .
+stdout '^kdmain ready: 4$'
+cd ../..
+
+-- kddep/go.mod --
+module example.com/h2kddep
+
+go 1.27
+
+-- kddep/meter.go --
+package kddep
+
+// Meter is a user type with the same opt-in name as the fork-only
+// (*net/http.Server) method. The export never copies this dependency,
+// so the rewrite cannot steal the call and the check must not refuse it.
+type Meter struct{ Hits int }
+
+func (m *Meter) EnableHTTP2ExtendedConnect() { m.Hits++ }
+
+-- kddep/dep.go --
+package kddep
+
+import "net/http"
+
+func Serve() int {
+	m := &Meter{}
+	m.EnableHTTP2ExtendedConnect()
+	return len(http.MethodGet) + m.Hits
+}
+
+-- kdmain/go.mod --
+module example.com/h2kdmain
+
+go 1.27
+
+require example.com/h2kddep v0.0.0
+
+replace example.com/h2kddep => ../kddep
+
+-- kdmain/main.lgo --
+package main
+
+import (
+	"fmt"
+
+	"example.com/h2kddep"
+)
+
+func main() {
+	fmt.Println("kdmain ready:", kddep.Serve())
+}

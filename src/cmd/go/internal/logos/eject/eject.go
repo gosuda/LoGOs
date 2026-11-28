@@ -260,6 +260,11 @@ func ejectToDir(ctx context.Context, out string) {
 	builds := collectTestBuilds(moduleLoader, ctx, opts, plan)
 	discoverGoImportLogos(moduleLoader, ctx, opts, plan)
 	plan.gorootLogos = collectGorootLogos(plan.provenance)
+	// The plan is final: every package the export copies is known, so
+	// the rewrite-ambiguity check can stay exactly on those. Packages
+	// the export leaves behind keep the portability check only; the
+	// text rewrite never touches their files.
+	downgradeEjectCheckFlags(plan)
 	makeEjectStagingDirs(plan, staging, builds)
 	buildEjectRoots(moduleLoader, ctx, phaseOneRoots(plan))
 	if len(builds) > 0 {
@@ -488,6 +493,37 @@ func (plan *ejectPlan) addPackage(p *load.Package) {
 	}
 	if ejectOwnsLogos(p) {
 		plan.logos = append(plan.logos, p)
+	}
+}
+
+// downgradeEjectCheckFlags replaces the full eject check with the
+// portability-only check for every loaded package the export does not
+// copy. The text rewrite never touches their files, so a same-named
+// user call there is safe and must not refuse the export; genuine
+// fork-only selectors still fail by type through the ordinary upstream
+// check. Copied packages keep the full check, which is the only guard
+// for the unfiltered rewrites copyModuleTree applies to them. The plan
+// must be final: call only after test dependencies joined it.
+func downgradeEjectCheckFlags(plan *ejectPlan) {
+	copied := make(map[string]bool, len(plan.deps))
+	for _, m := range plan.deps {
+		copied[m.path] = true
+	}
+	for _, recs := range plan.provenance {
+		for _, p := range recs {
+			if p == nil || p.Module == nil || p.Module.Main || copied[p.Module.Path] {
+				continue
+			}
+			for i, flag := range p.Internal.Gcflags {
+				if flag != "-logos.eject_check" {
+					continue
+				}
+				next := slices.Clone(p.Internal.Gcflags)
+				next[i] = "-logos.eject_check_portability"
+				p.Internal.Gcflags = next
+				break
+			}
+		}
 	}
 }
 

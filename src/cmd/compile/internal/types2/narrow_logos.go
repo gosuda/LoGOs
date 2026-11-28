@@ -1655,8 +1655,11 @@ func (p *logosEFPass) capture(st *logosEFState) *logosEFState {
 // path even when an earlier break already recorded it, each seed an entry
 // no check can discharge. With no live pairing and no surviving veto or
 // break, every path discarded the latest store and ordinary reads stay
-// silent. Results never paired with a named error stay silent.
-func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *syntax.FuncLit, eff *logosEFEffects) *logosEFState {
+// silent. Results never paired with a named error stay silent. On a
+// recovered continuation every surviving live pairing projects: the
+// recovered exit still holds each unchecked result, and no normal path
+// exists that could have discharged it.
+func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *syntax.FuncLit, eff *logosEFEffects, recovered bool) *logosEFState {
 	if end == nil || len(end.may) == 0 {
 		return end
 	}
@@ -1696,7 +1699,7 @@ func (p *logosEFPass) projectInvocationMay(before, end *logosEFState, lit *synta
 				}
 				out[k] = logosEFEntry{name: name, pos: lit.Pos()}
 				continue
-			} else {
+			} else if !recovered {
 				continue
 			}
 		}
@@ -5510,16 +5513,17 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 	}
 	end := p.run(lit.Body, entry)
 	p.eff = saved
+	recovered := false
 	if end == nil {
 		// A panic the literal recovers lets the call return: keep the
 		// conservative continuation instead of marking the caller dead.
-		if p.litCanRecover(lit) {
-			return p.later(lit, lit.Body, st)
+		// The join below merges the recoverable panic exits so the
+		// projection marks the unchecked results they still hold. An
+		// opaque recovery with no joinable exit keeps later().
+		if !p.litCanRecover(lit) {
+			return nil
 		}
-		return nil
-	}
-	if eff.deferred != nil {
-		end = end.afterDeferred(eff.deferred)
+		recovered = true
 	}
 	// A recovered panic exits through the literal's cleanups with the
 	// pre-panic stores still visible: join those exits with the
@@ -5530,12 +5534,21 @@ func (p *logosEFPass) inlineFuncLit(lit *syntax.FuncLit, st *logosEFState) *logo
 		if !p.panicCanRecover(pst, lit) {
 			continue
 		}
-		if r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true }); r != nil {
+		r := p.finishCleanups(pst, func(logosEFDeferredCall) bool { return true })
+		if r != nil {
 			end = logosEFJoin(end, r.withCleanups(st.cleanups))
 		}
 	}
-	if len(eff.assigned) != 0 || len(eff.created) != 0 || eff.deferred != nil {
-		end = p.projectInvocationMay(st, end, lit, eff)
+	if end == nil {
+		return p.later(lit, lit.Body, st)
+	}
+	if eff.deferred != nil && !recovered {
+		// A recovered exit already ran its cleanups in the join above;
+		// running them again would model a second return.
+		end = end.afterDeferred(eff.deferred)
+	}
+	if recovered || len(eff.assigned) != 0 || len(eff.created) != 0 || eff.deferred != nil {
+		end = p.projectInvocationMay(st, end, lit, eff, recovered)
 	}
 	end = end.withoutLocals(inside)
 	// A nested call starts from an empty per-invocation set so its exit
@@ -5946,12 +5959,14 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 		return true, recovered || cleanupExprRecovers(p, s), true
 	case *syntax.IfStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Cond)
-		ct, _, ot := cleanupElseRecovers(p, s.Then, rec)
-		ce, _, oe := cleanupElseRecovers(p, s.Else, rec)
+		ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
+		ce, re, oe := cleanupElseRecovers(p, s.Else, rec)
 		if !ot || !oe {
 			return false, false, false
 		}
-		return ct || ce, rec, true
+		// Recovery inside a branch counts only on paths that continue
+		// through it; a branch that ends drops out of the merge.
+		return ct || ce, (!ct || rt) && (!ce || re), true
 	case *syntax.ForStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Cond)
 		return true, rec, rec
@@ -5976,12 +5991,12 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 		return true, recovered, true
 	case *syntax.ConstIfStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Cond)
-		ct, _, ot := cleanupElseRecovers(p, s.Then, rec)
-		ce, _, oe := cleanupElseRecovers(p, s.Else, rec)
+		ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
+		ce, re, oe := cleanupElseRecovers(p, s.Else, rec)
 		if !ot || !oe {
 			return false, false, false
 		}
-		return ct || ce, rec, true
+		return ct || ce, (!ct || rt) && (!ce || re), true
 	case *syntax.ConstSwitchStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Targ)
 		var bodies [][]syntax.Stmt
@@ -6016,7 +6031,9 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 
 func cleanupElseRecovers(p *logosEFPass, e syntax.Stmt, recovered bool) (cont, out, ok bool) {
 	if e == nil {
-		return true, recovered, recovered
+		// An absent branch falls through with the incoming recovery
+		// state: it neither recovers nor blocks a later recover.
+		return true, recovered, true
 	}
 	if b, isBlock := e.(*syntax.BlockStmt); isBlock {
 		if b == nil {
@@ -6380,12 +6397,16 @@ func (p *logosEFPass) litValueEscapes(lam *syntax.LambdaExpr) bool {
 	return false
 }
 
-// cleanupCallsBoundVar reports whether the cleanup holding lam calls the
-// variable bound by lam's escaping position before it returns. A local the
-// cleanup invokes synchronously runs in cleanup mode; a binding saved
-// without a synchronous call runs later in ordinary mode.
+// cleanupCallsBoundVar reports whether a synchronous call in the cleanup
+// holding lam can invoke lam's value: the binding must reach the call
+// with no unconditional replacement between them. A call before the
+// binding, or after the variable is rebound, reaches another value. A
+// conditional reassignment keeps the conservative answer. A local the
+// cleanup invokes with lam's value runs in cleanup mode; a binding saved
+// without such a call runs later in ordinary mode.
 func (p *logosEFPass) cleanupCallsBoundVar(lam *syntax.LambdaExpr) bool {
 	var bound *Var
+	var bind syntax.Node
 	switch par := p.litParent(lam).(type) {
 	case *syntax.AssignStmt:
 		for _, l := range syntax.UnpackListExpr(par.Lhs) {
@@ -6394,6 +6415,7 @@ func (p *logosEFPass) cleanupCallsBoundVar(lam *syntax.LambdaExpr) bool {
 				break
 			}
 		}
+		bind = par
 	case *syntax.VarDecl:
 		for _, id := range par.NameList {
 			if v, _ := p.check.Defs[id].(*Var); v != nil {
@@ -6401,6 +6423,7 @@ func (p *logosEFPass) cleanupCallsBoundVar(lam *syntax.LambdaExpr) bool {
 				break
 			}
 		}
+		bind = par
 	default:
 		return false
 	}
@@ -6418,23 +6441,128 @@ func (p *logosEFPass) cleanupCallsBoundVar(lam *syntax.LambdaExpr) bool {
 	if outer == nil || outer.Body == nil {
 		return false
 	}
-	found := false
-	syntax.Inspect(outer.Body, func(n syntax.Node) bool {
-		if found {
+	w := &logosEFBoundScan{p: p, bound: bound, bind: bind}
+	found, _, _ := w.scanList(outer.Body.List, false, false)
+	return found
+}
+
+// logosEFBoundScan attributes synchronous calls of one variable to the
+// lambda value bound to it, threading the binding state through the
+// cleanup body in order.
+type logosEFBoundScan struct {
+	p     *logosEFPass
+	bound *Var
+	bind  syntax.Node
+}
+
+// scanList threads the binding state through list in order: live reports
+// the bound variable holds the lambda value, maybe that a conditional
+// assignment may hold it. It reports whether a synchronous call can
+// invoke the lambda value.
+func (w *logosEFBoundScan) scanList(list []syntax.Stmt, live, maybe bool) (found, liveOut, maybeOut bool) {
+	liveOut, maybeOut = live, maybe
+	for _, s := range list {
+		var f bool
+		f, liveOut, maybeOut = w.scanStmt(s, liveOut, maybeOut)
+		if f {
+			return true, liveOut, maybeOut
+		}
+	}
+	return false, liveOut, maybeOut
+}
+
+func (w *logosEFBoundScan) scanStmt(s syntax.Stmt, live, maybe bool) (found, liveOut, maybeOut bool) {
+	if s == nil {
+		return false, live, maybe
+	}
+	if w.stmtBinds(s) {
+		// The binding completes before the rest of this statement, so
+		// calls in it see the old value and the lambda value holds
+		// after it.
+		if w.scanCalls(s, live, maybe) {
+			return true, true, false
+		}
+		return false, true, false
+	}
+	switch s := s.(type) {
+	case *syntax.BlockStmt:
+		if s == nil {
+			return false, live, maybe
+		}
+		return w.scanList(s.List, live, maybe)
+	case *syntax.LabeledStmt:
+		return w.scanStmt(s.Stmt, live, maybe)
+	case *syntax.IfStmt:
+		if w.scanCalls(s.Init, live, maybe) || w.scanCalls(s.Cond, live, maybe) {
+			return true, live, maybe
+		}
+		ft, lt, mt := w.scanBranch(s.Then, live, maybe)
+		fe, le, me := w.scanBranch(s.Else, live, maybe)
+		// The lambda value survives only where every arm keeps it; a
+		// split keeps the conservative answer.
+		return ft || fe, lt && le, mt || me || lt != le
+	case *syntax.ReturnStmt:
+		return w.scanCalls(s, live, maybe), live, maybe
+	case *syntax.BranchStmt:
+		return false, live, maybe
+	default:
+		if w.scanCalls(s, live, maybe) {
+			return true, live, maybe
+		}
+		if w.directAssignsBound(s) {
+			// An unconditional replacement drops the lambda value.
+			return false, false, false
+		}
+		if !w.assignsBound(s) {
+			return false, live, maybe
+		}
+		// An assignment inside may establish the value partway through,
+		// so attribute calls conservatively while keeping prior state.
+		if w.scanCalls(s, false, true) {
+			return true, live, true
+		}
+		return false, live, true
+	}
+}
+
+func (w *logosEFBoundScan) scanBranch(e syntax.Stmt, live, maybe bool) (found, liveOut, maybeOut bool) {
+	if e == nil {
+		return false, live, maybe
+	}
+	if b, ok := e.(*syntax.BlockStmt); ok {
+		if b == nil {
+			return false, live, maybe
+		}
+		return w.scanList(b.List, live, maybe)
+	}
+	return w.scanStmt(e, live, maybe)
+}
+
+// scanCalls reports whether n holds a synchronous call of the bound
+// variable that the lambda value can reach. Bodies of nested literals
+// and deferred or spawned calls do not run synchronously, so the scan
+// skips them exactly as the former whole-body scan did.
+func (w *logosEFBoundScan) scanCalls(n syntax.Node, live, maybe bool) bool {
+	if n == nil || (!live && !maybe) {
+		return false
+	}
+	hit := false
+	syntax.Inspect(n, func(x syntax.Node) bool {
+		if hit {
 			return false
 		}
-		switch n := n.(type) {
+		switch x := x.(type) {
 		case *syntax.FuncLit, *syntax.LambdaExpr:
 			return false
 		case *syntax.CallStmt:
-			if n.Tok == syntax.Defer || n.Tok == syntax.Go {
+			if x.Tok == syntax.Defer || x.Tok == syntax.Go {
 				return false
 			}
 			return true
 		case *syntax.CallExpr:
-			if id, ok := syntax.Unparen(n.Fun).(*syntax.Name); ok {
-				if v, _ := p.check.Uses[id].(*Var); v == bound {
-					found = true
+			if id, ok := syntax.Unparen(x.Fun).(*syntax.Name); ok {
+				if v, _ := w.p.check.Uses[id].(*Var); v == w.bound {
+					hit = true
 					return false
 				}
 			}
@@ -6442,9 +6570,79 @@ func (p *logosEFPass) cleanupCallsBoundVar(lam *syntax.LambdaExpr) bool {
 		}
 		return true
 	})
-	return found
+	return hit
 }
 
+// stmtBinds reports whether s is the statement that binds the lambda: the
+// binding itself, or a declaration statement wrapping it. A bare `var`
+// declaration is a DeclStmt holding the VarDecl, never the VarDecl alone.
+func (w *logosEFBoundScan) stmtBinds(s syntax.Stmt) bool {
+	if s == w.bind {
+		return true
+	}
+	if d, ok := s.(*syntax.DeclStmt); ok {
+		for _, decl := range d.DeclList {
+			if decl == w.bind {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// directAssignsBound reports whether s itself unconditionally assigns the
+// bound variable to another value.
+func (w *logosEFBoundScan) directAssignsBound(s syntax.Stmt) bool {
+	if w.stmtBinds(s) {
+		return false
+	}
+	switch s := s.(type) {
+	case *syntax.AssignStmt:
+		for _, l := range syntax.UnpackListExpr(s.Lhs) {
+			if v := w.p.varOf(l); v == w.bound {
+				return true
+			}
+		}
+	case *syntax.DeclStmt:
+		for _, decl := range s.DeclList {
+			if vd, ok := decl.(*syntax.VarDecl); ok {
+				for _, id := range vd.NameList {
+					if v, _ := w.p.check.Defs[id].(*Var); v == w.bound {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// assignsBound reports whether s holds a nested assignment of the bound
+// variable. The binding statement itself never counts.
+func (w *logosEFBoundScan) assignsBound(s syntax.Stmt) bool {
+	if w.stmtBinds(s) {
+		return false
+	}
+	hit := false
+	syntax.Inspect(s, func(n syntax.Node) bool {
+		if hit {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.FuncLit, *syntax.LambdaExpr:
+			return false
+		case *syntax.AssignStmt:
+			for _, l := range syntax.UnpackListExpr(n.Lhs) {
+				if v := w.p.varOf(l); v == w.bound {
+					hit = true
+					return false
+				}
+			}
+		}
+		return !hit
+	})
+	return hit
+}
 func (p *logosEFPass) lambda(lam *syntax.LambdaExpr, st *logosEFState) *logosEFState {
 	body, isBlock := lam.Body.(*syntax.BlockStmt)
 	if p.check.logosInPlace[lam] {

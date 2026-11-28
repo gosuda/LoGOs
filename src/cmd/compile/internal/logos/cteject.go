@@ -447,16 +447,38 @@ func (fl *fileLower) ejectMethodText(s *ctMethodSite, sites []*ctMethodSite, ctx
 // text of any method call nested inside it.
 func (fl *fileLower) ejectMethodOperand(e syntax.Expr, sites []*ctMethodSite, ctx cfCtx) string {
 	start, end := fl.off(syntax.StartPos(e)), cfExactEnd(ctx, e)
+	// syntax.EndPos of a call stops at its last argument (or its
+	// function when it has none), so extend a call operand past its
+	// closing parenthesis. Without this a call nested anywhere in an
+	// operand renders without its argument list. Keep a wider node
+	// end (for example parentheses around the call) when it extends
+	// further.
+	if call, ok := syntax.Unparen(e).(*syntax.CallExpr); ok {
+		end = ctCallArgsEnd(ctx, cfExactEnd(ctx, syntax.Unparen(call.Fun)))
+		if nodeEnd := fl.off(syntax.EndPos(e)); nodeEnd > end {
+			end = nodeEnd
+		}
+	}
 	var inner []*ctMethodSite
 	for _, s := range sites {
-		if start <= s.start && s.end <= end && (start != s.start || end != s.end) {
+		// An operand that is exactly one nested call matches that
+		// call. The enclosing site itself always extends past the
+		// operand, so it never matches here.
+		if start <= s.start && s.end <= end {
 			inner = append(inner, s)
 		}
 	}
 	if len(inner) == 0 {
 		return string(fl.src[start:end])
 	}
-	slices.SortFunc(inner, func(a, b *ctMethodSite) int { return cmp.Compare(a.start, b.start) })
+	// Outermost first when sites share a start, so a contained site
+	// never renders twice.
+	slices.SortFunc(inner, func(a, b *ctMethodSite) int {
+		if c := cmp.Compare(a.start, b.start); c != 0 {
+			return c
+		}
+		return cmp.Compare(b.end, a.end)
+	})
 	var b strings.Builder
 	pos := start
 	for _, s := range inner {

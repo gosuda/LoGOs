@@ -422,6 +422,11 @@ func (check *Checker) logosConstForCharge(s *syntax.ConstForStmt, n int) bool {
 	}
 	top := len(check.logosCtChain) - 1
 	check.logosCtChain[top] += n
+	// Attribute the iterations to the innermost active instance as
+	// well, so its cached charge covers what the live walk counted.
+	if len(check.logosCtKeys) != 0 && check.logosCtCharge != nil {
+		check.logosCtCharge[check.logosCtKeys[len(check.logosCtKeys)-1]] += n
+	}
 	if sum := logosCtChainSum(check.logosCtChain); sum > check.logosNodeLimit() {
 		check.errorf(s.Pos(), InvalidRangeExpr, "[comptime::node_limit] comptime instantiation chain has %d nodes above the limit %d", sum, check.logosNodeLimit())
 		return false

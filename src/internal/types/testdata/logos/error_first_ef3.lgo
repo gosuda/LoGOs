@@ -414,3 +414,132 @@ func probeRecoveredBreakSplit(cond bool, reset bool, stop bool) {
 	}()
 	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
 }
+
+// A deferred cleanup that logs conditionally before recovering still
+// recovers on every path: the caller read of the unchecked result fails.
+func probeRecoverMissingElse(verbose bool, fail bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if verbose {
+				_ = 1
+			}
+			_ = recover()
+		}()
+		if fail {
+			panic("fail")
+		}
+		h.stats = 0
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// Same with an unconditional panic after a conditional log: the defer
+// recovers for either value of verbose, so the read still fails.
+func probeRecoverConditionalLog(verbose bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if verbose {
+				println("recovering")
+			}
+			_ = recover()
+		}()
+		panic("fail")
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// Recovery in both branches of the deferred conditional counts: the
+// merged recovery state reaches the caller continuation, which fails.
+func probeRecoverBothBranches(verbose bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if verbose {
+				_ = recover()
+			} else {
+				_ = recover()
+			}
+		}()
+		panic("fail")
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
+}
+
+// Control: an early return that skips the recovery leaves no recovered
+// continuation, so the call below stays unreachable and silent.
+func probeRecoverSkippedReturn(verbose bool) {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if verbose {
+				return
+			}
+			_ = recover()
+		}()
+		panic("fail")
+	}()
+	use(h.stats)
+}
+
+// A cleanup that saves a lambda, rebinds its variable, then calls the
+// replacement runs only the replacement: the saved lambda keeps
+// ordinary mode and stays silent.
+func probeSavedRebound() func() int {
+	var saved func() int
+	defer func() {
+		var cb func() int = () => func() int { n, _ := fetch(); return n }()
+		saved = cb
+		cb = func() int { return 0 }
+		use(cb())
+	}()
+	return saved
+}
+
+// A cleanup that calls a variable before rebinding it to a lambda calls
+// the old value: the saved replacement keeps ordinary mode and stays
+// silent.
+func probeSavedAfterCall() func() int {
+	var saved func() int
+	defer func() {
+		cb := func() int { return 0 }
+		use(cb())
+		cb = () => func() int { n, _ := fetch(); return n }()
+		saved = cb
+	}()
+	return saved
+}
+
+// Control: a cleanup that calls the replacement value runs it under the
+// cleanup, so its discarded-error read fails.
+func probeCleanupLocalCallValue() {
+	defer func() {
+		cb := func() int { return 0 }
+		cb = () => func() int { n, _ := fetch(); return n /* ERROR "read of n before its error is checked" */ }()
+		use(cb())
+	}()
+}
+
+// An inner call that replaces the result drops the preserved break, but
+// the fresh unchecked pairing still fails the caller read.
+func probeNestedReplace(cond bool, reset bool) {
+	h := heldSplit{}
+	if cond {
+		h.stats, h.errA = fetchHeld()
+	} else {
+		h.stats, h.errB = fetchHeld()
+	}
+	if reset {
+		h.errA = nil
+	}
+	func() {
+		h.errA = nil
+		h.stats, h.errA = fetchHeld()
+	}()
+	use(h.stats /* ERROR "read of h.stats before h.errA is checked" */)
+}

@@ -46,7 +46,7 @@ func VerifyEjectStdlibPrepared(pkg *types2.Package, info *types2.Info, files []*
 }
 
 func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.File, preparedOnly bool) {
-	if base.LogosEject == "" && !base.LogosEjectCheck {
+	if base.LogosEject == "" && !base.LogosEjectCheck && !base.LogosEjectCheckPortability {
 		return
 	}
 	if preparedOnly {
@@ -108,7 +108,7 @@ func verifyEjectStdlib(pkg *types2.Package, info *types2.Info, files []*syntax.F
 			if mapped[name] {
 				continue
 			}
-			if reason, ok := ambiguous[name]; ok {
+			if reason, ok := ambiguous[name]; ok && !base.LogosEjectCheckPortability {
 				base.Errorf("%s: [portability::fork_stdlib_api] logos eject: ambiguous EnableHTTP2ExtendedConnect call (%s); eject rewrites the name by spelling, so only (*net/http.Server) and logos/net/http calls are safe to eject (SPEC T-0.3)", name.Pos(), reason)
 				continue
 			}
