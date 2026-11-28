@@ -368,7 +368,11 @@ func (fl *fileLower) ejectCtMethodSites(methods map[*syntax.Name]string, parents
 		// everywhere else an immediately invoked function holds them.
 		if _, _, _, _, ok := ejectTupleCallArg(info, s); ok {
 			if stmt, kind, ok := tupleHoistTarget(s, parents); ok {
-				start, end := fl.off(syntax.StartPos(stmt)), fl.off(syntax.EndPos(stmt))
+				start := fl.off(syntax.StartPos(stmt))
+				end := fl.off(syntax.EndPos(stmt))
+				if callEnd := ctCallArgsEnd(ctx, cfExactEnd(ctx, s.call.Fun)); callEnd > end {
+					end = callEnd
+				}
 				fl.add(start, end, fl.ejectTupleHoist(s, sites, ctx, stmt, kind))
 				fl.markEjectSite(s.sel.Sel)
 				if s.targs != nil {
