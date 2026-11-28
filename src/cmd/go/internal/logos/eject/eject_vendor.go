@@ -1044,13 +1044,13 @@ func (b *h2ScopeBuilder) Visit(n ast.Node) ast.Visitor {
 // own: any block, a statement with header declarations, or a case or
 // communication clause body.
 func h2OpensScope(n ast.Node) bool {
-	switch n.(type) {
+	switch n := n.(type) {
 	case *ast.BlockStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.TypeSwitchStmt, *ast.SelectStmt, *ast.CaseClause, *ast.CommClause:
 		return true
 	case *ast.IfStmt:
-		return n.(*ast.IfStmt).Init != nil
+		return n.Init != nil
 	case *ast.ForStmt:
-		return n.(*ast.ForStmt).Init != nil
+		return n.Init != nil
 	}
 	return false
 }
