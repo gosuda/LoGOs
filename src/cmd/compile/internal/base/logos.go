@@ -14,6 +14,13 @@ var LogosEject string
 // output is written, while their compilation is otherwise native.
 var LogosEjectCheck bool
 
+// LogosEjectCheckPortability runs only the eject portability verifier,
+// without the rewrite-ambiguity refusal, for packages the export does
+// not copy. Their sources reach upstream Go unchanged, so the text
+// rewrite cannot steal a same-named user call there; genuine fork-only
+// selectors still fail by type through the ordinary upstream check.
+var LogosEjectCheckPortability bool
+
 var LogosCgoEject bool
 
 var Logos bool
@@ -53,6 +60,7 @@ func logosRegisterFlags() {
 	flag.BoolVar(&LogosGoFacts, "logos.gofacts", false, "record per-parameter mutation facts for Go packages")
 	flag.StringVar(&LogosEject, "logos.eject", "", "write ejected Go sources to `directory`")
 	flag.BoolVar(&LogosEjectCheck, "logos.eject_check", false, "verify ejected portability without emitting sources")
+	flag.BoolVar(&LogosEjectCheckPortability, "logos.eject_check_portability", false, "verify ejected portability without the rewrite-ambiguity refusal")
 	flag.BoolVar(&LogosCgoEject, "logos.cgoeject", false, "check and eject original cgo sources without emitting an object")
 	flag.StringVar(&LogosMode, "logos.mode", "", "run a logos helper mode (`next`, `context`, or `hints`)")
 	flag.StringVar(&LogosHintsOut, "logos.hintsout", "", "write the logos editor hints of the package to `file`")
