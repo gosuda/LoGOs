@@ -726,7 +726,11 @@ func TestSupportCopyKeepsUserCallShadowedByServerBlock(t *testing.T) {
 // A method receiver counts as a declaration of its function: a call on
 // the receiver resolves to the receiver type, so a same-named user
 // method stays untouched and never refuses as ambiguous. A
-// package-level server of the same name does not steal the call.
+// package-level server of the same name does not steal the call. The
+// fixture withholds the called method's declaration on purpose: a file
+// that defines the name never reaches the receiver filter, so only
+// undeclared calls prove resolution. Declarations themselves stay
+// legal: no method is declared on the non-local meter type.
 func TestSupportCopyResolvesMethodReceiver(t *testing.T) {
 	src := t.TempDir()
 	pkg := filepath.Join(src, "logos", "ejecttestrecv")
@@ -734,7 +738,7 @@ func TestSupportCopyResolvesMethodReceiver(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		"recv.go": "package ejecttestrecv\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nvar s = &http.Server{}\n\ntype Holder struct{}\n\nfunc (s *Holder) Enable() {\n\ts.EnableHTTP2ExtendedConnect()\n}\n\nfunc (m *meter.Meter) Measure() {\n\tm.EnableHTTP2ExtendedConnect()\n}\n",
+		"recv.go": "package ejecttestrecv\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nvar s = &http.Server{}\n\ntype Holder struct{}\n\nfunc (s *Holder) Enable() {\n\ts.EnableHTTP2ExtendedConnect()\n}\n\ntype Local struct {\n\tmeter.Meter\n}\n\nfunc (m *Local) Measure() {\n\tm.EnableHTTP2ExtendedConnect()\n}\n",
 	}
 	for name, source := range files {
 		if err := os.WriteFile(filepath.Join(pkg, name), []byte(source), 0666); err != nil {
