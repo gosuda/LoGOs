@@ -126,4 +126,4 @@ Rules:
 | `correctness::simd_array_shape` | Use a power-of-two array length for element-wise SIMD operations. |
 | `perf::zeroalloc_violation` | Eliminate heap allocations, use stack buffers, or remove the `//logos:zeroalloc` directive. |
 | `correctness::cgo_file_logos_syntax` | Use standard Go syntax in files importing `"C"`. |
-| `comptime::node_limit` | Reduce comptime AST unrolling or raise `-logos.comptime_nodes` (the `max_comptime_ast_nodes` TOML key was removed). |
+| `comptime::node_limit` | Reduce comptime AST unrolling or raise the limit with `logos build -gcflags=all=-logos.comptime_nodes=N ./...` (the `max_comptime_ast_nodes` TOML key was removed; a file that still holds it fails with `unknown key`). |

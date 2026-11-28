@@ -2384,7 +2384,7 @@ Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
 
 ### M7-A-S1 Pin the comptime node limit from the flag
 Anchor: Tony Hoare, David Parnas, Edsger W. Dijkstra
-- Attack: `src/cmd/go/testdata/script/logos_comptime_nodes.txt`: the `-logos.comptime_nodes` flag drives the limit, and the 24-node expansion fails at 23 and builds at 24; the chain budget itself is proved by `test/logos/attack/chain_budget.lgo` and the note chain by `test/logos/attack/chain_notes.lgo`. The `max_comptime_ast_nodes` TOML key was removed: `logos.toml` files that set it fail with `unknown key`, and the flag is the only control.
+- Attack: `src/cmd/go/testdata/script/logos_comptime_nodes.txt`: the `-logos.comptime_nodes` flag drives the limit, and the 24-node expansion fails at 23 and builds at 24; the chain budget itself is proved by `test/logos/attack/chain_budget.lgo` and the note chain by `test/logos/attack/chain_notes.lgo`. The `max_comptime_ast_nodes` TOML key was removed: `logos.toml` files that set it fail with `unknown key`, and the flag is the only control; pass it as `logos build -gcflags=all=-logos.comptime_nodes=N ./...`.
 - Build: none (test-only).
 - Gate: `go test -count=1 cmd/go -run 'Script/^logos_comptime_nodes$'`.
 - Red-team rows: none.
