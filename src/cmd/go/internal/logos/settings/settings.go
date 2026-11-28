@@ -20,7 +20,10 @@ import (
 
 // Env is the user environment observed at process start (cfg takes it
 // before main.invoke injects MkEnv defaults, covering the GOENV file).
-type Env struct{ GOEXPERIMENT, CGO_ENABLED, GOAMD64, GOARM64 string }
+type Env struct {
+	GOEXPERIMENT, CGO_ENABLED, GOAMD64, GOARM64 string
+	OptLevel                                    string
+}
 
 // Flags is every input of Load that is not a logos.toml.
 type Flags struct {
@@ -63,10 +66,11 @@ type Settings struct {
 	WasmFeatures              string
 }
 
-// Load resolves the settings: the -O level from the flag first, the
-// logos.toml of each main module root second. Plain go reads no
-// logos.toml and keeps the upstream opt level. Its only error is an
-// invalid -O value, and it still returns a non-nil Settings whose
+// Load resolves the settings: the -O level from the flag first, then the
+// LOGOS_OPT_LEVEL variable, then the logos.toml of each main module root.
+// Plain go reads no logos.toml and keeps the upstream opt level. Its only
+// errors are an invalid -O value or, in logos mode, an invalid
+// LOGOS_OPT_LEVEL value, and it still returns a non-nil Settings whose
 // file-derived fields are valid, so the caller applies the environment
 // before reporting the error. A broken logos.toml is not an error of
 // Load: it is Settings.Module.Err, and every field takes the broken-file
@@ -82,15 +86,21 @@ func Load(modRoot string, flags Flags) (*Settings, error) {
 	}
 	var err error
 	level := ""
+	prog := "go"
+	if flags.Logos {
+		prog = "logos"
+	}
 	if flags.Opt != "" {
 		if validOptLevel(flags.Opt) {
 			level = flags.Opt
 		} else {
-			prog := "go"
-			if flags.Logos {
-				prog = "logos"
-			}
 			err = fmt.Errorf("%s build: invalid -O level %q (want 0, 1, 2, 3, s)", prog, flags.Opt)
+		}
+	} else if flags.Logos && flags.Env.OptLevel != "" {
+		if validOptLevel(flags.Env.OptLevel) {
+			level = flags.Env.OptLevel
+		} else {
+			err = fmt.Errorf("%s build: invalid LOGOS_OPT_LEVEL %q (want 0, 1, 2, 3, s)", prog, flags.Env.OptLevel)
 		}
 	}
 	fallback := "1"
@@ -194,6 +204,17 @@ func (s *Settings) TargetArchEnv(goarch string) []string {
 		}
 	}
 	return env
+}
+
+// OptLevelEnv returns the LOGOS_OPT_LEVEL variable for the environment of
+// a program logos starts (a test binary or a run program): the host's
+// effective level, so a bare child build reuses it. An empty level
+// contributes nothing.
+func (s *Settings) OptLevelEnv() []string {
+	if s.OptLevel == "" {
+		return nil
+	}
+	return []string{"LOGOS_OPT_LEVEL=" + s.OptLevel}
 }
 
 // PedanticFlag returns the --pedantic flag value storing into f: a

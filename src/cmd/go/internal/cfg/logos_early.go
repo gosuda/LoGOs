@@ -62,7 +62,9 @@ func MaybeRelaunchEarly() {
 	if UnderGoRoot(".") {
 		return
 	}
-	initOverlayFromArgs(raw)
+	if initOverlayFromArgs(raw, cmd) {
+		defer fsys.ResetOverlay()
+	}
 	if MainModuleMarkedByLogos() {
 		RelaunchAsLogos("logos.toml beside go.mod")
 		return
@@ -198,11 +200,27 @@ func dirTargetHoldsLogos(dir string) bool {
 
 // initOverlayFromArgs points the overlay-aware file system at the -overlay
 // file named on the command line, so the marker check reads the overlaid
-// go.work, go.mod, and logos.toml contents. A bad value restores the
+// go.work, go.mod, and logos.toml contents. Only build arguments are
+// scanned: for run the scan stops at the package argument, and everywhere
+// it stops at -args and --, so a program's own -overlay never becomes a
+// build overlay. It reports whether the overlay was loaded; the caller
+// resets it before returning without relaunching, so toolchain selection
+// observes the disk exactly as plain go would. A bad value restores the
 // previous state; flag parsing and InitWorkfile report the error later.
-func initOverlayFromArgs(args []string) {
+func initOverlayFromArgs(args []string, cmd string) bool {
 	var val string
 	for i, a := range args {
+		if a == "--" || a == "-args" {
+			break
+		}
+		if a == "" || a[0] != '-' {
+			// A bare word starts the package for run, and a value or a
+			// package path everywhere else; neither can be a build flag.
+			if cmd == "run" {
+				break
+			}
+			continue
+		}
 		switch {
 		case a == "-overlay" || a == "--overlay":
 			if i+1 < len(args) && args[i+1] != "" && args[i+1][0] != '-' {
@@ -215,13 +233,15 @@ func initOverlayFromArgs(args []string) {
 		}
 	}
 	if val == "" {
-		return
+		return false
 	}
 	saved := fsys.OverlayFile
 	fsys.OverlayFile = val
 	if err := fsys.Init(); err != nil {
 		fsys.OverlayFile = saved
+		return false
 	}
+	return true
 }
 
 // logosScopeModule is one main module the early check can see: a workspace

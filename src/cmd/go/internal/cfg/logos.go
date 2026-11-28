@@ -54,13 +54,30 @@ var logosInitGOAMD64 = Getenv("GOAMD64")
 
 var logosInitGOARM64 = Getenv("GOARM64")
 
+// logosInitOptLevel snapshots the user LOGOS_OPT_LEVEL at process startup,
+// covering both the process environment and the GOENV file. Settings.Load
+// reads the level from this snapshot in logos mode, after the -O flag.
+var logosInitOptLevel = Getenv("LOGOS_OPT_LEVEL")
+
 func LogosStartupEnv() settings.Env {
 	return settings.Env{
 		GOEXPERIMENT: logosInitGOEXPERIMENT,
 		CGO_ENABLED:  logosInitCGOEnabled,
 		GOAMD64:      logosInitGOAMD64,
 		GOARM64:      logosInitGOARM64,
+		OptLevel:     logosInitOptLevel,
 	}
+}
+
+// LogosOptLevelEnv reports LOGOS_OPT_LEVEL for the environment of a program
+// logos starts (a test binary or a run program): the host's effective
+// level, so a bare child build reuses it. It contributes nothing outside
+// logos mode or with no level set.
+func LogosOptLevelEnv() []string {
+	if !Logos {
+		return nil
+	}
+	return settings.Current().OptLevelEnv()
 }
 
 // logosToolTags returns tags plus the "logos" tool tag in logos mode.
