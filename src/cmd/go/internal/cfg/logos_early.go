@@ -11,7 +11,6 @@ import (
 
 	"cmd/go/internal/fsys"
 	"golang.org/x/mod/modfile"
-	"internal/logosfile"
 )
 
 // MaybeRelaunchEarly decides every re-execution trigger that can be decided
@@ -23,11 +22,13 @@ import (
 //   - a logos.toml next to the go.mod of the working module, or next to any
 //     workspace member's go.mod, read through the -overlay flag when one is
 //     named on the command line;
-//   - a directory the command names (an absolute or relative path, ".", or a
-//     file), a ./...-style pattern (including the workspace-root pattern,
-//     which unions the workspace members), the "all" pattern, or a package
-//     path pattern that maps onto a main-module directory, when it holds
-//     LoGOs sources and no .go files.
+//   - a directory the command names (an absolute or relative path, ".", or
+//     the working directory when no path is named), a ./...-style pattern
+//     (including the workspace-root pattern, which unions the workspace
+//     members), the "all" pattern, or a package path pattern that maps onto
+//     a main-module directory, when it holds LoGOs sources and no .go
+//     files. A named file is an input to the command, not a package, and
+//     never triggers.
 //
 // A stock flag parser runs only after this check, so a LoGOs-only flag such
 // as -pedantic or -json-diagnostics reaches the directory check before the
@@ -120,7 +121,7 @@ var valueFlags = map[string]bool{
 }
 
 // namedLogosTarget reports whether the command's remaining arguments name a
-// directory, file, or pattern that holds LoGOs sources and no .go files.
+// directory or pattern that holds LoGOs sources and no .go files.
 // With no path-like arguments the command targets the working directory.
 func namedLogosTarget(args []string) (string, bool) {
 	var paths []string
@@ -156,18 +157,17 @@ func namedLogosTarget(args []string) (string, bool) {
 }
 
 // argTargetHoldsLogos reports whether one command argument names a local
-// file or directory that needs logos, or a pattern whose walk would meet
-// one. Package paths without wildcards resolve during package loading, so
-// only the import trigger decides those.
+// directory that needs logos, or a pattern whose walk would meet one.
+// Package paths without wildcards resolve during package loading, so only
+// the import trigger decides those.
 func argTargetHoldsLogos(p string) (string, bool) {
 	if fi, err := fsys.Stat(p); err == nil {
-		if fi.IsDir() {
-			if dirTargetHoldsLogos(p) {
-				return "command names LoGOs sources", true
-			}
+		if !fi.IsDir() {
+			// A named file is an input to the command (go run, go vet),
+			// not a package; only package loading decides it.
 			return "", false
 		}
-		if logosfile.Is(fi.Name()) {
+		if dirTargetHoldsLogos(p) {
 			return "command names LoGOs sources", true
 		}
 		return "", false

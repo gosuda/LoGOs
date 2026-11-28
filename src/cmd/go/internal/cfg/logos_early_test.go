@@ -97,18 +97,18 @@ func TestArgTargetHoldsLogos(t *testing.T) {
 		arg  string
 		want bool
 	}{
-		"logos directory":   {arg: "l", want: true},
-		"logos root file":   {arg: filepath.Join("l", "main.lgo"), want: true},
-		"go directory":      {arg: "g", want: false},
-		"go file":           {arg: filepath.Join("g", "main.go"), want: false},
-		"missing path":      {arg: "nosuchdir", want: false},
-		"logos walk":        {arg: "./l/...", want: true},
-		"go walk":           {arg: "./g/...", want: false},
-		"package single":    {arg: "example.com/l/lib", want: false},
-		"at version":        {arg: "example.com/l/lib@v1.0.0", want: false},
-		"all without scope": {arg: "all", want: false},
-		"standard library":  {arg: "std", want: false},
-		"unrelated pattern": {arg: "example.com/other/...", want: false},
+		"logos directory":     {arg: "l", want: true},
+		"logos file is input": {arg: filepath.Join("l", "main.lgo"), want: false},
+		"go directory":        {arg: "g", want: false},
+		"go file":             {arg: filepath.Join("g", "main.go"), want: false},
+		"missing path":        {arg: "nosuchdir", want: false},
+		"logos walk":          {arg: "./l/...", want: true},
+		"go walk":             {arg: "./g/...", want: false},
+		"package single":      {arg: "example.com/l/lib", want: false},
+		"at version":          {arg: "example.com/l/lib@v1.0.0", want: false},
+		"all without scope":   {arg: "all", want: false},
+		"standard library":    {arg: "std", want: false},
+		"unrelated pattern":   {arg: "example.com/other/...", want: false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
