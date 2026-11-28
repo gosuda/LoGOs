@@ -880,3 +880,51 @@ func TestSupportCopyRewritesCrossFileExplicitServer(t *testing.T) {
 		t.Errorf("support copy missing guard delegation:\n%s", got)
 	}
 }
+
+// A case clause expression evaluates in the enclosing scope: a call
+// there resolves to the parameter even when the clause body
+// redeclares the name for a user type. The body declaration must not
+// steal the expression's receiver.
+func TestSupportCopyCaseExprIgnoresClauseBodyShadow(t *testing.T) {
+	src := t.TempDir()
+	pkg := filepath.Join(src, "logos", "ejecttestclauseexpr")
+	if err := os.MkdirAll(pkg, 0777); err != nil {
+		t.Fatal(err)
+	}
+	const source = "package ejecttestclauseexpr\n\nimport (\n\t\"net/http\"\n\n\t\"example.com/othermod/meter\"\n)\n\nfunc Enable(s *http.Server) {\n\tswitch {\n\tcase s.EnableHTTP2ExtendedConnect() != nil:\n\t\ts := &meter.Meter{}\n\t\t_ = s\n\t}\n}\n"
+	if err := os.WriteFile(filepath.Join(pkg, "h2.go"), []byte(source), 0666); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := root.Close(); err != nil {
+			t.Errorf("close support root: %v", err)
+		}
+	}()
+	c := supportCopy{
+		src:          root,
+		srcDir:       src,
+		staging:      t.TempDir(),
+		dst:          t.TempDir(),
+		destinations: map[string]string{},
+		written:      map[string]string{},
+	}
+	p := supportSourcePackage{src: "logos/ejecttestclauseexpr", dst: "rt/logos/ejecttestclauseexpr"}
+	if _, _, err := c.copyPackageGo(p, "h2.go", map[string]bool{}); err != nil {
+		t.Fatalf("copyPackageGo: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c.dst, "rt", "logos", "ejecttestclauseexpr", "h2.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if strings.Contains(got, "s.EnableHTTP2ExtendedConnect()") {
+		t.Errorf("fork-only call in a case expression survives a clause-body shadow:\n%s", got)
+	}
+	if !strings.Contains(got, "RequireExtendedConnect") {
+		t.Errorf("support copy missing guard delegation for the case expression:\n%s", got)
+	}
+}
