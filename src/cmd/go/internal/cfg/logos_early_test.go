@@ -122,6 +122,9 @@ func TestArgTargetHoldsLogos(t *testing.T) {
 }
 
 func TestScopeHoldsLogosWorkspace(t *testing.T) {
+	// The workspace union needs workspace mode: pin it, so the test does
+	// not depend on the ambient GOWORK.
+	t.Setenv("GOWORK", "auto")
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.work"), "go 1.27\n\nuse (\n\t./g\n\t./l\n)\n")
 	writeGoModule(t, filepath.Join(root, "g"), "example.com/g")
@@ -149,6 +152,27 @@ func TestScopeHoldsLogosWorkspace(t *testing.T) {
 	}
 	if patternMeetsLogos("./...") {
 		t.Errorf("patternMeetsLogos(./...) = true with no LoGOs member, want false")
+	}
+}
+
+func TestScopeIgnoredUnderGoworkOff(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.work"), "go 1.27\n\nuse (\n\t./g\n\t./l\n)\n")
+	writeGoModule(t, filepath.Join(root, "g"), "example.com/g")
+	writeLogosModule(t, filepath.Join(root, "l"), "example.com/l")
+	t.Chdir(root)
+	// With the workspace off the members are invisible: no scope, so no
+	// member union and no package-path mapping through the workspace.
+	if scopeHoldsLogos() {
+		t.Errorf("scopeHoldsLogos() = true with GOWORK=off, want false")
+	}
+	if _, ok := argTargetHoldsLogos("all"); ok {
+		t.Errorf("argTargetHoldsLogos(all) = true with GOWORK=off, want false")
+	}
+	// An explicit local pattern still works: it names a directory.
+	if !patternMeetsLogos("./l/...") {
+		t.Errorf("patternMeetsLogos(./l/...) = false with GOWORK=off, want true")
 	}
 }
 
