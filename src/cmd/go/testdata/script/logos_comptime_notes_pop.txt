@@ -1,0 +1,48 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+! logos build ./...
+stderr 'comptime::error'
+stderr 'instantiated here'
+! stderr '31:14'
+
+-- w/go.mod --
+module example.com/notespop
+
+go 1.27
+
+-- w/main.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func ok[F any]() int {
+	n := 0
+	const for _, f := range comptime.Fields[F]() {
+		_ = f.Name
+		n++
+	}
+	return n
+}
+
+func bad[F any]() int {
+	const if comptime.IsStruct[F]() {
+		return 1
+	}
+	comptime.Error("nope")
+	return 0
+}
+
+type Pair struct {
+	A int
+	B string
+}
+
+func main() {
+	fmt.Println(ok[Pair]())
+	fmt.Println(bad[int]())
+}

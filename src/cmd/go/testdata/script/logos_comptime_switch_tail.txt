@@ -1,0 +1,58 @@
+env GOPROXY=off
+env GOTOOLCHAIN=local
+
+cd w
+logos run ./ok
+stdout '^1$'
+! logos build ./...
+stderr 'unsupported'
+
+-- w/go.mod --
+module example.com/switchtail
+
+go 1.27
+
+-- w/ok/ok.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+
+func pick[T any](v T) int {
+	_ = v
+	const switch T {
+	case int:
+		return 1
+	}
+	return 0
+	comptime.Error("unsupported")
+	return 0
+}
+
+func main() {
+	fmt.Println(pick[int](0))
+}
+
+-- w/bad/bad.lgo --
+package main
+
+import (
+	"comptime"
+	"fmt"
+)
+func pick[T any](v T) int {
+	_ = v
+	const switch T {
+	case int:
+		return 1
+	}
+	return 0
+	comptime.Error("unsupported")
+	return 0
+}
+
+func main() {
+	fmt.Println(pick[string]("s"))
+}
