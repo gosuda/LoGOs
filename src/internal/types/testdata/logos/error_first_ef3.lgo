@@ -644,3 +644,20 @@ func probeRecoverConditional(resume bool) {
 	}()
 	use(h.stats /* ERROR "read of h.stats before h.err is checked" */)
 }
+
+// A recovery behind a constant-false branch never runs, so the deferred
+// cleanup cannot resume the caller: the unchecked read after a panicking
+// call stays unreachable and silent.
+func probeDeadRecoverIfFalse() {
+	h := heldField{}
+	h.stats, h.err = fetchHeld()
+	func() {
+		defer func() {
+			if false {
+				_ = recover()
+			}
+		}()
+		panic("fail")
+	}()
+	use(h.stats)
+}

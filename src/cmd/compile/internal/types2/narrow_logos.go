@@ -6003,6 +6003,20 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 		return true, recovered || cleanupExprRecovers(p, s), true
 	case *syntax.IfStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Cond)
+		if v, ok := logosEFConstBool(p, s.Cond); ok {
+			if !v {
+				ce, re, oe := cleanupElseRecovers(p, s.Else, rec)
+				if !oe {
+					return false, false, false
+				}
+				return ce, re, true
+			}
+			ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
+			if !ot {
+				return false, false, false
+			}
+			return ct, rt, true
+		}
 		ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
 		ce, re, oe := cleanupElseRecovers(p, s.Else, rec)
 		if !ot || !oe {
@@ -6029,6 +6043,20 @@ func cleanupStmtRecovers(p *logosEFPass, s syntax.Stmt, recovered bool) (cont, o
 		return cleanupClausesRecovers(p, bodies, hasDefault, recovered)
 	case *syntax.ConstIfStmt:
 		rec := recovered || cleanupExprRecovers(p, s.Cond)
+		if v, ok := logosEFConstBool(p, s.Cond); ok {
+			if !v {
+				ce, re, oe := cleanupElseRecovers(p, s.Else, rec)
+				if !oe {
+					return false, false, false
+				}
+				return ce, re, true
+			}
+			ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
+			if !ot {
+				return false, false, false
+			}
+			return ct, rt, true
+		}
 		ct, rt, ot := cleanupElseRecovers(p, s.Then, rec)
 		ce, re, oe := cleanupElseRecovers(p, s.Else, rec)
 		if !ot || !oe {
@@ -6135,6 +6163,29 @@ func cleanupExprRecovers(p *logosEFPass, e syntax.Node) bool {
 	return hit
 }
 
+// logosEFConstBool reports the constant boolean value of e, if any.
+// Only a reachable recovery counts: a constant-false condition is not a
+// path, so recover behind it never resumes the caller.
+func logosEFConstBool(p *logosEFPass, e syntax.Expr) (bool, bool) {
+	if e == nil {
+		return false, false
+	}
+	u := syntax.Unparen(e)
+	if _, val, ok := p.check.logosChecked(u); ok && val != nil && val.Kind() == constant.Bool {
+		return constant.BoolVal(val), true
+	}
+	if _, val, ok := p.check.logosChecked(e); ok && val != nil && val.Kind() == constant.Bool {
+		return constant.BoolVal(val), true
+	}
+	if info, ok := p.check.untyped[u]; ok && info.val != nil && info.val.Kind() == constant.Bool {
+		return constant.BoolVal(info.val), true
+	}
+	if info, ok := p.check.untyped[e]; ok && info.val != nil && info.val.Kind() == constant.Bool {
+		return constant.BoolVal(info.val), true
+	}
+	return false, false
+}
+
 // cleanupMayRecover reports whether some path through body executes a
 // reached recover call and then completes the body: that path resumes
 // the caller when body runs as a deferred cleanup during unwinding. A
@@ -6202,6 +6253,14 @@ func mayStmtRecover(p *logosEFPass, s syntax.Stmt) (completes, recovered, kills 
 		return true, cleanupExprRecovers(p, s), false
 	case *syntax.IfStmt:
 		rec := cleanupExprRecovers(p, s.Init) || cleanupExprRecovers(p, s.Cond)
+		if v, ok := logosEFConstBool(p, s.Cond); ok {
+			if !v {
+				ce, re, ke := mayBranchRecover(p, s.Else)
+				return ce, rec || re, ke
+			}
+			ct, rt, kt := mayBranchRecover(p, s.Then)
+			return ct, rec || rt, kt
+		}
 		ct, rt, kt := mayBranchRecover(p, s.Then)
 		ce, re, ke := mayBranchRecover(p, s.Else)
 		return ct || ce, rec || rt || re, kt && ke
@@ -6235,6 +6294,14 @@ func mayStmtRecover(p *logosEFPass, s syntax.Stmt) (completes, recovered, kills 
 		return mayClausesRecover(p, bodies, hasDefault, false)
 	case *syntax.ConstIfStmt:
 		rec := cleanupExprRecovers(p, s.Cond)
+		if v, ok := logosEFConstBool(p, s.Cond); ok {
+			if !v {
+				ce, re, ke := mayBranchRecover(p, s.Else)
+				return ce, rec || re, ke
+			}
+			ct, rt, kt := mayBranchRecover(p, s.Then)
+			return ct, rec || rt, kt
+		}
 		ct, rt, kt := mayBranchRecover(p, s.Then)
 		ce, re, ke := mayBranchRecover(p, s.Else)
 		return ct || ce, rec || rt || re, kt && ke
