@@ -181,12 +181,13 @@ type logosCtFrame struct {
 }
 
 type logosCtWork struct {
-	check  *Checker
-	seen   map[string]string
-	active map[string]int
-	stack  []logosCtFrame
-	graph  map[string][]string
-	sites  []logosCtUse
+	check   *Checker
+	seen    map[string]string
+	active  map[string]int
+	stack   []logosCtFrame
+	graph   map[string][]string
+	sites   []logosCtUse
+	revDeps map[string][]string
 }
 
 type logosCtUse struct {
@@ -366,7 +367,21 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 	// budget the live walk saw. The key comes from the substituted
 	// edge: the template edges still hold type parameters, which map
 	// to no charge.
-	maxChild := 0
+	// A wrapper on the active path carries the largest charge of its
+	// descendants so far; a back edge to such a wrapper ends that path
+	// with the charge known so far. Reverse dependencies propagate the
+	// final charge to every wrapper caller, so mutually recursive
+	// wrappers share the largest descendant charge and the verdict is
+	// the same in every visit order.
+	if check.logosCtCharge == nil {
+		check.logosCtCharge = make(map[string]int)
+	}
+	if _, ok := check.logosCtCharge[key]; !ok {
+		check.logosCtCharge[key] = 0
+	}
+	if w.revDeps == nil {
+		w.revDeps = make(map[string][]string)
+	}
 	for slot, edge := range generic.Edges {
 		var concrete []Type
 		for i, t := range edge.Targs {
@@ -381,22 +396,51 @@ func (w *logosCtWork) visit(edge LogosCtEdge, pos syntax.Pos) string {
 		if concrete != nil {
 			edge.Targs = concrete
 		}
+		childKey := LogosCtKey(edge.Origin, edge.Targs)
+		if childKey != "" {
+			w.revDeps[childKey] = append(w.revDeps[childKey], key)
+		}
 		children[slot] = w.visit(edge, pos)
-		if child := LogosCtKey(edge.Origin, edge.Targs); child != "" {
-			if c, ok := check.logosCtCharge[child]; ok && c > maxChild {
-				maxChild = c
+		if childKey != "" {
+			if c, ok := check.logosCtCharge[childKey]; ok && c > check.logosCtCharge[key] {
+				check.logosCtCharge[key] = c
 			}
 		}
 	}
-	if maxChild != 0 {
-		if check.logosCtCharge == nil {
-			check.logosCtCharge = make(map[string]int)
+	// Re-read every child at its final charge: an earlier child may have
+	// grown through a back-edge fixup while a later sibling was visited.
+	for _, edge := range generic.Edges {
+		if child := LogosCtKey(edge.Origin, edge.Targs); child != "" {
+			if c, ok := check.logosCtCharge[child]; ok && c > check.logosCtCharge[key] {
+				check.logosCtCharge[key] = c
+			}
 		}
-		check.logosCtCharge[key] = maxChild
+	}
+	if check.logosCtCharge[key] == 0 {
+		delete(check.logosCtCharge, key)
+	} else {
+		w.propagateCtCharge(key)
 	}
 	check.logosCtNotes = check.logosCtNotes[:len(check.logosCtNotes)-1]
 	w.graph[id] = children
 	return id
+}
+
+// propagateCtCharge pushes a wrapper's final charge to every wrapper
+// caller recorded in revDeps, transitively, so mutually recursive
+// wrappers share the largest descendant charge regardless of visit order.
+func (w *logosCtWork) propagateCtCharge(key string) {
+	c, ok := w.check.logosCtCharge[key]
+	if !ok || c == 0 {
+		return
+	}
+	for _, caller := range w.revDeps[key] {
+		if cur, ok := w.check.logosCtCharge[caller]; ok && cur >= c {
+			continue
+		}
+		w.check.logosCtCharge[caller] = c
+		w.propagateCtCharge(caller)
+	}
 }
 
 // logosCtMethodSel returns the method selector of a call function: a

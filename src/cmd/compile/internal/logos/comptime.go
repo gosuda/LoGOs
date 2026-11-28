@@ -1111,7 +1111,7 @@ type ctPreparedUnit struct {
 	context *ctLowerContext
 }
 
-func stageCtPreparedUnit(rec *types2.LogosCtInst, sites *ctTraceSites, consumer *types2.Package) (ctPreparedUnit, error) {
+func stageCtPreparedUnit(rec *types2.LogosCtInst, sites *ctTraceSites, consumer *types2.Package, generics map[*types2.Func]types2.LogosCtGeneric) (ctPreparedUnit, error) {
 	ct := &ctLowerContext{owner: rec.Pkg, consumer: consumer, sites: sites, instanceName: rec.Sym}
 	fl := &fileLower{ct: ct, pkg: &packageLower{tpkg: rec.Pkg, info: rec.Info}}
 	decl, info, err := fl.reduceComptimeInstance(rec)
@@ -1123,6 +1123,18 @@ func stageCtPreparedUnit(rec *types2.LogosCtInst, sites *ctTraceSites, consumer 
 	if ct.err != nil {
 		return ctPreparedUnit{}, ct.err
 	}
+	// Expand tuple-argument method calls before the fresh check types the
+	// declaration, so their site keys describe plain calls as usual. The
+	// reduced facts name the generic method through Uses; the defining
+	// check's generic registry proves the origin half of detection.
+	if info.LogosCtGenerics == nil {
+		info.LogosCtGenerics = generics
+	}
+	roots := []syntax.Node{decl}
+	for _, helper := range fl.constDecls {
+		roots = append(roots, helper)
+	}
+	desugarCtTupleBody(info, &ctTupleNamer{}, roots...)
 	return ctPreparedUnit{decl: decl, helpers: fl.constDecls, rodata: fl.rodataVars, info: info, context: ct}, nil
 }
 
@@ -1235,7 +1247,7 @@ func stageCtPreparedPackage(pkg *types2.Package, info *types2.Info, files []*syn
 				byScope[scope] = file
 			}
 		}
-		unit, err := stageCtPreparedUnit(record, &p.sites, pkg)
+		unit, err := stageCtPreparedUnit(record, &p.sites, pkg, info.LogosCtGenerics)
 		if err != nil {
 			return nil, fmt.Errorf("logos: prepare %s: %w", record.Origin, err)
 		}

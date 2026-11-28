@@ -15,6 +15,9 @@ go run .
 cmp stdout $WORK/native.txt
 exists $UPROOT1272/bin/go
 exec env -u GOROOT $UPROOT1272/bin/go build ./...
+! logos run ./panic
+stderr 'panic/main\.lgo'
+stderr 'boom'
 
 -- w/go.mod --
 module example.com/constswitchlabels
@@ -34,6 +37,7 @@ func pick[T any](v T, skip bool) int {
 		if skip {
 			goto done
 		}
+	_:
 		n = 1
 	done:
 		n += 10
@@ -45,4 +49,22 @@ func main() {
 	fmt.Println(pick[int](0, false))
 	fmt.Println(pick[string]("s", true))
 	fmt.Println(pick[float64](0.0, false))
+}
+
+-- w/panic/main.lgo --
+package main
+
+func boom[T any](v T) int {
+	_ = v
+	const switch T {
+	case int, string:
+		goto done
+	done:
+		panic("boom")
+	}
+	return 0
+}
+
+func main() {
+	println(boom[int](0))
 }
